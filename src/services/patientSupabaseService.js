@@ -1,4 +1,5 @@
 import { supabase } from './supabaseConfig';
+import { syncGooglePatientRecord, isGoogleUser } from './googlePatientSync';
 import {
   mealPlanSections,
   nutritionistThread,
@@ -10,8 +11,9 @@ const META_END = '[GLICNUTRI_APP_META_END]';
 export function getPatientId(usuario) {
   return (
     usuario?.id_paciente_uuid ||
-    usuario?.id ||
     usuario?.user_metadata?.id_paciente_uuid ||
+    (isGoogleUser(usuario) ? usuario?.id : null) ||
+    usuario?.patient_id ||
     null
   );
 }
@@ -145,28 +147,145 @@ function mapSleepToLabel(value) {
   return map[value] || 'Boa';
 }
 
-export async function fetchPatientById(patientId) {
-  if (!patientId) {
-    return null;
-  }
+function uniqueValues(values) {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function normalizeEmail(value) {
+  return value ? String(value).trim().toLowerCase() : '';
+}
+
+function normalizeCpf(value) {
+  return value ? String(value).replace(/\D/g, '') : '';
+}
+
+function getContextEmails(...sources) {
+  return uniqueValues(
+    sources.flatMap((source) => [
+      normalizeEmail(source?.email_pac),
+      normalizeEmail(source?.email),
+      normalizeEmail(source?.user_metadata?.email),
+    ])
+  );
+}
+
+function getContextCpfs(...sources) {
+  return uniqueValues(
+    sources.map((source) => normalizeCpf(source?.cpf_paciente))
+  );
+}
+
+function getContextIds(...sources) {
+  return uniqueValues(
+    sources.flatMap((source) => [
+      source?.id_paciente_uuid || null,
+      source?.patient_id || null,
+      source?.user_metadata?.id_paciente_uuid || null,
+      isGoogleUser(source) ? source?.id || null : null,
+    ])
+  );
+}
+
+async function fetchPatientByEmail(email) {
+  if (!email) return null;
 
   const { data, error } = await supabase
     .from('paciente')
     .select('*')
-    .eq('id_paciente_uuid', patientId)
-    .maybeSingle();
+    .ilike('email_pac', email)
+    .limit(1);
 
   if (error) {
     throw error;
   }
 
-  return data;
+  return (data || [])[0] || null;
 }
 
-export async function fetchPatientExperience(patientId) {
-  const patient = await fetchPatientById(patientId);
+async function fetchPatientByCpf(cpf) {
+  if (!cpf) return null;
+
+  const { data, error } = await supabase
+    .from('paciente')
+    .select('*')
+    .eq('cpf_paciente', cpf)
+    .limit(1);
+
+  if (error) {
+    throw error;
+  }
+
+  return (data || [])[0] || null;
+}
+
+async function resolvePatientRecord({
+  patientId,
+  patientContext,
+  currentPatient,
+  allowGoogleSync = false,
+}) {
+  const candidateIds = uniqueValues([
+    patientId,
+    ...getContextIds(currentPatient, patientContext),
+  ]);
+
+  for (const candidateId of candidateIds) {
+    const { data, error } = await supabase
+      .from('paciente')
+      .select('*')
+      .eq('id_paciente_uuid', candidateId)
+      .maybeSingle();
+
+    if (error) {
+      throw error;
+    }
+
+    if (data) {
+      return data;
+    }
+  }
+
+  const candidateEmails = getContextEmails(currentPatient, patientContext);
+
+  for (const email of candidateEmails) {
+    const patientByEmail = await fetchPatientByEmail(email);
+
+    if (patientByEmail) {
+      return patientByEmail;
+    }
+  }
+
+  const candidateCpfs = getContextCpfs(currentPatient, patientContext);
+
+  for (const cpf of candidateCpfs) {
+    const patientByCpf = await fetchPatientByCpf(cpf);
+
+    if (patientByCpf) {
+      return patientByCpf;
+    }
+  }
+
+  if (allowGoogleSync && isGoogleUser(patientContext)) {
+    return await syncGooglePatientRecord(patientContext);
+  }
+
+  return null;
+}
+
+export async function fetchPatientById(patientId, options = {}) {
+  return await resolvePatientRecord({
+    patientId,
+    patientContext: options.patientContext,
+    currentPatient: options.currentPatient,
+    allowGoogleSync: true,
+  });
+}
+
+export async function fetchPatientExperience(patientId, options = {}) {
+  const patient = await fetchPatientById(patientId, options);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
-  const glucoseReadings = await fetchGlucoseReadings(patientId);
+  const effectivePatientId = patient?.id_paciente_uuid || patientId;
+  const glucoseReadings = await fetchGlucoseReadings(effectivePatientId);
 
   return {
     patient,
@@ -181,13 +300,27 @@ export async function savePatientAppState({
   objectiveText,
   appState,
   currentPatient,
+  patientContext,
 }) {
-  if (!patientId) {
-    throw new Error('Paciente sem identificador para salvar.');
+  const resolvedPatient = await resolvePatientRecord({
+    patientId,
+    currentPatient,
+    patientContext,
+    allowGoogleSync: true,
+  });
+
+  const effectivePatientId = resolvedPatient?.id_paciente_uuid || patientId;
+
+  if (!effectivePatientId) {
+    throw new Error('Paciente sem identificador valido para salvar.');
   }
 
   const normalized = normalizeAppState(appState);
-  const latestActivity = normalized.activityEntries[0]?.label || currentPatient?.nivel_atividade_fisica_atual || null;
+  const latestActivity =
+    normalized.activityEntries[0]?.label ||
+    resolvedPatient?.nivel_atividade_fisica_atual ||
+    currentPatient?.nivel_atividade_fisica_atual ||
+    null;
 
   const patch = {
     objetivo_principal_consulta: serializeObjectiveAndAppState(objectiveText, normalized),
@@ -199,12 +332,16 @@ export async function savePatientAppState({
   const { data, error } = await supabase
     .from('paciente')
     .update(patch)
-    .eq('id_paciente_uuid', patientId)
+    .eq('id_paciente_uuid', effectivePatientId)
     .select('*')
     .maybeSingle();
 
   if (error) {
     throw error;
+  }
+
+  if (!data?.id_paciente_uuid) {
+    throw new Error('O banco nao confirmou a atualizacao dos dados do paciente.');
   }
 
   return {

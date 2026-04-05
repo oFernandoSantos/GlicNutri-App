@@ -76,6 +76,18 @@ export default function PacienteMonitoramentoScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        patientId ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [patientId, usuarioLogado]
+  );
   const [range, setRange] = useState('Hoje');
   const [loading, setLoading] = useState(true);
   const [savingGlucose, setSavingGlucose] = useState(false);
@@ -85,6 +97,7 @@ export default function PacienteMonitoramentoScreen({
   const [objectiveText, setObjectiveText] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
   const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const activePatientId = patient?.id_paciente_uuid || patientId || null;
 
   useEffect(() => {
     let active = true;
@@ -93,14 +106,16 @@ export default function PacienteMonitoramentoScreen({
       try {
         setLoading(true);
 
-        if (!patientId) {
+        if (!canResolvePatient) {
           if (!active) return;
           setAppState(createDefaultAppState());
           setGlucoseReadings([]);
           return;
         }
 
-        const experience = await fetchPatientExperience(patientId);
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+        });
 
         if (!active) return;
 
@@ -120,7 +135,7 @@ export default function PacienteMonitoramentoScreen({
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, canResolvePatient]);
 
   const eventEntries = useMemo(
     () => [
@@ -204,8 +219,18 @@ export default function PacienteMonitoramentoScreen({
 
     try {
       setSavingGlucose(true);
-      await addGlucoseReading(patientId, parsedValue);
-      const updatedReadings = await fetchPatientExperience(patientId);
+      if (!activePatientId) {
+        throw new Error('Paciente sem identificador para registrar glicemia.');
+      }
+
+      await addGlucoseReading(activePatientId, parsedValue);
+      const updatedReadings = await fetchPatientExperience(activePatientId, {
+        patientContext: usuarioLogado,
+      });
+
+      setPatient(updatedReadings.patient || patient);
+      setObjectiveText(updatedReadings.clinicalObjective || objectiveText);
+      setAppState(updatedReadings.appState);
       setGlucoseReadings(updatedReadings.glucoseReadings);
       setNewGlucoseValue('');
       Alert.alert('Leitura salva', 'A glicemia manual foi registrada no Supabase.');
@@ -230,11 +255,16 @@ export default function PacienteMonitoramentoScreen({
 
       setAppState(nextState);
 
+      if (!canResolvePatient) {
+        throw new Error('Paciente sem contexto para salvar a medicacao.');
+      }
+
       const saved = await savePatientAppState({
-        patientId,
+        patientId: activePatientId,
         objectiveText,
         appState: nextState,
         currentPatient: patient,
+        patientContext: usuarioLogado,
       });
 
       setPatient(saved.patient || patient);
@@ -276,7 +306,7 @@ export default function PacienteMonitoramentoScreen({
           <TouchableOpacity
             style={styles.primaryButton}
             onPress={handleAddGlucose}
-            disabled={savingGlucose || !patientId}
+            disabled={savingGlucose || !activePatientId}
           >
             {savingGlucose ? (
               <ActivityIndicator color={patientTheme.colors.onPrimary} />
@@ -288,7 +318,7 @@ export default function PacienteMonitoramentoScreen({
           <TouchableOpacity
             style={styles.secondaryButton}
             onPress={handleRegisterMedication}
-            disabled={savingMedication || !patientId}
+            disabled={savingMedication || !canResolvePatient}
           >
             {savingMedication ? (
               <ActivityIndicator color={patientTheme.colors.primaryDark} />

@@ -52,6 +52,18 @@ const kindStyles = {
 export default function PacienteDiarioScreen({ navigation, route, usuarioLogado: usuarioProp }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        patientId ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [patientId, usuarioLogado]
+  );
   const [selectedMode, setSelectedMode] = useState('photo');
   const [mealText, setMealText] = useState('');
   const [loading, setLoading] = useState(true);
@@ -67,13 +79,15 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       try {
         setLoading(true);
 
-        if (!patientId) {
+        if (!canResolvePatient) {
           if (!active) return;
           setAppState(createDefaultAppState());
           return;
         }
 
-        const experience = await fetchPatientExperience(patientId);
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+        });
 
         if (!active) return;
 
@@ -92,7 +106,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, canResolvePatient]);
 
   const todayScore = useMemo(() => {
     const entries = appState.mealEntries || [];
@@ -178,12 +192,13 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     setSaving(true);
 
     try {
-      if (patientId) {
+      if (canResolvePatient) {
         const saved = await savePatientAppState({
           patientId,
           objectiveText,
           appState: nextState,
           currentPatient: patient,
+          patientContext: usuarioLogado,
         });
 
         setPatient(saved.patient || patient);

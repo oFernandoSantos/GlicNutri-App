@@ -1,0 +1,294 @@
+import React from 'react';
+import {
+  Modal,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
+} from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
+import { patientTheme, patientShadow } from '../theme/patientTheme';
+
+const menuItems = [
+  { label: 'Dashboard', route: 'HomeNutricionista', icon: 'grid-outline' },
+  { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes', icon: 'people-outline' },
+  { label: 'Agenda', route: 'NutricionistaAgenda', icon: 'calendar-outline' },
+  { label: 'Mensagens', route: 'NutricionistaMensagens', icon: 'chatbubbles-outline' },
+  { label: 'Relatorios', route: 'NutricionistaRelatorios', icon: 'bar-chart-outline' },
+];
+
+export default function NutricionistaDrawer({
+  visible,
+  onClose,
+  onNavigate,
+  onLogout,
+  currentRoute,
+  userName,
+  userSubtitle,
+}) {
+  const { width } = useWindowDimensions();
+  const compact = width < 390;
+  const drawerWidth = Math.min(width - 12, compact ? width * 0.9 : width * 0.78, 400);
+
+  return (
+    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+      <View style={styles.root}>
+        <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
+
+        <SafeAreaView style={[styles.drawer, { width: drawerWidth }]}>
+          <View style={[styles.header, compact && styles.headerCompact]}>
+            <View style={[styles.avatar, compact && styles.avatarCompact]}>
+              <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>
+                {(userName || 'N').trim().slice(0, 1).toUpperCase()}
+              </Text>
+            </View>
+
+            <View style={styles.headerText}>
+              <Text style={[styles.title, compact && styles.titleCompact]}>Painel profissional</Text>
+              <Text
+                style={[styles.userName, compact && styles.userNameCompact]}
+                numberOfLines={2}
+              >
+                {userName || 'Nutricionista'}
+              </Text>
+              <Text
+                style={[styles.userSubtitle, compact && styles.userSubtitleCompact]}
+                numberOfLines={3}
+              >
+                {userSubtitle || 'Monitore pacientes, alertas e aderencia em um so lugar'}
+              </Text>
+            </View>
+
+            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+              <Ionicons name="close" size={24} color={patientTheme.colors.onPrimary} />
+            </TouchableOpacity>
+          </View>
+
+          <ScrollView
+            style={styles.scroll}
+            contentContainerStyle={styles.scrollContent}
+            showsVerticalScrollIndicator={false}
+            bounces={false}
+          >
+            <View style={[styles.menuList, compact && styles.menuListCompact]}>
+              {menuItems.map((item) => {
+                const active = currentRoute === item.route;
+
+                return (
+                  <TouchableOpacity
+                    key={item.route}
+                    style={[
+                      styles.menuItem,
+                      compact && styles.menuItemCompact,
+                      active && styles.menuItemActive,
+                    ]}
+                    onPress={() => {
+                      onClose();
+                      setTimeout(() => {
+                        onNavigate(item.route);
+                      }, 120);
+                    }}
+                  >
+                    <Ionicons
+                      name={item.icon}
+                      size={22}
+                      color={
+                        active
+                          ? patientTheme.colors.primaryDark
+                          : patientTheme.colors.textMuted
+                      }
+                    />
+                    <Text
+                      style={[
+                        styles.menuLabel,
+                        compact && styles.menuLabelCompact,
+                        active && styles.menuLabelActive,
+                      ]}
+                      numberOfLines={2}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <View style={styles.footer}>
+              <TouchableOpacity
+                style={[styles.logoutButton, compact && styles.logoutButtonCompact]}
+                onPress={() => {
+                  onClose();
+                  setTimeout(() => {
+                    if (onLogout) onLogout();
+                  }, 120);
+                }}
+              >
+                <Ionicons name="log-out-outline" size={22} color="#d96666" />
+                <Text style={[styles.logoutText, compact && styles.logoutTextCompact]}>
+                  Sair da conta
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </ScrollView>
+        </SafeAreaView>
+      </View>
+    </Modal>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: {
+    flex: 1,
+    flexDirection: 'row',
+    backgroundColor: patientTheme.colors.overlay,
+  },
+  backdrop: {
+    flex: 1,
+  },
+  drawer: {
+    height: '100%',
+    maxWidth: '100%',
+    backgroundColor: patientTheme.colors.surface,
+  },
+  scroll: {
+    flex: 1,
+  },
+  scrollContent: {
+    flexGrow: 1,
+    paddingBottom: 12,
+  },
+  header: {
+    margin: 16,
+    padding: 18,
+    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.primary,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    ...patientShadow,
+  },
+  headerCompact: {
+    margin: 12,
+    padding: 14,
+  },
+  avatar: {
+    width: 50,
+    height: 50,
+    borderRadius: 25,
+    backgroundColor: 'rgba(255,255,255,0.24)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 12,
+  },
+  avatarCompact: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    marginRight: 10,
+  },
+  avatarText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 20,
+    fontWeight: '700',
+  },
+  avatarTextCompact: {
+    fontSize: 18,
+  },
+  headerText: {
+    flex: 1,
+  },
+  title: {
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 12,
+    marginBottom: 4,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  titleCompact: {
+    fontSize: 11,
+  },
+  userName: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  userNameCompact: {
+    fontSize: 16,
+  },
+  userSubtitle: {
+    color: 'rgba(255,255,255,0.9)',
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  userSubtitleCompact: {
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  closeButton: {
+    marginLeft: 8,
+  },
+  menuList: {
+    paddingHorizontal: 16,
+    gap: 8,
+  },
+  menuListCompact: {
+    paddingHorizontal: 12,
+  },
+  menuItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: patientTheme.radius.lg,
+  },
+  menuItemCompact: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  menuItemActive: {
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  menuLabel: {
+    flexShrink: 1,
+    marginLeft: 12,
+    fontSize: 15,
+    color: patientTheme.colors.text,
+    fontWeight: '600',
+  },
+  menuLabelCompact: {
+    marginLeft: 10,
+    fontSize: 14,
+  },
+  menuLabelActive: {
+    color: patientTheme.colors.primaryDark,
+  },
+  footer: {
+    marginTop: 'auto',
+    padding: 16,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: '#fff4f4',
+  },
+  logoutButtonCompact: {
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  logoutText: {
+    marginLeft: 12,
+    fontSize: 15,
+    color: '#d96666',
+    fontWeight: '700',
+  },
+  logoutTextCompact: {
+    marginLeft: 10,
+    fontSize: 14,
+  },
+});

@@ -24,6 +24,18 @@ export default function PacientePlanoScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        patientId ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [patientId, usuarioLogado]
+  );
   const [expandedFood, setExpandedFood] = useState(null);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(true);
@@ -39,13 +51,15 @@ export default function PacientePlanoScreen({
       try {
         setLoading(true);
 
-        if (!patientId) {
+        if (!canResolvePatient) {
           if (!active) return;
           setAppState(createDefaultAppState());
           return;
         }
 
-        const experience = await fetchPatientExperience(patientId);
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+        });
 
         if (!active) return;
 
@@ -64,7 +78,7 @@ export default function PacientePlanoScreen({
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, canResolvePatient]);
 
   const planSections = appState.planSections || [];
   const thread = appState.nutritionistThread || [];
@@ -94,12 +108,13 @@ export default function PacientePlanoScreen({
     try {
       setSending(true);
 
-      if (patientId) {
+      if (canResolvePatient) {
         const saved = await savePatientAppState({
           patientId,
           objectiveText,
           appState: nextState,
           currentPatient: patient,
+          patientContext: usuarioLogado,
         });
 
         setPatient(saved.patient || patient);
