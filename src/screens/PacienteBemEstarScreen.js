@@ -32,6 +32,18 @@ export default function PacienteBemEstarScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        patientId ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [patientId, usuarioLogado]
+  );
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [patient, setPatient] = useState(null);
@@ -48,13 +60,15 @@ export default function PacienteBemEstarScreen({
       try {
         setLoading(true);
 
-        if (!patientId) {
+        if (!canResolvePatient) {
           if (!active) return;
           setAppState(createDefaultAppState());
           return;
         }
 
-        const experience = await fetchPatientExperience(patientId);
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+        });
 
         if (!active) return;
 
@@ -76,7 +90,7 @@ export default function PacienteBemEstarScreen({
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, canResolvePatient]);
 
   const insight = useMemo(() => {
     const stressed = selectedStress >= 3;
@@ -122,12 +136,13 @@ export default function PacienteBemEstarScreen({
     try {
       setSaving(true);
 
-      if (patientId) {
+      if (canResolvePatient) {
         const saved = await savePatientAppState({
           patientId,
           objectiveText,
           appState: nextState,
           currentPatient: patient,
+          patientContext: usuarioLogado,
         });
 
         setPatient(saved.patient || patient);
@@ -163,12 +178,13 @@ export default function PacienteBemEstarScreen({
     try {
       setSaving(true);
 
-      if (patientId) {
+      if (canResolvePatient) {
         const saved = await savePatientAppState({
           patientId,
           objectiveText,
           appState: nextState,
           currentPatient: patient,
+          patientContext: usuarioLogado,
         });
 
         setPatient(saved.patient || patient);

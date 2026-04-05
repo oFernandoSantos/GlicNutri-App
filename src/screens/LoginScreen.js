@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,10 @@ import * as WebBrowser from 'expo-web-browser';
 import * as Linking from 'expo-linking';
 import * as AuthSession from 'expo-auth-session';
 import { supabase } from '../services/supabaseConfig';
+import {
+  buildGooglePatientFallback,
+  syncGooglePatientRecord,
+} from '../services/googlePatientSync';
 import SeletorPerfil from '../components/SeletorPerfil';
 
 const softGreenBorder = {
@@ -25,22 +29,118 @@ const googleLogo = {
   uri: 'https://img.icons8.com/?size=100&id=xoyhGXWmHnqX&format=png&color=000000',
 };
 
-export default function LoginScreen({ navigation, session }) {
-  const [role, setRole] = useState('Paciente');
+export default function LoginScreen({ navigation, route, session }) {
+  const roleInicial =
+    route?.params?.roleInicial === 'Nutricionista' ? 'Nutricionista' : 'Paciente';
+
+  const [role, setRole] = useState(roleInicial);
   const [identificador, setIdentificador] = useState('');
   const [senha, setSenha] = useState('');
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [errorMessage, setErrorMessage] = useState('');
+  const googleSessionHandledRef = useRef(false);
+
+  useEffect(() => {
+    setRole(roleInicial);
+  }, [roleInicial]);
+
+  function formatarCpf(valor) {
+    const numeros = valor.replace(/\D/g, '').slice(0, 11);
+
+    return numeros
+      .replace(/^(\d{3})(\d)/, '$1.$2')
+      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
+      .replace(/\.(\d{3})(\d)/, '.$1-$2');
+  }
+
+  function formatarCrn(valor) {
+    const textoLimpo = valor.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const numeros = textoLimpo.replace(/[A-Z]/g, '').slice(0, 5);
+    const uf = textoLimpo.replace(/\d/g, '').slice(0, 2);
+
+    if (!numeros) {
+      return '';
+    }
+
+    return uf ? `${numeros}/${uf}` : numeros;
+  }
+
+  function validarCpfParaLogin(valor) {
+    return valor.replace(/\D/g, '').length === 11;
+  }
+
+  function validarCrnParaLogin(valor) {
+    return /^\d{5}\/[A-Z]{2}$/.test(valor.trim().toUpperCase());
+  }
+
+  function validarEmail(valor) {
+    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    return regex.test(valor.trim().toLowerCase());
+  }
+
+  function handleChangeIdentificador(valor) {
+    setErrorMessage('');
+
+    if (role !== 'Paciente') {
+      if (valor.includes('@')) {
+        setIdentificador(valor);
+        return;
+      }
+
+      setIdentificador(formatarCrn(valor));
+      return;
+    }
+
+    if (valor.includes('@') || /[A-Za-z]/.test(valor)) {
+      setIdentificador(valor);
+      return;
+    }
+
+    setIdentificador(formatarCpf(valor));
+  }
+
+  function validarFormularioLogin() {
+    const identificadorLimpo = identificador.trim();
+    const senhaLimpa = senha.trim();
+
+    if (!identificadorLimpo || !senhaLimpa) {
+      return 'Preencha o identificador e a senha para continuar.';
+    }
+
+    if (identificadorLimpo.includes('@') && !validarEmail(identificadorLimpo)) {
+      return 'Digite um e-mail valido para continuar.';
+    }
+
+    if (
+      role === 'Paciente' &&
+      !identificadorLimpo.includes('@') &&
+      !validarCpfParaLogin(identificadorLimpo)
+    ) {
+      return 'Digite um CPF valido para acessar como paciente.';
+    }
+
+    if (
+      role === 'Nutricionista' &&
+      !identificadorLimpo.includes('@') &&
+      !validarCrnParaLogin(identificadorLimpo)
+    ) {
+      return 'Digite o CRN no formato 12345/SP para acessar como nutricionista.';
+    }
+
+    return '';
+  }
 
   function normalizarIdentificadorLogin(valor, perfil) {
     const valorBase = valor.trim();
+    const documentoNormalizado =
+      perfil === 'Paciente'
+        ? valorBase.replace(/\D/g, '')
+        : formatarCrn(valorBase);
 
     return {
       original: valorBase,
-      documento:
-        perfil === 'Paciente'
-          ? valorBase.replace(/\D/g, '')
-          : valorBase.toUpperCase(),
+      documento: documentoNormalizado,
       email: valorBase.toLowerCase(),
       ehEmail: valorBase.includes('@'),
     };
@@ -65,6 +165,33 @@ export default function LoginScreen({ navigation, session }) {
       identificadorNormalizado.documento,
       identificadorNormalizado.original,
     ].filter(Boolean);
+    const candidatos = [];
+
+    function adicionarCandidatos(registros) {
+      (registros || []).forEach((item) => {
+        const chave =
+          item?.id_paciente_uuid ||
+          item?.id_nutricionista_uuid ||
+          item?.email_pac ||
+          item?.email_acesso ||
+          item?.cpf_paciente ||
+          item?.crm_numero;
+
+        if (!candidatos.some((existente) => {
+          const chaveExistente =
+            existente?.id_paciente_uuid ||
+            existente?.id_nutricionista_uuid ||
+            existente?.email_pac ||
+            existente?.email_acesso ||
+            existente?.cpf_paciente ||
+            existente?.crm_numero;
+
+          return chaveExistente === chave;
+        })) {
+          candidatos.push(item);
+        }
+      });
+    }
 
     for (const valorDocumento of filtrosDocumento) {
       const { data, error } = await supabase
@@ -76,12 +203,17 @@ export default function LoginScreen({ navigation, session }) {
         throw error;
       }
 
+      adicionarCandidatos(data);
+
       const usuarioEncontrado = (data || []).find(
         (item) => String(item?.[colunaSenha] || '').trim() === senhaNormalizada
       );
 
       if (usuarioEncontrado) {
-        return usuarioEncontrado;
+        return {
+          usuario: usuarioEncontrado,
+          motivo: '',
+        };
       }
     }
 
@@ -95,16 +227,24 @@ export default function LoginScreen({ navigation, session }) {
         throw error;
       }
 
+      adicionarCandidatos(data);
+
       const usuarioEncontrado = (data || []).find(
         (item) => String(item?.[colunaSenha] || '').trim() === senhaNormalizada
       );
 
       if (usuarioEncontrado) {
-        return usuarioEncontrado;
+        return {
+          usuario: usuarioEncontrado,
+          motivo: '',
+        };
       }
     }
 
-    return null;
+    return {
+      usuario: null,
+      motivo: candidatos.length > 0 ? 'senha_incorreta' : 'usuario_nao_encontrado',
+    };
   }
 
   useEffect(() => {
@@ -122,22 +262,13 @@ export default function LoginScreen({ navigation, session }) {
           error: error?.message || null,
         });
 
-        if (data?.session?.user) {
-          navigation.reset({
-            index: 0,
-            routes: [
-              {
-                name: 'HomePaciente',
-                params: {
-                  usuarioLogado: data.session.user,
-                  loginSocial: true,
-                },
-              },
-            ],
-          });
+        if (data?.session?.user && !googleSessionHandledRef.current) {
+          googleSessionHandledRef.current = true;
+          await finalizarLoginGoogleComUsuario(data.session.user);
         }
       } catch (error) {
         console.log('Erro ao verificar sessao atual =>', error);
+        googleSessionHandledRef.current = false;
       }
     }
 
@@ -145,37 +276,56 @@ export default function LoginScreen({ navigation, session }) {
   }, [navigation]);
 
   useEffect(() => {
-    if (session?.user) {
-      navigation.reset({
-        index: 0,
-        routes: [
-          {
-            name: 'HomePaciente',
-            params: {
-              usuarioLogado: session.user,
-              loginSocial: true,
-            },
-          },
-        ],
+    if (!session?.user) {
+      googleSessionHandledRef.current = false;
+      return;
+    }
+
+    if (!googleSessionHandledRef.current) {
+      googleSessionHandledRef.current = true;
+      finalizarLoginGoogleComUsuario(session.user).catch((error) => {
+        console.log('Erro ao sincronizar sessao Google =>', error);
+        googleSessionHandledRef.current = false;
       });
     }
   }, [session, navigation]);
 
   async function handleLogin() {
-    if (!identificador.trim() || !senha.trim()) {
-      Alert.alert('Erro', 'Preencha todos os campos!');
+    const mensagemValidacao = validarFormularioLogin();
+
+    if (mensagemValidacao) {
+      setErrorMessage(mensagemValidacao);
       return;
     }
 
+    setErrorMessage('');
     setLoading(true);
 
     try {
-      const usuario = await buscarUsuarioPorCredenciais(role, identificador, senha);
+      const { usuario, motivo } = await buscarUsuarioPorCredenciais(
+        role,
+        identificador,
+        senha
+      );
 
       if (!usuario) {
+        setErrorMessage(
+          motivo === 'senha_incorreta'
+            ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
+            : role === 'Paciente'
+              ? 'Paciente nao encontrado. Confira o CPF ou e-mail informado.'
+              : 'Nutricionista nao encontrado. Confira o CRN ou e-mail informado.'
+        );
+        return;
+      }
+
+      if (role === 'Paciente' && usuario.excluido) {
+        setErrorMessage(
+          'Este paciente foi excluido e nao pode mais acessar a plataforma.'
+        );
         Alert.alert(
-          'Falha no login',
-          `${role} nao encontrado ou senha incorreta. Voce pode usar documento ou e-mail.`
+          'Acesso bloqueado',
+          'Este paciente foi excluido e nao pode mais acessar a plataforma.'
         );
         return;
       }
@@ -194,6 +344,7 @@ export default function LoginScreen({ navigation, session }) {
       });
     } catch (error) {
       console.log('Erro login comum =>', error);
+      setErrorMessage('Ocorreu um erro inesperado ao validar seu acesso.');
       Alert.alert('Erro', 'Ocorreu um erro inesperado ao validar seu acesso.');
     } finally {
       setLoading(false);
@@ -202,69 +353,10 @@ export default function LoginScreen({ navigation, session }) {
 
   async function sincronizarPacienteGoogle(user) {
     try {
-      if (!user?.id) return null;
-
-      const nomeGoogle =
-        user.user_metadata?.full_name ||
-        user.user_metadata?.name ||
-        user.email?.split('@')[0] ||
-        'Paciente';
-
-      const emailGoogle = user.email?.toLowerCase() || null;
-
-      const { data: pacienteExistente } = await supabase
-        .from('paciente')
-        .select('*')
-        .eq('id_paciente_uuid', user.id)
-        .maybeSingle();
-
-      if (pacienteExistente) {
-        const { data: atualizado } = await supabase
-          .from('paciente')
-          .update({
-            nome_completo: pacienteExistente.nome_completo || nomeGoogle,
-            email_pac: pacienteExistente.email_pac || emailGoogle,
-          })
-          .eq('id_paciente_uuid', user.id)
-          .select('*')
-          .maybeSingle();
-
-        return atualizado || pacienteExistente;
-      }
-
-      const { data: criado, error: erroInsert } = await supabase
-        .from('paciente')
-        .insert([
-          {
-            id_paciente_uuid: user.id,
-            nome_completo: nomeGoogle,
-            email_pac: emailGoogle,
-          },
-        ])
-        .select('*')
-        .maybeSingle();
-
-      if (erroInsert) {
-        console.log('Erro ao criar paciente Google =>', erroInsert.message);
-        return {
-          id_paciente_uuid: user.id,
-          nome_completo: nomeGoogle,
-          email_pac: emailGoogle,
-        };
-      }
-
-      return criado;
+      return (await syncGooglePatientRecord(user)) || buildGooglePatientFallback(user);
     } catch (error) {
       console.log('Erro ao sincronizar paciente Google =>', error);
-      return {
-        id_paciente_uuid: user?.id || null,
-        nome_completo:
-          user?.user_metadata?.full_name ||
-          user?.user_metadata?.name ||
-          user?.email?.split('@')[0] ||
-          'Paciente',
-        email_pac: user?.email?.toLowerCase() || null,
-      };
+      throw error;
     }
   }
 
@@ -309,6 +401,7 @@ export default function LoginScreen({ navigation, session }) {
 
   async function handleGoogleLogin() {
     try {
+      googleSessionHandledRef.current = false;
       setGoogleLoading(true);
 
       const redirectTo =
@@ -350,6 +443,7 @@ export default function LoginScreen({ navigation, session }) {
       console.log('Resultado OAuth =>', result);
 
       if (result.type === 'cancel') {
+        googleSessionHandledRef.current = false;
         return;
       }
 
@@ -397,6 +491,7 @@ export default function LoginScreen({ navigation, session }) {
       });
 
       if (finalSessionData?.session?.user) {
+        googleSessionHandledRef.current = true;
         await finalizarLoginGoogleComUsuario(finalSessionData.session.user);
         return;
       }
@@ -407,6 +502,7 @@ export default function LoginScreen({ navigation, session }) {
       );
     } catch (error) {
       console.log('Erro login Google =>', error);
+      googleSessionHandledRef.current = false;
       Alert.alert('Erro', 'Falha ao entrar com Google.');
     } finally {
       setGoogleLoading(false);
@@ -475,6 +571,28 @@ export default function LoginScreen({ navigation, session }) {
     marginBottom: 15,
     color: '#333',
     ...softGreenBorder,
+  };
+
+  const inputErrorStyle = {
+    borderColor: '#d96666',
+  };
+
+  const errorBoxStyle = {
+    marginTop: -4,
+    marginBottom: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+    backgroundColor: '#fff4f4',
+    borderWidth: 1,
+    borderColor: '#f0d2d2',
+  };
+
+  const errorTextStyle = {
+    color: '#c35a5a',
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 18,
   };
 
   const forgotPasswordButtonStyle = {
@@ -615,6 +733,8 @@ export default function LoginScreen({ navigation, session }) {
           onChangeRole={(perfil) => {
             setRole(perfil);
             setIdentificador('');
+            setSenha('');
+            setErrorMessage('');
           }}
         />
 
@@ -622,7 +742,7 @@ export default function LoginScreen({ navigation, session }) {
           {role === 'Paciente' ? 'CPF ou e-mail' : 'CRN/UF ou e-mail'}
         </Text>
         <TextInput
-          style={inputStyle}
+          style={[inputStyle, errorMessage ? inputErrorStyle : null]}
           placeholder={
             role === 'Paciente'
               ? '000.000.000-00 ou email@exemplo.com'
@@ -630,21 +750,43 @@ export default function LoginScreen({ navigation, session }) {
           }
           placeholderTextColor="#95a5a6"
           value={identificador}
-          onChangeText={setIdentificador}
+          onChangeText={handleChangeIdentificador}
           keyboardType="default"
-          autoCapitalize="none"
+          autoCapitalize={
+            role === 'Nutricionista' && !identificador.includes('@')
+              ? 'characters'
+              : 'none'
+          }
+          maxLength={
+            role === 'Paciente'
+              ? identificador.includes('@')
+                ? undefined
+                : 14
+              : identificador.includes('@')
+                ? undefined
+                : 8
+          }
         />
 
         <Text style={labelStyle}>Senha</Text>
         <TextInput
-          style={inputStyle}
+          style={[inputStyle, errorMessage ? inputErrorStyle : null]}
           placeholder="********"
           placeholderTextColor="#95a5a6"
           secureTextEntry
           value={senha}
-          onChangeText={setSenha}
+          onChangeText={(valor) => {
+            setSenha(valor);
+            setErrorMessage('');
+          }}
           autoCapitalize="none"
         />
+
+        {errorMessage ? (
+          <View style={errorBoxStyle}>
+            <Text style={errorTextStyle}>{errorMessage}</Text>
+          </View>
+        ) : null}
 
         <TouchableOpacity
           style={forgotPasswordButtonStyle}
@@ -665,32 +807,36 @@ export default function LoginScreen({ navigation, session }) {
           )}
         </TouchableOpacity>
 
-        <View style={dividerContainerStyle}>
-          <View style={dividerStyle} />
-          <Text style={dividerTextStyle}>ou</Text>
-          <View style={dividerStyle} />
-        </View>
-
-        <TouchableOpacity
-          style={googleButtonStyle}
-          onPress={handleGoogleLogin}
-          disabled={googleLoading || loading}
-        >
-          {googleLoading ? (
-            <ActivityIndicator color="#333" />
-          ) : (
-            <View style={googleButtonContentStyle}>
-              <View style={googleBadgeStyle}>
-                <Image source={googleLogo} style={googleLogoStyle} resizeMode="contain" />
-              </View>
-              <Text style={googleButtonTextStyle}>Continuar com Google</Text>
+        {role === 'Paciente' ? (
+          <>
+            <View style={dividerContainerStyle}>
+              <View style={dividerStyle} />
+              <Text style={dividerTextStyle}>ou</Text>
+              <View style={dividerStyle} />
             </View>
-          )}
-        </TouchableOpacity>
+
+            <TouchableOpacity
+              style={googleButtonStyle}
+              onPress={handleGoogleLogin}
+              disabled={googleLoading || loading}
+            >
+              {googleLoading ? (
+                <ActivityIndicator color="#333" />
+              ) : (
+                <View style={googleButtonContentStyle}>
+                  <View style={googleBadgeStyle}>
+                    <Image source={googleLogo} style={googleLogoStyle} resizeMode="contain" />
+                  </View>
+                  <Text style={googleButtonTextStyle}>Continuar com Google</Text>
+                </View>
+              )}
+            </TouchableOpacity>
+          </>
+        ) : null}
 
         <TouchableOpacity
           style={registerButtonStyle}
-          onPress={() => navigation.navigate('Cadastro')}
+          onPress={() => navigation.navigate('Cadastro', { roleInicial: role })}
         >
           <Text style={registerTextStyle}>
             Nao tem conta? <Text style={boldGreenStyle}>Cadastre-se</Text>

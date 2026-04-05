@@ -43,6 +43,10 @@ export default function HomeNutricionista({ route, navigation }) {
     }
   }
 
+  function handleAbrirGerenciamento() {
+    navigation.navigate('GerenciarPacientes', { usuarioLogado });
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -74,9 +78,9 @@ export default function HomeNutricionista({ route, navigation }) {
 
         <TouchableOpacity
           style={styles.actionButton}
-          onPress={() => Alert.alert('Em breve', 'Lista de pacientes em desenvolvimento.')}
+          onPress={handleAbrirGerenciamento}
         >
-          <Text style={styles.actionText}>Ver Meus Pacientes</Text>
+          <Text style={styles.actionText}>Gerenciar Pacientes</Text>
         </TouchableOpacity>
 
         <TouchableOpacity
@@ -142,7 +146,7 @@ const styles = StyleSheet.create({
     marginTop: 20,
     alignItems: 'center',
   },
-  actionText: { color: '#FFF', fontWeight: 'bold' },
+  actionText: { color: '#FFF', fontWeight: 'bold', fontSize: 16 },
   logoutButton: {
     marginTop: 30,
     alignItems: 'center',

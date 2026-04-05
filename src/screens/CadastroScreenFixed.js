@@ -4,6 +4,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   ScrollView,
   Alert,
   ActivityIndicator,
@@ -17,13 +18,17 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import SeletorPerfil from '../components/SeletorPerfil';
+import {
+  isValidNutritionistAccessCode,
+  normalizeNutritionistAccessCode,
+} from '../config/nutritionistAccessConfig';
 
 const softGreenBorder = {
   borderWidth: 1.5,
   borderColor: '#f4f4f4',
 };
 
-export default function CadastroScreen({ navigation, route }) {
+export default function CadastroScreenFixed({ navigation, route }) {
   const roleInicial =
     route?.params?.roleInicial === 'Nutricionista' ? 'Nutricionista' : 'Paciente';
 
@@ -32,9 +37,12 @@ export default function CadastroScreen({ navigation, route }) {
   const [documento, setDocumento] = useState('');
   const [genero, setGenero] = useState('');
   const [modalVisible, setModalVisible] = useState(false);
+  const [modalCodigoAcessoVisible, setModalCodigoAcessoVisible] = useState(false);
+  const [erroCodigoAcesso, setErroCodigoAcesso] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [codigoAcessoNutricionista, setCodigoAcessoNutricionista] = useState('');
   const [aceitouLgpd, setAceitouLgpd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [feedbackCadastro, setFeedbackCadastro] = useState(null);
@@ -45,10 +53,9 @@ export default function CadastroScreen({ navigation, route }) {
   const [bairro, setBairro] = useState('');
   const [cidade, setCidade] = useState('');
   const [uf, setUf] = useState('');
+
   const scrollViewRef = useRef(null);
-
   const opcoesGenero = ['Masculino', 'Feminino', 'Diverso'];
-
   const isPaciente = role === 'Paciente';
 
   useEffect(() => {
@@ -86,9 +93,9 @@ export default function CadastroScreen({ navigation, route }) {
       ...extra,
     });
 
-    requestAnimationFrame(() => {
+    setTimeout(() => {
       scrollViewRef.current?.scrollToEnd?.({ animated: true });
-    });
+    }, 50);
   };
 
   const limparFormulario = () => {
@@ -98,6 +105,7 @@ export default function CadastroScreen({ navigation, route }) {
     setEmail('');
     setSenha('');
     setConfirmarSenha('');
+    setCodigoAcessoNutricionista('');
     setAceitouLgpd(false);
     setCep('');
     setLogradouro('');
@@ -105,18 +113,14 @@ export default function CadastroScreen({ navigation, route }) {
     setBairro('');
     setCidade('');
     setUf('');
+    setErroCodigoAcesso('');
   };
 
   const trocarPerfil = (perfil) => {
     setRole(perfil);
     setFeedbackCadastro(null);
-    setDocumento('');
-    setCep('');
-    setLogradouro('');
-    setNumero('');
-    setBairro('');
-    setCidade('');
-    setUf('');
+    setErroCodigoAcesso('');
+    limparFormulario();
   };
 
   const formatarCpf = (valor) => {
@@ -132,19 +136,31 @@ export default function CadastroScreen({ navigation, route }) {
     return numeros.replace(/^(\d{5})(\d)/, '$1-$2');
   };
 
+  const formatarCrn = (valor) => {
+    const textoLimpo = valor.toUpperCase().replace(/[^A-Z0-9]/g, '');
+    const numeros = textoLimpo.replace(/[A-Z]/g, '').slice(0, 5);
+    const uf = textoLimpo.replace(/\d/g, '').slice(0, 2);
+
+    if (!numeros) {
+      return '';
+    }
+
+    return uf ? `${numeros}/${uf}` : numeros;
+  };
+
+  const validarCrn = (crn) => /^\d{5}\/[A-Z]{2}$/.test(crn.trim());
+
   const normalizarDocumento = () => {
     if (isPaciente) {
       return documento.replace(/\D/g, '');
     }
-    return documento.trim().toUpperCase();
+
+    return formatarCrn(documento);
   };
 
   const normalizarCep = () => cep.replace(/\D/g, '');
 
-  const validarEmail = (valor) => {
-    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return regex.test(valor.trim().toLowerCase());
-  };
+  const validarEmail = (valor) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim().toLowerCase());
 
   const validarCpf = (cpf) => {
     const cpfLimpo = cpf.replace(/\D/g, '');
@@ -172,10 +188,7 @@ export default function CadastroScreen({ navigation, route }) {
     return resto === Number(cpfLimpo.charAt(10));
   };
 
-  const validarCep = (valorCep) => {
-    const cepLimpo = valorCep.replace(/\D/g, '');
-    return cepLimpo.length === 8;
-  };
+  const validarCep = (valorCep) => valorCep.replace(/\D/g, '').length === 8;
 
   const buscarEnderecoPorCep = async () => {
     const cepLimpo = normalizarCep();
@@ -187,14 +200,15 @@ export default function CadastroScreen({ navigation, route }) {
       const data = await response.json();
 
       if (data.erro) {
-        Alert.alert('CEP inválido', 'Não encontramos esse CEP.');
+        exibirFeedback('erro', 'Nao encontramos esse CEP.');
+        Alert.alert('CEP invalido', 'Nao encontramos esse CEP.');
         return;
       }
 
       setLogradouro(data.logradouro || '');
       setBairro(data.bairro || '');
       setCidade(data.localidade || '');
-      setUf(data.uf || '');
+      setUf((data.uf || '').toUpperCase());
     } catch (error) {
       console.log('Erro ao buscar CEP:', error);
     }
@@ -208,17 +222,12 @@ export default function CadastroScreen({ navigation, route }) {
 
     if (error) throw error;
 
-    if (data && data.length > 0) {
-      const cpfExistente = data.some((item) => item.cpf_paciente === cpfLimpo);
-      const emailExistente = data.some((item) => item.email_pac === emailLimpo);
+    if ((data || []).some((item) => item.cpf_paciente === cpfLimpo)) {
+      throw new Error('Ja existe um paciente cadastrado com esse CPF.');
+    }
 
-      if (cpfExistente) {
-        throw new Error('Já existe um paciente cadastrado com esse CPF.');
-      }
-
-      if (emailExistente) {
-        throw new Error('Já existe um paciente cadastrado com esse e-mail.');
-      }
+    if ((data || []).some((item) => item.email_pac === emailLimpo)) {
+      throw new Error('Ja existe um paciente cadastrado com esse e-mail.');
     }
   };
 
@@ -230,75 +239,107 @@ export default function CadastroScreen({ navigation, route }) {
 
     if (error) throw error;
 
-    if (data && data.length > 0) {
-      const crnExistente = data.some((item) => item.crm_numero === crnLimpo);
-      const emailExistente = data.some((item) => item.email_acesso === emailLimpo);
+    if ((data || []).some((item) => item.crm_numero === crnLimpo)) {
+      throw new Error('Ja existe um nutricionista cadastrado com esse CRN/UF.');
+    }
 
-      if (crnExistente) {
-        throw new Error('Já existe um nutricionista cadastrado com esse CRN/UF.');
-      }
-
-      if (emailExistente) {
-        throw new Error('Já existe um nutricionista cadastrado com esse e-mail.');
-      }
+    if ((data || []).some((item) => item.email_acesso === emailLimpo)) {
+      throw new Error('Ja existe um nutricionista cadastrado com esse e-mail.');
     }
   };
 
-  const handleCadastro = async () => {
-    const nomeLimpo = nome.trim();
-    const emailLimpo = email.trim().toLowerCase();
-    const documentoFormatado = normalizarDocumento();
-    const cepLimpo = normalizarCep();
+  const validarFormulario = ({
+    nomeLimpo,
+    emailLimpo,
+    documentoFormatado,
+    cepLimpo,
+    exigirCodigoAcesso = true,
+    codigoAcessoInformado = codigoAcessoNutricionista,
+  }) => {
+    const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
 
-    setFeedbackCadastro(null);
-
-    if (!nomeLimpo || !documento.trim() || !emailLimpo || !senha || !confirmarSenha || !genero) {
-      Alert.alert('Atenção', 'Preencha todos os campos obrigatórios.');
-      return;
+    if (!nomeLimpo) return 'Informe o nome completo.';
+    if (!documento.trim()) return `Informe ${isPaciente ? 'o CPF' : 'o CRN/UF'}.`;
+    if (!isPaciente && exigirCodigoAcesso && !codigoAcessoNormalizado) {
+      return 'Informe o codigo de acesso da empresa para cadastrar a nutricionista.';
     }
+    if (isPaciente && !genero) return 'Selecione o genero do paciente.';
+    if (!emailLimpo) return 'Informe o e-mail.';
+    if (!senha || !confirmarSenha) return 'Preencha a senha e a confirmacao de senha.';
+    if (isPaciente && !cep.trim()) return 'Informe o CEP do paciente.';
 
-    if (isPaciente) {
-      if (
-        !cep.trim() ||
+    if (
+      isPaciente &&
+      (
         !logradouro.trim() ||
         !numero.trim() ||
         !bairro.trim() ||
         !cidade.trim() ||
         !uf.trim()
-      ) {
-        Alert.alert('Atenção', 'Preencha todos os campos de endereço.');
-        return;
+      )
+    ) {
+      return 'Preencha todos os campos de endereco do paciente.';
+    }
+
+    if (!aceitouLgpd) return 'Voce precisa aceitar os termos de LGPD para continuar.';
+    if (!validarEmail(emailLimpo)) return 'Digite um e-mail valido.';
+    if (senha.length < 6) return 'A senha precisa ter pelo menos 6 caracteres.';
+    if (senha !== confirmarSenha) return 'As senhas nao coincidem.';
+    if (
+      !isPaciente &&
+      exigirCodigoAcesso &&
+      !isValidNutritionistAccessCode(codigoAcessoNormalizado)
+    ) {
+      return 'Codigo de acesso invalido. Use o codigo fornecido pela empresa.';
+    }
+    if (!isPaciente && !validarCrn(documentoFormatado)) {
+      return 'Digite o CRN no formato 12345/SP.';
+    }
+    if (isPaciente && !validarCpf(documentoFormatado)) return 'Digite um CPF valido.';
+    if (isPaciente && !validarCep(cepLimpo)) return 'Digite um CEP valido com 8 numeros.';
+
+    return null;
+  };
+
+  const handleCadastro = async (codigoAcessoInformado = codigoAcessoNutricionista) => {
+    const nomeLimpo = nome.trim();
+    const emailLimpo = email.trim().toLowerCase();
+    const documentoFormatado = normalizarDocumento();
+    const cepLimpo = normalizarCep();
+    const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
+
+    setFeedbackCadastro(null);
+
+    const erroValidacao = validarFormulario({
+      nomeLimpo,
+      emailLimpo,
+      documentoFormatado,
+      cepLimpo,
+      codigoAcessoInformado: codigoAcessoNormalizado,
+    });
+
+    if (erroValidacao) {
+      const erroEhDoCodigoAcesso =
+        !isPaciente &&
+        (
+          erroValidacao === 'Informe o codigo de acesso da empresa para cadastrar a nutricionista.' ||
+          erroValidacao === 'Codigo de acesso invalido. Use o codigo fornecido pela empresa.'
+        );
+
+      if (erroEhDoCodigoAcesso) {
+        setErroCodigoAcesso(erroValidacao);
+      } else {
+        exibirFeedback('erro', erroValidacao);
+        Alert.alert('Validacao', erroValidacao);
       }
-    }
 
-    if (!aceitouLgpd) {
-      Alert.alert('Atenção', 'Você precisa aceitar os termos de LGPD para continuar.');
       return;
     }
 
-    if (!validarEmail(emailLimpo)) {
-      Alert.alert('E-mail inválido', 'Digite um e-mail válido.');
-      return;
-    }
-
-    if (senha.length < 6) {
-      Alert.alert('Senha inválida', 'A senha precisa ter pelo menos 6 caracteres.');
-      return;
-    }
-
-    if (senha !== confirmarSenha) {
-      Alert.alert('Erro', 'As senhas não coincidem.');
-      return;
-    }
-
-    if (isPaciente && !validarCpf(documentoFormatado)) {
-      Alert.alert('CPF inválido', 'Digite um CPF válido.');
-      return;
-    }
-
-    if (isPaciente && !validarCep(cepLimpo)) {
-      Alert.alert('CEP inválido', 'Digite um CEP válido com 8 números.');
-      return;
+    if (!isPaciente) {
+      setErroCodigoAcesso('');
+      setCodigoAcessoNutricionista(codigoAcessoNormalizado);
+      setModalCodigoAcessoVisible(false);
     }
 
     setLoading(true);
@@ -330,10 +371,12 @@ export default function CadastroScreen({ navigation, route }) {
           .insert([objetoCadastro])
           .select('id_paciente_uuid, nome_completo, email_pac')
           .single();
+
         if (error) throw error;
         if (!data?.id_paciente_uuid) {
           throw new Error('O paciente nao foi confirmado no banco de dados.');
         }
+
         registroCriado = data;
         console.log('Paciente salvo com sucesso:', data);
       } else {
@@ -351,33 +394,67 @@ export default function CadastroScreen({ navigation, route }) {
           .insert([objetoCadastro])
           .select('id_nutricionista_uuid, nome_completo_nutri, email_acesso')
           .single();
+
         if (error) throw error;
         if (!data?.id_nutricionista_uuid) {
           throw new Error('O nutricionista nao foi confirmado no banco de dados.');
         }
+
         registroCriado = data;
         console.log('Nutricionista salvo com sucesso:', data);
       }
 
       limparFormulario();
-      setFeedbackCadastro({
-        tipo: 'sucesso',
-        texto: `${role} cadastrado e salvo no banco com sucesso. Agora voce ja pode entrar pela aba ${role}.`,
-        registro: registroCriado,
-      });
+      exibirFeedback(
+        'sucesso',
+        `${role} cadastrado e salvo no banco com sucesso. Agora voce ja pode entrar pela aba ${role}.`,
+        { registro: registroCriado }
+      );
     } catch (err) {
       console.error('Erro detalhado:', err);
-      setFeedbackCadastro({
-        tipo: 'erro',
-        texto: err.message || 'Nao foi possivel concluir o cadastro.',
-      });
-      Alert.alert(
-        'Erro no Cadastro',
-        err.message || 'Não foi possível concluir o cadastro.'
-      );
+      exibirFeedback('erro', err.message || 'Nao foi possivel concluir o cadastro.');
+      Alert.alert('Erro no cadastro', err.message || 'Nao foi possivel concluir o cadastro.');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handlePressCadastrar = () => {
+    const nomeLimpo = nome.trim();
+    const emailLimpo = email.trim().toLowerCase();
+    const documentoFormatado = normalizarDocumento();
+    const cepLimpo = normalizarCep();
+
+    setFeedbackCadastro(null);
+
+    const erroValidacao = validarFormulario({
+      nomeLimpo,
+      emailLimpo,
+      documentoFormatado,
+      cepLimpo,
+      exigirCodigoAcesso: false,
+    });
+
+    if (erroValidacao) {
+      exibirFeedback('erro', erroValidacao);
+      Alert.alert('Validacao', erroValidacao);
+      return;
+    }
+
+    if (isPaciente) {
+      handleCadastro();
+      return;
+    }
+
+    setErroCodigoAcesso('');
+    setModalCodigoAcessoVisible(true);
+  };
+
+  const handleConfirmarCodigoAcesso = () => {
+    const codigoNormalizado = normalizeNutritionistAccessCode(codigoAcessoNutricionista);
+    setErroCodigoAcesso('');
+    setCodigoAcessoNutricionista(codigoNormalizado);
+    handleCadastro(codigoNormalizado);
   };
 
   return (
@@ -387,6 +464,7 @@ export default function CadastroScreen({ navigation, route }) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       >
         <ScrollView
+          ref={scrollViewRef}
           style={[styles.scroll, RNPlatform.OS === 'web' && styles.webScroll]}
           contentContainerStyle={[
             styles.scrollContent,
@@ -406,23 +484,18 @@ export default function CadastroScreen({ navigation, route }) {
           <View style={styles.card}>
             <Text style={styles.title}>Crie sua conta</Text>
 
-            <SeletorPerfil
-              role={role}
-              onChangeRole={trocarPerfil}
-            />
+            <SeletorPerfil role={role} onChangeRole={trocarPerfil} />
 
             <Text style={styles.label}>Nome Completo</Text>
             <TextInput
               style={styles.input}
               value={nome}
               onChangeText={setNome}
-              placeholder="Ex: João Silva"
+              placeholder="Ex: Joao Silva"
               placeholderTextColor="#999"
             />
 
-            <Text style={styles.label}>
-              {isPaciente ? 'CPF' : 'CRN/UF'}
-            </Text>
+            <Text style={styles.label}>{isPaciente ? 'CPF' : 'CRN/UF'}</Text>
             <TextInput
               style={styles.input}
               value={documento}
@@ -430,17 +503,17 @@ export default function CadastroScreen({ navigation, route }) {
                 if (isPaciente) {
                   setDocumento(formatarCpf(valor));
                 } else {
-                  setDocumento(valor.toUpperCase());
+                  setDocumento(formatarCrn(valor));
                 }
               }}
-              placeholder={isPaciente ? '000.000.000-00' : '12345/PR'}
+              placeholder={isPaciente ? '000.000.000-00' : '12345/SP'}
               placeholderTextColor="#999"
               keyboardType={isPaciente ? 'numeric' : 'default'}
               autoCapitalize="characters"
-              maxLength={isPaciente ? 14 : 15}
+              maxLength={isPaciente ? 14 : 8}
             />
 
-            {isPaciente && (
+            {isPaciente ? (
               <>
                 <Text style={styles.label}>CEP</Text>
                 <TextInput
@@ -463,7 +536,7 @@ export default function CadastroScreen({ navigation, route }) {
                   placeholderTextColor="#999"
                 />
 
-                <Text style={styles.label}>Número</Text>
+                <Text style={styles.label}>Numero</Text>
                 <TextInput
                   style={styles.input}
                   value={numero}
@@ -499,7 +572,7 @@ export default function CadastroScreen({ navigation, route }) {
                       style={styles.input}
                       value={uf}
                       onChangeText={(valor) => setUf(valor.toUpperCase())}
-                      placeholder="PR"
+                      placeholder="SP"
                       placeholderTextColor="#999"
                       maxLength={2}
                       autoCapitalize="characters"
@@ -507,15 +580,17 @@ export default function CadastroScreen({ navigation, route }) {
                   </View>
                 </View>
               </>
-            )}
+            ) : null}
 
-            <Text style={styles.label}>Gênero</Text>
+            <Text style={styles.label}>
+              {isPaciente ? 'Genero' : 'Genero (opcional)'}
+            </Text>
             <TouchableOpacity
               style={styles.inputPicker}
               onPress={() => setModalVisible(true)}
             >
               <Text style={{ color: genero ? '#333' : '#999' }}>
-                {genero || 'Selecione seu gênero'}
+                {genero || 'Selecione'}
               </Text>
               <Ionicons name="chevron-down" size={20} color="#999" />
             </TouchableOpacity>
@@ -562,17 +637,23 @@ export default function CadastroScreen({ navigation, route }) {
                 color={aceitouLgpd ? '#4fdfa3' : '#7f8c8d'}
               />
               <Text style={styles.checkboxText}>
-                Li e aceito os termos de uso e a política de privacidade conforme a LGPD.
+                Li e aceito os termos de uso e a politica de privacidade conforme a LGPD.
               </Text>
             </TouchableOpacity>
 
             <TouchableOpacity
               style={[
                 styles.button,
-                { backgroundColor: formularioValido ? '#4fdfa3' : '#aeb6bf' },
+                {
+                  backgroundColor: loading
+                    ? '#aeb6bf'
+                    : formularioValido
+                      ? '#4fdfa3'
+                      : '#7bcfae',
+                },
               ]}
-              onPress={handleCadastro}
-              disabled={!formularioValido}
+              onPress={handlePressCadastrar}
+              disabled={loading}
             >
               {loading ? (
                 <ActivityIndicator color="#FFF" />
@@ -615,31 +696,84 @@ export default function CadastroScreen({ navigation, route }) {
         </ScrollView>
 
         <Modal visible={modalVisible} transparent animationType="fade">
-          <TouchableOpacity
-            style={styles.modalOverlay}
-            activeOpacity={1}
-            onPress={() => setModalVisible(false)}
-          >
-            <View style={styles.modalContent}>
-              <Text style={styles.modalTitle}>Selecione o Gênero</Text>
+          <TouchableWithoutFeedback onPress={() => setModalVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Selecione o Genero</Text>
 
-              {opcoesGenero.map((item) => (
-                <TouchableOpacity
-                  key={item}
-                  style={styles.modalItem}
-                  onPress={() => {
-                    setGenero(item);
-                    setModalVisible(false);
-                  }}
-                >
-                  <Text style={styles.modalItemText}>{item}</Text>
-                  {genero === item && (
-                    <Ionicons name="checkmark" size={22} color="#27ae60" />
-                  )}
-                </TouchableOpacity>
-              ))}
+                  {opcoesGenero.map((item) => (
+                    <TouchableOpacity
+                      key={item}
+                      style={styles.modalItem}
+                      onPress={() => {
+                        setGenero(item);
+                        setModalVisible(false);
+                      }}
+                    >
+                      <Text style={styles.modalItemText}>{item}</Text>
+                      {genero === item ? (
+                        <Ionicons name="checkmark" size={22} color="#27ae60" />
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </TouchableOpacity>
+          </TouchableWithoutFeedback>
+        </Modal>
+
+        <Modal visible={modalCodigoAcessoVisible} transparent animationType="fade">
+          <TouchableWithoutFeedback onPress={() => setModalCodigoAcessoVisible(false)}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.modalContent}>
+                  <Text style={styles.modalTitle}>Codigo de Acesso da Empresa</Text>
+                  <Text style={styles.modalDescription}>
+                    Digite o codigo fornecido pela empresa para liberar o cadastro da
+                    nutricionista.
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    value={codigoAcessoNutricionista}
+                    onChangeText={(valor) =>
+                      setCodigoAcessoNutricionista(normalizeNutritionistAccessCode(valor))
+                    }
+                    placeholder="Digite o codigo"
+                    placeholderTextColor="#999"
+                    autoCapitalize="characters"
+                    autoCorrect={false}
+                  />
+
+                  {erroCodigoAcesso ? (
+                    <View style={styles.modalErrorBox}>
+                      <Text style={styles.modalErrorText}>{erroCodigoAcesso}</Text>
+                    </View>
+                  ) : null}
+
+                  <View style={styles.modalActions}>
+                    <TouchableOpacity
+                      style={[styles.modalActionButton, styles.modalActionSecondary]}
+                      onPress={() => {
+                        setErroCodigoAcesso('');
+                        setModalCodigoAcessoVisible(false);
+                      }}
+                    >
+                      <Text style={styles.modalActionSecondaryText}>Cancelar</Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      style={[styles.modalActionButton, styles.modalActionPrimary]}
+                      onPress={handleConfirmarCodigoAcesso}
+                    >
+                      <Text style={styles.modalActionPrimaryText}>Confirmar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
         </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -684,39 +818,6 @@ const styles = StyleSheet.create({
     padding: 25,
     ...softGreenBorder,
   },
-  feedbackBox: {
-    marginBottom: 18,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: '#e9fbf3',
-    borderWidth: 1,
-    borderColor: '#4fdfa3',
-  },
-  feedbackBoxErro: {
-    backgroundColor: '#fff1f0',
-    borderColor: '#e57373',
-  },
-  feedbackText: {
-    color: '#256f51',
-    lineHeight: 20,
-    fontSize: 14,
-    fontWeight: '600',
-  },
-  feedbackTextErro: {
-    color: '#b23a48',
-  },
-  feedbackButton: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    backgroundColor: '#4fdfa3',
-    borderRadius: 12,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-  },
-  feedbackButtonText: {
-    color: '#FFF',
-    fontWeight: '700',
-  },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
@@ -739,6 +840,13 @@ const styles = StyleSheet.create({
     color: '#333',
     backgroundColor: '#ffffff',
     ...softGreenBorder,
+  },
+  helperText: {
+    marginTop: -8,
+    marginBottom: 14,
+    color: '#686d71',
+    fontSize: 12,
+    lineHeight: 17,
   },
   inputPicker: {
     flexDirection: 'row',
@@ -786,6 +894,39 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
   },
+  feedbackBox: {
+    marginTop: 14,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#e9fbf3',
+    borderWidth: 1,
+    borderColor: '#4fdfa3',
+  },
+  feedbackBoxErro: {
+    backgroundColor: '#fff1f0',
+    borderColor: '#e57373',
+  },
+  feedbackText: {
+    color: '#256f51',
+    lineHeight: 20,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  feedbackTextErro: {
+    color: '#b23a48',
+  },
+  feedbackButton: {
+    alignSelf: 'flex-start',
+    marginTop: 10,
+    backgroundColor: '#4fdfa3',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  feedbackButtonText: {
+    color: '#FFF',
+    fontWeight: '700',
+  },
   modalOverlay: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -806,6 +947,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     color: '#333',
   },
+  modalDescription: {
+    color: '#686d71',
+    textAlign: 'center',
+    lineHeight: 20,
+    marginBottom: 16,
+  },
+  modalErrorBox: {
+    marginTop: -2,
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 14,
+    backgroundColor: '#fff1f0',
+    borderWidth: 1,
+    borderColor: '#e57373',
+  },
+  modalErrorText: {
+    color: '#b23a48',
+    fontSize: 14,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
   modalItem: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -816,5 +979,31 @@ const styles = StyleSheet.create({
   modalItemText: {
     fontSize: 16,
     color: '#444',
+  },
+  modalActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  modalActionButton: {
+    flex: 1,
+    borderRadius: 12,
+    paddingVertical: 12,
+    alignItems: 'center',
+  },
+  modalActionSecondary: {
+    backgroundColor: '#ffffff',
+    ...softGreenBorder,
+  },
+  modalActionPrimary: {
+    backgroundColor: '#4fdfa3',
+  },
+  modalActionSecondaryText: {
+    color: '#686d71',
+    fontWeight: '700',
+  },
+  modalActionPrimaryText: {
+    color: '#ffffff',
+    fontWeight: '700',
   },
 });

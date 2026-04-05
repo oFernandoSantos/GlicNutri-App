@@ -28,6 +28,7 @@ import {
   getPatientId,
   savePatientAppState,
 } from '../services/patientSupabaseService';
+import { syncGooglePatientRecord } from '../services/googlePatientSync';
 
 function getGreetingMeta(name) {
   const hour = new Date().getHours();
@@ -122,13 +123,25 @@ export default function PacienteHomeScreen({
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
 
   const idPaciente = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        idPaciente ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [idPaciente, usuarioLogado]
+  );
 
   const nomeBaseUsuario = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
 
   async function carregarDados() {
     try {
       setLoading(true);
-      if (!idPaciente) {
+      if (!canResolvePatient) {
         setPaciente({
           nome_completo: nomeBaseUsuario,
           email_pac: usuarioLogado?.email || null,
@@ -139,7 +152,20 @@ export default function PacienteHomeScreen({
         return;
       }
 
-      const experience = await fetchPatientExperience(idPaciente);
+      let experience = await fetchPatientExperience(idPaciente, {
+        patientContext: usuarioLogado,
+      });
+
+      if (!experience.patient && usuarioLogado?.id) {
+        const pacienteSincronizado = await syncGooglePatientRecord(usuarioLogado);
+
+        if (pacienteSincronizado?.id_paciente_uuid) {
+          experience = {
+            ...experience,
+            patient: pacienteSincronizado,
+          };
+        }
+      }
 
       setPaciente(
         experience.patient || {
@@ -161,7 +187,7 @@ export default function PacienteHomeScreen({
   }
 
   async function persistirAppState(nextState) {
-    if (!idPaciente) {
+    if (!canResolvePatient) {
       setAppState(nextState);
       return;
     }
@@ -171,6 +197,7 @@ export default function PacienteHomeScreen({
       objectiveText: clinicalObjective,
       appState: nextState,
       currentPatient: paciente,
+      patientContext: usuarioLogado,
     });
 
     setPaciente(saved.patient || paciente);
@@ -203,7 +230,7 @@ export default function PacienteHomeScreen({
 
   useEffect(() => {
     carregarDados();
-  }, [idPaciente]);
+  }, [idPaciente, canResolvePatient]);
 
   const onRefresh = () => {
     setRefreshing(true);

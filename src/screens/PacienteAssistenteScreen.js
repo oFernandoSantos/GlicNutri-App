@@ -33,6 +33,18 @@ export default function PacienteAssistenteScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        patientId ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [patientId, usuarioLogado]
+  );
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -48,14 +60,16 @@ export default function PacienteAssistenteScreen({
       try {
         setLoading(true);
 
-        if (!patientId) {
+        if (!canResolvePatient) {
           if (!active) return;
           setAppState(createDefaultAppState());
           setGlucoseReadings([]);
           return;
         }
 
-        const experience = await fetchPatientExperience(patientId);
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+        });
 
         if (!active) return;
 
@@ -75,7 +89,7 @@ export default function PacienteAssistenteScreen({
     return () => {
       active = false;
     };
-  }, [patientId]);
+  }, [patientId, canResolvePatient]);
 
   const currentGlucose = getLatestGlucose(glucoseReadings)?.value || 105;
   const messages =
@@ -113,12 +127,13 @@ export default function PacienteAssistenteScreen({
     try {
       setSaving(true);
 
-      if (patientId) {
+      if (canResolvePatient) {
         const saved = await savePatientAppState({
           patientId,
           objectiveText,
           appState: nextState,
           currentPatient: patient,
+          patientContext: usuarioLogado,
         });
 
         setPatient(saved.patient || patient);
