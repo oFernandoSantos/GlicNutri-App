@@ -28,6 +28,25 @@ const softGreenBorder = {
   borderColor: '#f4f4f4',
 };
 
+function createCadastroFieldErrors() {
+  return {
+    nome: '',
+    documento: '',
+    genero: '',
+    email: '',
+    senha: '',
+    confirmarSenha: '',
+    cep: '',
+    logradouro: '',
+    numero: '',
+    bairro: '',
+    cidade: '',
+    uf: '',
+    aceitouLgpd: '',
+    codigoAcessoNutricionista: '',
+  };
+}
+
 export default function CadastroScreenFixed({ navigation, route }) {
   const roleInicial =
     route?.params?.roleInicial === 'Nutricionista' ? 'Nutricionista' : 'Paciente';
@@ -46,6 +65,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [aceitouLgpd, setAceitouLgpd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [feedbackCadastro, setFeedbackCadastro] = useState(null);
+  const [fieldErrors, setFieldErrors] = useState(createCadastroFieldErrors);
 
   const [cep, setCep] = useState('');
   const [logradouro, setLogradouro] = useState('');
@@ -61,7 +81,12 @@ export default function CadastroScreenFixed({ navigation, route }) {
   useEffect(() => {
     setRole(roleInicial);
     setFeedbackCadastro(null);
+    limparErrosCamposCadastro();
   }, [roleInicial]);
+
+  function limparErrosCamposCadastro() {
+    setFieldErrors(createCadastroFieldErrors());
+  }
 
   const formularioValido = isPaciente
     ? nome.trim() !== '' &&
@@ -114,6 +139,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
     setCidade('');
     setUf('');
     setErroCodigoAcesso('');
+    limparErrosCamposCadastro();
   };
 
   const trocarPerfil = (perfil) => {
@@ -190,6 +216,158 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
   const validarCep = (valorCep) => valorCep.replace(/\D/g, '').length === 8;
 
+  const validarCampoCadastro = (
+    campo,
+    {
+      exigirCodigoAcesso = true,
+      codigoAcessoInformado = codigoAcessoNutricionista,
+      overrides = {},
+    } = {}
+  ) => {
+    const nomeValor = overrides.nome ?? nome;
+    const documentoValor = overrides.documento ?? documento;
+    const generoValor = overrides.genero ?? genero;
+    const emailValor = overrides.email ?? email;
+    const senhaValor = overrides.senha ?? senha;
+    const confirmarSenhaValor = overrides.confirmarSenha ?? confirmarSenha;
+    const cepValor = overrides.cep ?? cep;
+    const logradouroValor = overrides.logradouro ?? logradouro;
+    const numeroValor = overrides.numero ?? numero;
+    const bairroValor = overrides.bairro ?? bairro;
+    const cidadeValor = overrides.cidade ?? cidade;
+    const ufValor = overrides.uf ?? uf;
+    const aceitouLgpdValor = overrides.aceitouLgpd ?? aceitouLgpd;
+
+    const nomeLimpo = nomeValor.trim();
+    const documentoBruto = documentoValor.trim();
+    const documentoFormatado = isPaciente
+      ? documentoValor.replace(/\D/g, '')
+      : formatarCrn(documentoValor);
+    const emailLimpo = emailValor.trim().toLowerCase();
+    const cepBruto = cepValor.trim();
+    const cepLimpo = cepValor.replace(/\D/g, '');
+    const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
+
+    switch (campo) {
+      case 'nome':
+        return !nomeLimpo ? 'Informe o nome completo.' : '';
+      case 'documento':
+        if (!documentoBruto) {
+          return `Informe ${isPaciente ? 'o CPF' : 'o CRN/UF'}.`;
+        }
+        if (!isPaciente && !validarCrn(documentoFormatado)) {
+          return 'Digite o CRN no formato 12345/SP.';
+        }
+        if (isPaciente && !validarCpf(documentoFormatado)) {
+          return 'Digite um CPF valido.';
+        }
+        return '';
+      case 'genero':
+        return isPaciente && !generoValor ? 'Selecione o genero do paciente.' : '';
+      case 'email':
+        if (!emailLimpo) return 'Informe o e-mail.';
+        return !validarEmail(emailLimpo) ? 'Digite um e-mail valido.' : '';
+      case 'senha':
+        if (!senhaValor) return 'Informe a senha.';
+        return senhaValor.length < 6 ? 'A senha precisa ter pelo menos 6 caracteres.' : '';
+      case 'confirmarSenha':
+        if (!confirmarSenhaValor) return 'Confirme a senha.';
+        return senhaValor !== confirmarSenhaValor ? 'As senhas nao coincidem.' : '';
+      case 'cep':
+        if (!isPaciente) return '';
+        if (!cepBruto) return 'Informe o CEP do paciente.';
+        return !validarCep(cepLimpo) ? 'Digite um CEP valido com 8 numeros.' : '';
+      case 'logradouro':
+        return isPaciente && !logradouroValor.trim() ? 'Informe o logradouro.' : '';
+      case 'numero':
+        return isPaciente && !numeroValor.trim() ? 'Informe o numero.' : '';
+      case 'bairro':
+        return isPaciente && !bairroValor.trim() ? 'Informe o bairro.' : '';
+      case 'cidade':
+        return isPaciente && !cidadeValor.trim() ? 'Informe a cidade.' : '';
+      case 'uf':
+        return isPaciente && !ufValor.trim() ? 'Informe a UF.' : '';
+      case 'aceitouLgpd':
+        return !aceitouLgpdValor
+          ? 'Voce precisa aceitar os termos de LGPD para continuar.'
+          : '';
+      case 'codigoAcessoNutricionista':
+        if (isPaciente || !exigirCodigoAcesso) return '';
+        if (!codigoAcessoNormalizado) {
+          return 'Informe o codigo de acesso da empresa para cadastrar a nutricionista.';
+        }
+        return !isValidNutritionistAccessCode(codigoAcessoNormalizado)
+          ? 'Codigo de acesso invalido. Use o codigo fornecido pela empresa.'
+          : '';
+      default:
+        return '';
+    }
+  };
+
+  const obterErrosFormularioCadastro = (opcoes = {}) => {
+    const erros = createCadastroFieldErrors();
+    const campos = isPaciente
+      ? [
+          'nome',
+          'documento',
+          'genero',
+          'email',
+          'senha',
+          'confirmarSenha',
+          'cep',
+          'logradouro',
+          'numero',
+          'bairro',
+          'cidade',
+          'uf',
+          'aceitouLgpd',
+        ]
+      : [
+          'nome',
+          'documento',
+          'email',
+          'senha',
+          'confirmarSenha',
+          'aceitouLgpd',
+          ...(opcoes.exigirCodigoAcesso === false ? [] : ['codigoAcessoNutricionista']),
+        ];
+
+    campos.forEach((campo) => {
+      erros[campo] = validarCampoCadastro(campo, opcoes);
+    });
+
+    return erros;
+  };
+
+  const temErrosCadastro = (erros) => Object.values(erros).some(Boolean);
+
+  const atualizarErroCampoCadastro = (campo, opcoes = {}) => {
+    setFieldErrors((atual) => {
+      if (!atual[campo]) {
+        return atual;
+      }
+
+      return {
+        ...atual,
+        [campo]: validarCampoCadastro(campo, opcoes),
+      };
+    });
+  };
+
+  const atualizarErrosCamposCadastro = (campos, opcoes = {}) => {
+    setFieldErrors((atual) => {
+      const proximoEstado = { ...atual };
+
+      campos.forEach((campo) => {
+        if (proximoEstado[campo]) {
+          proximoEstado[campo] = validarCampoCadastro(campo, opcoes);
+        }
+      });
+
+      return proximoEstado;
+    });
+  };
+
   const buscarEnderecoPorCep = async () => {
     const cepLimpo = normalizarCep();
 
@@ -205,10 +383,23 @@ export default function CadastroScreenFixed({ navigation, route }) {
         return;
       }
 
-      setLogradouro(data.logradouro || '');
-      setBairro(data.bairro || '');
-      setCidade(data.localidade || '');
-      setUf((data.uf || '').toUpperCase());
+      const logradouroViaCep = data.logradouro || '';
+      const bairroViaCep = data.bairro || '';
+      const cidadeViaCep = data.localidade || '';
+      const ufViaCep = (data.uf || '').toUpperCase();
+
+      setLogradouro(logradouroViaCep);
+      setBairro(bairroViaCep);
+      setCidade(cidadeViaCep);
+      setUf(ufViaCep);
+      atualizarErrosCamposCadastro(['logradouro', 'bairro', 'cidade', 'uf'], {
+        overrides: {
+          logradouro: logradouroViaCep,
+          bairro: bairroViaCep,
+          cidade: cidadeViaCep,
+          uf: ufViaCep,
+        },
+      });
     } catch (error) {
       console.log('Erro ao buscar CEP:', error);
     }
@@ -309,34 +500,21 @@ export default function CadastroScreenFixed({ navigation, route }) {
     const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
 
     setFeedbackCadastro(null);
-
-    const erroValidacao = validarFormulario({
-      nomeLimpo,
-      emailLimpo,
-      documentoFormatado,
-      cepLimpo,
+    const errosFormulario = obterErrosFormularioCadastro({
       codigoAcessoInformado: codigoAcessoNormalizado,
     });
+    setFieldErrors(errosFormulario);
 
-    if (erroValidacao) {
-      const erroEhDoCodigoAcesso =
-        !isPaciente &&
-        (
-          erroValidacao === 'Informe o codigo de acesso da empresa para cadastrar a nutricionista.' ||
-          erroValidacao === 'Codigo de acesso invalido. Use o codigo fornecido pela empresa.'
-        );
+    if (!isPaciente) {
+      setErroCodigoAcesso(errosFormulario.codigoAcessoNutricionista || '');
+    }
 
-      if (erroEhDoCodigoAcesso) {
-        setErroCodigoAcesso(erroValidacao);
-      } else {
-        exibirFeedback('erro', erroValidacao);
-        Alert.alert('Validacao', erroValidacao);
-      }
-
+    if (temErrosCadastro(errosFormulario)) {
       return;
     }
 
     if (!isPaciente) {
+      limparErrosCamposCadastro();
       setErroCodigoAcesso('');
       setCodigoAcessoNutricionista(codigoAcessoNormalizado);
       setModalCodigoAcessoVisible(false);
@@ -407,37 +585,38 @@ export default function CadastroScreenFixed({ navigation, route }) {
       limparFormulario();
       exibirFeedback(
         'sucesso',
-        `${role} cadastrado e salvo no banco com sucesso. Agora voce ja pode entrar pela aba ${role}.`,
+        isPaciente
+          ? 'Paciente cadastrado com Sucesso.'
+          : 'Nutricionista cadastrado com Sucesso.',
         { registro: registroCriado }
       );
     } catch (err) {
       console.error('Erro detalhado:', err);
-      exibirFeedback('erro', err.message || 'Nao foi possivel concluir o cadastro.');
-      Alert.alert('Erro no cadastro', err.message || 'Nao foi possivel concluir o cadastro.');
+      const mensagemErro = err.message || 'Nao foi possivel concluir o cadastro.';
+
+      if (mensagemErro.includes('CPF')) {
+        setFieldErrors((atual) => ({ ...atual, documento: mensagemErro }));
+      } else if (mensagemErro.includes('CRN/UF')) {
+        setFieldErrors((atual) => ({ ...atual, documento: mensagemErro }));
+      } else if (mensagemErro.includes('e-mail')) {
+        setFieldErrors((atual) => ({ ...atual, email: mensagemErro }));
+      } else {
+        exibirFeedback('erro', mensagemErro);
+        Alert.alert('Erro no cadastro', mensagemErro);
+      }
     } finally {
       setLoading(false);
     }
   };
 
   const handlePressCadastrar = () => {
-    const nomeLimpo = nome.trim();
-    const emailLimpo = email.trim().toLowerCase();
-    const documentoFormatado = normalizarDocumento();
-    const cepLimpo = normalizarCep();
-
     setFeedbackCadastro(null);
-
-    const erroValidacao = validarFormulario({
-      nomeLimpo,
-      emailLimpo,
-      documentoFormatado,
-      cepLimpo,
+    const errosFormulario = obterErrosFormularioCadastro({
       exigirCodigoAcesso: false,
     });
+    setFieldErrors(errosFormulario);
 
-    if (erroValidacao) {
-      exibirFeedback('erro', erroValidacao);
-      Alert.alert('Validacao', erroValidacao);
+    if (temErrosCadastro(errosFormulario)) {
       return;
     }
 
@@ -447,15 +626,22 @@ export default function CadastroScreenFixed({ navigation, route }) {
     }
 
     setErroCodigoAcesso('');
+    setFieldErrors((atual) => ({ ...atual, codigoAcessoNutricionista: '' }));
     setModalCodigoAcessoVisible(true);
   };
 
   const handleConfirmarCodigoAcesso = () => {
     const codigoNormalizado = normalizeNutritionistAccessCode(codigoAcessoNutricionista);
     setErroCodigoAcesso('');
+    setFieldErrors((atual) => ({ ...atual, codigoAcessoNutricionista: '' }));
     setCodigoAcessoNutricionista(codigoNormalizado);
     handleCadastro(codigoNormalizado);
   };
+
+  const renderFieldError = (campo) =>
+    fieldErrors[campo] ? (
+      <Text style={styles.fieldErrorText}>{fieldErrors[campo]}</Text>
+    ) : null;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -488,16 +674,21 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
             <Text style={styles.label}>Nome Completo</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.nome ? styles.inputError : null]}
               value={nome}
-              onChangeText={setNome}
+              onChangeText={(valor) => {
+                setNome(valor);
+                setFeedbackCadastro(null);
+                atualizarErroCampoCadastro('nome', { overrides: { nome: valor } });
+              }}
               placeholder="Ex: Joao Silva"
               placeholderTextColor="#999"
             />
+            {renderFieldError('nome')}
 
             <Text style={styles.label}>{isPaciente ? 'CPF' : 'CRN/UF'}</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.documento ? styles.inputError : null]}
               value={documento}
               onChangeText={(valor) => {
                 if (isPaciente) {
@@ -505,6 +696,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
                 } else {
                   setDocumento(formatarCrn(valor));
                 }
+                setFeedbackCadastro(null);
+                atualizarErroCampoCadastro('documento', {
+                  overrides: { documento: isPaciente ? formatarCpf(valor) : formatarCrn(valor) },
+                });
               }}
               placeholder={isPaciente ? '000.000.000-00' : '12345/SP'}
               placeholderTextColor="#999"
@@ -512,71 +707,108 @@ export default function CadastroScreenFixed({ navigation, route }) {
               autoCapitalize="characters"
               maxLength={isPaciente ? 14 : 8}
             />
+            {renderFieldError('documento')}
 
             {isPaciente ? (
               <>
                 <Text style={styles.label}>CEP</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, fieldErrors.cep ? styles.inputError : null]}
                   value={cep}
-                  onChangeText={(valor) => setCep(formatarCep(valor))}
+                  onChangeText={(valor) => {
+                    setCep(formatarCep(valor));
+                    atualizarErroCampoCadastro('cep', {
+                      overrides: { cep: formatarCep(valor) },
+                    });
+                  }}
                   onBlur={buscarEnderecoPorCep}
                   placeholder="00000-000"
                   placeholderTextColor="#999"
                   keyboardType="numeric"
                   maxLength={9}
                 />
+                {renderFieldError('cep')}
 
                 <Text style={styles.label}>Logradouro</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, fieldErrors.logradouro ? styles.inputError : null]}
                   value={logradouro}
-                  onChangeText={setLogradouro}
+                  onChangeText={(valor) => {
+                    setLogradouro(valor);
+                    atualizarErroCampoCadastro('logradouro', {
+                      overrides: { logradouro: valor },
+                    });
+                  }}
                   placeholder="Rua, avenida..."
                   placeholderTextColor="#999"
                 />
+                {renderFieldError('logradouro')}
 
                 <Text style={styles.label}>Numero</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, fieldErrors.numero ? styles.inputError : null]}
                   value={numero}
-                  onChangeText={setNumero}
+                  onChangeText={(valor) => {
+                    setNumero(valor);
+                    atualizarErroCampoCadastro('numero', {
+                      overrides: { numero: valor },
+                    });
+                  }}
                   placeholder="123"
                   placeholderTextColor="#999"
                 />
+                {renderFieldError('numero')}
 
                 <Text style={styles.label}>Bairro</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, fieldErrors.bairro ? styles.inputError : null]}
                   value={bairro}
-                  onChangeText={setBairro}
+                  onChangeText={(valor) => {
+                    setBairro(valor);
+                    atualizarErroCampoCadastro('bairro', {
+                      overrides: { bairro: valor },
+                    });
+                  }}
                   placeholder="Seu bairro"
                   placeholderTextColor="#999"
                 />
+                {renderFieldError('bairro')}
 
                 <View style={styles.row}>
                   <View style={styles.cityContainer}>
                     <Text style={styles.label}>Cidade</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, fieldErrors.cidade ? styles.inputError : null]}
                       value={cidade}
-                      onChangeText={setCidade}
+                      onChangeText={(valor) => {
+                        setCidade(valor);
+                        atualizarErroCampoCadastro('cidade', {
+                          overrides: { cidade: valor },
+                        });
+                      }}
                       placeholder="Sua cidade"
                       placeholderTextColor="#999"
                     />
+                    {renderFieldError('cidade')}
                   </View>
 
                   <View style={styles.ufContainer}>
                     <Text style={styles.label}>UF</Text>
                     <TextInput
-                      style={styles.input}
+                      style={[styles.input, fieldErrors.uf ? styles.inputError : null]}
                       value={uf}
-                      onChangeText={(valor) => setUf(valor.toUpperCase())}
+                      onChangeText={(valor) => {
+                        setUf(valor.toUpperCase());
+                        atualizarErroCampoCadastro('uf', {
+                          overrides: { uf: valor.toUpperCase() },
+                        });
+                      }}
                       placeholder="SP"
                       placeholderTextColor="#999"
                       maxLength={2}
                       autoCapitalize="characters"
                     />
+                    {renderFieldError('uf')}
                   </View>
                 </View>
               </>
@@ -586,7 +818,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
               {isPaciente ? 'Genero' : 'Genero (opcional)'}
             </Text>
             <TouchableOpacity
-              style={styles.inputPicker}
+              style={[
+                styles.inputPicker,
+                fieldErrors.genero ? styles.inputPickerError : null,
+              ]}
               onPress={() => setModalVisible(true)}
             >
               <Text style={{ color: genero ? '#333' : '#999' }}>
@@ -594,41 +829,68 @@ export default function CadastroScreenFixed({ navigation, route }) {
               </Text>
               <Ionicons name="chevron-down" size={20} color="#999" />
             </TouchableOpacity>
+            {renderFieldError('genero')}
 
             <Text style={styles.label}>E-mail</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.email ? styles.inputError : null]}
               value={email}
-              onChangeText={setEmail}
+              onChangeText={(valor) => {
+                setEmail(valor);
+                atualizarErroCampoCadastro('email', {
+                  overrides: { email: valor },
+                });
+              }}
               autoCapitalize="none"
               placeholder="exemplo@email.com"
               keyboardType="email-address"
               placeholderTextColor="#999"
             />
+            {renderFieldError('email')}
 
             <Text style={styles.label}>Senha</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.senha ? styles.inputError : null]}
               value={senha}
-              onChangeText={setSenha}
+              onChangeText={(valor) => {
+                setSenha(valor);
+                atualizarErroCampoCadastro('senha', {
+                  overrides: { senha: valor },
+                });
+                atualizarErroCampoCadastro('confirmarSenha', {
+                  overrides: { senha: valor },
+                });
+              }}
               secureTextEntry
               placeholder="Crie uma senha"
               placeholderTextColor="#999"
             />
+            {renderFieldError('senha')}
 
             <Text style={styles.label}>Confirmar Senha</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, fieldErrors.confirmarSenha ? styles.inputError : null]}
               value={confirmarSenha}
-              onChangeText={setConfirmarSenha}
+              onChangeText={(valor) => {
+                setConfirmarSenha(valor);
+                atualizarErroCampoCadastro('confirmarSenha', {
+                  overrides: { confirmarSenha: valor },
+                });
+              }}
               secureTextEntry
               placeholder="Repita a senha"
               placeholderTextColor="#999"
             />
+            {renderFieldError('confirmarSenha')}
 
             <TouchableOpacity
               style={styles.checkboxContainer}
-              onPress={() => setAceitouLgpd(!aceitouLgpd)}
+              onPress={() => {
+                setAceitouLgpd(!aceitouLgpd);
+                atualizarErroCampoCadastro('aceitouLgpd', {
+                  overrides: { aceitouLgpd: !aceitouLgpd },
+                });
+              }}
               activeOpacity={0.8}
             >
               <Ionicons
@@ -640,6 +902,9 @@ export default function CadastroScreenFixed({ navigation, route }) {
                 Li e aceito os termos de uso e a politica de privacidade conforme a LGPD.
               </Text>
             </TouchableOpacity>
+            {fieldErrors.aceitouLgpd ? (
+              <Text style={styles.checkboxErrorText}>{fieldErrors.aceitouLgpd}</Text>
+            ) : null}
 
             <TouchableOpacity
               style={[
@@ -708,6 +973,9 @@ export default function CadastroScreenFixed({ navigation, route }) {
                       style={styles.modalItem}
                       onPress={() => {
                         setGenero(item);
+                        atualizarErroCampoCadastro('genero', {
+                          overrides: { genero: item },
+                        });
                         setModalVisible(false);
                       }}
                     >
@@ -735,10 +1003,23 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   </Text>
 
                   <TextInput
-                    style={styles.input}
+                    style={[
+                      styles.input,
+                      (erroCodigoAcesso || fieldErrors.codigoAcessoNutricionista)
+                        ? styles.inputError
+                        : null,
+                    ]}
                     value={codigoAcessoNutricionista}
                     onChangeText={(valor) =>
-                      setCodigoAcessoNutricionista(normalizeNutritionistAccessCode(valor))
+                      {
+                        setCodigoAcessoNutricionista(
+                          normalizeNutritionistAccessCode(valor)
+                        );
+                        setErroCodigoAcesso('');
+                        atualizarErroCampoCadastro('codigoAcessoNutricionista', {
+                          codigoAcessoInformado: normalizeNutritionistAccessCode(valor),
+                        });
+                      }
                     }
                     placeholder="Digite o codigo"
                     placeholderTextColor="#999"
@@ -757,6 +1038,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
                       style={[styles.modalActionButton, styles.modalActionSecondary]}
                       onPress={() => {
                         setErroCodigoAcesso('');
+                        setFieldErrors((atual) => ({
+                          ...atual,
+                          codigoAcessoNutricionista: '',
+                        }));
                         setModalCodigoAcessoVisible(false);
                       }}
                     >
@@ -841,6 +1126,17 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     ...softGreenBorder,
   },
+  inputError: {
+    borderColor: '#d96666',
+  },
+  fieldErrorText: {
+    marginTop: -8,
+    marginBottom: 12,
+    color: '#c35a5a',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  },
   helperText: {
     marginTop: -8,
     marginBottom: 14,
@@ -859,6 +1155,9 @@ const styles = StyleSheet.create({
     marginBottom: 15,
     backgroundColor: '#ffffff',
     ...softGreenBorder,
+  },
+  inputPickerError: {
+    borderColor: '#d96666',
   },
   row: {
     flexDirection: 'row',
@@ -882,6 +1181,14 @@ const styles = StyleSheet.create({
     color: '#34495e',
     fontSize: 13,
     lineHeight: 18,
+  },
+  checkboxErrorText: {
+    marginTop: -6,
+    marginBottom: 12,
+    color: '#c35a5a',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
   },
   button: {
     padding: 16,
