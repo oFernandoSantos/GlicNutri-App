@@ -39,11 +39,24 @@ export default function LoginScreen({ navigation, route, session }) {
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [fieldErrors, setFieldErrors] = useState({
+    identificador: '',
+    senha: '',
+  });
   const googleSessionHandledRef = useRef(false);
 
   useEffect(() => {
     setRole(roleInicial);
+    setErrorMessage('');
+    limparErrosCamposLogin();
   }, [roleInicial]);
+
+  function limparErrosCamposLogin() {
+    setFieldErrors({
+      identificador: '',
+      senha: '',
+    });
+  }
 
   function formatarCpf(valor) {
     const numeros = valor.replace(/\D/g, '').slice(0, 11);
@@ -79,56 +92,74 @@ export default function LoginScreen({ navigation, route, session }) {
     return regex.test(valor.trim().toLowerCase());
   }
 
-  function handleChangeIdentificador(valor) {
-    setErrorMessage('');
+  function validarCamposLogin({
+    identificadorValor = identificador,
+    senhaValor = senha,
+  } = {}) {
+    const proximosErros = {
+      identificador: '',
+      senha: '',
+    };
+    const identificadorLimpo = identificadorValor.trim();
+    const senhaLimpa = senhaValor.trim();
 
-    if (role !== 'Paciente') {
-      if (valor.includes('@')) {
-        setIdentificador(valor);
-        return;
-      }
-
-      setIdentificador(formatarCrn(valor));
-      return;
-    }
-
-    if (valor.includes('@') || /[A-Za-z]/.test(valor)) {
-      setIdentificador(valor);
-      return;
-    }
-
-    setIdentificador(formatarCpf(valor));
-  }
-
-  function validarFormularioLogin() {
-    const identificadorLimpo = identificador.trim();
-    const senhaLimpa = senha.trim();
-
-    if (!identificadorLimpo || !senhaLimpa) {
-      return 'Preencha o identificador e a senha para continuar.';
-    }
-
-    if (identificadorLimpo.includes('@') && !validarEmail(identificadorLimpo)) {
-      return 'Digite um e-mail valido para continuar.';
-    }
-
-    if (
+    if (!identificadorLimpo) {
+      proximosErros.identificador =
+        role === 'Paciente'
+          ? 'Preencha o CPF ou e-mail.'
+          : 'Preencha o CRN/UF ou e-mail.';
+    } else if (identificadorLimpo.includes('@') && !validarEmail(identificadorLimpo)) {
+      proximosErros.identificador = 'Digite um e-mail valido para continuar.';
+    } else if (
       role === 'Paciente' &&
       !identificadorLimpo.includes('@') &&
       !validarCpfParaLogin(identificadorLimpo)
     ) {
-      return 'Digite um CPF valido para acessar como paciente.';
-    }
-
-    if (
+      proximosErros.identificador = 'Digite um CPF valido para acessar como paciente.';
+    } else if (
       role === 'Nutricionista' &&
       !identificadorLimpo.includes('@') &&
       !validarCrnParaLogin(identificadorLimpo)
     ) {
-      return 'Digite o CRN no formato 12345/SP para acessar como nutricionista.';
+      proximosErros.identificador =
+        'Digite o CRN no formato 12345/SP para acessar como nutricionista.';
     }
 
-    return '';
+    if (!senhaLimpa) {
+      proximosErros.senha = 'Preencha a senha.';
+    }
+
+    return proximosErros;
+  }
+
+  function temErrosCamposLogin(erros) {
+    return Object.values(erros).some(Boolean);
+  }
+
+  function handleChangeIdentificador(valor) {
+    setErrorMessage('');
+    let proximoValor = valor;
+
+    if (role !== 'Paciente') {
+      if (valor.includes('@')) {
+        proximoValor = valor;
+      } else {
+        proximoValor = formatarCrn(valor);
+      }
+    } else if (valor.includes('@') || /[A-Za-z]/.test(valor)) {
+      proximoValor = valor;
+    } else {
+      proximoValor = formatarCpf(valor);
+    }
+
+    setIdentificador(proximoValor);
+    setFieldErrors((atual) => ({
+      ...atual,
+      identificador: validarCamposLogin({
+        identificadorValor: proximoValor,
+        senhaValor: senha,
+      }).identificador,
+    }));
   }
 
   function normalizarIdentificadorLogin(valor, perfil) {
@@ -291,13 +322,15 @@ export default function LoginScreen({ navigation, route, session }) {
   }, [session, navigation]);
 
   async function handleLogin() {
-    const mensagemValidacao = validarFormularioLogin();
+    const errosFormulario = validarCamposLogin();
+    setFieldErrors(errosFormulario);
 
-    if (mensagemValidacao) {
-      setErrorMessage(mensagemValidacao);
+    if (temErrosCamposLogin(errosFormulario)) {
+      setErrorMessage('');
       return;
     }
 
+    limparErrosCamposLogin();
     setErrorMessage('');
     setLoading(true);
 
@@ -309,20 +342,26 @@ export default function LoginScreen({ navigation, route, session }) {
       );
 
       if (!usuario) {
-        setErrorMessage(
-          motivo === 'senha_incorreta'
-            ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
-            : role === 'Paciente'
-              ? 'Paciente nao encontrado. Confira o CPF ou e-mail informado.'
-              : 'Nutricionista nao encontrado. Confira o CRN ou e-mail informado.'
-        );
+        setFieldErrors({
+          identificador:
+            motivo === 'senha_incorreta'
+              ? ''
+              : role === 'Paciente'
+                ? 'Paciente nao encontrado. Confira o CPF ou e-mail informado.'
+                : 'Nutricionista nao encontrado. Confira o CRN ou e-mail informado.',
+          senha:
+            motivo === 'senha_incorreta'
+              ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
+              : '',
+        });
         return;
       }
 
       if (role === 'Paciente' && usuario.excluido) {
-        setErrorMessage(
-          'Este paciente foi excluido e nao pode mais acessar a plataforma.'
-        );
+        setFieldErrors({
+          identificador: 'Este paciente foi excluido e nao pode mais acessar a plataforma.',
+          senha: '',
+        });
         Alert.alert(
           'Acesso bloqueado',
           'Este paciente foi excluido e nao pode mais acessar a plataforma.'
@@ -595,6 +634,15 @@ export default function LoginScreen({ navigation, route, session }) {
     lineHeight: 18,
   };
 
+  const fieldErrorTextStyle = {
+    marginTop: -8,
+    marginBottom: 12,
+    color: '#c35a5a',
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+  };
+
   const forgotPasswordButtonStyle = {
     alignSelf: 'flex-end',
     marginBottom: 25,
@@ -735,6 +783,7 @@ export default function LoginScreen({ navigation, route, session }) {
             setIdentificador('');
             setSenha('');
             setErrorMessage('');
+            limparErrosCamposLogin();
           }}
         />
 
@@ -742,7 +791,7 @@ export default function LoginScreen({ navigation, route, session }) {
           {role === 'Paciente' ? 'CPF ou e-mail' : 'CRN/UF ou e-mail'}
         </Text>
         <TextInput
-          style={[inputStyle, errorMessage ? inputErrorStyle : null]}
+          style={[inputStyle, fieldErrors.identificador ? inputErrorStyle : null]}
           placeholder={
             role === 'Paciente'
               ? '000.000.000-00 ou email@exemplo.com'
@@ -767,10 +816,13 @@ export default function LoginScreen({ navigation, route, session }) {
                 : 8
           }
         />
+        {fieldErrors.identificador ? (
+          <Text style={fieldErrorTextStyle}>{fieldErrors.identificador}</Text>
+        ) : null}
 
         <Text style={labelStyle}>Senha</Text>
         <TextInput
-          style={[inputStyle, errorMessage ? inputErrorStyle : null]}
+          style={[inputStyle, fieldErrors.senha ? inputErrorStyle : null]}
           placeholder="********"
           placeholderTextColor="#95a5a6"
           secureTextEntry
@@ -778,9 +830,19 @@ export default function LoginScreen({ navigation, route, session }) {
           onChangeText={(valor) => {
             setSenha(valor);
             setErrorMessage('');
+            setFieldErrors((atual) => ({
+              ...atual,
+              senha: validarCamposLogin({
+                identificadorValor: identificador,
+                senhaValor: valor,
+              }).senha,
+            }));
           }}
           autoCapitalize="none"
         />
+        {fieldErrors.senha ? (
+          <Text style={fieldErrorTextStyle}>{fieldErrors.senha}</Text>
+        ) : null}
 
         {errorMessage ? (
           <View style={errorBoxStyle}>
