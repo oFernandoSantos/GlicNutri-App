@@ -18,6 +18,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import SeletorPerfil from '../components/SeletorPerfil';
+import BotaoVoltar from '../components/BotaoVoltar';
 import {
   isValidNutritionistAccessCode,
   normalizeNutritionistAccessCode,
@@ -660,12 +661,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >
-          <TouchableOpacity
+          <BotaoVoltar
             onPress={() => navigation.navigate('Login')}
-            style={styles.backButton}
-          >
-            <Text style={styles.backText}>Voltar</Text>
-          </TouchableOpacity>
+            style={styles.authBackButton}
+          />
 
           <View style={styles.card}>
             <Text style={styles.title}>Crie sua conta</Text>
@@ -1080,22 +1079,9 @@ const styles = StyleSheet.create({
     flexGrow: 0,
     minHeight: '100%',
   },
-  backButton: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f4f4f4',
-    paddingHorizontal: 14,
-    height: 40,
-    borderRadius: 20,
+  authBackButton: {
     marginTop: 10,
     marginBottom: 20,
-    ...softGreenBorder,
-  },
-  backText: {
-    color: '#686d71',
-    fontWeight: '600',
-    fontSize: 14,
   },
   card: {
     backgroundColor: '#f4f4f4',

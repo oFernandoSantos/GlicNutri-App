@@ -14,6 +14,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 import NutricionistaDrawer from '../components/NutricionistaDrawer';
+import BotaoVoltar from '../components/BotaoVoltar';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_SPACE,
 } from '../components/BarraAbasNutricionista';
@@ -180,12 +181,11 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
           ))}
         </SectionCard>
 
-        <TouchableOpacity
-          style={styles.primaryButton}
+        <BotaoVoltar
+          label="Voltar ao dashboard"
           onPress={() => navigation.navigate('HomeNutricionista', { usuarioLogado })}
-        >
-          <Text style={styles.primaryButtonText}>Voltar ao dashboard</Text>
-        </TouchableOpacity>
+          variant="primary"
+        />
 
         <View style={styles.listFooter} />
       </ScrollView>
@@ -372,19 +372,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 21,
     color: patientTheme.colors.textMuted,
-  },
-  primaryButton: {
-    marginTop: 20,
-    backgroundColor: patientTheme.colors.primaryDark,
-    borderRadius: patientTheme.radius.pill,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 16,
-  },
-  primaryButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '700',
-    fontSize: 15,
   },
   listFooter: {
     height: 8,

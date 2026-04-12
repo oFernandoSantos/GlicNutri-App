@@ -18,6 +18,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 import NutricionistaDrawer from '../components/NutricionistaDrawer';
+import BotaoVoltar from '../components/BotaoVoltar';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
@@ -438,14 +439,11 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         nestedScrollEnabled
       >
         <View style={styles.headerRow}>
-          <TouchableOpacity style={styles.headerButton} onPress={() => navigation.goBack()}>
-            <Ionicons
-              name="arrow-back"
-              size={18}
-              color={patientTheme.colors.text}
-            />
-            <Text style={styles.headerButtonText}>Voltar</Text>
-          </TouchableOpacity>
+          <BotaoVoltar
+            navigation={navigation}
+            fallbackRoute="HomeNutricionista"
+            fallbackParams={{ usuarioLogado }}
+          />
 
           <View style={styles.headerIconGroup}>
             <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
@@ -943,20 +941,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-  },
-  headerButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
-    ...patientShadow,
-  },
-  headerButtonText: {
-    marginLeft: 6,
-    color: patientTheme.colors.text,
-    fontWeight: '700',
   },
   headerIconGroup: {
     flexDirection: 'row',
