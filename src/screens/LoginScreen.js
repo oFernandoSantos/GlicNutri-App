@@ -19,6 +19,7 @@ import {
   syncGooglePatientRecord,
 } from '../services/googlePatientSync';
 import SeletorPerfil from '../components/SeletorPerfil';
+import BotaoVoltar from '../components/BotaoVoltar';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -559,23 +560,9 @@ export default function LoginScreen({ navigation, route, session }) {
     minHeight: 0,
   };
 
-  const backButtonStyle = {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#f4f4f4',
-    paddingHorizontal: 14,
-    height: 40,
-    borderRadius: 20,
+  const authBackButtonStyle = {
     marginTop: 10,
     marginBottom: 20,
-    ...softGreenBorder,
-  };
-
-  const backTextStyle = {
-    color: '#686d71',
-    fontWeight: '600',
-    fontSize: 14,
   };
 
   const cardStyle = {
@@ -766,12 +753,10 @@ export default function LoginScreen({ navigation, route, session }) {
       keyboardShouldPersistTaps="handled"
       nestedScrollEnabled
     >
-      <TouchableOpacity
+      <BotaoVoltar
         onPress={() => navigation.navigate('Intro')}
-        style={backButtonStyle}
-      >
-        <Text style={backTextStyle}>Voltar</Text>
-      </TouchableOpacity>
+        style={authBackButtonStyle}
+      />
 
       <View style={cardStyle}>
         <Text style={titleStyle}>Bem-vindo ao GlicNutri</Text>

@@ -4,13 +4,12 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   StatusBar,
   Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from './BarraAbasPaciente';
+import BotaoVoltar from './BotaoVoltar';
 import { temaPaciente, sombraPaciente } from '../theme/temaPaciente';
 
 export default function LayoutTelaPaciente({
@@ -38,14 +37,7 @@ export default function LayoutTelaPaciente({
     <View style={styles.cabecalho}>
       <View style={styles.topoCabecalho}>
         {mostrarVoltar ? (
-          <TouchableOpacity style={styles.botaoVoltar} onPress={() => navigation.goBack()}>
-            <Ionicons
-              name="chevron-back-outline"
-              size={20}
-              color={temaPaciente.cores.texto}
-            />
-            <Text style={styles.textoVoltar}>Voltar</Text>
-          </TouchableOpacity>
+          <BotaoVoltar navigation={navigation} fallbackRoute="HomePaciente" />
         ) : (
           <View style={styles.insigniaPaciente}>
             <View style={styles.pontoOnline} />
@@ -191,23 +183,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-  },
-  botaoVoltar: {
-    minHeight: 44,
-    paddingHorizontal: 14,
-    borderRadius: temaPaciente.raios.pill,
-    backgroundColor: temaPaciente.cores.superficie,
-    borderWidth: 1,
-    borderColor: temaPaciente.cores.borda,
-    flexDirection: 'row',
-    alignItems: 'center',
-    ...sombraPaciente,
-  },
-  textoVoltar: {
-    marginLeft: 4,
-    color: temaPaciente.cores.texto,
-    fontSize: 14,
-    fontWeight: '700',
   },
   insigniaPaciente: {
     minHeight: 40,

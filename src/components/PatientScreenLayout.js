@@ -4,13 +4,12 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   StatusBar,
   Platform,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from './BarraAbasPaciente';
+import BotaoVoltar from './BotaoVoltar';
 import { patientTheme } from '../theme/patientTheme';
 
 export default function PatientScreenLayout({
@@ -30,10 +29,7 @@ export default function PatientScreenLayout({
 
       <View style={styles.body}>
         <View style={styles.header}>
-          <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-            <Ionicons name="chevron-back" size={20} color={patientTheme.colors.text} />
-            <Text style={styles.backText}>Voltar</Text>
-          </TouchableOpacity>
+          <BotaoVoltar navigation={navigation} fallbackRoute="HomePaciente" />
 
           <View style={styles.headerText}>
             <Text style={styles.title}>{title}</Text>
@@ -99,22 +95,6 @@ const styles = StyleSheet.create({
     maxHeight: '100%',
     overflowY: 'auto',
     overflowX: 'hidden',
-  },
-  backButton: {
-    alignSelf: 'flex-start',
-    minWidth: 92,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: patientTheme.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  backText: {
-    marginLeft: 4,
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '600',
   },
   headerText: {
     marginTop: 18,
