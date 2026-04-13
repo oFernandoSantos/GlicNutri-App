@@ -8,12 +8,12 @@ import {
   Platform,
   StatusBar,
 } from 'react-native';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
-import BotaoVoltar from '../components/BotaoVoltar';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
+import BotaoVoltar from '../../components/BotaoVoltar';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_SPACE,
-} from '../components/BarraAbasNutricionista';
-import { nutritionistSectionContent } from '../data/nutritionistDashboardData';
+} from '../../components/BarraAbasNutricionista';
+import { nutritionistSectionContent } from '../../data/nutritionistDashboardData';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;

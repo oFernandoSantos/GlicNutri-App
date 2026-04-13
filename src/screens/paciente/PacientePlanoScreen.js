@@ -8,14 +8,14 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import PatientScreenLayout from '../components/PatientScreenLayout';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
+import PatientScreenLayout from '../../components/PatientScreenLayout';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import {
   createDefaultAppState,
   fetchPatientExperience,
   getPatientId,
   savePatientAppState,
-} from '../services/patientSupabaseService';
+} from '../../services/patientSupabaseService';
 
 export default function PacientePlanoScreen({
   navigation,

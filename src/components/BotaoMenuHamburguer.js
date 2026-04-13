@@ -12,7 +12,7 @@ export default function BotaoMenuHamburguer({
   disabled = false,
   loading = false,
   style,
-  iconColor = patientTheme.colors.text,
+  iconColor = patientTheme.colors.primary,
   iconSize = 24,
   accessibilityLabel = 'Abrir menu',
 }) {
@@ -39,11 +39,14 @@ export default function BotaoMenuHamburguer({
 const styles = StyleSheet.create({
   button: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: 999,
-    height: 46,
+    backgroundColor: '#f4f4f4',
+    borderColor: '#f4f4f4',
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    height: 40,
+    width: 40,
+    padding: 0,
     justifyContent: 'center',
-    width: 46,
     ...patientShadow,
   },
   disabled: {

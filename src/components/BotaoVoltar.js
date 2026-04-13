@@ -1,7 +1,9 @@
 import React from 'react';
-import { StyleSheet, Text, TouchableOpacity } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Image, StyleSheet, TouchableOpacity } from 'react-native';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
+
+const BACK_ICON_PNG_URL =
+  'https://img.icons8.com/ios-glyphs/60/4fdfa3/chevron-left.png';
 
 export default function BotaoVoltar({
   navigation,
@@ -9,18 +11,13 @@ export default function BotaoVoltar({
   fallbackRoute,
   fallbackParams,
   label = 'Voltar',
-  iconName = 'chevron-back-outline',
-  showIcon = true,
   variant = 'default',
   style,
   textStyle,
-  iconColor,
   disabled = false,
   preferFallback = false,
 }) {
   const isPrimary = variant === 'primary';
-  const textColor = isPrimary ? patientTheme.colors.onPrimary : patientTheme.colors.text;
-  const resolvedIconColor = iconColor || textColor;
 
   function handlePress() {
     if (disabled) return;
@@ -63,19 +60,15 @@ export default function BotaoVoltar({
         style,
       ]}
     >
-      {showIcon ? (
-        <Ionicons name={iconName} size={20} color={resolvedIconColor} />
-      ) : null}
-      <Text
+      <Image
+        accessibilityIgnoresInvertColors
+        resizeMode="contain"
+        source={{ uri: BACK_ICON_PNG_URL }}
         style={[
-          styles.text,
-          isPrimary && styles.primaryText,
-          showIcon && styles.textWithIcon,
+          styles.icon,
           textStyle,
         ]}
-      >
-        {label}
-      </Text>
+      />
     </TouchableOpacity>
   );
 }
@@ -83,21 +76,21 @@ export default function BotaoVoltar({
 const styles = StyleSheet.create({
   button: {
     alignSelf: 'flex-start',
-    minHeight: 40,
-    minWidth: 92,
-    paddingHorizontal: 14,
+    height: 40,
+    width: 40,
+    padding: 0,
     borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: '#f4f4f4',
     borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
+    borderColor: '#f4f4f4',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     ...patientShadow,
   },
   primaryButton: {
-    alignSelf: 'stretch',
-    minHeight: 52,
+    height: 52,
+    width: 52,
     marginTop: 24,
     backgroundColor: patientTheme.colors.primary,
     borderWidth: 0,
@@ -105,16 +98,8 @@ const styles = StyleSheet.create({
   disabled: {
     opacity: 0.55,
   },
-  text: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  primaryText: {
-    color: patientTheme.colors.onPrimary,
-    fontSize: 16,
-  },
-  textWithIcon: {
-    marginLeft: 4,
+  icon: {
+    height: 18,
+    width: 18,
   },
 });

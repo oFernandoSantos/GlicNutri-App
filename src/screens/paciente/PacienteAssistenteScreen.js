@@ -8,20 +8,20 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import PatientScreenLayout from '../components/PatientScreenLayout';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
+import PatientScreenLayout from '../../components/PatientScreenLayout';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import {
   aiAlerts,
   assistantQuickQuestions,
   buildAssistantReply,
-} from '../data/patientExperienceData';
+} from '../../data/patientExperienceData';
 import {
   createDefaultAppState,
   fetchPatientExperience,
   getPatientId,
   getLatestGlucose,
   savePatientAppState,
-} from '../services/patientSupabaseService';
+} from '../../services/patientSupabaseService';
 
 const assistantWelcome =
   'Estou aqui para responder duvidas do dia a dia cruzando sua glicose, refeicoes e rotina.';

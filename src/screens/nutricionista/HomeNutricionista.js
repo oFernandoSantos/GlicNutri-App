@@ -10,7 +10,7 @@ import {
   Alert,
   Platform,
 } from 'react-native';
-import { supabase } from '../services/supabaseConfig';
+import { supabase } from '../../services/supabaseConfig';
 
 const softGreenBorder = {
   borderWidth: 1.5,

@@ -4,7 +4,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  SafeAreaView,
   ScrollView,
   ActivityIndicator,
   Alert,
@@ -12,12 +11,17 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
+  SafeAreaView,
   StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabaseConfig';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
-import BotaoVoltar from '../components/BotaoVoltar';
+import { supabase } from '../../services/supabaseConfig';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
+import BotaoVoltar from '../../components/BotaoVoltar';
+import BarraAbasNutricionista, {
+  NUTRI_TAB_BAR_HEIGHT,
+  NUTRI_TAB_BAR_SPACE,
+} from '../../components/BarraAbasNutricionista';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -32,7 +36,7 @@ function getInitials(name) {
     .join('');
 }
 
-export default function GerenciarPacientesScreen({ navigation, route }) {
+export default function GerenciarPacientesStyled({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
 
   const [pacientes, setPacientes] = useState([]);
@@ -42,6 +46,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalExclusaoVisible, setModalExclusaoVisible] = useState(false);
   const [pacienteParaExcluir, setPacienteParaExcluir] = useState(null);
+  const [feedbackEdicao, setFeedbackEdicao] = useState(null);
 
   const [editandoId, setEditandoId] = useState(null);
   const [nome, setNome] = useState('');
@@ -74,7 +79,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
 
   const exibirCpf = (valor) => {
     const cpfLimpo = String(valor || '').replace(/\D/g, '');
-    if (cpfLimpo.length !== 11) return valor || 'Não informado';
+    if (cpfLimpo.length !== 11) return valor || 'Nao informado';
     return cpfLimpo
       .replace(/^(\d{3})(\d)/, '$1.$2')
       .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
@@ -86,10 +91,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
     return regex.test(valor.trim().toLowerCase());
   };
 
-  const validarCep = (valor) => {
-    const cepLimpo = valor.replace(/\D/g, '');
-    return cepLimpo.length === 8;
-  };
+  const validarCep = (valor) => valor.replace(/\D/g, '').length === 8;
 
   const validarCpf = (valor) => {
     const cpfLimpo = valor.replace(/\D/g, '');
@@ -129,6 +131,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
     setBairro('');
     setCidade('');
     setUf('');
+    setFeedbackEdicao(null);
   };
 
   const fecharModal = () => {
@@ -151,7 +154,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
       setPacientes(data || []);
     } catch (error) {
       console.log('Erro ao carregar pacientes:', error);
-      Alert.alert('Erro', 'Não foi possível carregar os pacientes.');
+      Alert.alert('Erro', 'Nao foi possivel carregar os pacientes.');
     } finally {
       setLoading(false);
     }
@@ -168,6 +171,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
   }, [navigation, carregarPacientes]);
 
   const abrirModalEdicao = (paciente) => {
+    setFeedbackEdicao(null);
     setEditandoId(getPacienteId(paciente));
     setNome(paciente.nome_completo || '');
     setCpf(formatarCpf(String(paciente.cpf_paciente || '')));
@@ -192,7 +196,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
       const data = await response.json();
 
       if (data.erro) {
-        Alert.alert('CEP inválido', 'Não encontramos esse CEP.');
+        Alert.alert('CEP invalido', 'Nao encontramos esse CEP.');
         return;
       }
 
@@ -213,20 +217,15 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
 
     if (error) throw error;
 
-    const conflitos = (data || []).filter(
-      (item) => item.id_paciente_uuid !== idAtual
-    );
+    const conflitos = (data || []).filter((item) => item.id_paciente_uuid !== idAtual);
 
     if (conflitos.length > 0) {
-      const cpfExistente = conflitos.some((item) => item.cpf_paciente === cpfLimpo);
-      const emailExistente = conflitos.some((item) => item.email_pac === emailLimpo);
-
-      if (cpfExistente) {
-        throw new Error('Já existe outro paciente cadastrado com esse CPF.');
+      if (conflitos.some((item) => item.cpf_paciente === cpfLimpo)) {
+        throw new Error('Ja existe outro paciente cadastrado com esse CPF.');
       }
 
-      if (emailExistente) {
-        throw new Error('Já existe outro paciente cadastrado com esse e-mail.');
+      if (conflitos.some((item) => item.email_pac === emailLimpo)) {
+        throw new Error('Ja existe outro paciente cadastrado com esse e-mail.');
       }
     }
   };
@@ -239,68 +238,87 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
     const generoLimpo = genero.trim();
     const ufLimpo = uf.trim().toUpperCase();
 
-    if (
-      !nomeLimpo ||
-      !cpfLimpo ||
-      !generoLimpo ||
-      !emailLimpo ||
-      !cepLimpo ||
-      !logradouro.trim() ||
-      !numero.trim() ||
-      !bairro.trim() ||
-      !cidade.trim() ||
-      !ufLimpo
-    ) {
-      Alert.alert('Atenção', 'Preencha todos os campos do paciente.');
+    if (!editandoId) {
+      const mensagem = 'Paciente sem identificador para atualizar.';
+      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
+      Alert.alert('Erro', mensagem);
+      return;
+    }
+
+    if (!nomeLimpo || !cpfLimpo || !emailLimpo) {
+      const mensagem = 'Preencha nome, CPF e e-mail para salvar as alteracoes.';
+      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
+      Alert.alert('Atencao', mensagem);
       return;
     }
 
     if (!validarCpf(cpfLimpo)) {
-      Alert.alert('CPF inválido', 'Digite um CPF válido.');
+      const mensagem = 'Digite um CPF valido.';
+      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
+      Alert.alert('CPF invalido', mensagem);
       return;
     }
 
     if (!validarEmail(emailLimpo)) {
-      Alert.alert('E-mail inválido', 'Digite um e-mail válido.');
+      const mensagem = 'Digite um e-mail valido.';
+      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
+      Alert.alert('E-mail invalido', mensagem);
       return;
     }
 
-    if (!validarCep(cepLimpo)) {
-      Alert.alert('CEP inválido', 'Digite um CEP válido com 8 números.');
+    if (cepLimpo && !validarCep(cepLimpo)) {
+      const mensagem = 'Digite um CEP valido com 8 numeros.';
+      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
+      Alert.alert('CEP invalido', mensagem);
       return;
     }
 
     try {
       setLoadingSalvar(true);
+      setFeedbackEdicao(null);
 
       await verificarDuplicidadeEdicao(editandoId, cpfLimpo, emailLimpo);
 
-      const payload = {
-        nome_completo: nomeLimpo,
-        cpf_paciente: cpfLimpo,
-        sexo_biologico: generoLimpo,
-        email_pac: emailLimpo,
-        cep: cepLimpo,
-        logradouro: logradouro.trim(),
-        numero: numero.trim(),
-        bairro: bairro.trim(),
-        cidade: cidade.trim(),
-        uf: ufLimpo,
-      };
-
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('paciente')
-        .update(payload)
-        .eq('id_paciente_uuid', editandoId);
+        .update({
+          nome_completo: nomeLimpo,
+          cpf_paciente: cpfLimpo,
+          sexo_biologico: generoLimpo || null,
+          email_pac: emailLimpo,
+          cep: cepLimpo || null,
+          logradouro: logradouro.trim() || null,
+          numero: numero.trim() || null,
+          bairro: bairro.trim() || null,
+          cidade: cidade.trim() || null,
+          uf: ufLimpo || null,
+        })
+        .eq('id_paciente_uuid', editandoId)
+        .select('*')
+        .maybeSingle();
 
       if (error) throw error;
+      if (!data?.id_paciente_uuid) {
+        throw new Error('O banco nao confirmou a atualizacao do paciente.');
+      }
 
+      setPacientes((atual) =>
+        atual.map((item) =>
+          getPacienteId(item) === data.id_paciente_uuid ? data : item
+        )
+      );
+
+      setFeedbackEdicao({ tipo: 'sucesso', texto: 'Paciente atualizado com sucesso.' });
       Alert.alert('Sucesso', 'Paciente atualizado com sucesso.');
       fecharModal();
-      carregarPacientes();
+      await carregarPacientes();
     } catch (error) {
       console.log('Erro ao atualizar paciente:', error);
-      Alert.alert('Erro', error.message || 'Não foi possível atualizar o paciente.');
+      setFeedbackEdicao({
+        tipo: 'erro',
+        texto: error.message || 'Nao foi possivel atualizar o paciente.',
+      });
+      Alert.alert('Erro', error.message || 'Nao foi possivel atualizar o paciente.');
     } finally {
       setLoadingSalvar(false);
     }
@@ -331,17 +349,15 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
         throw new Error('O banco nao confirmou a exclusao logica do paciente.');
       }
 
-      setPacientes((atual) =>
-        atual.filter((item) => getPacienteId(item) !== pacienteId)
-      );
+      setPacientes((atual) => atual.filter((item) => getPacienteId(item) !== pacienteId));
       setModalExclusaoVisible(false);
       setPacienteParaExcluir(null);
 
-      Alert.alert('Sucesso', 'Paciente excluído logicamente com sucesso.');
+      Alert.alert('Sucesso', 'Paciente excluido logicamente com sucesso.');
       carregarPacientes();
     } catch (error) {
       console.log('Erro ao excluir paciente:', error);
-      Alert.alert('Erro', 'Não foi possível excluir o paciente.');
+      Alert.alert('Erro', 'Nao foi possivel excluir o paciente.');
     } finally {
       setLoadingExcluirId(null);
     }
@@ -368,7 +384,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
   ).length;
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar
         barStyle="dark-content"
         backgroundColor={patientTheme.colors.background}
@@ -392,19 +408,21 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
             preferFallback
           />
 
-          <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
-            <Ionicons
-              name="refresh-outline"
-              size={20}
-              color={patientTheme.colors.text}
-            />
-          </TouchableOpacity>
+          <View style={styles.headerIconGroup}>
+            <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
+              <Ionicons
+                name="refresh-outline"
+                size={20}
+                color={patientTheme.colors.text}
+              />
+            </TouchableOpacity>
+          </View>
         </View>
 
         <Text style={styles.greeting}>Gerenciar pacientes</Text>
         <Text style={styles.headerSubtitle}>
           Carteira ativa de {nomeNutri}. Edite cadastros, revise dados e arquive
-          pacientes com o mesmo visual da experiencia do paciente.
+          pacientes com a mesma linguagem visual da experiencia do paciente.
         </Text>
 
         <SectionCard style={styles.heroCard}>
@@ -534,24 +552,45 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                     CPF: {exibirCpf(paciente.cpf_paciente)}
                   </Text>
                 </View>
+
+                <View style={styles.infoPill}>
+                  <Ionicons
+                    name="person-outline"
+                    size={16}
+                    color={patientTheme.colors.primaryDark}
+                  />
+                  <Text style={styles.infoPillText}>
+                    Genero: {paciente.sexo_biologico || 'Nao informado'}
+                  </Text>
+                </View>
+              </View>
+
               <Text style={styles.patientInfo}>
-                E-mail: {paciente.email_pac || 'Não informado'}
+                E-mail: {paciente.email_pac || 'Nao informado'}
               </Text>
-              <Text style={styles.patientInfo}>
-                Gênero: {paciente.sexo_biologico || 'Não informado'}
-              </Text>
-              <Text style={styles.patientInfo}>
-                Endereço: {paciente.logradouro || 'Não informado'}, {paciente.numero || 's/n'} - {paciente.bairro || 'Sem bairro'}
-              </Text>
-              <Text style={styles.patientInfo}>
-                {paciente.cidade || 'Sem cidade'} / {paciente.uf || '--'} • CEP: {formatarCep(String(paciente.cep || '')) || 'Não informado'}
-              </Text>
+
+              <View style={styles.addressCard}>
+                <Text style={styles.addressTitle}>Endereco</Text>
+                <Text style={styles.addressText}>
+                  {paciente.logradouro || 'Nao informado'}, {paciente.numero || 's/n'} -{' '}
+                  {paciente.bairro || 'Sem bairro'}
+                </Text>
+                <Text style={styles.addressText}>
+                  {paciente.cidade || 'Sem cidade'} / {paciente.uf || '--'} | CEP:{' '}
+                  {formatarCep(String(paciente.cep || '')) || 'Nao informado'}
+                </Text>
+              </View>
 
               <View style={styles.actionsRow}>
                 <TouchableOpacity
                   style={styles.editButton}
                   onPress={() => abrirModalEdicao(paciente)}
                 >
+                  <Ionicons
+                    name="create-outline"
+                    size={18}
+                    color={patientTheme.colors.text}
+                  />
                   <Text style={styles.editButtonText}>Editar</Text>
                 </TouchableOpacity>
 
@@ -561,13 +600,20 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                   disabled={loadingExcluirId === getPacienteId(paciente)}
                 >
                   {loadingExcluirId === getPacienteId(paciente) ? (
-                    <ActivityIndicator color="#FFF" />
+                    <ActivityIndicator color={patientTheme.colors.onPrimary} />
                   ) : (
-                    <Text style={styles.deleteButtonText}>Excluir</Text>
+                    <>
+                      <Ionicons
+                        name="trash-outline"
+                        size={18}
+                        color={patientTheme.colors.onPrimary}
+                      />
+                      <Text style={styles.deleteButtonText}>Excluir</Text>
+                    </>
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
+            </SectionCard>
           ))
         )}
       </ScrollView>
@@ -580,23 +626,28 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
           <View style={styles.modalContent}>
             <ScrollView
               showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
+              keyboardShouldPersistTaps="always"
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Editar Paciente</Text>
+                <View>
+                  <Text style={styles.modalTitle}>Editar paciente</Text>
+                  <Text style={styles.modalSubtitle}>
+                    Atualize os dados e confirme o cadastro.
+                  </Text>
+                </View>
 
-                <TouchableOpacity onPress={fecharModal}>
-                  <Ionicons name="close" size={24} color="#333" />
+                <TouchableOpacity style={styles.closeButton} onPress={fecharModal}>
+                  <Ionicons name="close" size={20} color={patientTheme.colors.text} />
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>Nome Completo</Text>
+              <Text style={styles.label}>Nome completo</Text>
               <TextInput
                 style={styles.input}
                 value={nome}
                 onChangeText={setNome}
                 placeholder="Nome completo"
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
               />
 
               <Text style={styles.label}>CPF</Text>
@@ -605,12 +656,12 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 value={cpf}
                 onChangeText={(valor) => setCpf(formatarCpf(valor))}
                 placeholder="000.000.000-00"
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
                 keyboardType="numeric"
                 maxLength={14}
               />
 
-              <Text style={styles.label}>Gênero</Text>
+              <Text style={styles.label}>Genero</Text>
               <View style={styles.genderRow}>
                 {opcoesGenero.map((opcao) => {
                   const ativo = genero === opcao;
@@ -621,7 +672,12 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                       style={[styles.genderButton, ativo && styles.genderButtonActive]}
                       onPress={() => setGenero(opcao)}
                     >
-                      <Text style={[styles.genderButtonText, ativo && styles.genderButtonTextActive]}>
+                      <Text
+                        style={[
+                          styles.genderButtonText,
+                          ativo && styles.genderButtonTextActive,
+                        ]}
+                      >
                         {opcao}
                       </Text>
                     </TouchableOpacity>
@@ -635,7 +691,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 value={email}
                 onChangeText={setEmail}
                 placeholder="email@exemplo.com"
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
                 autoCapitalize="none"
                 keyboardType="email-address"
               />
@@ -647,7 +703,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 onChangeText={(valor) => setCep(formatarCep(valor))}
                 onBlur={buscarEnderecoPorCep}
                 placeholder="00000-000"
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
                 keyboardType="numeric"
                 maxLength={9}
               />
@@ -658,16 +714,16 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 value={logradouro}
                 onChangeText={setLogradouro}
                 placeholder="Rua, avenida..."
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
               />
 
-              <Text style={styles.label}>Número</Text>
+              <Text style={styles.label}>Numero</Text>
               <TextInput
                 style={styles.input}
                 value={numero}
                 onChangeText={setNumero}
                 placeholder="123"
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
               />
 
               <Text style={styles.label}>Bairro</Text>
@@ -676,10 +732,10 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 value={bairro}
                 onChangeText={setBairro}
                 placeholder="Bairro"
-                placeholderTextColor="#999"
+                placeholderTextColor={patientTheme.colors.textMuted}
               />
 
-              <View style={styles.row}>
+              <View style={styles.formRow}>
                 <View style={styles.cityContainer}>
                   <Text style={styles.label}>Cidade</Text>
                   <TextInput
@@ -687,7 +743,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                     value={cidade}
                     onChangeText={setCidade}
                     placeholder="Cidade"
-                    placeholderTextColor="#999"
+                    placeholderTextColor={patientTheme.colors.textMuted}
                   />
                 </View>
 
@@ -697,13 +753,31 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                     style={styles.input}
                     value={uf}
                     onChangeText={(valor) => setUf(valor.toUpperCase())}
-                    placeholder="PR"
-                    placeholderTextColor="#999"
+                    placeholder="SP"
+                    placeholderTextColor={patientTheme.colors.textMuted}
                     autoCapitalize="characters"
                     maxLength={2}
                   />
                 </View>
               </View>
+
+              {feedbackEdicao ? (
+                <View
+                  style={[
+                    styles.feedbackBox,
+                    feedbackEdicao.tipo === 'erro' && styles.feedbackBoxErro,
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.feedbackText,
+                      feedbackEdicao.tipo === 'erro' && styles.feedbackTextErro,
+                    ]}
+                  >
+                    {feedbackEdicao.texto}
+                  </Text>
+                </View>
+              ) : null}
 
               <TouchableOpacity
                 style={styles.saveButton}
@@ -711,9 +785,9 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 disabled={loadingSalvar}
               >
                 {loadingSalvar ? (
-                  <ActivityIndicator color="#FFF" />
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
                 ) : (
-                  <Text style={styles.saveButtonText}>Salvar alterações</Text>
+                  <Text style={styles.saveButtonText}>Salvar alteracoes</Text>
                 )}
               </TouchableOpacity>
 
@@ -730,8 +804,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
           <View style={styles.confirmModalContent}>
             <Text style={styles.confirmTitle}>Excluir paciente</Text>
             <Text style={styles.confirmText}>
-              Deseja excluir logicamente{' '}
-              {pacienteParaExcluir?.nome_completo || 'este paciente'}?
+              Deseja excluir logicamente {pacienteParaExcluir?.nome_completo || 'este paciente'}?
             </Text>
 
             <View style={styles.confirmActions}>
@@ -755,7 +828,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
                 }
               >
                 {loadingExcluirId === getPacienteId(pacienteParaExcluir) ? (
-                  <ActivityIndicator color="#FFF" />
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
                 ) : (
                   <Text style={styles.confirmDeleteText}>Excluir</Text>
                 )}
@@ -764,41 +837,27 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
           </View>
         </View>
       </Modal>
+
+      <BarraAbasNutricionista
+        navigation={navigation}
+        rotaAtual={route?.name || 'GerenciarPacientes'}
+        usuarioLogado={usuarioLogado}
+      />
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, minHeight: 0, backgroundColor: '#FFFFFF' },
-
-  header: {
-    padding: 30,
-    backgroundColor: '#27ae60',
-    borderBottomLeftRadius: 30,
-    borderBottomRightRadius: 30,
+  container: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: patientTheme.colors.background,
   },
-  headerBack: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginBottom: 16,
+  containerWeb: {
+    height: '100vh',
+    maxHeight: '100vh',
+    overflow: 'hidden',
   },
-  headerBackText: {
-    color: '#FFF',
-    fontWeight: '600',
-    marginLeft: 6,
-  },
-  welcome: {
-    fontSize: 24,
-    fontWeight: 'bold',
-    color: '#FFF',
-  },
-  subtitle: {
-    color: '#E3F2FD',
-    fontSize: 16,
-    marginTop: 4,
-  },
-
   scroll: {
     flex: 1,
     minHeight: 0,
@@ -811,238 +870,370 @@ const styles = StyleSheet.create({
   },
   content: {
     flexGrow: 1,
-    padding: 20,
-    paddingBottom: 40,
+    padding: patientTheme.spacing.screen,
+    paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
   },
   webContent: {
     flexGrow: 0,
     minHeight: '100%',
   },
-
-  cardInfo: {
-    backgroundColor: '#f4f4f4',
-    padding: 20,
-    borderRadius: 15,
-    marginTop: 20,
-    ...softGreenBorder,
+  sectionCard: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: patientTheme.spacing.card,
+    ...patientShadow,
   },
-  cardTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 10,
+  headerRow: {
+    marginTop: 14,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
-  infoText: {
-    color: '#7f8c8d',
-    fontSize: 16,
-    marginBottom: 6,
+  headerIconGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
-  reloadButton: {
-    backgroundColor: '#27ae60',
-    paddingVertical: 12,
-    borderRadius: 12,
+  headerIconButton: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: patientTheme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...patientShadow,
+  },
+  greeting: {
+    marginTop: 22,
+    fontSize: 30,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  headerSubtitle: {
+    marginTop: 8,
+    fontSize: 15,
+    lineHeight: 22,
+    color: patientTheme.colors.textMuted,
+  },
+  heroCard: {
+    marginTop: 22,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
+  },
+  heroCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  eyebrow: {
+    fontSize: 13,
+    color: patientTheme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.7,
+  },
+  heroValue: {
+    marginTop: 8,
+    fontSize: 34,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  heroBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  heroBadgeText: {
+    marginLeft: 6,
+    fontSize: 13,
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '700',
+  },
+  heroHelper: {
+    marginTop: 8,
+    color: patientTheme.colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  metricRow: {
+    marginTop: 18,
+    flexDirection: 'row',
+    gap: 12,
+  },
+  metricPill: {
+    flex: 1,
+    borderRadius: patientTheme.radius.lg,
+    padding: 14,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    ...patientShadow,
+  },
+  metricLabel: {
+    fontSize: 12,
+    color: patientTheme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  metricValue: {
+    marginTop: 8,
+    fontSize: 22,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  summaryRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  summaryCard: {
+    flex: 1,
+    minHeight: 118,
+  },
+  summaryLabel: {
     marginTop: 10,
-    alignItems: 'center',
+    fontSize: 13,
+    color: patientTheme.colors.textMuted,
   },
-  reloadButtonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
+  summaryValue: {
+    marginTop: 8,
+    fontSize: 18,
+    color: patientTheme.colors.text,
+    fontWeight: '700',
   },
-
-  loadingContainer: {
-    marginTop: 40,
+  sectionHeader: {
+    marginTop: 24,
+    marginBottom: 12,
+  },
+  sectionTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  sectionHelper: {
+    marginTop: 6,
+    fontSize: 13,
+    color: patientTheme.colors.textMuted,
+  },
+  loadingCard: {
     alignItems: 'center',
+    paddingVertical: 28,
   },
   loadingText: {
-    marginTop: 10,
-    color: '#7f8c8d',
+    marginTop: 12,
+    color: patientTheme.colors.textMuted,
   },
-
   emptyCard: {
-    backgroundColor: '#f4f4f4',
-    padding: 24,
-    borderRadius: 16,
-    marginTop: 20,
     alignItems: 'center',
-    ...softGreenBorder,
+    paddingVertical: 28,
   },
   emptyTitle: {
     fontSize: 18,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 8,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
   },
   emptyText: {
-    color: '#7f8c8d',
+    marginTop: 8,
+    fontSize: 14,
+    lineHeight: 21,
+    color: patientTheme.colors.textMuted,
     textAlign: 'center',
-    lineHeight: 20,
   },
-
   patientCard: {
-    backgroundColor: '#f4f4f4',
-    padding: 18,
-    borderRadius: 16,
-    marginTop: 16,
-    ...softGreenBorder,
+    marginBottom: 12,
+  },
+  patientHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  patientAvatar: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: patientTheme.colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 14,
+  },
+  patientAvatarText: {
+    fontSize: 16,
+    fontWeight: '700',
+    color: patientTheme.colors.primaryDark,
+  },
+  patientHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
   },
   patientName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#27ae60',
-    marginBottom: 10,
+    fontSize: 16,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  patientMeta: {
+    marginTop: 4,
+    fontSize: 13,
+    color: patientTheme.colors.textMuted,
+  },
+  infoGrid: {
+    marginTop: 16,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  infoPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  infoPillText: {
+    marginLeft: 8,
+    fontSize: 13,
+    color: patientTheme.colors.text,
+    fontWeight: '600',
   },
   patientInfo: {
-    color: '#5f6b73',
+    marginTop: 14,
     fontSize: 14,
-    marginBottom: 6,
     lineHeight: 20,
+    color: patientTheme.colors.textMuted,
   },
-
+  addressCard: {
+    marginTop: 14,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    padding: 14,
+    ...patientShadow,
+  },
+  addressTitle: {
+    fontSize: 12,
+    fontWeight: '700',
+    color: patientTheme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  addressText: {
+    marginTop: 6,
+    fontSize: 14,
+    lineHeight: 20,
+    color: patientTheme.colors.text,
+  },
   actionsRow: {
+    marginTop: 16,
     flexDirection: 'row',
     gap: 10,
-    marginTop: 14,
   },
   editButton: {
     flex: 1,
-    backgroundColor: '#27ae60',
-    paddingVertical: 12,
-    borderRadius: 12,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    ...patientShadow,
   },
   editButtonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
+    color: patientTheme.colors.text,
+    fontWeight: '700',
   },
   deleteButton: {
     flex: 1,
-    backgroundColor: '#e74c3c',
-    paddingVertical: 12,
-    borderRadius: 12,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
     alignItems: 'center',
     justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
   },
   deleteButtonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '700',
   },
-
   modalOverlay: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    backgroundColor: patientTheme.colors.overlay,
     justifyContent: 'center',
     padding: 20,
   },
   modalContent: {
     maxHeight: '90%',
-    backgroundColor: '#f4f4f4',
-    borderRadius: 20,
-    padding: 20,
-    ...softGreenBorder,
-  },
-  confirmModalContent: {
-    backgroundColor: '#f4f4f4',
-    borderRadius: 20,
-    padding: 22,
-    ...softGreenBorder,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: patientTheme.spacing.card,
+    ...patientShadow,
   },
   modalHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: 18,
   },
   modalTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#27ae60',
-  },
-  confirmTitle: {
-    fontSize: 20,
-    fontWeight: 'bold',
-    color: '#2c3e50',
-    marginBottom: 10,
-  },
-  confirmText: {
-    color: '#5f6b73',
-    fontSize: 15,
-    lineHeight: 22,
-  },
-  confirmActions: {
-    flexDirection: 'row',
-    gap: 10,
-    marginTop: 22,
-  },
-  confirmCancelButton: {
-    flex: 1,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#d7dde2',
-    borderRadius: 12,
-    paddingVertical: 12,
-    alignItems: 'center',
-  },
-  confirmCancelText: {
-    color: '#5f6b73',
+    fontSize: 22,
     fontWeight: '700',
+    color: patientTheme.colors.text,
   },
-  confirmDeleteButton: {
-    flex: 1,
-    backgroundColor: '#e74c3c',
-    borderRadius: 12,
-    paddingVertical: 12,
+  modalSubtitle: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 19,
+    color: patientTheme.colors.textMuted,
+  },
+  closeButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     alignItems: 'center',
     justifyContent: 'center',
+    ...patientShadow,
   },
-  confirmDeleteText: {
-    color: '#FFF',
-    fontWeight: '700',
-  },
-
   label: {
-    fontSize: 14,
-    color: '#34495e',
     marginBottom: 6,
+    fontSize: 14,
+    color: patientTheme.colors.text,
     fontWeight: '600',
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 15,
-    color: '#333',
-    backgroundColor: '#FFFFFF',
-    ...softGreenBorder,
+    borderRadius: patientTheme.radius.lg,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 14,
+    color: patientTheme.colors.text,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    ...patientShadow,
   },
-
   genderRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 15,
     flexWrap: 'wrap',
+    gap: 8,
+    marginBottom: 14,
   },
   genderButton: {
-    borderWidth: 1,
-    borderColor: '#cfd8dc',
-    backgroundColor: '#FFF',
-    paddingVertical: 10,
     paddingHorizontal: 14,
-    borderRadius: 20,
+    paddingVertical: 10,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    ...patientShadow,
   },
   genderButtonActive: {
-    backgroundColor: '#27ae60',
-    borderColor: '#27ae60',
+    backgroundColor: patientTheme.colors.primaryDark,
   },
   genderButtonText: {
-    color: '#2c3e50',
+    color: patientTheme.colors.text,
     fontWeight: '600',
   },
   genderButtonTextActive: {
-    color: '#FFF',
+    color: patientTheme.colors.onPrimary,
   },
-
-  row: {
+  formRow: {
     flexDirection: 'row',
     gap: 10,
   },
@@ -1050,29 +1241,98 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   ufContainer: {
-    width: 80,
+    width: 84,
   },
-
+  feedbackBox: {
+    marginTop: 4,
+    marginBottom: 14,
+    padding: 14,
+    borderRadius: 14,
+    backgroundColor: '#e9fbf3',
+    borderWidth: 1,
+    borderColor: '#4fdfa3',
+  },
+  feedbackBoxErro: {
+    backgroundColor: '#fff1f0',
+    borderColor: '#e57373',
+  },
+  feedbackText: {
+    color: '#256f51',
+    lineHeight: 20,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  feedbackTextErro: {
+    color: '#b23a48',
+  },
   saveButton: {
-    backgroundColor: '#27ae60',
-    paddingVertical: 14,
-    borderRadius: 12,
+    marginTop: 10,
+    minHeight: 52,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
     alignItems: 'center',
-    marginTop: 8,
+    justifyContent: 'center',
   },
   saveButtonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
-    fontSize: 16,
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '700',
+    fontSize: 15,
   },
   cancelButton: {
+    marginTop: 10,
     alignItems: 'center',
-    paddingVertical: 14,
-    marginTop: 8,
+    justifyContent: 'center',
+    minHeight: 46,
   },
   cancelButtonText: {
-    color: '#e74c3c',
-    fontWeight: 'bold',
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+  },
+  confirmModalContent: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: 22,
+    ...patientShadow,
+  },
+  confirmTitle: {
+    fontSize: 20,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  confirmText: {
+    marginTop: 10,
     fontSize: 15,
+    lineHeight: 22,
+    color: patientTheme.colors.textMuted,
+  },
+  confirmActions: {
+    marginTop: 22,
+    flexDirection: 'row',
+    gap: 10,
+  },
+  confirmCancelButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...patientShadow,
+  },
+  confirmCancelText: {
+    color: patientTheme.colors.text,
+    fontWeight: '700',
+  },
+  confirmDeleteButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmDeleteText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '700',
   },
 });

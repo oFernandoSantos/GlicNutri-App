@@ -9,8 +9,8 @@ import {
   ActivityIndicator,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import PatientScreenLayout from '../components/PatientScreenLayout';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
+import PatientScreenLayout from '../../components/PatientScreenLayout';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import {
   appendNewestEntry,
   buildMealEntry,
@@ -18,7 +18,7 @@ import {
   fetchPatientExperience,
   getPatientId,
   savePatientAppState,
-} from '../services/patientSupabaseService';
+} from '../../services/patientSupabaseService';
 
 const inputModes = [
   { id: 'photo', label: 'Foto do prato', icon: 'camera-outline' },

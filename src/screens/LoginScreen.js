@@ -19,7 +19,6 @@ import {
   syncGooglePatientRecord,
 } from '../services/googlePatientSync';
 import SeletorPerfil from '../components/SeletorPerfil';
-import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
 import { inputFocusBorder } from '../theme/inputFocusTheme';
 
@@ -592,16 +591,21 @@ export default function LoginScreen({ navigation, route, session }) {
     minHeight: 0,
   };
 
-  const authBackButtonStyle = {
-    marginTop: 10,
-    marginBottom: 20,
-  };
-
   const cardStyle = {
     backgroundColor: '#f4f4f4',
     borderRadius: 24,
     padding: 25,
     ...softGreenBorder,
+  };
+
+  const loginBrandStyle = {
+    color: '#5afcb8',
+    fontSize: 20,
+    fontWeight: '700',
+    marginTop: 10,
+    marginBottom: 20,
+    height: 40,
+    lineHeight: 40,
   };
 
   const titleStyle = {
@@ -614,7 +618,7 @@ export default function LoginScreen({ navigation, route, session }) {
 
   const labelStyle = {
     fontSize: 14,
-    color: '#686d71',
+    color: '#34495e',
     marginBottom: 5,
     fontWeight: '600',
   };
@@ -799,13 +803,10 @@ export default function LoginScreen({ navigation, route, session }) {
       keyboardShouldPersistTaps="handled"
       nestedScrollEnabled
     >
-      <BotaoVoltar
-        onPress={() => navigation.navigate('Intro')}
-        style={authBackButtonStyle}
-      />
+      <Text style={loginBrandStyle}>GlicNutri</Text>
 
       <View style={cardStyle}>
-        <Text style={titleStyle}>Bem-vindo ao GlicNutri</Text>
+        <Text style={titleStyle}>Bem-vindo</Text>
 
         <SeletorPerfil
           role={role}

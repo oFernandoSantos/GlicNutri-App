@@ -11,16 +11,16 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from '../components/BarraAbasPaciente';
-import PatientDrawer from '../components/PatientDrawer';
-import BotaoMenuHamburguer from '../components/BotaoMenuHamburguer';
-import { supabase } from '../services/supabaseConfig';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
+import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from '../../components/BarraAbasPaciente';
+import PatientDrawer from '../../components/PatientDrawer';
+import BotaoMenuHamburguer from '../../components/BotaoMenuHamburguer';
+import { supabase } from '../../services/supabaseConfig';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import {
   glucoseSparkline,
   buildHomeInsights,
   getTrendMeta,
-} from '../data/patientExperienceData';
+} from '../../data/patientExperienceData';
 import {
   createDefaultAppState,
   fetchPatientExperience,
@@ -28,8 +28,8 @@ import {
   getPatientDisplayName,
   getPatientId,
   savePatientAppState,
-} from '../services/patientSupabaseService';
-import { syncGooglePatientRecord } from '../services/googlePatientSync';
+} from '../../services/patientSupabaseService';
+import { syncGooglePatientRecord } from '../../services/googlePatientSync';
 
 function getGreetingMeta(name) {
   const hour = new Date().getHours();
@@ -372,10 +372,8 @@ export default function PacienteHomeScreen({
 
           <View style={styles.headerActions}>
             <BotaoMenuHamburguer
-              style={styles.headerMenuButton}
               onPress={() => setMenuVisible(true)}
               disabled={saindo}
-              iconSize={26}
             />
           </View>
         </View>
@@ -605,11 +603,6 @@ const styles = StyleSheet.create({
   headerActions: {
     alignItems: 'flex-end',
     gap: 10,
-  },
-  headerMenuButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
   },
   sectionCard: {
     backgroundColor: patientTheme.colors.surface,
