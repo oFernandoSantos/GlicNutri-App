@@ -29,7 +29,11 @@ export default function PatientScreenLayout({
 
       <View style={styles.body}>
         <View style={styles.header}>
-          <BotaoVoltar navigation={navigation} fallbackRoute="HomePaciente" />
+          <BotaoVoltar
+            navigation={navigation}
+            fallbackRoute="HomePaciente"
+            preferFallback
+          />
 
           <View style={styles.headerText}>
             <Text style={styles.title}>{title}</Text>

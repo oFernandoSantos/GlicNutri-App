@@ -37,7 +37,11 @@ export default function LayoutTelaPaciente({
     <View style={styles.cabecalho}>
       <View style={styles.topoCabecalho}>
         {mostrarVoltar ? (
-          <BotaoVoltar navigation={navigation} fallbackRoute="HomePaciente" />
+          <BotaoVoltar
+            navigation={navigation}
+            fallbackRoute="HomePaciente"
+            preferFallback
+          />
         ) : (
           <View style={styles.insigniaPaciente}>
             <View style={styles.pontoOnline} />

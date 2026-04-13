@@ -389,6 +389,7 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
             navigation={navigation}
             fallbackRoute="HomeNutricionista"
             fallbackParams={{ usuarioLogado }}
+            preferFallback
           />
 
           <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>

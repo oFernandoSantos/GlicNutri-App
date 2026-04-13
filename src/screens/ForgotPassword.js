@@ -17,6 +17,7 @@ import { Ionicons } from '@expo/vector-icons';
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
+import { inputFocusBorder } from '../theme/inputFocusTheme';
 import {
   confirmarCodigoRecuperacaoSenha,
   solicitarCodigoRecuperacaoSenha,
@@ -48,6 +49,7 @@ export default function ForgotPassword({ navigation }) {
   const [fieldErrors, setFieldErrors] = useState(camposIniciaisErro);
   const [codigoErro, setCodigoErro] = useState('');
   const [novaSenhaFocada, setNovaSenhaFocada] = useState(false);
+  const [focusedField, setFocusedField] = useState('');
   const [loading, setLoading] = useState(false);
   const [validandoCodigo, setValidandoCodigo] = useState(false);
 
@@ -251,13 +253,19 @@ export default function ForgotPassword({ navigation }) {
 
             <Text style={styles.label}>E-mail cadastrado</Text>
             <TextInput
-              style={[styles.input, fieldErrors.email ? styles.inputError : null]}
+              style={[
+                styles.input,
+                fieldErrors.email ? styles.inputError : null,
+                focusedField === 'email' ? styles.inputFocused : null,
+              ]}
               value={email}
               onChangeText={(valor) => {
                 setEmail(valor);
                 setFeedbackSucesso('');
                 limparErroCampo('email');
               }}
+              onFocus={() => setFocusedField('email')}
+              onBlur={() => setFocusedField('')}
               placeholder="email@exemplo.com"
               placeholderTextColor="#999"
               keyboardType="email-address"
@@ -360,12 +368,15 @@ export default function ForgotPassword({ navigation }) {
                     styles.input,
                     styles.codeInput,
                     codigoErro ? styles.inputError : null,
+                    focusedField === 'codigo' ? styles.inputFocused : null,
                   ]}
                   value={codigo}
                   onChangeText={(valor) => {
                     setCodigo(valor.replace(/\D/g, '').slice(0, 6));
                     setCodigoErro('');
                   }}
+                  onFocus={() => setFocusedField('codigo')}
+                  onBlur={() => setFocusedField('')}
                   placeholder="000000"
                   placeholderTextColor="#999"
                   keyboardType="numeric"
@@ -459,7 +470,7 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 14,
+    borderRadius: 15,
     paddingHorizontal: 14,
     paddingVertical: 14,
     marginBottom: 16,
@@ -470,10 +481,13 @@ const styles = StyleSheet.create({
   inputError: {
     borderColor: '#EF4444',
   },
+  inputFocused: {
+    ...inputFocusBorder,
+  },
   passwordInputWrapper: {
     borderWidth: 1,
     borderColor: '#E5E7EB',
-    borderRadius: 14,
+    borderRadius: 15,
     marginBottom: 16,
     backgroundColor: '#ffffff',
     position: 'relative',

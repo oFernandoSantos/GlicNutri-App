@@ -13,9 +13,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 
 const menuItems = [
-  { label: 'Dashboard', route: 'HomeNutricionista', icon: 'grid-outline' },
-  { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes', icon: 'people-outline' },
   { label: 'Agenda', route: 'NutricionistaAgenda', icon: 'calendar-outline' },
+  { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes', icon: 'people-outline' },
+  { label: 'Inicio', route: 'HomeNutricionista', icon: 'home-outline' },
   { label: 'Mensagens', route: 'NutricionistaMensagens', icon: 'chatbubbles-outline' },
   { label: 'Relatorios', route: 'NutricionistaRelatorios', icon: 'bar-chart-outline' },
 ];

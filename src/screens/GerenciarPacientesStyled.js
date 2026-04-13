@@ -17,7 +17,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
-import NutricionistaDrawer from '../components/NutricionistaDrawer';
 import BotaoVoltar from '../components/BotaoVoltar';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
@@ -44,8 +43,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [loading, setLoading] = useState(true);
   const [loadingSalvar, setLoadingSalvar] = useState(false);
   const [loadingExcluirId, setLoadingExcluirId] = useState(null);
-  const [loadingLogout, setLoadingLogout] = useState(false);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalExclusaoVisible, setModalExclusaoVisible] = useState(false);
   const [pacienteParaExcluir, setPacienteParaExcluir] = useState(null);
@@ -371,29 +368,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     setModalExclusaoVisible(true);
   };
 
-  async function handleLogout() {
-    try {
-      setMenuVisible(false);
-      setLoadingLogout(true);
-
-      const { error } = await supabase.auth.signOut();
-
-      if (error) {
-        console.log('Erro ao encerrar sessao:', error.message);
-      }
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
-    } catch (error) {
-      console.log('Erro inesperado no logout:', error);
-      Alert.alert('Erro', 'Nao foi possivel sair da conta.');
-    } finally {
-      setLoadingLogout(false);
-    }
-  }
-
   const nomeNutri =
     usuarioLogado?.nome_completo_nutri ||
     usuarioLogado?.nome_nutri ||
@@ -416,18 +390,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         backgroundColor={patientTheme.colors.background}
       />
 
-      {menuVisible ? (
-        <NutricionistaDrawer
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={(screen) => navigation.navigate(screen, { usuarioLogado })}
-          onLogout={handleLogout}
-          currentRoute={route?.name || 'GerenciarPacientes'}
-          userName={`Dra. ${nomeNutri}`}
-          userSubtitle={`CRN ${usuarioLogado?.crm_numero || 'Nao informado'}`}
-        />
-      ) : null}
-
       <ScrollView
         style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
         contentContainerStyle={[
@@ -443,6 +405,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
             navigation={navigation}
             fallbackRoute="HomeNutricionista"
             fallbackParams={{ usuarioLogado }}
+            preferFallback
           />
 
           <View style={styles.headerIconGroup}>
@@ -452,22 +415,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                 size={20}
                 color={patientTheme.colors.text}
               />
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.headerIconButton}
-              onPress={() => setMenuVisible(true)}
-              disabled={loadingLogout}
-            >
-              {loadingLogout ? (
-                <ActivityIndicator size="small" color={patientTheme.colors.text} />
-              ) : (
-                <Ionicons
-                  name="menu-outline"
-                  size={20}
-                  color={patientTheme.colors.text}
-                />
-              )}
             </TouchableOpacity>
           </View>
         </View>

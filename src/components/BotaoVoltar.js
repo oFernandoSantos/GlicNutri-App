@@ -16,6 +16,7 @@ export default function BotaoVoltar({
   textStyle,
   iconColor,
   disabled = false,
+  preferFallback = false,
 }) {
   const isPrimary = variant === 'primary';
   const textColor = isPrimary ? patientTheme.colors.onPrimary : patientTheme.colors.text;
@@ -26,6 +27,11 @@ export default function BotaoVoltar({
 
     if (typeof onPress === 'function') {
       onPress();
+      return;
+    }
+
+    if (preferFallback && fallbackRoute && navigation?.navigate) {
+      navigation.navigate(fallbackRoute, fallbackParams);
       return;
     }
 

@@ -7,9 +7,9 @@ export const NUTRI_TAB_BAR_HEIGHT = 64;
 export const NUTRI_TAB_BAR_SPACE = 8;
 
 const abasPrincipais = [
-  { rota: 'HomeNutricionista', rotulo: 'Dashboard', icone: 'grid-outline' },
-  { rota: 'GerenciarPacientes', rotulo: 'Pacientes', icone: 'people-outline' },
   { rota: 'NutricionistaAgenda', rotulo: 'Agenda', icone: 'calendar-outline' },
+  { rota: 'GerenciarPacientes', rotulo: 'Pacientes', icone: 'people-outline' },
+  { rota: 'HomeNutricionista', rotulo: 'Inicio', icone: 'home-outline' },
   { rota: 'NutricionistaMensagens', rotulo: 'Mensagens', icone: 'chatbubbles-outline' },
   { rota: 'NutricionistaRelatorios', rotulo: 'Relatorios', icone: 'bar-chart-outline' },
 ];

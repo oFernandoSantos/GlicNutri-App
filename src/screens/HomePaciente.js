@@ -3,16 +3,13 @@ import {
   View,
   Text,
   ScrollView,
-  TouchableOpacity,
   StyleSheet,
   StatusBar,
   ActivityIndicator,
   RefreshControl,
-  Alert,
   Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import MenuLateral from '../components/MenuLateral';
 import { supabase } from '../services/supabaseConfig';
 
 const softGreenBorder = {
@@ -21,10 +18,8 @@ const softGreenBorder = {
 };
 
 export default function HomePaciente({ navigation, route, usuarioLogado: usuarioProp }) {
-  const [menuVisivel, setMenuVisivel] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [saindo, setSaindo] = useState(false);
 
   const [paciente, setPaciente] = useState(null);
   const [refeicoes, setRefeicoes] = useState([]);
@@ -147,29 +142,6 @@ export default function HomePaciente({ navigation, route, usuarioLogado: usuario
     }
   }
 
-  async function handleLogout() {
-    try {
-      setMenuVisivel(false);
-      setSaindo(true);
-
-      const { error } = await supabase.auth.signOut();
-
-      if (error) {
-        console.log('Erro ao sair:', error.message);
-      }
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
-    } catch (error) {
-      console.log('Erro inesperado no logout:', error);
-      Alert.alert('Erro', 'Não foi possível sair da conta.');
-    } finally {
-      setSaindo(false);
-    }
-  }
-
   useEffect(() => {
     carregarDados();
   }, [idPaciente]);
@@ -207,14 +179,6 @@ export default function HomePaciente({ navigation, route, usuarioLogado: usuario
     <View style={styles.container}>
       <StatusBar barStyle="dark-content" backgroundColor="#FFFFFF" />
 
-      <MenuLateral
-        visivel={menuVisivel}
-        aoFechar={() => setMenuVisivel(false)}
-        onNavigate={navigation.navigate}
-        onLogout={handleLogout}
-        usuario={nomeUsuario}
-      />
-
       <View style={styles.header}>
         <View>
           <Text style={styles.logo}>
@@ -223,13 +187,6 @@ export default function HomePaciente({ navigation, route, usuarioLogado: usuario
           <Text style={styles.headerSubtitle}>Sua rotina de saúde em um só lugar</Text>
         </View>
 
-        <TouchableOpacity
-          style={styles.menuButton}
-          onPress={() => setMenuVisivel(true)}
-          disabled={saindo}
-        >
-          <Ionicons name="menu-outline" size={26} color="#22C55E" />
-        </TouchableOpacity>
       </View>
 
       <ScrollView
@@ -299,12 +256,6 @@ export default function HomePaciente({ navigation, route, usuarioLogado: usuario
         )}
       </ScrollView>
 
-      {saindo ? (
-        <View style={styles.overlaySaindo}>
-          <ActivityIndicator size="large" color="#22C55E" />
-          <Text style={styles.saindoTexto}>Saindo...</Text>
-        </View>
-      ) : null}
     </View>
   );
 }
@@ -347,14 +298,6 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#6B7280',
     marginTop: 2,
-  },
-  menuButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 14,
-    backgroundColor: '#F0FDF4',
-    alignItems: 'center',
-    justifyContent: 'center',
   },
   scroll: {
     flex: 1,
@@ -465,21 +408,5 @@ const styles = StyleSheet.create({
   },
   emptyText: {
     color: '#6B7280',
-  },
-  overlaySaindo: {
-    position: 'absolute',
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    backgroundColor: 'rgba(255,255,255,0.75)',
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  saindoTexto: {
-    marginTop: 12,
-    fontSize: 16,
-    color: '#374151',
-    fontWeight: '600',
   },
 });

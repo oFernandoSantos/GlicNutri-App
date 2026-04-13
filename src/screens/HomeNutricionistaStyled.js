@@ -42,15 +42,6 @@ function getGreetingMeta(name) {
   };
 }
 
-function getInitials(name) {
-  return (name || 'Nutricionista')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((item) => item[0]?.toUpperCase() || '')
-    .join('');
-}
-
 export default function HomeNutricionistaStyled({ route, navigation }) {
   const { usuarioLogado } = route.params || {};
   const [loadingPainel, setLoadingPainel] = useState(true);
@@ -194,10 +185,6 @@ export default function HomeNutricionistaStyled({ route, navigation }) {
           </View>
 
           <View style={styles.headerActions}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitials(nomeNutri)}</Text>
-            </View>
-
             <TouchableOpacity
               style={styles.refreshButton}
               onPress={carregarPainel}
@@ -434,20 +421,6 @@ const styles = StyleSheet.create({
   headerActions: {
     alignItems: 'flex-end',
     gap: 10,
-  },
-  avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  avatarText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 19,
-    fontWeight: '700',
   },
   refreshButton: {
     width: 46,

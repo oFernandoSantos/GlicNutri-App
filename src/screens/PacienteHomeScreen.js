@@ -13,6 +13,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from '../components/BarraAbasPaciente';
 import PatientDrawer from '../components/PatientDrawer';
+import BotaoMenuHamburguer from '../components/BotaoMenuHamburguer';
 import { supabase } from '../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 import {
@@ -52,15 +53,6 @@ function getGreetingMeta(name) {
     title: `Boa noite, ${firstName}!`,
     subtitle: 'Hora de fechar o dia com escolhas leves e tranquilas.',
   };
-}
-
-function getInitials(name) {
-  return (name || 'Paciente')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((item) => item[0]?.toUpperCase() || '')
-    .join('');
 }
 
 function Sparkline({ data }) {
@@ -379,17 +371,12 @@ export default function PacienteHomeScreen({
           </View>
 
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitials(nomeUsuario)}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuButton}
+            <BotaoMenuHamburguer
+              style={styles.headerMenuButton}
               onPress={() => setMenuVisible(true)}
               disabled={saindo}
-            >
-              <Ionicons name="menu-outline" size={24} color={patientTheme.colors.text} />
-            </TouchableOpacity>
+              iconSize={26}
+            />
           </View>
         </View>
 
@@ -619,28 +606,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     gap: 10,
   },
-  avatar: {
+  headerMenuButton: {
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  avatarText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 19,
-    fontWeight: '700',
-  },
-  menuButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
   },
   sectionCard: {
     backgroundColor: patientTheme.colors.surface,

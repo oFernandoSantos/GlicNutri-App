@@ -1,19 +1,14 @@
-import React, { useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
-  Alert,
   Platform,
   StatusBar,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
-import NutricionistaDrawer from '../components/NutricionistaDrawer';
 import BotaoVoltar from '../components/BotaoVoltar';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_SPACE,
@@ -24,79 +19,26 @@ function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
 }
 
-function getInitials(name) {
-  return (name || 'Nutricionista')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((item) => item[0]?.toUpperCase() || '')
-    .join('');
-}
-
 export default function NutricionistaSectionScreen({ route, navigation }) {
   const { usuarioLogado } = route.params || {};
-  const [menuVisible, setMenuVisible] = useState(false);
-  const [loadingLogout, setLoadingLogout] = useState(false);
-
-  const nomeNutri =
-    usuarioLogado?.nome_completo_nutri ||
-    usuarioLogado?.nome_nutri ||
-    'Nutricionista';
-
-  const crnNutri = usuarioLogado?.crm_numero || 'Nao informado';
   const emailNutri = usuarioLogado?.email_acesso || 'Sem e-mail cadastrado';
   const conteudo =
     nutritionistSectionContent[route?.name] || nutritionistSectionContent.NutricionistaAgenda;
 
   const menuPills = useMemo(
     () => [
-      { label: 'Dashboard', route: 'HomeNutricionista' },
-      { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes' },
       { label: 'Agenda', route: 'NutricionistaAgenda' },
+      { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes' },
+      { label: 'Inicio', route: 'HomeNutricionista' },
       { label: 'Mensagens', route: 'NutricionistaMensagens' },
       { label: 'Relatorios', route: 'NutricionistaRelatorios' },
     ],
     []
   );
 
-  async function handleLogout() {
-    try {
-      setMenuVisible(false);
-      setLoadingLogout(true);
-
-      const { error } = await supabase.auth.signOut();
-
-      if (error) {
-        console.log('Erro ao encerrar sessao:', error.message);
-      }
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
-    } catch (error) {
-      console.log('Erro inesperado no logout:', error);
-      Alert.alert('Erro', 'Nao foi possivel sair da conta.');
-    } finally {
-      setLoadingLogout(false);
-    }
-  }
-
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
-
-      {menuVisible ? (
-        <NutricionistaDrawer
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={(screen) => navigation.navigate(screen, { usuarioLogado })}
-          onLogout={handleLogout}
-          currentRoute={route?.name}
-          userName={`Dra. ${nomeNutri}`}
-          userSubtitle={`CRN ${crnNutri}`}
-        />
-      ) : null}
 
       <ScrollView
         style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
@@ -109,37 +51,12 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
         nestedScrollEnabled
       >
         <View style={styles.headerRow}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.professionalName}>{`Dra. ${nomeNutri}`}</Text>
-            <Text style={styles.professionalMeta}>{`CRN ${crnNutri}`}</Text>
-          </View>
-
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.avatar}>
-              <Text style={styles.avatarText}>{getInitials(nomeNutri)}</Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.menuButton}
-              onPress={() => setMenuVisible(true)}
-              disabled={loadingLogout}
-            >
-              <Ionicons name="menu-outline" size={24} color={patientTheme.colors.text} />
-            </TouchableOpacity>
-          </View>
-        </View>
-
-        <View style={styles.headerToolbar}>
-          <TouchableOpacity style={styles.inlineLogout} onPress={handleLogout}>
-            {loadingLogout ? (
-              <ActivityIndicator color="#d96666" />
-            ) : (
-              <>
-                <Ionicons name="log-out-outline" size={18} color="#d96666" />
-                <Text style={styles.inlineLogoutText}>Sair</Text>
-              </>
-            )}
-          </TouchableOpacity>
+          <BotaoVoltar
+            navigation={navigation}
+            fallbackRoute="HomeNutricionista"
+            fallbackParams={{ usuarioLogado }}
+            preferFallback
+          />
         </View>
 
         <ScrollView
@@ -180,12 +97,6 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
             </View>
           ))}
         </SectionCard>
-
-        <BotaoVoltar
-          label="Voltar ao dashboard"
-          onPress={() => navigation.navigate('HomeNutricionista', { usuarioLogado })}
-          variant="primary"
-        />
 
         <View style={styles.listFooter} />
       </ScrollView>
@@ -234,64 +145,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'flex-start',
-  },
-  headerCopy: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  professionalName: {
-    fontSize: 26,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  professionalMeta: {
-    marginTop: 8,
-    fontSize: 15,
-    color: patientTheme.colors.textMuted,
-  },
-  headerActions: {
-    alignItems: 'flex-end',
-    gap: 10,
-  },
-  avatar: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  avatarText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 19,
-    fontWeight: '700',
-  },
-  menuButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  headerToolbar: {
-    marginTop: 14,
-    alignItems: 'flex-start',
-  },
-  inlineLogout: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: '#fff4f4',
-  },
-  inlineLogoutText: {
-    marginLeft: 8,
-    color: '#d96666',
-    fontWeight: '700',
   },
   menuPills: {
     paddingVertical: 18,
