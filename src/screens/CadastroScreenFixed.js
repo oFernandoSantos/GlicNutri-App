@@ -13,16 +13,24 @@ import {
   Platform,
   SafeAreaView,
   StyleSheet,
-  Platform as RNPlatform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
+import CampoSenha from '../components/CampoSenha';
 import {
   isValidNutritionistAccessCode,
   normalizeNutritionistAccessCode,
 } from '../config/nutritionistAccessConfig';
+import {
+  getPasswordValidationMessage,
+  passwordRequirements,
+} from '../utils/passwordRequirements';
+import {
+  confirmarCodigoValidacaoEmailCadastro,
+  solicitarCodigoValidacaoEmailCadastro,
+} from '../services/emailVerificationService';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -59,13 +67,22 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [modalVisible, setModalVisible] = useState(false);
   const [modalCodigoAcessoVisible, setModalCodigoAcessoVisible] = useState(false);
   const [erroCodigoAcesso, setErroCodigoAcesso] = useState('');
+  const [modalValidacaoEmailVisible, setModalValidacaoEmailVisible] = useState(false);
+  const [codigoValidacaoEmail, setCodigoValidacaoEmail] = useState('');
+  const [erroCodigoValidacaoEmail, setErroCodigoValidacaoEmail] = useState('');
+  const [validandoEmailCadastro, setValidandoEmailCadastro] = useState(false);
+  const [codigoAcessoPendenteCadastro, setCodigoAcessoPendenteCadastro] = useState('');
+  const [emailPendenteCadastro, setEmailPendenteCadastro] = useState('');
   const [email, setEmail] = useState('');
   const [senha, setSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
+  const [senhaFocada, setSenhaFocada] = useState(false);
   const [codigoAcessoNutricionista, setCodigoAcessoNutricionista] = useState('');
   const [aceitouLgpd, setAceitouLgpd] = useState(false);
   const [loading, setLoading] = useState(false);
   const [feedbackCadastro, setFeedbackCadastro] = useState(null);
+  const [modalCadastroSucessoVisible, setModalCadastroSucessoVisible] = useState(false);
+  const [mensagemCadastroSucesso, setMensagemCadastroSucesso] = useState('');
   const [fieldErrors, setFieldErrors] = useState(createCadastroFieldErrors);
 
   const [cep, setCep] = useState('');
@@ -78,6 +95,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const scrollViewRef = useRef(null);
   const opcoesGenero = ['Masculino', 'Feminino', 'Diverso'];
   const isPaciente = role === 'Paciente';
+  const senhaCadastroValida = passwordRequirements.every((item) => item.test(senha));
+  const confirmacaoSenhaValida = confirmarSenha.trim() !== '' && senha === confirmarSenha;
 
   useEffect(() => {
     setRole(roleInicial);
@@ -94,8 +113,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
       documento.trim() !== '' &&
       genero.trim() !== '' &&
       email.trim() !== '' &&
-      senha.trim() !== '' &&
-      confirmarSenha.trim() !== '' &&
+      senhaCadastroValida &&
+      confirmacaoSenhaValida &&
       cep.trim() !== '' &&
       logradouro.trim() !== '' &&
       numero.trim() !== '' &&
@@ -107,8 +126,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
     : nome.trim() !== '' &&
       documento.trim() !== '' &&
       email.trim() !== '' &&
-      senha.trim() !== '' &&
-      confirmarSenha.trim() !== '' &&
+      senhaCadastroValida &&
+      confirmacaoSenhaValida &&
       aceitouLgpd &&
       !loading;
 
@@ -131,6 +150,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
     setEmail('');
     setSenha('');
     setConfirmarSenha('');
+    setSenhaFocada(false);
     setCodigoAcessoNutricionista('');
     setAceitouLgpd(false);
     setCep('');
@@ -140,6 +160,14 @@ export default function CadastroScreenFixed({ navigation, route }) {
     setCidade('');
     setUf('');
     setErroCodigoAcesso('');
+    setModalValidacaoEmailVisible(false);
+    setCodigoValidacaoEmail('');
+    setErroCodigoValidacaoEmail('');
+    setValidandoEmailCadastro(false);
+    setCodigoAcessoPendenteCadastro('');
+    setEmailPendenteCadastro('');
+    setModalCadastroSucessoVisible(false);
+    setMensagemCadastroSucesso('');
     limparErrosCamposCadastro();
   };
 
@@ -269,8 +297,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
         if (!emailLimpo) return 'Informe o e-mail.';
         return !validarEmail(emailLimpo) ? 'Digite um e-mail valido.' : '';
       case 'senha':
-        if (!senhaValor) return 'Informe a senha.';
-        return senhaValor.length < 6 ? 'A senha precisa ter pelo menos 6 caracteres.' : '';
+        return getPasswordValidationMessage(senhaValor, 'Informe a senha.');
       case 'confirmarSenha':
         if (!confirmarSenhaValor) return 'Confirme a senha.';
         return senhaValor !== confirmarSenhaValor ? 'As senhas nao coincidem.' : '';
@@ -440,6 +467,79 @@ export default function CadastroScreenFixed({ navigation, route }) {
     }
   };
 
+  const tratarErroCadastro = (mensagemErro) => {
+    if (mensagemErro.includes('CPF')) {
+      setFieldErrors((atual) => ({ ...atual, documento: mensagemErro }));
+      return;
+    }
+
+    if (mensagemErro.includes('CRN/UF')) {
+      setFieldErrors((atual) => ({ ...atual, documento: mensagemErro }));
+      return;
+    }
+
+    const erroCampoEmail =
+      (mensagemErro.startsWith('Ja existe') && mensagemErro.includes('e-mail')) ||
+      mensagemErro === 'E-mail invalido.' ||
+      mensagemErro === 'Digite um e-mail valido.';
+
+    if (erroCampoEmail) {
+      setFieldErrors((atual) => ({ ...atual, email: mensagemErro }));
+      return;
+    }
+
+    exibirFeedback('erro', mensagemErro);
+    Alert.alert('Erro no cadastro', mensagemErro);
+  };
+
+  const solicitarValidacaoEmailCadastro = async (
+    codigoAcessoInformado = codigoAcessoNutricionista,
+    { reenviar = false } = {}
+  ) => {
+    const emailLimpo = email.trim().toLowerCase();
+    const documentoFormatado = normalizarDocumento();
+    const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
+
+    setFeedbackCadastro(null);
+    setErroCodigoValidacaoEmail('');
+    setLoading(true);
+    let abriuModalValidacao = false;
+
+    try {
+      if (isPaciente) {
+        await verificarDuplicidadePaciente(documentoFormatado, emailLimpo);
+      } else {
+        await verificarDuplicidadeNutricionista(documentoFormatado, emailLimpo);
+      }
+
+      setCodigoAcessoPendenteCadastro(codigoAcessoNormalizado);
+      setEmailPendenteCadastro(emailLimpo);
+      setCodigoValidacaoEmail('');
+      setModalValidacaoEmailVisible(true);
+      abriuModalValidacao = true;
+
+      await solicitarCodigoValidacaoEmailCadastro({
+        role,
+        email: emailLimpo,
+      });
+
+      if (reenviar) {
+        setErroCodigoValidacaoEmail('');
+        Alert.alert('Codigo reenviado', 'Confira o e-mail informado.');
+      }
+    } catch (err) {
+      const mensagemErro = err.message || 'Nao foi possivel enviar o codigo de validacao.';
+
+      if (reenviar || abriuModalValidacao || modalValidacaoEmailVisible) {
+        setErroCodigoValidacaoEmail(mensagemErro);
+      } else {
+        tratarErroCadastro(mensagemErro);
+      }
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const validarFormulario = ({
     nomeLimpo,
     emailLimpo,
@@ -475,7 +575,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
     if (!aceitouLgpd) return 'Voce precisa aceitar os termos de LGPD para continuar.';
     if (!validarEmail(emailLimpo)) return 'Digite um e-mail valido.';
-    if (senha.length < 6) return 'A senha precisa ter pelo menos 6 caracteres.';
+    const erroSenha = getPasswordValidationMessage(senha, 'Informe a senha.');
+    if (erroSenha) return erroSenha;
     if (senha !== confirmarSenha) return 'As senhas nao coincidem.';
     if (
       !isPaciente &&
@@ -493,7 +594,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
     return null;
   };
 
-  const handleCadastro = async (codigoAcessoInformado = codigoAcessoNutricionista) => {
+  const handleCadastro = async (
+    codigoAcessoInformado = codigoAcessoNutricionista,
+    { emailValidado = false } = {}
+  ) => {
     const nomeLimpo = nome.trim();
     const emailLimpo = email.trim().toLowerCase();
     const documentoFormatado = normalizarDocumento();
@@ -521,11 +625,14 @@ export default function CadastroScreenFixed({ navigation, route }) {
       setModalCodigoAcessoVisible(false);
     }
 
+    if (!emailValidado) {
+      await solicitarValidacaoEmailCadastro(codigoAcessoNormalizado);
+      return;
+    }
+
     setLoading(true);
 
     try {
-      let registroCriado = null;
-
       if (isPaciente) {
         await verificarDuplicidadePaciente(documentoFormatado, emailLimpo);
 
@@ -556,7 +663,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
           throw new Error('O paciente nao foi confirmado no banco de dados.');
         }
 
-        registroCriado = data;
         console.log('Paciente salvo com sucesso:', data);
       } else {
         await verificarDuplicidadeNutricionista(documentoFormatado, emailLimpo);
@@ -579,32 +685,23 @@ export default function CadastroScreenFixed({ navigation, route }) {
           throw new Error('O nutricionista nao foi confirmado no banco de dados.');
         }
 
-        registroCriado = data;
         console.log('Nutricionista salvo com sucesso:', data);
       }
 
-      limparFormulario();
-      exibirFeedback(
-        'sucesso',
+      const mensagemSucesso =
         isPaciente
-          ? 'Paciente cadastrado com Sucesso.'
-          : 'Nutricionista cadastrado com Sucesso.',
-        { registro: registroCriado }
+          ? 'Paciente cadastrado com sucesso.'
+          : 'Nutricionista cadastrado com sucesso.';
+
+      limparFormulario();
+      setMensagemCadastroSucesso(
+        `${mensagemSucesso} E-mail validado com sucesso. Voce ja pode fazer login.`
       );
+      setModalCadastroSucessoVisible(true);
     } catch (err) {
       console.error('Erro detalhado:', err);
       const mensagemErro = err.message || 'Nao foi possivel concluir o cadastro.';
-
-      if (mensagemErro.includes('CPF')) {
-        setFieldErrors((atual) => ({ ...atual, documento: mensagemErro }));
-      } else if (mensagemErro.includes('CRN/UF')) {
-        setFieldErrors((atual) => ({ ...atual, documento: mensagemErro }));
-      } else if (mensagemErro.includes('e-mail')) {
-        setFieldErrors((atual) => ({ ...atual, email: mensagemErro }));
-      } else {
-        exibirFeedback('erro', mensagemErro);
-        Alert.alert('Erro no cadastro', mensagemErro);
-      }
+      tratarErroCadastro(mensagemErro);
     } finally {
       setLoading(false);
     }
@@ -639,10 +736,96 @@ export default function CadastroScreenFixed({ navigation, route }) {
     handleCadastro(codigoNormalizado);
   };
 
+  const handleCancelarValidacaoEmailCadastro = () => {
+    setModalValidacaoEmailVisible(false);
+    setCodigoValidacaoEmail('');
+    setErroCodigoValidacaoEmail('');
+    setEmailPendenteCadastro('');
+    setCodigoAcessoPendenteCadastro('');
+    setValidandoEmailCadastro(false);
+  };
+
+  const handleReenviarCodigoValidacaoEmailCadastro = async () => {
+    await solicitarValidacaoEmailCadastro(
+      codigoAcessoPendenteCadastro || codigoAcessoNutricionista,
+      { reenviar: true }
+    );
+  };
+
+  const handleConfirmarValidacaoEmailCadastro = async () => {
+    const codigoLimpo = codigoValidacaoEmail.replace(/\D/g, '');
+    const emailLimpo = email.trim().toLowerCase();
+    const emailValidado = emailPendenteCadastro || emailLimpo;
+
+    if (codigoLimpo.length !== 6) {
+      setErroCodigoValidacaoEmail('Digite o codigo de 6 digitos enviado por e-mail.');
+      return;
+    }
+
+    setErroCodigoValidacaoEmail('');
+    setValidandoEmailCadastro(true);
+
+    try {
+      await confirmarCodigoValidacaoEmailCadastro({
+        role,
+        email: emailValidado,
+        code: codigoLimpo,
+      });
+
+      if (emailLimpo !== emailValidado) {
+        setErroCodigoValidacaoEmail(
+          'O e-mail do formulario mudou. Solicite um novo codigo para validar o e-mail atual.'
+        );
+        return;
+      }
+
+      setModalValidacaoEmailVisible(false);
+      setCodigoValidacaoEmail('');
+      setErroCodigoValidacaoEmail('');
+
+      await handleCadastro(
+        codigoAcessoPendenteCadastro || codigoAcessoNutricionista,
+        { emailValidado: true }
+      );
+    } catch (err) {
+      setErroCodigoValidacaoEmail(
+        err?.message || 'Codigo invalido. Confira o codigo enviado por e-mail.'
+      );
+    } finally {
+      setValidandoEmailCadastro(false);
+    }
+  };
+
   const renderFieldError = (campo) =>
     fieldErrors[campo] ? (
       <Text style={styles.fieldErrorText}>{fieldErrors[campo]}</Text>
     ) : null;
+
+  const renderPasswordRequirements = () => (
+    <View style={styles.requirementsBox}>
+      {passwordRequirements.map((item) => {
+        const ativo = item.test(senha);
+
+        return (
+          <View key={item.key} style={styles.requirementItem}>
+            <Ionicons
+              name={ativo ? 'checkmark-circle' : 'ellipse-outline'}
+              size={16}
+              color={ativo ? '#159365' : '#9CA3AF'}
+            />
+            <Text
+              style={[
+                styles.requirementText,
+                ativo ? styles.requirementTextActive : null,
+              ]}
+            >
+              {item.label}
+            </Text>
+          </View>
+        );
+      })}
+    </View>
+  );
 
   return (
     <SafeAreaView style={styles.container}>
@@ -652,10 +835,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
       >
         <ScrollView
           ref={scrollViewRef}
-          style={[styles.scroll, RNPlatform.OS === 'web' && styles.webScroll]}
+          style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
           contentContainerStyle={[
             styles.scrollContent,
-            RNPlatform.OS === 'web' && styles.webScrollContent,
+            Platform.OS === 'web' && styles.webScrollContent,
           ]}
           keyboardShouldPersistTaps="handled"
           showsVerticalScrollIndicator={false}
@@ -846,10 +1029,16 @@ export default function CadastroScreenFixed({ navigation, route }) {
               placeholderTextColor="#999"
             />
             {renderFieldError('email')}
+            <Text style={styles.helperText}>
+              Enviaremos um codigo para validar este e-mail antes de criar a conta.
+            </Text>
 
             <Text style={styles.label}>Senha</Text>
-            <TextInput
-              style={[styles.input, fieldErrors.senha ? styles.inputError : null]}
+            <CampoSenha
+              wrapperStyle={styles.passwordInputWrapper}
+              inputStyle={styles.passwordInput}
+              invalid={!!fieldErrors.senha}
+              invalidStyle={styles.inputError}
               value={senha}
               onChangeText={(valor) => {
                 setSenha(valor);
@@ -860,15 +1049,22 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   overrides: { senha: valor },
                 });
               }}
-              secureTextEntry
               placeholder="Crie uma senha"
               placeholderTextColor="#999"
+              autoComplete="new-password"
+              textContentType="newPassword"
+              onFocus={() => setSenhaFocada(true)}
+              onBlur={() => setSenhaFocada(false)}
             />
             {renderFieldError('senha')}
+            {senhaFocada ? renderPasswordRequirements() : null}
 
             <Text style={styles.label}>Confirmar Senha</Text>
-            <TextInput
-              style={[styles.input, fieldErrors.confirmarSenha ? styles.inputError : null]}
+            <CampoSenha
+              wrapperStyle={styles.passwordInputWrapper}
+              inputStyle={styles.passwordInput}
+              invalid={!!fieldErrors.confirmarSenha}
+              invalidStyle={styles.inputError}
               value={confirmarSenha}
               onChangeText={(valor) => {
                 setConfirmarSenha(valor);
@@ -876,9 +1072,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   overrides: { confirmarSenha: valor },
                 });
               }}
-              secureTextEntry
               placeholder="Repita a senha"
               placeholderTextColor="#999"
+              autoComplete="new-password"
+              textContentType="newPassword"
             />
             {renderFieldError('confirmarSenha')}
 
@@ -922,38 +1119,25 @@ export default function CadastroScreenFixed({ navigation, route }) {
               {loading ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
-                <Text style={styles.buttonText}>Cadastrar</Text>
+                <Text style={styles.buttonText}>Validar e cadastrar</Text>
               )}
             </TouchableOpacity>
 
-            {feedbackCadastro ? (
+            {feedbackCadastro?.tipo === 'erro' ? (
               <View
                 style={[
                   styles.feedbackBox,
-                  feedbackCadastro.tipo === 'erro' && styles.feedbackBoxErro,
+                  styles.feedbackBoxErro,
                 ]}
               >
                 <Text
                   style={[
                     styles.feedbackText,
-                    feedbackCadastro.tipo === 'erro' && styles.feedbackTextErro,
+                    styles.feedbackTextErro,
                   ]}
                 >
                   {feedbackCadastro.texto}
                 </Text>
-
-                {feedbackCadastro.tipo === 'sucesso' ? (
-                  <TouchableOpacity
-                    style={styles.feedbackButton}
-                    onPress={() =>
-                      navigation.navigate('Login', {
-                        roleInicial: role,
-                      })
-                    }
-                  >
-                    <Text style={styles.feedbackButtonText}>Ir para login</Text>
-                  </TouchableOpacity>
-                ) : null}
               </View>
             ) : null}
           </View>
@@ -1059,6 +1243,115 @@ export default function CadastroScreenFixed({ navigation, route }) {
             </View>
           </TouchableWithoutFeedback>
         </Modal>
+
+        <Modal
+          visible={modalValidacaoEmailVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={handleCancelarValidacaoEmailCadastro}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.emailModalCard}>
+              <Text style={styles.emailModalTitle}>Codigo enviado</Text>
+              <Text style={styles.emailModalText}>
+                Digite o codigo de 6 digitos enviado para{' '}
+                {emailPendenteCadastro || email.trim().toLowerCase()}.
+              </Text>
+
+              <TextInput
+                style={[
+                  styles.input,
+                  styles.codeInput,
+                  erroCodigoValidacaoEmail ? styles.inputError : null,
+                ]}
+                value={codigoValidacaoEmail}
+                onChangeText={(valor) => {
+                  setCodigoValidacaoEmail(valor.replace(/\D/g, '').slice(0, 6));
+                  setErroCodigoValidacaoEmail('');
+                }}
+                placeholder="000000"
+                placeholderTextColor="#999"
+                keyboardType="number-pad"
+                maxLength={6}
+                editable={!loading && !validandoEmailCadastro}
+              />
+
+              {erroCodigoValidacaoEmail ? (
+                <Text style={styles.codeErrorText}>{erroCodigoValidacaoEmail}</Text>
+              ) : null}
+
+              <TouchableOpacity
+                style={[
+                  styles.emailModalPrimaryButton,
+                  (validandoEmailCadastro || loading) && styles.buttonDisabled,
+                ]}
+                onPress={handleConfirmarValidacaoEmailCadastro}
+                disabled={validandoEmailCadastro || loading}
+              >
+                {validandoEmailCadastro ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.buttonText}>Validar codigo e cadastrar</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.emailModalSecondaryButton}
+                onPress={handleReenviarCodigoValidacaoEmailCadastro}
+                disabled={validandoEmailCadastro || loading}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#4fdfa3" />
+                ) : (
+                  <Text style={styles.emailModalSecondaryButtonText}>
+                    Reenviar codigo
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.emailModalCancelButton}
+                onPress={handleCancelarValidacaoEmailCadastro}
+                disabled={validandoEmailCadastro}
+              >
+                <Text style={styles.emailModalCancelButtonText}>Cancelar</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </Modal>
+
+        <Modal visible={modalCadastroSucessoVisible} transparent animationType="fade">
+          <TouchableWithoutFeedback onPress={() => {}}>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.emailModalCard}>
+                  <Ionicons
+                    name="checkmark-circle"
+                    size={46}
+                    color="#159365"
+                    style={styles.modalSuccessIcon}
+                  />
+                  <Text style={styles.emailModalTitle}>Cadastro validado</Text>
+                  <Text style={styles.emailModalText}>
+                    {mensagemCadastroSucesso}
+                  </Text>
+
+                  <TouchableOpacity
+                    style={styles.emailModalPrimaryButton}
+                    onPress={() => {
+                      setModalCadastroSucessoVisible(false);
+                      navigation.navigate('Login', {
+                        roleInicial: role,
+                      });
+                    }}
+                  >
+                    <Text style={styles.buttonText}>Ir para login</Text>
+                  </TouchableOpacity>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+          </TouchableWithoutFeedback>
+        </Modal>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -1112,8 +1405,29 @@ const styles = StyleSheet.create({
     backgroundColor: '#ffffff',
     ...softGreenBorder,
   },
+  codeInput: {
+    fontSize: 20,
+    fontWeight: '700',
+    letterSpacing: 4,
+    textAlign: 'center',
+  },
   inputError: {
     borderColor: '#d96666',
+  },
+  passwordInputWrapper: {
+    borderWidth: 1,
+    borderColor: '#DDD',
+    borderRadius: 10,
+    marginBottom: 15,
+    backgroundColor: '#ffffff',
+    position: 'relative',
+    ...softGreenBorder,
+  },
+  passwordInput: {
+    color: '#333',
+    paddingHorizontal: 12,
+    paddingRight: 48,
+    paddingVertical: 12,
   },
   fieldErrorText: {
     marginTop: -8,
@@ -1129,6 +1443,25 @@ const styles = StyleSheet.create({
     color: '#686d71',
     fontSize: 12,
     lineHeight: 17,
+  },
+  requirementsBox: {
+    marginBottom: 14,
+    marginTop: -7,
+  },
+  requirementItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 7,
+    marginBottom: 5,
+  },
+  requirementText: {
+    color: '#686d71',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  requirementTextActive: {
+    color: '#159365',
+    fontWeight: '700',
   },
   inputPicker: {
     flexDirection: 'row',
@@ -1182,6 +1515,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginTop: 10,
   },
+  buttonDisabled: {
+    opacity: 0.6,
+  },
   buttonText: {
     color: '#FFF',
     fontWeight: 'bold',
@@ -1225,6 +1561,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     alignItems: 'center',
+    padding: 20,
   },
   modalContent: {
     backgroundColor: '#f4f4f4',
@@ -1232,6 +1569,64 @@ const styles = StyleSheet.create({
     borderRadius: 15,
     padding: 20,
     ...softGreenBorder,
+  },
+  emailModalCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#ffffff',
+    borderRadius: 8,
+    padding: 22,
+  },
+  emailModalTitle: {
+    color: '#111827',
+    fontSize: 20,
+    fontWeight: '700',
+    textAlign: 'center',
+    marginBottom: 10,
+  },
+  emailModalText: {
+    color: '#4B5563',
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+    marginBottom: 18,
+  },
+  codeErrorText: {
+    color: '#B91C1C',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 14,
+    marginTop: -8,
+    textAlign: 'center',
+  },
+  emailModalPrimaryButton: {
+    backgroundColor: '#4fdfa3',
+    borderRadius: 8,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  emailModalSecondaryButton: {
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#4fdfa3',
+    alignItems: 'center',
+    paddingVertical: 13,
+    marginTop: 10,
+  },
+  emailModalSecondaryButtonText: {
+    color: '#159365',
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  emailModalCancelButton: {
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginTop: 4,
+  },
+  emailModalCancelButtonText: {
+    color: '#6B7280',
+    fontSize: 14,
+    fontWeight: '600',
   },
   modalTitle: {
     fontSize: 18,
@@ -1245,6 +1640,28 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     lineHeight: 20,
     marginBottom: 16,
+  },
+  modalInfoBox: {
+    alignItems: 'center',
+    backgroundColor: '#e9fbf3',
+    borderColor: '#4fdfa3',
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'center',
+    marginBottom: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  modalInfoText: {
+    color: '#256f51',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalSuccessIcon: {
+    alignSelf: 'center',
+    marginBottom: 8,
   },
   modalErrorBox: {
     marginTop: -2,
@@ -1283,6 +1700,14 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     paddingVertical: 12,
     alignItems: 'center',
+  },
+  modalActionDisabled: {
+    opacity: 0.6,
+  },
+  modalConfirmButton: {
+    alignSelf: 'stretch',
+    flex: 0,
+    marginTop: 10,
   },
   modalActionSecondary: {
     backgroundColor: '#ffffff',
