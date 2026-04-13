@@ -1,0 +1,7 @@
+project_id = "isiweqkdoyxorohuibqb"
+
+[functions.password-recovery]
+verify_jwt = true
+
+[functions.email-verification]
+verify_jwt = false

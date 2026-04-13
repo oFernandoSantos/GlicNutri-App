@@ -20,6 +20,7 @@ import {
 } from '../services/googlePatientSync';
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
+import CampoSenha from '../components/CampoSenha';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -80,6 +81,42 @@ export default function LoginScreen({ navigation, route, session }) {
     return uf ? `${numeros}/${uf}` : numeros;
   }
 
+  function identificadorPareceEmail(valor, perfil = role) {
+    const valorLimpo = valor.trim();
+
+    if (!valorLimpo) return false;
+    if (valorLimpo.includes('@')) return true;
+
+    if (perfil === 'Paciente') {
+      return /[A-Za-z]/.test(valorLimpo);
+    }
+
+    if (/^[A-Za-z]/.test(valorLimpo)) return true;
+    if (/[._+\-]/.test(valorLimpo)) return true;
+    if (/^\d+$/.test(valorLimpo)) return false;
+
+    const valorSemEspacos = valorLimpo.replace(/\s/g, '');
+    const crnParcial = /^\d{0,5}\/?[A-Za-z]{0,2}$/.test(valorSemEspacos);
+
+    return !crnParcial && /[A-Za-z]/.test(valorLimpo);
+  }
+
+  function formatarIdentificadorLogin(valor, perfil = role) {
+    if (identificadorPareceEmail(valor, perfil)) {
+      return valor.replace(/\s/g, '').toLowerCase();
+    }
+
+    return perfil === 'Paciente' ? formatarCpf(valor) : formatarCrn(valor);
+  }
+
+  function obterMaxLengthIdentificador() {
+    if (identificadorPareceEmail(identificador, role)) {
+      return undefined;
+    }
+
+    return role === 'Paciente' ? 14 : 8;
+  }
+
   function validarCpfParaLogin(valor) {
     return valor.replace(/\D/g, '').length === 11;
   }
@@ -103,23 +140,24 @@ export default function LoginScreen({ navigation, route, session }) {
     };
     const identificadorLimpo = identificadorValor.trim();
     const senhaLimpa = senhaValor.trim();
+    const ehEmail = identificadorPareceEmail(identificadorLimpo, role);
 
     if (!identificadorLimpo) {
       proximosErros.identificador =
         role === 'Paciente'
           ? 'Preencha o CPF ou e-mail.'
           : 'Preencha o CRN/UF ou e-mail.';
-    } else if (identificadorLimpo.includes('@') && !validarEmail(identificadorLimpo)) {
+    } else if (ehEmail && !validarEmail(identificadorLimpo)) {
       proximosErros.identificador = 'Digite um e-mail valido para continuar.';
     } else if (
       role === 'Paciente' &&
-      !identificadorLimpo.includes('@') &&
+      !ehEmail &&
       !validarCpfParaLogin(identificadorLimpo)
     ) {
       proximosErros.identificador = 'Digite um CPF valido para acessar como paciente.';
     } else if (
       role === 'Nutricionista' &&
-      !identificadorLimpo.includes('@') &&
+      !ehEmail &&
       !validarCrnParaLogin(identificadorLimpo)
     ) {
       proximosErros.identificador =
@@ -139,19 +177,7 @@ export default function LoginScreen({ navigation, route, session }) {
 
   function handleChangeIdentificador(valor) {
     setErrorMessage('');
-    let proximoValor = valor;
-
-    if (role !== 'Paciente') {
-      if (valor.includes('@')) {
-        proximoValor = valor;
-      } else {
-        proximoValor = formatarCrn(valor);
-      }
-    } else if (valor.includes('@') || /[A-Za-z]/.test(valor)) {
-      proximoValor = valor;
-    } else {
-      proximoValor = formatarCpf(valor);
-    }
+    const proximoValor = formatarIdentificadorLogin(valor, role);
 
     setIdentificador(proximoValor);
     setFieldErrors((atual) => ({
@@ -165,8 +191,10 @@ export default function LoginScreen({ navigation, route, session }) {
 
   function normalizarIdentificadorLogin(valor, perfil) {
     const valorBase = valor.trim();
-    const documentoNormalizado =
-      perfil === 'Paciente'
+    const ehEmail = identificadorPareceEmail(valorBase, perfil);
+    const documentoNormalizado = ehEmail
+      ? ''
+      : perfil === 'Paciente'
         ? valorBase.replace(/\D/g, '')
         : formatarCrn(valorBase);
 
@@ -174,7 +202,7 @@ export default function LoginScreen({ navigation, route, session }) {
       original: valorBase,
       documento: documentoNormalizado,
       email: valorBase.toLowerCase(),
-      ehEmail: valorBase.includes('@'),
+      ehEmail,
     };
   }
 
@@ -193,10 +221,12 @@ export default function LoginScreen({ navigation, route, session }) {
       perfil
     );
     const senhaNormalizada = senhaInformada.trim();
-    const filtrosDocumento = [
-      identificadorNormalizado.documento,
-      identificadorNormalizado.original,
-    ].filter(Boolean);
+    const filtrosDocumento = identificadorNormalizado.ehEmail
+      ? []
+      : [
+          identificadorNormalizado.documento,
+          identificadorNormalizado.original,
+        ].filter(Boolean);
     const candidatos = [];
 
     function adicionarCandidatos(registros) {
@@ -253,7 +283,7 @@ export default function LoginScreen({ navigation, route, session }) {
       const { data, error } = await supabase
         .from(tabela)
         .select('*')
-        .eq(colunaEmail, identificadorNormalizado.email);
+        .ilike(colunaEmail, identificadorNormalizado.email);
 
       if (error) {
         throw error;
@@ -603,6 +633,20 @@ export default function LoginScreen({ navigation, route, session }) {
     borderColor: '#d96666',
   };
 
+  const passwordInputWrapperStyle = {
+    ...inputStyle,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    position: 'relative',
+  };
+
+  const passwordInputStyle = {
+    color: '#333',
+    height: '100%',
+    paddingHorizontal: 15,
+    paddingRight: 48,
+  };
+
   const errorBoxStyle = {
     marginTop: -4,
     marginBottom: 14,
@@ -787,30 +831,26 @@ export default function LoginScreen({ navigation, route, session }) {
           onChangeText={handleChangeIdentificador}
           keyboardType="default"
           autoCapitalize={
-            role === 'Nutricionista' && !identificador.includes('@')
+            role === 'Nutricionista' &&
+            identificador.trim() &&
+            !identificadorPareceEmail(identificador, role)
               ? 'characters'
               : 'none'
           }
-          maxLength={
-            role === 'Paciente'
-              ? identificador.includes('@')
-                ? undefined
-                : 14
-              : identificador.includes('@')
-                ? undefined
-                : 8
-          }
+          maxLength={obterMaxLengthIdentificador()}
         />
         {fieldErrors.identificador ? (
           <Text style={fieldErrorTextStyle}>{fieldErrors.identificador}</Text>
         ) : null}
 
         <Text style={labelStyle}>Senha</Text>
-        <TextInput
-          style={[inputStyle, fieldErrors.senha ? inputErrorStyle : null]}
+        <CampoSenha
+          wrapperStyle={passwordInputWrapperStyle}
+          inputStyle={passwordInputStyle}
+          invalid={!!fieldErrors.senha}
+          invalidStyle={inputErrorStyle}
           placeholder="********"
           placeholderTextColor="#95a5a6"
-          secureTextEntry
           value={senha}
           onChangeText={(valor) => {
             setSenha(valor);
@@ -824,6 +864,8 @@ export default function LoginScreen({ navigation, route, session }) {
             }));
           }}
           autoCapitalize="none"
+          autoComplete="password"
+          textContentType="password"
         />
         {fieldErrors.senha ? (
           <Text style={fieldErrorTextStyle}>{fieldErrors.senha}</Text>
