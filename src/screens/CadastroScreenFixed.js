@@ -19,6 +19,7 @@ import { supabase } from '../services/supabaseConfig';
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
+import { inputFocusBorder } from '../theme/inputFocusTheme';
 import {
   isValidNutritionistAccessCode,
   normalizeNutritionistAccessCode,
@@ -77,6 +78,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [senha, setSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
   const [senhaFocada, setSenhaFocada] = useState(false);
+  const [focusedField, setFocusedField] = useState('');
   const [codigoAcessoNutricionista, setCodigoAcessoNutricionista] = useState('');
   const [aceitouLgpd, setAceitouLgpd] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -151,6 +153,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
     setSenha('');
     setConfirmarSenha('');
     setSenhaFocada(false);
+    setFocusedField('');
     setCodigoAcessoNutricionista('');
     setAceitouLgpd(false);
     setCep('');
@@ -827,6 +830,23 @@ export default function CadastroScreenFixed({ navigation, route }) {
     </View>
   );
 
+  const getInputStyle = (campo, hasError, extraStyle = null) => [
+    styles.input,
+    extraStyle,
+    hasError ? styles.inputError : null,
+    focusedField === campo ? styles.inputFocused : null,
+  ];
+
+  const focarCampo = (campo) => setFocusedField(campo);
+
+  const desfocarCampo = (campo, callback) => {
+    setFocusedField((atual) => (atual === campo ? '' : atual));
+
+    if (typeof callback === 'function') {
+      callback();
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -856,13 +876,15 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
             <Text style={styles.label}>Nome Completo</Text>
             <TextInput
-              style={[styles.input, fieldErrors.nome ? styles.inputError : null]}
+              style={getInputStyle('nome', fieldErrors.nome)}
               value={nome}
               onChangeText={(valor) => {
                 setNome(valor);
                 setFeedbackCadastro(null);
                 atualizarErroCampoCadastro('nome', { overrides: { nome: valor } });
               }}
+              onFocus={() => focarCampo('nome')}
+              onBlur={() => desfocarCampo('nome')}
               placeholder="Ex: Joao Silva"
               placeholderTextColor="#999"
             />
@@ -870,7 +892,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
             <Text style={styles.label}>{isPaciente ? 'CPF' : 'CRN/UF'}</Text>
             <TextInput
-              style={[styles.input, fieldErrors.documento ? styles.inputError : null]}
+              style={getInputStyle('documento', fieldErrors.documento)}
               value={documento}
               onChangeText={(valor) => {
                 if (isPaciente) {
@@ -888,6 +910,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
               keyboardType={isPaciente ? 'numeric' : 'default'}
               autoCapitalize="characters"
               maxLength={isPaciente ? 14 : 8}
+              onFocus={() => focarCampo('documento')}
+              onBlur={() => desfocarCampo('documento')}
             />
             {renderFieldError('documento')}
 
@@ -895,7 +919,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
               <>
                 <Text style={styles.label}>CEP</Text>
                 <TextInput
-                  style={[styles.input, fieldErrors.cep ? styles.inputError : null]}
+                  style={getInputStyle('cep', fieldErrors.cep)}
                   value={cep}
                   onChangeText={(valor) => {
                     setCep(formatarCep(valor));
@@ -903,7 +927,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                       overrides: { cep: formatarCep(valor) },
                     });
                   }}
-                  onBlur={buscarEnderecoPorCep}
+                  onFocus={() => focarCampo('cep')}
+                  onBlur={() => desfocarCampo('cep', buscarEnderecoPorCep)}
                   placeholder="00000-000"
                   placeholderTextColor="#999"
                   keyboardType="numeric"
@@ -913,7 +938,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
                 <Text style={styles.label}>Logradouro</Text>
                 <TextInput
-                  style={[styles.input, fieldErrors.logradouro ? styles.inputError : null]}
+                  style={getInputStyle('logradouro', fieldErrors.logradouro)}
                   value={logradouro}
                   onChangeText={(valor) => {
                     setLogradouro(valor);
@@ -921,6 +946,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                       overrides: { logradouro: valor },
                     });
                   }}
+                  onFocus={() => focarCampo('logradouro')}
+                  onBlur={() => desfocarCampo('logradouro')}
                   placeholder="Rua, avenida..."
                   placeholderTextColor="#999"
                 />
@@ -928,7 +955,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
                 <Text style={styles.label}>Numero</Text>
                 <TextInput
-                  style={[styles.input, fieldErrors.numero ? styles.inputError : null]}
+                  style={getInputStyle('numero', fieldErrors.numero)}
                   value={numero}
                   onChangeText={(valor) => {
                     setNumero(valor);
@@ -936,6 +963,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                       overrides: { numero: valor },
                     });
                   }}
+                  onFocus={() => focarCampo('numero')}
+                  onBlur={() => desfocarCampo('numero')}
                   placeholder="123"
                   placeholderTextColor="#999"
                 />
@@ -943,7 +972,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
                 <Text style={styles.label}>Bairro</Text>
                 <TextInput
-                  style={[styles.input, fieldErrors.bairro ? styles.inputError : null]}
+                  style={getInputStyle('bairro', fieldErrors.bairro)}
                   value={bairro}
                   onChangeText={(valor) => {
                     setBairro(valor);
@@ -951,6 +980,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                       overrides: { bairro: valor },
                     });
                   }}
+                  onFocus={() => focarCampo('bairro')}
+                  onBlur={() => desfocarCampo('bairro')}
                   placeholder="Seu bairro"
                   placeholderTextColor="#999"
                 />
@@ -960,7 +991,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   <View style={styles.cityContainer}>
                     <Text style={styles.label}>Cidade</Text>
                     <TextInput
-                      style={[styles.input, fieldErrors.cidade ? styles.inputError : null]}
+                      style={getInputStyle('cidade', fieldErrors.cidade)}
                       value={cidade}
                       onChangeText={(valor) => {
                         setCidade(valor);
@@ -968,6 +999,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                           overrides: { cidade: valor },
                         });
                       }}
+                      onFocus={() => focarCampo('cidade')}
+                      onBlur={() => desfocarCampo('cidade')}
                       placeholder="Sua cidade"
                       placeholderTextColor="#999"
                     />
@@ -977,7 +1010,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   <View style={styles.ufContainer}>
                     <Text style={styles.label}>UF</Text>
                     <TextInput
-                      style={[styles.input, fieldErrors.uf ? styles.inputError : null]}
+                      style={getInputStyle('uf', fieldErrors.uf)}
                       value={uf}
                       onChangeText={(valor) => {
                         setUf(valor.toUpperCase());
@@ -985,6 +1018,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                           overrides: { uf: valor.toUpperCase() },
                         });
                       }}
+                      onFocus={() => focarCampo('uf')}
+                      onBlur={() => desfocarCampo('uf')}
                       placeholder="SP"
                       placeholderTextColor="#999"
                       maxLength={2}
@@ -1015,7 +1050,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
             <Text style={styles.label}>E-mail</Text>
             <TextInput
-              style={[styles.input, fieldErrors.email ? styles.inputError : null]}
+              style={getInputStyle('email', fieldErrors.email)}
               value={email}
               onChangeText={(valor) => {
                 setEmail(valor);
@@ -1023,6 +1058,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   overrides: { email: valor },
                 });
               }}
+              onFocus={() => focarCampo('email')}
+              onBlur={() => desfocarCampo('email')}
               autoCapitalize="none"
               placeholder="exemplo@email.com"
               keyboardType="email-address"
@@ -1186,12 +1223,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   </Text>
 
                   <TextInput
-                    style={[
-                      styles.input,
-                      (erroCodigoAcesso || fieldErrors.codigoAcessoNutricionista)
-                        ? styles.inputError
-                        : null,
-                    ]}
+                    style={getInputStyle(
+                      'codigoAcessoNutricionista',
+                      erroCodigoAcesso || fieldErrors.codigoAcessoNutricionista
+                    )}
                     value={codigoAcessoNutricionista}
                     onChangeText={(valor) =>
                       {
@@ -1208,6 +1243,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
                     placeholderTextColor="#999"
                     autoCapitalize="characters"
                     autoCorrect={false}
+                    onFocus={() => focarCampo('codigoAcessoNutricionista')}
+                    onBlur={() => desfocarCampo('codigoAcessoNutricionista')}
                   />
 
                   {erroCodigoAcesso ? (
@@ -1259,16 +1296,18 @@ export default function CadastroScreenFixed({ navigation, route }) {
               </Text>
 
               <TextInput
-                style={[
-                  styles.input,
-                  styles.codeInput,
-                  erroCodigoValidacaoEmail ? styles.inputError : null,
-                ]}
+                style={getInputStyle(
+                  'codigoValidacaoEmail',
+                  erroCodigoValidacaoEmail,
+                  styles.codeInput
+                )}
                 value={codigoValidacaoEmail}
                 onChangeText={(valor) => {
                   setCodigoValidacaoEmail(valor.replace(/\D/g, '').slice(0, 6));
                   setErroCodigoValidacaoEmail('');
                 }}
+                onFocus={() => focarCampo('codigoValidacaoEmail')}
+                onBlur={() => desfocarCampo('codigoValidacaoEmail')}
                 placeholder="000000"
                 placeholderTextColor="#999"
                 keyboardType="number-pad"
@@ -1398,7 +1437,7 @@ const styles = StyleSheet.create({
   input: {
     borderWidth: 1,
     borderColor: '#DDD',
-    borderRadius: 10,
+    borderRadius: 15,
     padding: 12,
     marginBottom: 15,
     color: '#333',
@@ -1414,10 +1453,13 @@ const styles = StyleSheet.create({
   inputError: {
     borderColor: '#d96666',
   },
+  inputFocused: {
+    ...inputFocusBorder,
+  },
   passwordInputWrapper: {
     borderWidth: 1,
     borderColor: '#DDD',
-    borderRadius: 10,
+    borderRadius: 15,
     marginBottom: 15,
     backgroundColor: '#ffffff',
     position: 'relative',
@@ -1469,7 +1511,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     borderWidth: 1,
     borderColor: '#DDD',
-    borderRadius: 10,
+    borderRadius: 15,
     padding: 12,
     marginBottom: 15,
     backgroundColor: '#ffffff',

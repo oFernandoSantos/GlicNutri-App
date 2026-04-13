@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { inputFocusBorder, inputWebFocusReset } from '../theme/inputFocusTheme';
 
 let webPasswordStyleInjected = false;
 
@@ -62,9 +63,11 @@ export default function CampoSenha({
   autoCorrect = false,
   textContentType = 'password',
   secureTextEntry: _secureTextEntry,
+  focusedStyle,
   ...textInputProps
 }) {
   const [visivel, setVisivel] = useState(false);
+  const [focado, setFocado] = useState(false);
   const editable = textInputProps.editable !== false;
 
   useEffect(() => {
@@ -77,12 +80,23 @@ export default function CampoSenha({
     }
   }, [value]);
 
+  function handleFocus(event) {
+    setFocado(true);
+    textInputProps.onFocus?.(event);
+  }
+
+  function handleBlur(event) {
+    setFocado(false);
+    textInputProps.onBlur?.(event);
+  }
+
   return (
     <View
       style={[
         styles.wrapper,
         wrapperStyle,
         invalid ? [styles.invalid, invalidStyle] : null,
+        focado ? [styles.focused, focusedStyle] : null,
       ]}
     >
       <TextInput
@@ -96,9 +110,12 @@ export default function CampoSenha({
         autoCorrect={autoCorrect}
         textContentType={textContentType}
         secureTextEntry={Platform.OS !== 'web' && !visivel}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
         style={[
           styles.input,
           inputStyle,
+          inputWebFocusReset,
           Platform.OS === 'web' && !visivel ? styles.webHiddenPassword : null,
         ]}
       />
@@ -132,6 +149,9 @@ const styles = StyleSheet.create({
   },
   invalid: {
     borderColor: '#d96666',
+  },
+  focused: {
+    ...inputFocusBorder,
   },
   input: {
     color: '#333',

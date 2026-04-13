@@ -21,6 +21,7 @@ import {
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
+import { inputFocusBorder } from '../theme/inputFocusTheme';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -45,6 +46,7 @@ export default function LoginScreen({ navigation, route, session }) {
     identificador: '',
     senha: '',
   });
+  const [focusedField, setFocusedField] = useState('');
   const googleSessionHandledRef = useRef(false);
 
   useEffect(() => {
@@ -820,7 +822,11 @@ export default function LoginScreen({ navigation, route, session }) {
           {role === 'Paciente' ? 'CPF ou e-mail' : 'CRN/UF ou e-mail'}
         </Text>
         <TextInput
-          style={[inputStyle, fieldErrors.identificador ? inputErrorStyle : null]}
+          style={[
+            inputStyle,
+            fieldErrors.identificador ? inputErrorStyle : null,
+            focusedField === 'identificador' ? inputFocusBorder : null,
+          ]}
           placeholder={
             role === 'Paciente'
               ? '000.000.000-00 ou email@exemplo.com'
@@ -838,6 +844,8 @@ export default function LoginScreen({ navigation, route, session }) {
               : 'none'
           }
           maxLength={obterMaxLengthIdentificador()}
+          onFocus={() => setFocusedField('identificador')}
+          onBlur={() => setFocusedField('')}
         />
         {fieldErrors.identificador ? (
           <Text style={fieldErrorTextStyle}>{fieldErrors.identificador}</Text>

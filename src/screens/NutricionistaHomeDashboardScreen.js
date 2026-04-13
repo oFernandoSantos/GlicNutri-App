@@ -5,7 +5,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  ActivityIndicator,
   Alert,
   Platform,
   StatusBar,
@@ -14,6 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 import NutricionistaDrawer from '../components/NutricionistaDrawer';
+import BotaoMenuHamburguer from '../components/BotaoMenuHamburguer';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_SPACE,
 } from '../components/BarraAbasNutricionista';
@@ -21,15 +21,6 @@ import { nutritionistDashboardData } from '../data/nutritionistDashboardData';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
-}
-
-function getInitials(name) {
-  return (name || 'Nutricionista')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((item) => item[0]?.toUpperCase() || '')
-    .join('');
 }
 
 function getRiskTone(risk) {
@@ -67,9 +58,9 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
 
   const menuPills = useMemo(
     () => [
-      { label: 'Dashboard', route: 'HomeNutricionista' },
-      { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes' },
       { label: 'Agenda', route: 'NutricionistaAgenda' },
+      { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes' },
+      { label: 'Inicio', route: 'HomeNutricionista' },
       { label: 'Mensagens', route: 'NutricionistaMensagens' },
       { label: 'Relatorios', route: 'NutricionistaRelatorios' },
     ],
@@ -131,41 +122,21 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
       >
-        <SectionCard style={styles.professionalCard}>
-          <View style={styles.professionalTop}>
-            <View style={styles.professionalCopy}>
-              <Text style={styles.professionalName}>{`Dra. ${nomeNutri}`}</Text>
-              <Text style={styles.professionalMeta}>{`CRN ${crnNutri}`}</Text>
-            </View>
-
-            <View style={styles.professionalActions}>
-              <TouchableOpacity style={styles.avatar}>
-                <Text style={styles.avatarText}>{getInitials(nomeNutri)}</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.menuButton}
-                onPress={() => setMenuVisible(true)}
-                disabled={loadingLogout}
-              >
-                <Ionicons name="menu-outline" size={24} color={patientTheme.colors.text} />
-              </TouchableOpacity>
-            </View>
+        <View style={styles.headerRow}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.greeting}>{`Dra. ${nomeNutri}`}</Text>
+            <Text style={styles.headerSubtitle}>{`CRN ${crnNutri}`}</Text>
           </View>
 
-          <View style={styles.professionalFooter}>
-            <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-              {loadingLogout ? (
-                <ActivityIndicator color="#d96666" />
-              ) : (
-                <>
-                  <Ionicons name="log-out-outline" size={18} color="#d96666" />
-                  <Text style={styles.logoutButtonText}>Sair</Text>
-                </>
-              )}
-            </TouchableOpacity>
+          <View style={styles.headerActions}>
+            <BotaoMenuHamburguer
+              style={styles.headerMenuButton}
+              onPress={() => setMenuVisible(true)}
+              loading={loadingLogout}
+              iconSize={26}
+            />
           </View>
-        </SectionCard>
+        </View>
 
         <ScrollView
           horizontal
@@ -359,72 +330,35 @@ const styles = StyleSheet.create({
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
-  professionalCard: {
+  headerRow: {
     marginTop: 14,
-  },
-  professionalTop: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
-  professionalCopy: {
+  headerCopy: {
     flex: 1,
     paddingRight: 12,
   },
-  professionalName: {
-    fontSize: 28,
+  greeting: {
+    fontSize: 30,
     fontWeight: '700',
     color: patientTheme.colors.text,
   },
-  professionalMeta: {
+  headerSubtitle: {
     marginTop: 8,
     fontSize: 15,
     lineHeight: 22,
     color: patientTheme.colors.textMuted,
   },
-  professionalActions: {
+  headerActions: {
     alignItems: 'flex-end',
     gap: 10,
   },
-  avatar: {
+  headerMenuButton: {
     width: 58,
     height: 58,
     borderRadius: 29,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  avatarText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 19,
-    fontWeight: '700',
-  },
-  menuButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  professionalFooter: {
-    marginTop: 16,
-    alignItems: 'flex-start',
-  },
-  logoutButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: '#fff4f4',
-  },
-  logoutButtonText: {
-    marginLeft: 8,
-    color: '#d96666',
-    fontWeight: '700',
   },
   menuPills: {
     paddingVertical: 18,
