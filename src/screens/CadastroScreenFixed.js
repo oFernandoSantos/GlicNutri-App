@@ -206,6 +206,11 @@ export default function CadastroScreenFixed({ navigation, route }) {
     return uf ? `${numeros}/${uf}` : numeros;
   };
 
+  const formatarNome = (valor) =>
+    valor.replace(/(^|\s)(\S)/g, (_, espaco, letra) =>
+      `${espaco}${letra.toLocaleUpperCase('pt-BR')}`
+    );
+
   const validarCrn = (crn) => /^\d{5}\/[A-Z]{2}$/.test(crn.trim());
 
   const normalizarDocumento = () => {
@@ -409,8 +414,11 @@ export default function CadastroScreenFixed({ navigation, route }) {
       const data = await response.json();
 
       if (data.erro) {
-        exibirFeedback('erro', 'Nao encontramos esse CEP.');
-        Alert.alert('CEP invalido', 'Nao encontramos esse CEP.');
+        setFeedbackCadastro(null);
+        setFieldErrors((atual) => ({
+          ...atual,
+          cep: 'CEP invalido.',
+        }));
         return;
       }
 
@@ -879,14 +887,18 @@ export default function CadastroScreenFixed({ navigation, route }) {
               style={getInputStyle('nome', fieldErrors.nome)}
               value={nome}
               onChangeText={(valor) => {
-                setNome(valor);
+                const nomeFormatado = formatarNome(valor);
+                setNome(nomeFormatado);
                 setFeedbackCadastro(null);
-                atualizarErroCampoCadastro('nome', { overrides: { nome: valor } });
+                atualizarErroCampoCadastro('nome', {
+                  overrides: { nome: nomeFormatado },
+                });
               }}
               onFocus={() => focarCampo('nome')}
               onBlur={() => desfocarCampo('nome')}
               placeholder="Ex: Joao Silva"
               placeholderTextColor="#999"
+              autoCapitalize="words"
             />
             {renderFieldError('nome')}
 
@@ -922,9 +934,11 @@ export default function CadastroScreenFixed({ navigation, route }) {
                   style={getInputStyle('cep', fieldErrors.cep)}
                   value={cep}
                   onChangeText={(valor) => {
-                    setCep(formatarCep(valor));
+                    const cepFormatado = formatarCep(valor);
+                    setCep(cepFormatado);
+                    setFeedbackCadastro(null);
                     atualizarErroCampoCadastro('cep', {
-                      overrides: { cep: formatarCep(valor) },
+                      overrides: { cep: cepFormatado },
                     });
                   }}
                   onFocus={() => focarCampo('cep')}
@@ -1142,21 +1156,15 @@ export default function CadastroScreenFixed({ navigation, route }) {
             <TouchableOpacity
               style={[
                 styles.button,
-                {
-                  backgroundColor: loading
-                    ? '#aeb6bf'
-                    : formularioValido
-                      ? '#4fdfa3'
-                      : '#7bcfae',
-                },
+                !formularioValido ? styles.buttonInactive : null,
               ]}
               onPress={handlePressCadastrar}
-              disabled={loading}
+              disabled={!formularioValido}
             >
               {loading ? (
                 <ActivityIndicator color="#FFF" />
               ) : (
-                <Text style={styles.buttonText}>Validar e cadastrar</Text>
+                <Text style={styles.buttonText}>Cadastrar</Text>
               )}
             </TouchableOpacity>
 
@@ -1330,7 +1338,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
                 {validandoEmailCadastro ? (
                   <ActivityIndicator color="#FFF" />
                 ) : (
-                  <Text style={styles.buttonText}>Validar codigo e cadastrar</Text>
+                  <Text style={styles.buttonText}>Cadastrar</Text>
                 )}
               </TouchableOpacity>
 
@@ -1552,18 +1560,26 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
   button: {
+    backgroundColor: 'rgb(79, 223, 163)',
+    borderRadius: 20,
     padding: 16,
-    borderRadius: 10,
     alignItems: 'center',
+    opacity: 1,
     marginTop: 10,
+    transitionDuration: '0s',
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  buttonInactive: {
+    backgroundColor: 'rgb(174, 182, 191)',
+    opacity: 1,
   },
   buttonText: {
     color: '#FFF',
     fontWeight: 'bold',
     fontSize: 16,
+    lineHeight: 20,
   },
   feedbackBox: {
     marginTop: 14,
@@ -1642,10 +1658,12 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   emailModalPrimaryButton: {
-    backgroundColor: '#4fdfa3',
-    borderRadius: 8,
-    paddingVertical: 16,
+    backgroundColor: 'rgb(79, 223, 163)',
+    borderRadius: 20,
+    padding: 16,
     alignItems: 'center',
+    opacity: 1,
+    transitionDuration: '0s',
   },
   emailModalSecondaryButton: {
     borderRadius: 8,

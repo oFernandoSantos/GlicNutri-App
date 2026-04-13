@@ -10,14 +10,14 @@ import {
   StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabaseConfig';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
-import NutricionistaDrawer from '../components/NutricionistaDrawer';
-import BotaoMenuHamburguer from '../components/BotaoMenuHamburguer';
+import { supabase } from '../../services/supabaseConfig';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
+import NutricionistaDrawer from '../../components/NutricionistaDrawer';
+import BotaoMenuHamburguer from '../../components/BotaoMenuHamburguer';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_SPACE,
-} from '../components/BarraAbasNutricionista';
-import { nutritionistDashboardData } from '../data/nutritionistDashboardData';
+} from '../../components/BarraAbasNutricionista';
+import { nutritionistDashboardData } from '../../data/nutritionistDashboardData';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -130,10 +130,8 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
 
           <View style={styles.headerActions}>
             <BotaoMenuHamburguer
-              style={styles.headerMenuButton}
               onPress={() => setMenuVisible(true)}
               loading={loadingLogout}
-              iconSize={26}
             />
           </View>
         </View>
@@ -354,11 +352,6 @@ const styles = StyleSheet.create({
   headerActions: {
     alignItems: 'flex-end',
     gap: 10,
-  },
-  headerMenuButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
   },
   menuPills: {
     paddingVertical: 18,

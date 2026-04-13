@@ -11,8 +11,8 @@ import {
   StatusBar,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../services/supabaseConfig';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
+import { supabase } from '../../services/supabaseConfig';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;

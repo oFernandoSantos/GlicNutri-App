@@ -53,6 +53,17 @@ export default function ForgotPassword({ navigation }) {
   const [loading, setLoading] = useState(false);
   const [validandoCodigo, setValidandoCodigo] = useState(false);
 
+  const senhaRecuperacaoValida = passwordRequirements.every((item) =>
+    item.test(novaSenha)
+  );
+  const confirmacaoNovaSenhaValida =
+    confirmarSenha.trim() !== '' && novaSenha === confirmarSenha;
+  const podeEnviarCodigo =
+    validarEmail(email) &&
+    senhaRecuperacaoValida &&
+    confirmacaoNovaSenhaValida &&
+    !loading;
+
   function validarEmail(valor) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim().toLowerCase());
   }
@@ -325,9 +336,12 @@ export default function ForgotPassword({ navigation }) {
             ) : null}
 
             <TouchableOpacity
-              style={styles.button}
+              style={[
+                styles.button,
+                !podeEnviarCodigo ? styles.buttonInactive : null,
+              ]}
               onPress={() => handleEnviarCodigo()}
-              disabled={loading}
+              disabled={!podeEnviarCodigo}
             >
               {loading ? (
                 <ActivityIndicator color="#FFF" />
@@ -397,7 +411,7 @@ export default function ForgotPassword({ navigation }) {
                   {validandoCodigo ? (
                     <ActivityIndicator color="#FFF" />
                   ) : (
-                    <Text style={styles.buttonText}>Validar codigo e salvar</Text>
+                    <Text style={styles.buttonText}>Salvar</Text>
                   )}
                 </TouchableOpacity>
 
@@ -547,19 +561,25 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   button: {
-    backgroundColor: '#4fdfa3',
-    borderRadius: 8,
-    paddingVertical: 16,
+    backgroundColor: 'rgb(79, 223, 163)',
+    borderRadius: 20,
+    padding: 16,
     alignItems: 'center',
     opacity: 1,
+    transitionDuration: '0s',
   },
   buttonDisabled: {
     opacity: 0.6,
+  },
+  buttonInactive: {
+    backgroundColor: 'rgb(174, 182, 191)',
+    opacity: 1,
   },
   buttonText: {
     color: '#FFF',
     fontWeight: '700',
     fontSize: 16,
+    lineHeight: 20,
   },
   modalOverlay: {
     flex: 1,

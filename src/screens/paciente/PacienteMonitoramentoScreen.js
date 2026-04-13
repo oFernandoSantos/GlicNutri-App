@@ -10,8 +10,8 @@ import {
   Alert,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import PatientScreenLayout from '../components/PatientScreenLayout';
-import { patientTheme, patientShadow } from '../theme/patientTheme';
+import PatientScreenLayout from '../../components/PatientScreenLayout';
+import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import {
   addGlucoseReading,
   appendNewestEntry,
@@ -21,7 +21,7 @@ import {
   fetchPatientExperience,
   getPatientId,
   savePatientAppState,
-} from '../services/patientSupabaseService';
+} from '../../services/patientSupabaseService';
 
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
 

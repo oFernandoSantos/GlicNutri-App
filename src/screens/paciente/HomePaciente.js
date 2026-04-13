@@ -10,7 +10,7 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import { supabase } from '../services/supabaseConfig';
+import { supabase } from '../../services/supabaseConfig';
 
 const softGreenBorder = {
   borderWidth: 1.5,
