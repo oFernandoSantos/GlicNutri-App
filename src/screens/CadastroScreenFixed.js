@@ -13,9 +13,17 @@ import {
   Platform,
   SafeAreaView,
   StyleSheet,
+  Image,
 } from 'react-native';
+import * as WebBrowser from 'expo-web-browser';
+import * as Linking from 'expo-linking';
+import * as AuthSession from 'expo-auth-session';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../services/supabaseConfig';
+import {
+  buildGooglePatientFallback,
+  syncGooglePatientRecord,
+} from '../services/googlePatientSync';
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
@@ -36,6 +44,10 @@ import {
 const softGreenBorder = {
   borderWidth: 1.5,
   borderColor: '#f4f4f4',
+};
+
+const googleLogo = {
+  uri: 'https://img.icons8.com/?size=100&id=xoyhGXWmHnqX&format=png&color=000000',
 };
 
 function createCadastroFieldErrors() {
@@ -82,6 +94,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [codigoAcessoNutricionista, setCodigoAcessoNutricionista] = useState('');
   const [aceitouLgpd, setAceitouLgpd] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [feedbackCadastro, setFeedbackCadastro] = useState(null);
   const [modalCadastroSucessoVisible, setModalCadastroSucessoVisible] = useState(false);
   const [mensagemCadastroSucesso, setMensagemCadastroSucesso] = useState('');
@@ -95,6 +108,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [uf, setUf] = useState('');
 
   const scrollViewRef = useRef(null);
+  const googleSessionHandledRef = useRef(false);
   const opcoesGenero = ['Masculino', 'Feminino', 'Diverso'];
   const isPaciente = role === 'Paciente';
   const senhaCadastroValida = passwordRequirements.every((item) => item.test(senha));
@@ -105,6 +119,36 @@ export default function CadastroScreenFixed({ navigation, route }) {
     setFeedbackCadastro(null);
     limparErrosCamposCadastro();
   }, [roleInicial]);
+
+  useEffect(() => {
+    WebBrowser.maybeCompleteAuthSession();
+  }, []);
+
+  useEffect(() => {
+    async function verificarSessaoAtual() {
+      try {
+        const { data, error } = await supabase.auth.getSession();
+
+        console.log('Sessao atual ao abrir Cadastro =>', {
+          hasSession: !!data?.session,
+          userId: data?.session?.user?.id || null,
+          error: error?.message || null,
+        });
+
+        if (data?.session?.user && !googleSessionHandledRef.current) {
+          googleSessionHandledRef.current = true;
+          await finalizarCadastroGoogleComUsuario(data.session.user);
+        }
+      } catch (error) {
+        console.log('Erro ao verificar sessao atual no cadastro =>', error);
+        googleSessionHandledRef.current = false;
+      }
+    }
+
+    if (isPaciente) {
+      verificarSessaoAtual();
+    }
+  }, [isPaciente, navigation]);
 
   function limparErrosCamposCadastro() {
     setFieldErrors(createCadastroFieldErrors());
@@ -855,6 +899,167 @@ export default function CadastroScreenFixed({ navigation, route }) {
     }
   };
 
+  async function sincronizarPacienteGoogle(user) {
+    try {
+      return (await syncGooglePatientRecord(user)) || buildGooglePatientFallback(user);
+    } catch (error) {
+      console.log('Erro ao sincronizar paciente Google no cadastro =>', error);
+      throw error;
+    }
+  }
+
+  async function finalizarCadastroGoogleComUsuario(user) {
+    const pacienteGoogle = await sincronizarPacienteGoogle(user);
+
+    navigation.reset({
+      index: 0,
+      routes: [
+        {
+          name: 'HomePaciente',
+          params: {
+            usuarioLogado: pacienteGoogle || user,
+            loginSocial: true,
+          },
+        },
+      ],
+    });
+  }
+
+  function extrairTokensDaUrl(url) {
+    let accessToken = null;
+    let refreshToken = null;
+
+    const parsed = Linking.parse(url);
+    console.log('Linking.parse cadastro =>', parsed);
+
+    if (parsed?.queryParams?.access_token) {
+      accessToken = parsed.queryParams.access_token;
+      refreshToken = parsed.queryParams.refresh_token;
+    }
+
+    if ((!accessToken || !refreshToken) && url.includes('#')) {
+      const hashPart = url.split('#')[1];
+      const hashParams = new URLSearchParams(hashPart);
+      accessToken = accessToken || hashParams.get('access_token');
+      refreshToken = refreshToken || hashParams.get('refresh_token');
+    }
+
+    return { accessToken, refreshToken };
+  }
+
+  async function handleGoogleCadastro() {
+    if (!isPaciente) return;
+
+    try {
+      googleSessionHandledRef.current = false;
+      setFeedbackCadastro(null);
+      setGoogleLoading(true);
+
+      const redirectTo =
+        Platform.OS === 'web'
+          ? window.location.origin
+          : AuthSession.makeRedirectUri({
+              scheme: 'glicnutri',
+              path: 'auth/callback',
+            });
+
+      console.log('redirectTo cadastro =>', redirectTo);
+
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider: 'google',
+        options: {
+          redirectTo,
+          skipBrowserRedirect: Platform.OS !== 'web',
+        },
+      });
+
+      if (error) {
+        console.log('Erro OAuth Google no cadastro =>', error);
+        Alert.alert('Erro no Google', error.message);
+        return;
+      }
+
+      if (!data?.url) {
+        Alert.alert('Erro', 'Nao foi possivel iniciar o cadastro com Google.');
+        return;
+      }
+
+      if (Platform.OS === 'web') {
+        window.location.href = data.url;
+        return;
+      }
+
+      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
+
+      console.log('Resultado OAuth cadastro =>', result);
+
+      if (result.type === 'cancel') {
+        googleSessionHandledRef.current = false;
+        return;
+      }
+
+      if (result.type !== 'success' || !result.url) {
+        Alert.alert('Erro', 'Nao foi possivel concluir o cadastro com Google.');
+        return;
+      }
+
+      const returnedUrl = result.url;
+      console.log('URL retorno cadastro =>', returnedUrl);
+
+      let { accessToken, refreshToken } = extrairTokensDaUrl(returnedUrl);
+
+      console.log('accessToken cadastro =>', accessToken ? 'SIM' : 'NAO');
+      console.log('refreshToken cadastro =>', refreshToken ? 'SIM' : 'NAO');
+
+      if (accessToken && refreshToken) {
+        const { data: sessionSetData, error: setSessionError } =
+          await supabase.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+
+        console.log('setSession cadastro =>', {
+          hasSession: !!sessionSetData?.session,
+          userId: sessionSetData?.session?.user?.id || null,
+          error: setSessionError?.message || null,
+        });
+
+        if (setSessionError) {
+          Alert.alert('Erro', setSessionError.message);
+          return;
+        }
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      const { data: finalSessionData, error: finalSessionError } =
+        await supabase.auth.getSession();
+
+      console.log('Sessao final cadastro =>', {
+        hasSession: !!finalSessionData?.session,
+        userId: finalSessionData?.session?.user?.id || null,
+        error: finalSessionError?.message || null,
+      });
+
+      if (finalSessionData?.session?.user) {
+        googleSessionHandledRef.current = true;
+        await finalizarCadastroGoogleComUsuario(finalSessionData.session.user);
+        return;
+      }
+
+      Alert.alert(
+        'Atencao',
+        'O Google voltou para o app, mas o Supabase nao criou a sessao.'
+      );
+    } catch (error) {
+      console.log('Erro cadastro Google =>', error);
+      googleSessionHandledRef.current = false;
+      Alert.alert('Erro', 'Falha ao cadastrar com Google.');
+    } finally {
+      setGoogleLoading(false);
+    }
+  }
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
@@ -1156,10 +1361,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
             <TouchableOpacity
               style={[
                 styles.button,
-                !formularioValido ? styles.buttonInactive : null,
+                (!formularioValido || googleLoading) ? styles.buttonInactive : null,
               ]}
               onPress={handlePressCadastrar}
-              disabled={!formularioValido}
+              disabled={!formularioValido || googleLoading}
             >
               {loading ? (
                 <ActivityIndicator color="#FFF" />
@@ -1167,6 +1372,42 @@ export default function CadastroScreenFixed({ navigation, route }) {
                 <Text style={styles.buttonText}>Cadastrar</Text>
               )}
             </TouchableOpacity>
+
+            {isPaciente ? (
+              <>
+                <View style={styles.dividerContainer}>
+                  <View style={styles.divider} />
+                  <Text style={styles.dividerText}>ou</Text>
+                  <View style={styles.divider} />
+                </View>
+
+                <TouchableOpacity
+                  style={[
+                    styles.googleButton,
+                    googleLoading ? styles.googleButtonLoading : null,
+                  ]}
+                  onPress={handleGoogleCadastro}
+                  disabled={googleLoading || loading}
+                >
+                  {googleLoading ? (
+                    <ActivityIndicator color="#333" />
+                  ) : (
+                    <View style={styles.googleButtonContent}>
+                      <View style={styles.googleBadge}>
+                        <Image
+                          source={googleLogo}
+                          style={styles.googleLogo}
+                          resizeMode="contain"
+                        />
+                      </View>
+                      <Text style={styles.googleButtonText}>
+                        Cadastre-se com Google
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+              </>
+            ) : null}
 
             {feedbackCadastro?.tipo === 'erro' ? (
               <View
@@ -1580,6 +1821,61 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 16,
     lineHeight: 20,
+  },
+  dividerContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 18,
+    marginBottom: 4,
+  },
+  divider: {
+    flex: 1,
+    height: 1,
+    backgroundColor: '#e0e0e0',
+  },
+  dividerText: {
+    marginHorizontal: 10,
+    color: '#7f8c8d',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  googleButton: {
+    marginTop: 12,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dcdcdc',
+    borderRadius: 20,
+    padding: 16,
+    alignItems: 'center',
+    ...softGreenBorder,
+  },
+  googleButtonLoading: {
+    opacity: 0.7,
+  },
+  googleButtonContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  googleBadge: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: '#dadce0',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 10,
+  },
+  googleLogo: {
+    width: 18,
+    height: 18,
+  },
+  googleButtonText: {
+    color: '#3c4043',
+    fontWeight: '600',
+    fontSize: 15,
   },
   feedbackBox: {
     marginTop: 14,
