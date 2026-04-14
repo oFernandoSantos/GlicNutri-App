@@ -1401,7 +1401,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
                         />
                       </View>
                       <Text style={styles.googleButtonText}>
-                        Cadastre-se com Google
+                        Continuar com Google
                       </Text>
                     </View>
                   )}
