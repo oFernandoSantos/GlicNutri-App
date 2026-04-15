@@ -18,6 +18,7 @@ import { patientShadow, patientTheme } from '../../theme/patientTheme';
 import { markPatientOnboardingSeen } from '../../services/patientOnboardingService';
 
 const ONBOARDING_WEB_MAX_WIDTH = 440;
+const ONBOARDING_READER_HEIGHT = 68;
 
 const steps = [
   {
@@ -393,11 +394,7 @@ export default function PacienteOnboardingScreen({
 
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView
-        style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
-        contentContainerStyle={styles.scrollContent}
-        showsVerticalScrollIndicator={false}
-      >
+      <View style={[styles.readerTop, Platform.OS === 'web' && styles.readerTopWebFixed]}>
         <View style={[styles.topBar, { width: contentWidth }]}>
           <View style={styles.topSide}>
             <BotaoVoltar onPress={handleBack} style={styles.backButton} />
@@ -406,19 +403,26 @@ export default function PacienteOnboardingScreen({
           {renderStepProgress()}
 
           <View style={[styles.topSide, styles.topRight]}>
-            {stepIndex < steps.length - 1 ? (
-              <TouchableOpacity
-                activeOpacity={0.78}
-                onPress={() => finishOnboarding(true)}
-                disabled={saving}
-                style={styles.skipButton}
-              >
-                <Text style={styles.skipText}>Pular</Text>
-              </TouchableOpacity>
-            ) : null}
+            <TouchableOpacity
+              activeOpacity={0.78}
+              onPress={() => finishOnboarding(true)}
+              disabled={saving}
+              style={styles.skipButton}
+            >
+              <Text style={styles.skipText}>Pular</Text>
+            </TouchableOpacity>
           </View>
         </View>
+      </View>
 
+      <ScrollView
+        style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
+        contentContainerStyle={[
+          styles.scrollContent,
+          Platform.OS === 'web' && styles.webScrollContent,
+        ]}
+        showsVerticalScrollIndicator={false}
+      >
         <View style={[styles.stepFrame, { width: contentWidth }]}>
           {renderStepCard(currentStep, stepIndex)}
         </View>
@@ -444,8 +448,29 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexGrow: 1,
     paddingHorizontal: 20,
-    paddingTop: 14,
+    paddingTop: 18,
     paddingBottom: 44,
+  },
+  webScrollContent: {
+    paddingTop: ONBOARDING_READER_HEIGHT + 18,
+  },
+  readerTop: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderBottomColor: '#ffffff',
+    borderBottomWidth: 1,
+    justifyContent: 'center',
+    minHeight: ONBOARDING_READER_HEIGHT,
+    width: '100%',
+    zIndex: 10,
+    ...patientShadow,
+  },
+  readerTopWebFixed: {
+    left: 0,
+    position: 'fixed',
+    right: 0,
+    top: 0,
+    zIndex: 1000,
   },
   topBar: {
     alignItems: 'center',

@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
 import { CardStyleInterpolators, createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import IntroScreen from './src/screens/IntroScreen';
 import LoginScreen from './src/screens/LoginScreen';
@@ -279,6 +280,8 @@ export default function App() {
     : introSeen
       ? 'Login'
       : 'Intro';
+  const useFullBleedIntro = initialRouteName === 'Intro';
+  const AppSurface = useFullBleedIntro ? View : SafeAreaView;
 
   const readerScreenOptions = {
     animationEnabled: false,
@@ -291,31 +294,34 @@ export default function App() {
 
   return (
     <GestureHandlerRootView style={[styles.gestureRoot, Platform.OS === 'web' && styles.webDocumentRoot]}>
-      <SafeAreaView
-        style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
-      >
-        <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
-
-        <View
-          style={[styles.appBody, Platform.OS === 'web' && styles.webDocumentBody]}
+      <SafeAreaProvider>
+        <AppSurface
+          style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
         >
-          <NavigationContainer>
-            <Stack.Navigator
-              key={
-                session
-                  ? patientOnboardingSeen
-                    ? 'auth'
-                    : 'auth-onboarding'
-                  : introSeen
-                    ? 'guest-seen'
-                    : 'guest-first'
-              }
-              initialRouteName={initialRouteName}
-              screenOptions={{
-                cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
-                headerShown: false,
-              }}
-            >
+          {!useFullBleedIntro ? (
+            <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+          ) : null}
+
+          <View
+            style={[styles.appBody, Platform.OS === 'web' && styles.webDocumentBody]}
+          >
+            <NavigationContainer>
+              <Stack.Navigator
+                key={
+                  session
+                    ? patientOnboardingSeen
+                      ? 'auth'
+                      : 'auth-onboarding'
+                    : introSeen
+                      ? 'guest-seen'
+                      : 'guest-first'
+                }
+                initialRouteName={initialRouteName}
+                screenOptions={{
+                  cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
+                  headerShown: false,
+                }}
+              >
               <Stack.Screen name="Intro">
                 {(props) => (
                   <IntroScreen
@@ -412,10 +418,11 @@ export default function App() {
                 component={NutricionistaSectionScreen}
                 options={readerScreenOptions}
               />
-            </Stack.Navigator>
-          </NavigationContainer>
-        </View>
-      </SafeAreaView>
+              </Stack.Navigator>
+            </NavigationContainer>
+          </View>
+        </AppSurface>
+      </SafeAreaProvider>
     </GestureHandlerRootView>
   );
 }

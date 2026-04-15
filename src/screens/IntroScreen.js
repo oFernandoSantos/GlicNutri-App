@@ -2,13 +2,14 @@ import React, { useRef, useEffect, useState } from 'react';
 import {
   View,
   Text,
-  SafeAreaView,
+  StatusBar,
   ScrollView,
   ImageBackground,
   Pressable,
   StyleSheet,
   useWindowDimensions,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { INTRO_SEEN_STORAGE_KEY } from '../constants/storageKeys';
 import { supabase } from '../services/supabaseConfig';
@@ -55,6 +56,7 @@ const introSlides = [
 export default function IntroScreen({ navigation, onIntroFinished }) {
   const checkedSession = useRef(false);
   const carouselRef = useRef(null);
+  const insets = useSafeAreaInsets();
   const { width } = useWindowDimensions();
   const slideWidth = Math.max(width, 1);
   const libreCircleSize = Math.min(Math.max(width * 0.48, 160), 300);
@@ -62,6 +64,11 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
   const libreCenterCircleSize = libreCircleSize * 0.16;
   const [activeSlide, setActiveSlide] = useState(0);
   const isLastSlide = activeSlide === introSlides.length - 1;
+  const topActionTextOffset = Math.max(insets.top + 18, 34);
+  const contentTopPadding = topActionTextOffset;
+  const libreContentTopPadding = Math.max(insets.top + 60, 84);
+  const skipTop = topActionTextOffset - 6;
+  const controlsBottom = Math.max(insets.bottom + 18, 30);
 
   useEffect(() => {
     let isMounted = true;
@@ -102,12 +109,6 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
       isMounted = false;
     };
   }, [navigation]);
-
-  useEffect(() => {
-    AsyncStorage.setItem(INTRO_SEEN_STORAGE_KEY, 'true').catch((error) => {
-      console.log('Erro ao marcar intro como vista:', error);
-    });
-  }, []);
 
   const handleSlideScrollEnd = (event) => {
     const offsetX = event.nativeEvent.contentOffset.x;
@@ -154,7 +155,7 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
           key="freestyle-libre"
           style={[styles.slide, styles.libreSlide, { width: slideWidth }]}
         >
-          <View style={styles.libreContent}>
+          <View style={[styles.libreContent, { paddingTop: libreContentTopPadding }]}>
             <View
               style={[
                 styles.libreOuterCircle,
@@ -216,7 +217,7 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
           <View pointerEvents="none" style={styles.darkGreenTone} />
         ) : null}
 
-        <View style={styles.content}>
+        <View style={[styles.content, { paddingTop: contentTopPadding }]}>
           <Text style={styles.brand}>GlicNutri</Text>
 
           <View style={styles.infoArea}>
@@ -232,7 +233,13 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
   };
 
   return (
-    <SafeAreaView style={styles.container}>
+    <View style={styles.container}>
+      <StatusBar
+        translucent
+        backgroundColor="transparent"
+        barStyle={activeSlide === 1 ? 'dark-content' : 'light-content'}
+      />
+
       <View style={styles.introFrame}>
         <ScrollView
           ref={carouselRef}
@@ -250,13 +257,13 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
         </ScrollView>
 
         <Pressable
-          style={styles.skipButton}
+          style={[styles.skipButton, { top: skipTop }]}
           onPress={finishIntro}
         >
           <Text style={styles.skipButtonText}>Pular</Text>
         </Pressable>
 
-        <View style={styles.controls}>
+        <View style={[styles.controls, { bottom: controlsBottom }]}>
           <View style={styles.dotsRow}>
             {introSlides.map((slide, index) => (
               <View
@@ -279,7 +286,7 @@ export default function IntroScreen({ navigation, onIntroFinished }) {
           </Pressable>
         </View>
       </View>
-    </SafeAreaView>
+    </View>
   );
 }
 
