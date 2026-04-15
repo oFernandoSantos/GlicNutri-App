@@ -15,7 +15,6 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import SeletorPerfil from '../components/SeletorPerfil';
-import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
 import { inputFocusBorder } from '../theme/inputFocusTheme';
 import { useKeyboardAwareScroll } from '../utils/keyboardAwareScroll';
@@ -316,11 +315,6 @@ export default function ForgotPassword({ navigation }) {
               Platform.OS === 'web' && styles.webAuthContentBox,
             ]}
           >
-            <BotaoVoltar
-              onPress={() => navigation.navigate('Login')}
-              style={styles.authBackButton}
-            />
-
             <View style={styles.card} onLayout={registerScrollContainer}>
               <Text style={styles.title}>Recuperar senha</Text>
 
@@ -540,9 +534,8 @@ const styles = StyleSheet.create({
   scrollContent: { flexGrow: 1, padding: 20, paddingBottom: 180 },
   modalKeyboard: { flex: 1 },
   webScroll: {
-    height: '100vh',
-    maxHeight: '100vh',
-    overflowY: 'auto',
+    minHeight: '100vh',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   webScrollContent: {
@@ -555,10 +548,6 @@ const styles = StyleSheet.create({
   },
   webAuthContentBox: {
     maxWidth: AUTH_WEB_MAX_WIDTH,
-  },
-  authBackButton: {
-    marginTop: 10,
-    marginBottom: 20,
   },
   card: {
     backgroundColor: '#f4f4f4',

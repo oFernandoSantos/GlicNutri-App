@@ -5,6 +5,7 @@ import {
   View,
   ActivityIndicator,
   Platform,
+  StyleSheet,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
@@ -34,8 +35,82 @@ import { INTRO_SEEN_STORAGE_KEY } from './src/constants/storageKeys';
 import { hasPatientOnboardingSeen } from './src/services/patientOnboardingService';
 
 const Stack = createStackNavigator();
+const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
+const READER_TOPO_WEB_HEIGHT = 59;
+
+function useWebDocumentScroll() {
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    let style = document.getElementById(WEB_SCROLL_STYLE_ID);
+
+    if (!style) {
+      style = document.createElement('style');
+      style.id = WEB_SCROLL_STYLE_ID;
+      document.head.appendChild(style);
+    }
+
+    style.textContent = `
+      html,
+      body,
+      #root {
+        min-height: 100%;
+      }
+
+      body,
+      #root {
+        min-height: 100vh;
+      }
+
+      html,
+      body {
+        height: auto !important;
+        overflow-x: hidden !important;
+        overflow-y: auto !important;
+        -webkit-overflow-scrolling: touch;
+      }
+
+      #root {
+        display: flex;
+        height: auto !important;
+      }
+
+      @supports (min-height: 100dvh) {
+        body,
+        #root {
+          min-height: 100dvh;
+        }
+      }
+
+      *,
+      *::before,
+      *::after {
+        -ms-overflow-style: none !important;
+        scrollbar-width: none !important;
+      }
+
+      *::-webkit-scrollbar {
+        display: none !important;
+        height: 0 !important;
+        width: 0 !important;
+      }
+    `;
+
+    document.documentElement.style.height = 'auto';
+    document.documentElement.style.overflowY = 'auto';
+    document.body.style.height = 'auto';
+    document.body.style.overflowY = 'auto';
+    document.body.style.overflowX = 'hidden';
+
+    return undefined;
+  }, []);
+}
 
 export default function App() {
+  useWebDocumentScroll();
+
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [introReady, setIntroReady] = useState(false);
@@ -175,21 +250,14 @@ export default function App() {
   if (!authReady || !introReady || !patientOnboardingReady) {
     return (
       <SafeAreaView
-        style={[
-          { flex: 1, backgroundColor: patientTheme.colors.background },
-          Platform.OS === 'web' && { height: '100vh', maxHeight: '100vh', overflow: 'hidden' },
-        ]}
+        style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
       >
         <StatusBar
           barStyle="dark-content"
           backgroundColor={patientTheme.colors.background}
         />
         <View
-          style={{
-            flex: 1,
-            alignItems: 'center',
-            justifyContent: 'center',
-          }}
+          style={styles.loadingBody}
         >
           <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
         </View>
@@ -214,6 +282,7 @@ export default function App() {
 
   const readerScreenOptions = {
     animationEnabled: false,
+    cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
     cardStyleInterpolator: CardStyleInterpolators.forNoAnimation,
     gestureEnabled: false,
     header: (props) => <ReaderTopo {...props} />,
@@ -221,20 +290,14 @@ export default function App() {
   };
 
   return (
-    <GestureHandlerRootView style={{ flex: 1 }}>
+    <GestureHandlerRootView style={[styles.gestureRoot, Platform.OS === 'web' && styles.webDocumentRoot]}>
       <SafeAreaView
-        style={[
-          { flex: 1, minHeight: 0, backgroundColor: patientTheme.colors.background },
-          Platform.OS === 'web' && { height: '100vh', maxHeight: '100vh', overflow: 'hidden' },
-        ]}
+        style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
       >
         <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
 
         <View
-          style={[
-            { flex: 1, minHeight: 0 },
-            Platform.OS === 'web' && { height: '100%', maxHeight: '100%', overflow: 'hidden' },
-          ]}
+          style={[styles.appBody, Platform.OS === 'web' && styles.webDocumentBody]}
         >
           <NavigationContainer>
             <Stack.Navigator
@@ -248,7 +311,10 @@ export default function App() {
                     : 'guest-first'
               }
               initialRouteName={initialRouteName}
-              screenOptions={{ headerShown: false }}
+              screenOptions={{
+                cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
+                headerShown: false,
+              }}
             >
               <Stack.Screen name="Intro">
                 {(props) => (
@@ -260,7 +326,7 @@ export default function App() {
                 )}
               </Stack.Screen>
 
-              <Stack.Screen name="Login">
+              <Stack.Screen name="Login" options={readerScreenOptions}>
                 {(props) => (
                   <LoginScreen
                     {...props}
@@ -269,8 +335,16 @@ export default function App() {
                 )}
               </Stack.Screen>
 
-              <Stack.Screen name="Cadastro" component={CadastroScreen} />
-              <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
+              <Stack.Screen
+                name="Cadastro"
+                component={CadastroScreen}
+                options={readerScreenOptions}
+              />
+              <Stack.Screen
+                name="ForgotPassword"
+                component={ForgotPassword}
+                options={readerScreenOptions}
+              />
 
               <Stack.Screen name="PacienteOnboarding">
                 {(props) => (
@@ -345,3 +419,36 @@ export default function App() {
     </GestureHandlerRootView>
   );
 }
+
+const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+    minHeight: 0,
+  },
+  appRoot: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: patientTheme.colors.background,
+  },
+  appBody: {
+    flex: 1,
+    minHeight: 0,
+  },
+  loadingBody: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  webDocumentRoot: {
+    minHeight: '100vh',
+    overflow: 'visible',
+  },
+  webDocumentBody: {
+    minHeight: 0,
+    overflow: 'visible',
+  },
+  webStackCard: {
+    overflow: 'visible',
+    paddingTop: READER_TOPO_WEB_HEIGHT,
+  },
+});

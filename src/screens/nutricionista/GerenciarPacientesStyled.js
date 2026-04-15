@@ -1045,18 +1045,15 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100%',
-    maxHeight: '100%',
-    overflow: 'hidden',
+    minHeight: '100%',
+    overflow: 'visible',
   },
   scroll: {
     flex: 1,
     minHeight: 0,
   },
   webScroll: {
-    height: '100%',
-    maxHeight: '100%',
-    overflowY: 'auto',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   content: {

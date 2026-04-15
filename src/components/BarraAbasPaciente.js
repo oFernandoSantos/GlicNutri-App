@@ -34,7 +34,7 @@ const abasPrincipais = [
   },
 ];
 
-const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed' } : null;
+const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed', zIndex: 850 } : null;
 
 function IconeAba({ aba, ativo }) {
   const cor = ativo ? temaPaciente.cores.primariaForte : '#98A2A7';

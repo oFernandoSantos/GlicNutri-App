@@ -294,9 +294,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100%',
-    maxHeight: '100%',
-    overflow: 'hidden',
+    minHeight: '100%',
+    overflow: 'visible',
   },
   loadingContainer: {
     alignItems: 'center',
@@ -313,10 +312,8 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   webScroll: {
-    height: '100%',
-    maxHeight: '100%',
     overflowX: 'hidden',
-    overflowY: 'auto',
+    overflowY: 'visible',
   },
   scrollContent: {
     flexGrow: 1,

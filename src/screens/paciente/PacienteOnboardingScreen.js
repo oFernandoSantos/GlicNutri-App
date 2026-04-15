@@ -436,9 +436,8 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   webScroll: {
-    height: '100vh',
-    maxHeight: '100vh',
-    overflowY: 'auto',
+    minHeight: '100vh',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   scrollContent: {

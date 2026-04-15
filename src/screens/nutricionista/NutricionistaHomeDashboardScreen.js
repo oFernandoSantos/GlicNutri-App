@@ -300,9 +300,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100%',
-    maxHeight: '100%',
-    overflow: 'hidden',
+    minHeight: '100%',
+    overflow: 'visible',
   },
   scroll: {
     flex: 1,
@@ -314,9 +313,7 @@ const styles = StyleSheet.create({
     paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
   },
   webScroll: {
-    height: '100%',
-    maxHeight: '100%',
-    overflowY: 'auto',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   webScrollContent: {

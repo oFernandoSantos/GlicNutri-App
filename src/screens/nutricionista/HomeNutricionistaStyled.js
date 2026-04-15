@@ -364,9 +364,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100vh',
-    maxHeight: '100vh',
-    overflow: 'hidden',
+    minHeight: '100vh',
+    overflow: 'visible',
   },
   loadingContainer: {
     flex: 1,
@@ -388,9 +387,7 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   webScroll: {
-    height: '100%',
-    maxHeight: '100%',
-    overflowY: 'auto',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   webScrollContent: {

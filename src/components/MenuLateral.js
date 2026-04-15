@@ -22,11 +22,13 @@ export default function MenuLateral({
   const compact = width < 390;
   const drawerWidth = Math.min(width - 12, compact ? width * 0.88 : width * 0.72, 360);
 
+  if (!visivel) return null;
+
   return (
     <Modal
       animationType="fade"
       transparent
-      visible={visivel}
+      visible
       onRequestClose={aoFechar}
     >
       <View style={styles.containerPrincipal}>
@@ -106,16 +108,23 @@ export default function MenuLateral({
 const styles = StyleSheet.create({
   containerPrincipal: {
     flex: 1,
-    flexDirection: 'row',
-    backgroundColor: 'rgba(0,0,0,0.5)',
+    position: 'relative',
   },
   fecharArea: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    zIndex: 1,
   },
   menuConteudo: {
     backgroundColor: '#f4f4f4',
+    bottom: 0,
+    elevation: 2,
     height: '100%',
+    left: 0,
     maxWidth: '100%',
+    position: 'absolute',
+    top: 0,
+    zIndex: 2,
     borderWidth: 1.5,
     borderColor: '#f4f4f4',
   },

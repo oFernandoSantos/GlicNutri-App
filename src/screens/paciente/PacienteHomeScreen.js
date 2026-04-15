@@ -9,6 +9,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Modal,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import BarraAbasPaciente, {
@@ -55,6 +56,18 @@ function getGreetingMeta(name) {
     title: `Boa noite, ${firstName}!`,
     subtitle: 'Hora de fechar o dia com escolhas leves e tranquilas.',
   };
+}
+
+function padDatePart(value) {
+  return String(value).padStart(2, '0');
+}
+
+function formatNotificationDate(date) {
+  return `${padDatePart(date.getDate())}/${padDatePart(date.getMonth() + 1)}/${date.getFullYear()}`;
+}
+
+function formatNotificationTime(date) {
+  return `${padDatePart(date.getHours())}:${padDatePart(date.getMinutes())}`;
 }
 
 function Sparkline({ data }) {
@@ -105,6 +118,8 @@ export default function PacienteHomeScreen({
   usuarioLogado: usuarioProp,
 }) {
   const [menuVisible, setMenuVisible] = useState(false);
+  const [notificationsVisible, setNotificationsVisible] = useState(false);
+  const [dismissedNotificationKeys, setDismissedNotificationKeys] = useState({});
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saindo, setSaindo] = useState(false);
@@ -226,13 +241,6 @@ export default function PacienteHomeScreen({
     carregarDados();
   }, [idPaciente, canResolvePatient]);
 
-  useEffect(() => {
-    navigation.setOptions({
-      readerOnMenuPress: () => setMenuVisible(true),
-      readerMenuDisabled: saindo,
-    });
-  }, [navigation, saindo]);
-
   const onRefresh = () => {
     setRefreshing(true);
     carregarDados();
@@ -250,7 +258,42 @@ export default function PacienteHomeScreen({
   const mealEntries = appState?.mealEntries || [];
   const planSections = appState?.planSections || [];
   const waterCount = appState?.waterCount || 0;
-  const insights = buildHomeInsights(currentGlucose, mealEntries.length);
+  const insights = useMemo(
+    () => buildHomeInsights(currentGlucose, mealEntries.length),
+    [currentGlucose, mealEntries.length]
+  );
+  const notificationBaseTime = useMemo(
+    () => new Date(),
+    [currentGlucose, mealEntries.length]
+  );
+  const allNotificationItems = useMemo(
+    () =>
+      insights.map((item, index) => {
+        const createdAt = new Date(notificationBaseTime.getTime() - index * 18 * 60 * 1000);
+
+        return {
+          ...item,
+          date: formatNotificationDate(createdAt),
+          time: formatNotificationTime(createdAt),
+          notificationKey: `${item.id}-${item.text}`,
+          optionLabel:
+            index === 0
+              ? 'Aviso da IA'
+              : index === 1
+                ? 'Resumo do dia'
+                : 'Lembrete de cuidado',
+        };
+      }),
+    [insights, notificationBaseTime]
+  );
+  const notificationItems = useMemo(
+    () =>
+      allNotificationItems.filter(
+        (item) => !dismissedNotificationKeys[item.notificationKey]
+      ),
+    [allNotificationItems, dismissedNotificationKeys]
+  );
+  const notificationCount = notificationItems.length;
   const sparklineData =
     glucoseReadings.length >= 2
       ? glucoseReadings
@@ -258,6 +301,35 @@ export default function PacienteHomeScreen({
           .reverse()
           .map((item) => item.value)
       : glucoseSparkline;
+
+  useEffect(() => {
+    navigation.setOptions({
+      readerOnMenuPress: () => setMenuVisible(true),
+      readerMenuDisabled: saindo,
+      readerNotificationCount: notificationCount,
+      readerNotificationDisabled: notificationCount === 0,
+      readerOnNotificationPress: () => setNotificationsVisible(true),
+    });
+  }, [navigation, notificationCount, saindo]);
+
+  function limparNotificacao(notificationKey) {
+    setDismissedNotificationKeys((atual) => ({
+      ...atual,
+      [notificationKey]: true,
+    }));
+  }
+
+  function limparTodasNotificacoes() {
+    setDismissedNotificationKeys((atual) => {
+      const proximas = { ...atual };
+
+      notificationItems.forEach((item) => {
+        proximas[item.notificationKey] = true;
+      });
+
+      return proximas;
+    });
+  }
 
   const quickActions = [
     {
@@ -367,6 +439,115 @@ export default function PacienteHomeScreen({
           userName={nomeUsuario}
           userSubtitle={emailUsuario}
         />
+      ) : null}
+
+      {notificationsVisible ? (
+        <Modal
+          visible
+          transparent
+          animationType="fade"
+          onRequestClose={() => setNotificationsVisible(false)}
+        >
+          <View style={styles.notificationModalOverlay}>
+            <View style={styles.notificationModalCard}>
+              <View style={styles.notificationModalHeader}>
+                <View style={styles.notificationTitleRow}>
+                  <View style={styles.notificationIconWrap}>
+                    <Ionicons
+                      name="notifications-outline"
+                      size={20}
+                      color={patientTheme.colors.primary}
+                    />
+                  </View>
+                  <View>
+                    <Text style={styles.notificationModalTitle}>Notificacoes</Text>
+                    <Text style={styles.notificationModalSubtitle}>
+                      {notificationCount} {notificationCount === 1 ? 'aviso agora' : 'avisos agora'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.notificationHeaderActions}>
+                  {notificationCount > 0 ? (
+                    <TouchableOpacity
+                      accessibilityLabel="Limpar todas as notificacoes"
+                      accessibilityRole="button"
+                      activeOpacity={0.78}
+                      onPress={limparTodasNotificacoes}
+                      style={styles.notificationClearAllButton}
+                    >
+                      <Text style={styles.notificationClearAllText}>Limpar todas</Text>
+                    </TouchableOpacity>
+                  ) : null}
+
+                  <TouchableOpacity
+                    accessibilityLabel="Fechar notificacoes"
+                    accessibilityRole="button"
+                    activeOpacity={0.78}
+                    onPress={() => setNotificationsVisible(false)}
+                    style={styles.notificationCloseButton}
+                  >
+                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+
+              <ScrollView
+                style={styles.notificationList}
+                contentContainerStyle={styles.notificationListContent}
+                showsVerticalScrollIndicator={false}
+              >
+                {notificationCount > 0 ? (
+                  notificationItems.map((item) => (
+                    <View key={item.notificationKey} style={styles.notificationItem}>
+                      <View style={styles.notificationItemTopRow}>
+                        <Text style={styles.notificationItemTitle}>{item.title}</Text>
+                        <Text style={styles.notificationOptionText}>{item.optionLabel}</Text>
+                      </View>
+
+                      <View style={styles.notificationMetaRow}>
+                        <View style={styles.notificationMetaPill}>
+                          <Ionicons
+                            name="calendar-outline"
+                            size={13}
+                            color={patientTheme.colors.primaryDark}
+                          />
+                          <Text style={styles.notificationMetaText}>{item.date}</Text>
+                        </View>
+
+                        <View style={styles.notificationMetaPill}>
+                          <Ionicons
+                            name="time-outline"
+                            size={13}
+                            color={patientTheme.colors.primaryDark}
+                          />
+                          <Text style={styles.notificationMetaText}>{item.time}</Text>
+                        </View>
+                      </View>
+
+                      <Text style={styles.notificationItemText}>{item.text}</Text>
+
+                      <TouchableOpacity
+                        accessibilityLabel={`Limpar notificacao ${item.title}`}
+                        accessibilityRole="button"
+                        activeOpacity={0.78}
+                        onPress={() => limparNotificacao(item.notificationKey)}
+                        style={styles.notificationClearButton}
+                      >
+                        <Ionicons name="checkmark-done-outline" size={16} color="#d96666" />
+                        <Text style={styles.notificationClearText}>Limpar notificacao</Text>
+                      </TouchableOpacity>
+                    </View>
+                  ))
+                ) : (
+                  <Text style={styles.notificationEmptyText}>
+                    Nenhuma notificacao nova no momento.
+                  </Text>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        </Modal>
       ) : null}
 
       <ScrollView
@@ -551,9 +732,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100%',
-    maxHeight: '100%',
-    overflow: 'hidden',
+    minHeight: '100%',
+    overflow: 'visible',
   },
   loadingContainer: {
     flex: 1,
@@ -575,9 +755,7 @@ const styles = StyleSheet.create({
     paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
   },
   webScroll: {
-    height: '100%',
-    maxHeight: '100%',
-    overflowY: 'auto',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   webScrollContent: {
@@ -792,6 +970,164 @@ const styles = StyleSheet.create({
   },
   feedCard: {
     gap: 10,
+  },
+  notificationModalOverlay: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(47, 52, 56, 0.28)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  notificationModalCard: {
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    maxHeight: '86%',
+    maxWidth: 420,
+    padding: 18,
+    width: '100%',
+    ...patientShadow,
+  },
+  notificationModalHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  notificationTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flex: 1,
+  },
+  notificationIconWrap: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: '#ffffff',
+    borderRadius: 20,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 40,
+  },
+  notificationModalTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '700',
+  },
+  notificationModalSubtitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  notificationHeaderActions: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginLeft: 10,
+  },
+  notificationClearAllButton: {
+    backgroundColor: '#fff4f4',
+    borderColor: '#f0d2d2',
+    borderRadius: 18,
+    borderWidth: 1,
+    marginRight: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  notificationClearAllText: {
+    color: '#d96666',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  notificationCloseButton: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: '#ffffff',
+    borderRadius: 18,
+    borderWidth: 1,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  notificationList: {
+    maxHeight: 440,
+  },
+  notificationListContent: {
+    paddingBottom: 4,
+  },
+  notificationItem: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: '#ffffff',
+    borderRadius: 16,
+    borderWidth: 1,
+    marginTop: 10,
+    padding: 14,
+  },
+  notificationItemTopRow: {
+    alignItems: 'flex-start',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  notificationItemTitle: {
+    color: patientTheme.colors.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '700',
+    paddingRight: 10,
+  },
+  notificationOptionText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  notificationMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  notificationMetaPill: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderColor: '#ffffff',
+    borderRadius: 14,
+    borderWidth: 1,
+    flexDirection: 'row',
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  notificationMetaText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 5,
+  },
+  notificationItemText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+    marginTop: 5,
+  },
+  notificationClearButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    marginTop: 12,
+    paddingVertical: 4,
+  },
+  notificationClearText: {
+    color: '#d96666',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 5,
+  },
+  notificationEmptyText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
   },
   insightRow: {
     flexDirection: 'row',

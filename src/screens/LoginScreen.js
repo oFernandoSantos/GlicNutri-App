@@ -12,14 +12,15 @@ import {
   SafeAreaView,
   Image,
 } from 'react-native';
-import * as WebBrowser from 'expo-web-browser';
-import * as Linking from 'expo-linking';
-import * as AuthSession from 'expo-auth-session';
 import { supabase } from '../services/supabaseConfig';
 import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
 } from '../services/googlePatientSync';
+import {
+  maybeCompleteGoogleOAuthSession,
+  startGoogleOAuth,
+} from '../services/googleOAuthService';
 import { hasPatientOnboardingSeen } from '../services/patientOnboardingService';
 import SeletorPerfil from '../components/SeletorPerfil';
 import CampoSenha from '../components/CampoSenha';
@@ -254,7 +255,7 @@ export default function LoginScreen({ navigation, route, session }) {
   }
 
   useEffect(() => {
-    WebBrowser.maybeCompleteAuthSession();
+    maybeCompleteGoogleOAuthSession();
   }, []);
 
   useEffect(() => {
@@ -399,122 +400,27 @@ export default function LoginScreen({ navigation, route, session }) {
     });
   }
 
-  function extrairTokensDaUrl(url) {
-    let accessToken = null;
-    let refreshToken = null;
-
-    const parsed = Linking.parse(url);
-    console.log('Linking.parse =>', parsed);
-
-    if (parsed?.queryParams?.access_token) {
-      accessToken = parsed.queryParams.access_token;
-      refreshToken = parsed.queryParams.refresh_token;
-    }
-
-    if ((!accessToken || !refreshToken) && url.includes('#')) {
-      const hashPart = url.split('#')[1];
-      const hashParams = new URLSearchParams(hashPart);
-      accessToken = accessToken || hashParams.get('access_token');
-      refreshToken = refreshToken || hashParams.get('refresh_token');
-    }
-
-    return { accessToken, refreshToken };
-  }
-
   async function handleGoogleLogin() {
     try {
       googleSessionHandledRef.current = false;
       setGoogleLoading(true);
 
-      const redirectTo =
-        Platform.OS === 'web'
-          ? window.location.origin
-          : AuthSession.makeRedirectUri({
-              scheme: 'glicnutri',
-              path: 'auth/callback',
-            });
+      const { cancelled, redirected, session: googleSession } = await startGoogleOAuth();
 
-      console.log('redirectTo =>', redirectTo);
-
-      const { data, error } = await supabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo,
-          skipBrowserRedirect: Platform.OS !== 'web',
-        },
-      });
-
-      if (error) {
-        console.log('Erro OAuth Google =>', error);
-        Alert.alert('Erro no Google', error.message);
-        return;
-      }
-
-      if (!data?.url) {
-        Alert.alert('Erro', 'Nao foi possivel iniciar o login com Google.');
-        return;
-      }
-
-      if (Platform.OS === 'web') {
-        window.location.href = data.url;
-        return;
-      }
-
-      const result = await WebBrowser.openAuthSessionAsync(data.url, redirectTo);
-
-      console.log('Resultado OAuth =>', result);
-
-      if (result.type === 'cancel') {
+      if (cancelled) {
         googleSessionHandledRef.current = false;
         return;
       }
 
-      if (result.type !== 'success' || !result.url) {
-        Alert.alert('Erro', 'Nao foi possivel concluir o login com Google.');
+      if (redirected) {
         return;
       }
 
-      const returnedUrl = result.url;
-      console.log('URL retorno =>', returnedUrl);
+      const finalSession = googleSession || (await supabase.auth.getSession()).data?.session;
 
-      let { accessToken, refreshToken } = extrairTokensDaUrl(returnedUrl);
-
-      console.log('accessToken =>', accessToken ? 'SIM' : 'NAO');
-      console.log('refreshToken =>', refreshToken ? 'SIM' : 'NAO');
-
-      if (accessToken && refreshToken) {
-        const { data: sessionSetData, error: setSessionError } =
-          await supabase.auth.setSession({
-            access_token: accessToken,
-            refresh_token: refreshToken,
-          });
-
-        console.log('setSession =>', {
-          hasSession: !!sessionSetData?.session,
-          userId: sessionSetData?.session?.user?.id || null,
-          error: setSessionError?.message || null,
-        });
-
-        if (setSessionError) {
-          Alert.alert('Erro', setSessionError.message);
-          return;
-        }
-      }
-
-      await new Promise((resolve) => setTimeout(resolve, 800));
-
-      const { data: finalSessionData, error: finalSessionError } =
-        await supabase.auth.getSession();
-
-      console.log('Sessao final =>', {
-        hasSession: !!finalSessionData?.session,
-        userId: finalSessionData?.session?.user?.id || null,
-        error: finalSessionError?.message || null,
-      });
-
-      if (finalSessionData?.session?.user) {
+      if (finalSession?.user) {
         googleSessionHandledRef.current = true;
-        await finalizarLoginGoogleComUsuario(finalSessionData.session.user);
+        await finalizarLoginGoogleComUsuario(finalSession.user);
         return;
       }
 
@@ -525,7 +431,7 @@ export default function LoginScreen({ navigation, route, session }) {
     } catch (error) {
       console.log('Erro login Google =>', error);
       googleSessionHandledRef.current = false;
-      Alert.alert('Erro', 'Falha ao entrar com Google.');
+      Alert.alert('Erro', error?.message || 'Falha ao entrar com Google.');
     } finally {
       setGoogleLoading(false);
     }
@@ -571,16 +477,6 @@ export default function LoginScreen({ navigation, route, session }) {
     padding: 25,
     width: '100%',
     ...softGreenBorder,
-  };
-
-  const loginBrandStyle = {
-    color: '#5afcb8',
-    fontSize: 20,
-    fontWeight: '700',
-    marginTop: 10,
-    marginBottom: 20,
-    height: 40,
-    lineHeight: 40,
   };
 
   const titleStyle = {
@@ -768,9 +664,8 @@ export default function LoginScreen({ navigation, route, session }) {
           style={[
             scrollStyle,
             Platform.OS === 'web' && {
-              height: '100vh',
-              maxHeight: '100vh',
-              overflowY: 'auto',
+              minHeight: '100vh',
+              overflowY: 'visible',
               overflowX: 'hidden',
             },
           ]}
@@ -786,15 +681,6 @@ export default function LoginScreen({ navigation, route, session }) {
           keyboardShouldPersistTaps="handled"
           nestedScrollEnabled
         >
-      <Text
-        style={[
-          loginBrandStyle,
-          Platform.OS === 'web' && webAuthBoxStyle,
-        ]}
-      >
-        GlicNutri
-      </Text>
-
       <View
         onLayout={registerScrollContainer}
         style={[
