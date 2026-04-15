@@ -112,9 +112,8 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   webScroll: {
-    height: '100vh',
-    maxHeight: '100vh',
-    overflowY: 'auto',
+    minHeight: '100vh',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   welcome: { fontSize: 24, fontWeight: 'bold', color: '#FFF' },

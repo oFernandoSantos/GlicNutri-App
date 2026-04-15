@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 
 const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista']);
+const AUTH_BACK_ROUTES = new Set(['Cadastro', 'ForgotPassword']);
 const PATIENT_ROUTES = new Set([
   'PacienteDiario',
   'PacienteMonitoramento',
@@ -21,6 +22,9 @@ const NUTRITIONIST_ROUTES = new Set([
 
 const routeTitles = {
   HomePaciente: 'GlicNutri',
+  Login: 'GlicNutri',
+  Cadastro: 'Cadastro',
+  ForgotPassword: 'Recuperar senha',
   PacienteDiario: 'Diário',
   PacienteMonitoramento: 'Glicose',
   PacienteAssistente: 'IA',
@@ -58,11 +62,24 @@ export default function ReaderTopo({ navigation, route, options }) {
   const title = getTitle(route);
   const topSpacing = Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0;
   const isHome = HOME_ROUTES.has(route?.name);
+  const isLogin = route?.name === 'Login';
+  const isAuthBack = AUTH_BACK_ROUTES.has(route?.name);
+  const hideCenteredTitle = isLogin || isAuthBack;
+  const isPatientHome = route?.name === 'HomePaciente';
   const menuAction = options?.readerOnMenuPress;
   const menuDisabled = options?.readerMenuDisabled;
   const menuLoading = options?.readerMenuLoading;
+  const notificationCount = Number(options?.readerNotificationCount || 0);
+  const notificationAction = options?.readerOnNotificationPress;
+  const notificationDisabled = options?.readerNotificationDisabled;
+  const hasNotifications = notificationCount > 0;
 
   function handleBack() {
+    if (isAuthBack) {
+      navigation?.navigate?.('Login');
+      return;
+    }
+
     const homeRoute = getHomeRoute(route);
     const params = route?.params || {};
 
@@ -78,12 +95,31 @@ export default function ReaderTopo({ navigation, route, options }) {
   }
 
   return (
-    <View style={styles.reader}>
+    <View style={[styles.reader, Platform.OS === 'web' && styles.readerWebFixed]}>
       <View style={{ height: topSpacing }} />
 
       <View style={styles.bar}>
-        <View style={styles.side}>
-          {!isHome ? (
+        <View style={[styles.side, isLogin && styles.brandSide]}>
+          {isLogin ? (
+            <Text style={styles.brandText} numberOfLines={1}>
+              GlicNutri
+            </Text>
+          ) : isPatientHome ? (
+            <TouchableOpacity
+              activeOpacity={0.78}
+              accessibilityLabel="Abrir menu"
+              accessibilityRole="button"
+              disabled={menuDisabled || menuLoading}
+              onPress={menuAction}
+              style={[styles.readerButton, (menuDisabled || menuLoading) && styles.readerButtonDisabled]}
+            >
+              {menuLoading ? (
+                <ActivityIndicator size="small" color={patientTheme.colors.primary} />
+              ) : (
+                <Ionicons name="menu-outline" size={22} color={patientTheme.colors.primary} />
+              )}
+            </TouchableOpacity>
+          ) : isAuthBack || !isHome ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel="Voltar"
@@ -96,14 +132,45 @@ export default function ReaderTopo({ navigation, route, options }) {
           ) : null}
         </View>
 
-        <View pointerEvents="none" style={styles.titleWrap}>
-          <Text style={styles.title} numberOfLines={1}>
-            {title}
-          </Text>
-        </View>
+        {!hideCenteredTitle ? (
+          <View pointerEvents="none" style={styles.titleWrap}>
+            <Text style={styles.title} numberOfLines={1}>
+              {title}
+            </Text>
+          </View>
+        ) : null}
 
         <View style={[styles.side, styles.sideRight]}>
-          {isHome ? (
+          {isPatientHome ? (
+            <TouchableOpacity
+              activeOpacity={0.78}
+              accessibilityLabel={
+                hasNotifications
+                  ? `${notificationCount} notificacoes`
+                  : 'Nenhuma notificacao'
+              }
+              accessibilityRole="button"
+              disabled={notificationDisabled}
+              onPress={notificationAction}
+              style={[
+                styles.readerButton,
+                notificationDisabled && styles.readerButtonDisabled,
+              ]}
+            >
+              <Ionicons
+                name="notifications-outline"
+                size={21}
+                color={patientTheme.colors.primary}
+              />
+              {hasNotifications ? (
+                <View style={styles.notificationBadge}>
+                  <Text style={styles.notificationBadgeText}>
+                    {notificationCount > 9 ? '9+' : notificationCount}
+                  </Text>
+                </View>
+              ) : null}
+            </TouchableOpacity>
+          ) : isHome ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel="Abrir menu"
@@ -135,6 +202,13 @@ const styles = StyleSheet.create({
     borderColor: '#ffffff',
     borderBottomColor: '#ffffff',
   },
+  readerWebFixed: {
+    left: 0,
+    position: 'fixed',
+    right: 0,
+    top: 0,
+    zIndex: 1000,
+  },
   bar: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -151,6 +225,15 @@ const styles = StyleSheet.create({
   sideRight: {
     alignItems: 'flex-end',
   },
+  brandSide: {
+    flex: 1,
+    width: 'auto',
+  },
+  brandText: {
+    color: patientTheme.colors.primary,
+    fontSize: 20,
+    fontWeight: '700',
+  },
   readerButton: {
     alignItems: 'center',
     backgroundColor: '#f4f4f4',
@@ -161,6 +244,26 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 40,
     ...patientShadow,
+  },
+  notificationBadge: {
+    alignItems: 'center',
+    backgroundColor: '#ff1f1f',
+    borderColor: '#ffffff',
+    borderRadius: 9,
+    borderWidth: 1,
+    height: 18,
+    justifyContent: 'center',
+    minWidth: 18,
+    paddingHorizontal: 4,
+    position: 'absolute',
+    right: -2,
+    top: -2,
+  },
+  notificationBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '700',
+    lineHeight: 12,
   },
   readerButtonDisabled: {
     opacity: 0.6,

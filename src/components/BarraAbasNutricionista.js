@@ -14,7 +14,7 @@ const abasPrincipais = [
   { rota: 'NutricionistaRelatorios', rotulo: 'Relatorios', icone: 'bar-chart-outline' },
 ];
 
-const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed' } : null;
+const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed', zIndex: 850 } : null;
 
 export default function BarraAbasNutricionista({
   navigation,

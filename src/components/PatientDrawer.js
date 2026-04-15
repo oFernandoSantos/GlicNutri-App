@@ -45,8 +45,10 @@ export default function PatientDrawer({
   const compact = width < 390;
   const drawerWidth = Math.min(width - 12, compact ? width * 0.9 : width * 0.78, 380);
 
+  if (!visible) return null;
+
   return (
-    <Modal animationType="fade" transparent visible={visible} onRequestClose={onClose}>
+    <Modal animationType="fade" transparent visible onRequestClose={onClose}>
       <View style={styles.root}>
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
 
@@ -146,16 +148,23 @@ export default function PatientDrawer({
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    flexDirection: 'row',
-    backgroundColor: patientTheme.colors.overlay,
+    position: 'relative',
   },
   backdrop: {
-    flex: 1,
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: patientTheme.colors.overlay,
+    zIndex: 1,
   },
   drawer: {
-    height: '100%',
-    maxWidth: '100%',
     backgroundColor: patientTheme.colors.surface,
+    bottom: 0,
+    elevation: 2,
+    height: '100%',
+    left: 0,
+    maxWidth: '100%',
+    position: 'absolute',
+    top: 0,
+    zIndex: 2,
   },
   scroll: {
     flex: 1,

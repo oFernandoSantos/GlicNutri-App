@@ -147,7 +147,7 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   webScroll: {
-    overflowY: 'auto',
+    overflowY: 'visible',
     overflowX: 'hidden',
   },
   scrollConteudo: {
