@@ -7,7 +7,9 @@ import {
   ScrollView,
   Alert,
   ActivityIndicator,
+  KeyboardAvoidingView,
   Platform,
+  SafeAreaView,
   Image,
 } from 'react-native';
 import * as WebBrowser from 'expo-web-browser';
@@ -18,14 +20,18 @@ import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
 } from '../services/googlePatientSync';
+import { hasPatientOnboardingSeen } from '../services/patientOnboardingService';
 import SeletorPerfil from '../components/SeletorPerfil';
 import CampoSenha from '../components/CampoSenha';
 import { inputFocusBorder } from '../theme/inputFocusTheme';
+import { useKeyboardAwareScroll } from '../utils/keyboardAwareScroll';
 
 const softGreenBorder = {
   borderWidth: 1.5,
   borderColor: '#f4f4f4',
 };
+
+const AUTH_WEB_MAX_WIDTH = 440;
 
 const googleLogo = {
   uri: 'https://img.icons8.com/?size=100&id=xoyhGXWmHnqX&format=png&color=000000',
@@ -47,6 +53,12 @@ export default function LoginScreen({ navigation, route, session }) {
   });
   const [focusedField, setFocusedField] = useState('');
   const googleSessionHandledRef = useRef(false);
+  const {
+    scrollViewRef,
+    registerScrollContainer,
+    registerFieldLayout,
+    scrollToField,
+  } = useKeyboardAwareScroll({ topOffset: 115 });
 
   useEffect(() => {
     setRole(roleInicial);
@@ -61,69 +73,13 @@ export default function LoginScreen({ navigation, route, session }) {
     });
   }
 
-  function formatarCpf(valor) {
-    const numeros = valor.replace(/\D/g, '').slice(0, 11);
-
-    return numeros
-      .replace(/^(\d{3})(\d)/, '$1.$2')
-      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
-      .replace(/\.(\d{3})(\d)/, '.$1-$2');
+  function focarCampoLogin(campo) {
+    setFocusedField(campo);
+    scrollToField(campo);
   }
 
-  function formatarCrn(valor) {
-    const textoLimpo = valor.toUpperCase().replace(/[^A-Z0-9]/g, '');
-    const numeros = textoLimpo.replace(/[A-Z]/g, '').slice(0, 5);
-    const uf = textoLimpo.replace(/\d/g, '').slice(0, 2);
-
-    if (!numeros) {
-      return '';
-    }
-
-    return uf ? `${numeros}/${uf}` : numeros;
-  }
-
-  function identificadorPareceEmail(valor, perfil = role) {
-    const valorLimpo = valor.trim();
-
-    if (!valorLimpo) return false;
-    if (valorLimpo.includes('@')) return true;
-
-    if (perfil === 'Paciente') {
-      return /[A-Za-z]/.test(valorLimpo);
-    }
-
-    if (/^[A-Za-z]/.test(valorLimpo)) return true;
-    if (/[._+\-]/.test(valorLimpo)) return true;
-    if (/^\d+$/.test(valorLimpo)) return false;
-
-    const valorSemEspacos = valorLimpo.replace(/\s/g, '');
-    const crnParcial = /^\d{0,5}\/?[A-Za-z]{0,2}$/.test(valorSemEspacos);
-
-    return !crnParcial && /[A-Za-z]/.test(valorLimpo);
-  }
-
-  function formatarIdentificadorLogin(valor, perfil = role) {
-    if (identificadorPareceEmail(valor, perfil)) {
-      return valor.replace(/\s/g, '').toLowerCase();
-    }
-
-    return perfil === 'Paciente' ? formatarCpf(valor) : formatarCrn(valor);
-  }
-
-  function obterMaxLengthIdentificador() {
-    if (identificadorPareceEmail(identificador, role)) {
-      return undefined;
-    }
-
-    return role === 'Paciente' ? 14 : 8;
-  }
-
-  function validarCpfParaLogin(valor) {
-    return valor.replace(/\D/g, '').length === 11;
-  }
-
-  function validarCrnParaLogin(valor) {
-    return /^\d{5}\/[A-Z]{2}$/.test(valor.trim().toUpperCase());
+  function desfocarCampoLogin(campo) {
+    setFocusedField((atual) => (atual === campo ? '' : atual));
   }
 
   function validarEmail(valor) {
@@ -141,28 +97,11 @@ export default function LoginScreen({ navigation, route, session }) {
     };
     const identificadorLimpo = identificadorValor.trim();
     const senhaLimpa = senhaValor.trim();
-    const ehEmail = identificadorPareceEmail(identificadorLimpo, role);
 
     if (!identificadorLimpo) {
-      proximosErros.identificador =
-        role === 'Paciente'
-          ? 'Preencha o CPF ou e-mail.'
-          : 'Preencha o CRN/UF ou e-mail.';
-    } else if (ehEmail && !validarEmail(identificadorLimpo)) {
+      proximosErros.identificador = 'Informe o e-mail cadastrado.';
+    } else if (!validarEmail(identificadorLimpo)) {
       proximosErros.identificador = 'Digite um e-mail valido para continuar.';
-    } else if (
-      role === 'Paciente' &&
-      !ehEmail &&
-      !validarCpfParaLogin(identificadorLimpo)
-    ) {
-      proximosErros.identificador = 'Digite um CPF valido para acessar como paciente.';
-    } else if (
-      role === 'Nutricionista' &&
-      !ehEmail &&
-      !validarCrnParaLogin(identificadorLimpo)
-    ) {
-      proximosErros.identificador =
-        'Digite o CRN no formato 12345/SP para acessar como nutricionista.';
     }
 
     if (!senhaLimpa) {
@@ -177,34 +116,20 @@ export default function LoginScreen({ navigation, route, session }) {
   }
 
   function handleChangeIdentificador(valor) {
-    setErrorMessage('');
-    const proximoValor = formatarIdentificadorLogin(valor, role);
+    const emailMinusculo = valor.toLowerCase();
 
-    setIdentificador(proximoValor);
+    setErrorMessage('');
+    setIdentificador(emailMinusculo);
     setFieldErrors((atual) => ({
       ...atual,
-      identificador: validarCamposLogin({
-        identificadorValor: proximoValor,
-        senhaValor: senha,
-      }).identificador,
+      identificador:
+        emailMinusculo.trim() || atual.identificador
+          ? validarCamposLogin({
+              identificadorValor: emailMinusculo,
+              senhaValor: senha,
+            }).identificador
+          : '',
     }));
-  }
-
-  function normalizarIdentificadorLogin(valor, perfil) {
-    const valorBase = valor.trim();
-    const ehEmail = identificadorPareceEmail(valorBase, perfil);
-    const documentoNormalizado = ehEmail
-      ? ''
-      : perfil === 'Paciente'
-        ? valorBase.replace(/\D/g, '')
-        : formatarCrn(valorBase);
-
-    return {
-      original: valorBase,
-      documento: documentoNormalizado,
-      email: valorBase.toLowerCase(),
-      ehEmail,
-    };
   }
 
   async function buscarUsuarioPorCredenciais(
@@ -213,21 +138,69 @@ export default function LoginScreen({ navigation, route, session }) {
     senhaInformada
   ) {
     const tabela = perfil === 'Paciente' ? 'paciente' : 'nutricionista';
-    const colunaDoc = perfil === 'Paciente' ? 'cpf_paciente' : 'crm_numero';
     const colunaEmail = perfil === 'Paciente' ? 'email_pac' : 'email_acesso';
     const colunaSenha = perfil === 'Paciente' ? 'senha_pac' : 'senha_nutri';
+    const colunaId = perfil === 'Paciente' ? 'id_paciente_uuid' : 'id_nutricionista_uuid';
+    const funcaoLogin =
+      perfil === 'Paciente'
+        ? 'verificar_login_paciente'
+        : 'verificar_login_nutricionista';
 
-    const identificadorNormalizado = normalizarIdentificadorLogin(
-      identificadorInformado,
-      perfil
-    );
+    const emailNormalizado = identificadorInformado.trim().toLowerCase();
     const senhaNormalizada = senhaInformada.trim();
-    const filtrosDocumento = identificadorNormalizado.ehEmail
-      ? []
-      : [
-          identificadorNormalizado.documento,
-          identificadorNormalizado.original,
-        ].filter(Boolean);
+
+    async function verificarExistenciaUsuario() {
+      const { data, error } = await supabase
+        .from(tabela)
+        .select(colunaId)
+        .ilike(colunaEmail, emailNormalizado)
+        .limit(1);
+
+      if (error) throw error;
+
+      return (data || []).length > 0;
+    }
+
+    try {
+      const { data, error } = await supabase.rpc(funcaoLogin, {
+        p_identificador: emailNormalizado,
+        p_senha: senhaNormalizada,
+      });
+
+      if (error) throw error;
+
+      const usuarioEncontrado = Array.isArray(data) ? data[0] : data;
+
+      if (usuarioEncontrado) {
+        return {
+          usuario: usuarioEncontrado,
+          motivo: '',
+        };
+      }
+
+      return {
+        usuario: null,
+        motivo: (await verificarExistenciaUsuario())
+          ? 'senha_incorreta'
+          : 'usuario_nao_encontrado',
+      };
+    } catch (error) {
+      const mensagem = String(error?.message || '').toLowerCase();
+      const funcaoNaoExiste =
+        mensagem.includes(funcaoLogin.toLowerCase()) ||
+        mensagem.includes('could not find the function') ||
+        mensagem.includes('schema cache') ||
+        mensagem.includes('does not exist');
+
+      if (!funcaoNaoExiste) {
+        throw error;
+      }
+
+      console.log(
+        'Funcao de login criptografado ainda nao disponivel; usando validacao legada temporaria.'
+      );
+    }
+
     const candidatos = [];
 
     function adicionarCandidatos(registros) {
@@ -236,18 +209,14 @@ export default function LoginScreen({ navigation, route, session }) {
           item?.id_paciente_uuid ||
           item?.id_nutricionista_uuid ||
           item?.email_pac ||
-          item?.email_acesso ||
-          item?.cpf_paciente ||
-          item?.crm_numero;
+          item?.email_acesso;
 
         if (!candidatos.some((existente) => {
           const chaveExistente =
             existente?.id_paciente_uuid ||
             existente?.id_nutricionista_uuid ||
             existente?.email_pac ||
-            existente?.email_acesso ||
-            existente?.cpf_paciente ||
-            existente?.crm_numero;
+            existente?.email_acesso;
 
           return chaveExistente === chave;
         })) {
@@ -256,52 +225,26 @@ export default function LoginScreen({ navigation, route, session }) {
       });
     }
 
-    for (const valorDocumento of filtrosDocumento) {
-      const { data, error } = await supabase
-        .from(tabela)
-        .select('*')
-        .eq(colunaDoc, valorDocumento);
+    const { data, error } = await supabase
+      .from(tabela)
+      .select('*')
+      .ilike(colunaEmail, emailNormalizado);
 
-      if (error) {
-        throw error;
-      }
-
-      adicionarCandidatos(data);
-
-      const usuarioEncontrado = (data || []).find(
-        (item) => String(item?.[colunaSenha] || '').trim() === senhaNormalizada
-      );
-
-      if (usuarioEncontrado) {
-        return {
-          usuario: usuarioEncontrado,
-          motivo: '',
-        };
-      }
+    if (error) {
+      throw error;
     }
 
-    if (identificadorNormalizado.ehEmail) {
-      const { data, error } = await supabase
-        .from(tabela)
-        .select('*')
-        .ilike(colunaEmail, identificadorNormalizado.email);
+    adicionarCandidatos(data);
 
-      if (error) {
-        throw error;
-      }
+    const usuarioEncontrado = (data || []).find(
+      (item) => String(item?.[colunaSenha] || '').trim() === senhaNormalizada
+    );
 
-      adicionarCandidatos(data);
-
-      const usuarioEncontrado = (data || []).find(
-        (item) => String(item?.[colunaSenha] || '').trim() === senhaNormalizada
-      );
-
-      if (usuarioEncontrado) {
-        return {
-          usuario: usuarioEncontrado,
-          motivo: '',
-        };
-      }
+    if (usuarioEncontrado) {
+      return {
+        usuario: usuarioEncontrado,
+        motivo: '',
+      };
     }
 
     return {
@@ -379,8 +322,8 @@ export default function LoginScreen({ navigation, route, session }) {
             motivo === 'senha_incorreta'
               ? ''
               : role === 'Paciente'
-                ? 'Paciente nao encontrado. Confira o CPF ou e-mail informado.'
-                : 'Nutricionista nao encontrado. Confira o CRN ou e-mail informado.',
+                ? 'Paciente nao encontrado. Confira o e-mail informado.'
+                : 'Nutricionista nao encontrado. Confira o e-mail informado.',
           senha:
             motivo === 'senha_incorreta'
               ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
@@ -402,7 +345,11 @@ export default function LoginScreen({ navigation, route, session }) {
       }
 
       const rotaDestino =
-        role === 'Paciente' ? 'HomePaciente' : 'HomeNutricionista';
+        role === 'Paciente' && !(await hasPatientOnboardingSeen(usuario))
+          ? 'PacienteOnboarding'
+          : role === 'Paciente'
+            ? 'HomePaciente'
+            : 'HomeNutricionista';
 
       navigation.reset({
         index: 0,
@@ -433,14 +380,18 @@ export default function LoginScreen({ navigation, route, session }) {
 
   async function finalizarLoginGoogleComUsuario(user) {
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
+    const usuarioPaciente = pacienteGoogle || user;
+    const rotaDestino = (await hasPatientOnboardingSeen(usuarioPaciente))
+      ? 'HomePaciente'
+      : 'PacienteOnboarding';
 
     navigation.reset({
       index: 0,
       routes: [
         {
-          name: 'HomePaciente',
+          name: rotaDestino,
           params: {
-            usuarioLogado: pacienteGoogle || user,
+            usuarioLogado: usuarioPaciente,
             loginSocial: true,
           },
         },
@@ -583,10 +534,33 @@ export default function LoginScreen({ navigation, route, session }) {
   const containerStyle = {
     flexGrow: 1,
     padding: 20,
+    paddingBottom: 180,
     backgroundColor: '#ffffff',
   };
 
+  const webContentContainerStyle = {
+    alignItems: 'center',
+    flexGrow: 0,
+    minHeight: '100%',
+  };
+
+  const webAuthBoxStyle = {
+    maxWidth: AUTH_WEB_MAX_WIDTH,
+    width: '100%',
+  };
+
   const scrollStyle = {
+    flex: 1,
+    minHeight: 0,
+  };
+
+  const safeAreaStyle = {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: '#ffffff',
+  };
+
+  const keyboardStyle = {
     flex: 1,
     minHeight: 0,
   };
@@ -595,6 +569,7 @@ export default function LoginScreen({ navigation, route, session }) {
     backgroundColor: '#f4f4f4',
     borderRadius: 24,
     padding: 25,
+    width: '100%',
     ...softGreenBorder,
   };
 
@@ -782,30 +757,51 @@ export default function LoginScreen({ navigation, route, session }) {
   };
 
   return (
-    <ScrollView
-      style={[
-        scrollStyle,
-        Platform.OS === 'web' && {
-          height: '100vh',
-          maxHeight: '100vh',
-          overflowY: 'auto',
-          overflowX: 'hidden',
-        },
-      ]}
-      contentContainerStyle={[
-        containerStyle,
-        Platform.OS === 'web' && {
-          flexGrow: 0,
-          minHeight: '100%',
-        },
-      ]}
-      showsVerticalScrollIndicator={false}
-      keyboardShouldPersistTaps="handled"
-      nestedScrollEnabled
-    >
-      <Text style={loginBrandStyle}>GlicNutri</Text>
+    <SafeAreaView style={safeAreaStyle}>
+      <KeyboardAvoidingView
+        style={keyboardStyle}
+        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+      >
+        <ScrollView
+          ref={scrollViewRef}
+          style={[
+            scrollStyle,
+            Platform.OS === 'web' && {
+              height: '100vh',
+              maxHeight: '100vh',
+              overflowY: 'auto',
+              overflowX: 'hidden',
+            },
+          ]}
+          contentContainerStyle={[
+            containerStyle,
+            Platform.OS === 'web' && {
+              flexGrow: 0,
+              minHeight: '100%',
+            },
+            Platform.OS === 'web' && webContentContainerStyle,
+          ]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+          nestedScrollEnabled
+        >
+      <Text
+        style={[
+          loginBrandStyle,
+          Platform.OS === 'web' && webAuthBoxStyle,
+        ]}
+      >
+        GlicNutri
+      </Text>
 
-      <View style={cardStyle}>
+      <View
+        onLayout={registerScrollContainer}
+        style={[
+          cardStyle,
+          Platform.OS === 'web' && webAuthBoxStyle,
+        ]}
+      >
         <Text style={titleStyle}>Bem-vindo</Text>
 
         <SeletorPerfil
@@ -819,63 +815,57 @@ export default function LoginScreen({ navigation, route, session }) {
           }}
         />
 
-        <Text style={labelStyle}>
-          {role === 'Paciente' ? 'CPF ou e-mail' : 'CRN/UF ou e-mail'}
-        </Text>
+        <Text style={labelStyle}>E-mail cadastrado</Text>
         <TextInput
           style={[
             inputStyle,
             fieldErrors.identificador ? inputErrorStyle : null,
             focusedField === 'identificador' ? inputFocusBorder : null,
           ]}
-          placeholder={
-            role === 'Paciente'
-              ? '000.000.000-00 ou email@exemplo.com'
-              : '12345/SP ou email@exemplo.com'
-          }
-          placeholderTextColor="#95a5a6"
+          placeholder="email@exemplo.com"
+          placeholderTextColor="#999"
           value={identificador}
           onChangeText={handleChangeIdentificador}
-          keyboardType="default"
-          autoCapitalize={
-            role === 'Nutricionista' &&
-            identificador.trim() &&
-            !identificadorPareceEmail(identificador, role)
-              ? 'characters'
-              : 'none'
-          }
-          maxLength={obterMaxLengthIdentificador()}
-          onFocus={() => setFocusedField('identificador')}
-          onBlur={() => setFocusedField('')}
+          onLayout={registerFieldLayout('identificador')}
+          onFocus={() => focarCampoLogin('identificador')}
+          onBlur={() => desfocarCampoLogin('identificador')}
+          keyboardType="email-address"
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete="email"
         />
         {fieldErrors.identificador ? (
           <Text style={fieldErrorTextStyle}>{fieldErrors.identificador}</Text>
         ) : null}
 
         <Text style={labelStyle}>Senha</Text>
-        <CampoSenha
-          wrapperStyle={passwordInputWrapperStyle}
-          inputStyle={passwordInputStyle}
-          invalid={!!fieldErrors.senha}
-          invalidStyle={inputErrorStyle}
-          placeholder="********"
-          placeholderTextColor="#95a5a6"
-          value={senha}
-          onChangeText={(valor) => {
-            setSenha(valor);
-            setErrorMessage('');
-            setFieldErrors((atual) => ({
-              ...atual,
-              senha: validarCamposLogin({
-                identificadorValor: identificador,
-                senhaValor: valor,
-              }).senha,
-            }));
-          }}
-          autoCapitalize="none"
-          autoComplete="password"
-          textContentType="password"
-        />
+        <View onLayout={registerFieldLayout('senha')}>
+          <CampoSenha
+            wrapperStyle={passwordInputWrapperStyle}
+            inputStyle={passwordInputStyle}
+            invalid={!!fieldErrors.senha}
+            invalidStyle={inputErrorStyle}
+            placeholder="********"
+            placeholderTextColor="#95a5a6"
+            value={senha}
+            onChangeText={(valor) => {
+              setSenha(valor);
+              setErrorMessage('');
+              setFieldErrors((atual) => ({
+                ...atual,
+                senha: validarCamposLogin({
+                  identificadorValor: identificador,
+                  senhaValor: valor,
+                }).senha,
+              }));
+            }}
+            autoCapitalize="none"
+            autoComplete="password"
+            textContentType="password"
+            onFocus={() => focarCampoLogin('senha')}
+            onBlur={() => desfocarCampoLogin('senha')}
+          />
+        </View>
         {fieldErrors.senha ? (
           <Text style={fieldErrorTextStyle}>{fieldErrors.senha}</Text>
         ) : null}
@@ -941,6 +931,8 @@ export default function LoginScreen({ navigation, route, session }) {
           </Text>
         </TouchableOpacity>
       </View>
-    </ScrollView>
+        </ScrollView>
+      </KeyboardAvoidingView>
+    </SafeAreaView>
   );
 }

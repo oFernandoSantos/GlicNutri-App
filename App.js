@@ -8,13 +8,14 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
-import { createStackNavigator } from '@react-navigation/stack';
+import { CardStyleInterpolators, createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 
 import IntroScreen from './src/screens/IntroScreen';
 import LoginScreen from './src/screens/LoginScreen';
 import CadastroScreen from './src/screens/CadastroScreenFixed';
 import ForgotPassword from './src/screens/ForgotPassword';
+import PacienteOnboardingScreen from './src/screens/paciente/PacienteOnboardingScreen';
 import HomePaciente from './src/screens/paciente/PacienteHomeScreen';
 import HomeNutricionista from './src/screens/nutricionista/NutricionistaHomeDashboardScreen';
 import GerenciarPacientesScreen from './src/screens/nutricionista/GerenciarPacientesStyled';
@@ -24,10 +25,13 @@ import PacienteMonitoramentoScreen from './src/screens/paciente/PacienteMonitora
 import PacienteAssistenteScreen from './src/screens/paciente/PacienteAssistenteScreen';
 import PacienteBemEstarScreen from './src/screens/paciente/PacienteBemEstarScreen';
 import PacientePlanoScreen from './src/screens/paciente/PacientePlanoScreen';
+import PacientePerfilScreen from './src/screens/paciente/PacientePerfilScreen';
+import ReaderTopo from './src/components/ReaderTopo';
 import { supabase } from './src/services/supabaseConfig';
 import { syncGooglePatientRecord } from './src/services/googlePatientSync';
 import { patientTheme } from './src/theme/patientTheme';
 import { INTRO_SEEN_STORAGE_KEY } from './src/constants/storageKeys';
+import { hasPatientOnboardingSeen } from './src/services/patientOnboardingService';
 
 const Stack = createStackNavigator();
 
@@ -36,6 +40,8 @@ export default function App() {
   const [authReady, setAuthReady] = useState(false);
   const [introReady, setIntroReady] = useState(false);
   const [introSeen, setIntroSeen] = useState(false);
+  const [patientOnboardingReady, setPatientOnboardingReady] = useState(false);
+  const [patientOnboardingSeen, setPatientOnboardingSeen] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -112,6 +118,37 @@ export default function App() {
   useEffect(() => {
     let isMounted = true;
 
+    async function carregarOnboardingPaciente() {
+      if (!authReady) return;
+
+      if (!session?.user) {
+        if (isMounted) {
+          setPatientOnboardingSeen(false);
+          setPatientOnboardingReady(true);
+        }
+        return;
+      }
+
+      setPatientOnboardingReady(false);
+
+      const onboardingVisto = await hasPatientOnboardingSeen(session.user);
+
+      if (isMounted) {
+        setPatientOnboardingSeen(onboardingVisto);
+        setPatientOnboardingReady(true);
+      }
+    }
+
+    carregarOnboardingPaciente();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [authReady, session]);
+
+  useEffect(() => {
+    let isMounted = true;
+
     async function carregarIntroVista() {
       try {
         const value = await AsyncStorage.getItem(INTRO_SEEN_STORAGE_KEY);
@@ -135,7 +172,7 @@ export default function App() {
     };
   }, []);
 
-  if (!authReady || !introReady) {
+  if (!authReady || !introReady || !patientOnboardingReady) {
     return (
       <SafeAreaView
         style={[
@@ -168,10 +205,20 @@ export default function App() {
   }
 
   const initialRouteName = session
-    ? 'HomePaciente'
+    ? patientOnboardingSeen
+      ? 'HomePaciente'
+      : 'PacienteOnboarding'
     : introSeen
       ? 'Login'
       : 'Intro';
+
+  const readerScreenOptions = {
+    animationEnabled: false,
+    cardStyleInterpolator: CardStyleInterpolators.forNoAnimation,
+    gestureEnabled: false,
+    header: (props) => <ReaderTopo {...props} />,
+    headerShown: true,
+  };
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
@@ -191,7 +238,15 @@ export default function App() {
         >
           <NavigationContainer>
             <Stack.Navigator
-              key={session ? 'auth' : introSeen ? 'guest-seen' : 'guest-first'}
+              key={
+                session
+                  ? patientOnboardingSeen
+                    ? 'auth'
+                    : 'auth-onboarding'
+                  : introSeen
+                    ? 'guest-seen'
+                    : 'guest-first'
+              }
               initialRouteName={initialRouteName}
               screenOptions={{ headerShown: false }}
             >
@@ -217,53 +272,71 @@ export default function App() {
               <Stack.Screen name="Cadastro" component={CadastroScreen} />
               <Stack.Screen name="ForgotPassword" component={ForgotPassword} />
 
-              <Stack.Screen name="HomePaciente">
+              <Stack.Screen name="PacienteOnboarding">
+                {(props) => (
+                  <PacienteOnboardingScreen
+                    {...getPacienteProps(props)}
+                    onOnboardingFinished={() => setPatientOnboardingSeen(true)}
+                  />
+                )}
+              </Stack.Screen>
+
+              <Stack.Screen name="HomePaciente" options={readerScreenOptions}>
                 {(props) => <HomePaciente {...getPacienteProps(props)} />}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteDiario">
+              <Stack.Screen name="PacienteDiario" options={readerScreenOptions}>
                 {(props) => <PacienteDiarioScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteMonitoramento">
+              <Stack.Screen name="PacienteMonitoramento" options={readerScreenOptions}>
                 {(props) => <PacienteMonitoramentoScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteAssistente">
+              <Stack.Screen name="PacienteAssistente" options={readerScreenOptions}>
                 {(props) => <PacienteAssistenteScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteBemEstar">
+              <Stack.Screen name="PacienteBemEstar" options={readerScreenOptions}>
                 {(props) => <PacienteBemEstarScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
-              <Stack.Screen name="PacientePlano">
+              <Stack.Screen name="PacientePlano" options={readerScreenOptions}>
                 {(props) => <PacientePlanoScreen {...getPacienteProps(props)} />}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfil" options={readerScreenOptions}>
+                {(props) => <PacientePerfilScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
               <Stack.Screen
                 name="HomeNutricionista"
                 component={HomeNutricionista}
+                options={readerScreenOptions}
               />
 
               <Stack.Screen
                 name="GerenciarPacientes"
                 component={GerenciarPacientesScreen}
+                options={readerScreenOptions}
               />
 
               <Stack.Screen
                 name="NutricionistaAgenda"
                 component={NutricionistaSectionScreen}
+                options={readerScreenOptions}
               />
 
               <Stack.Screen
                 name="NutricionistaMensagens"
                 component={NutricionistaSectionScreen}
+                options={readerScreenOptions}
               />
 
               <Stack.Screen
                 name="NutricionistaRelatorios"
                 component={NutricionistaSectionScreen}
+                options={readerScreenOptions}
               />
             </Stack.Navigator>
           </NavigationContainer>

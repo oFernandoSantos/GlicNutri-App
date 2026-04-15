@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -13,8 +13,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import NutricionistaDrawer from '../../components/NutricionistaDrawer';
-import BotaoMenuHamburguer from '../../components/BotaoMenuHamburguer';
 import BarraAbasNutricionista, {
+  NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
 } from '../../components/BarraAbasNutricionista';
 import { nutritionistDashboardData } from '../../data/nutritionistDashboardData';
@@ -94,6 +94,14 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     navigation.navigate(routeName, { usuarioLogado });
   }
 
+  useEffect(() => {
+    navigation.setOptions({
+      readerOnMenuPress: () => setMenuVisible(true),
+      readerMenuDisabled: loadingLogout,
+      readerMenuLoading: loadingLogout,
+    });
+  }, [navigation, loadingLogout]);
+
   const priorityTone = getRiskTone(nutritionistDashboardData.priorityPatient.risk);
 
   return (
@@ -126,13 +134,6 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
           <View style={styles.headerCopy}>
             <Text style={styles.greeting}>{`Dra. ${nomeNutri}`}</Text>
             <Text style={styles.headerSubtitle}>{`CRN ${crnNutri}`}</Text>
-          </View>
-
-          <View style={styles.headerActions}>
-            <BotaoMenuHamburguer
-              onPress={() => setMenuVisible(true)}
-              loading={loadingLogout}
-            />
           </View>
         </View>
 
@@ -299,8 +300,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100vh',
-    maxHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
     overflow: 'hidden',
   },
   scroll: {
@@ -310,7 +311,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
-    paddingBottom: 40 + NUTRI_TAB_BAR_SPACE,
+    paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
   },
   webScroll: {
     height: '100%',

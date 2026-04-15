@@ -24,10 +24,12 @@ import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
 } from '../services/googlePatientSync';
+import { hasPatientOnboardingSeen } from '../services/patientOnboardingService';
 import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
 import { inputFocusBorder } from '../theme/inputFocusTheme';
+import { useKeyboardAwareScroll } from '../utils/keyboardAwareScroll';
 import {
   isValidNutritionistAccessCode,
   normalizeNutritionistAccessCode,
@@ -36,6 +38,7 @@ import {
   getPasswordValidationMessage,
   passwordRequirements,
 } from '../utils/passwordRequirements';
+import { shouldDisableIOSPasswordAutofill } from '../utils/platformAutofill';
 import {
   confirmarCodigoValidacaoEmailCadastro,
   solicitarCodigoValidacaoEmailCadastro,
@@ -50,20 +53,18 @@ const googleLogo = {
   uri: 'https://img.icons8.com/?size=100&id=xoyhGXWmHnqX&format=png&color=000000',
 };
 
+const AUTH_WEB_MAX_WIDTH = 440;
+const AUTH_ACCENT_GREEN = '#24d393';
+
 function createCadastroFieldErrors() {
   return {
     nome: '',
     documento: '',
+    dataNascimento: '',
     genero: '',
     email: '',
     senha: '',
     confirmarSenha: '',
-    cep: '',
-    logradouro: '',
-    numero: '',
-    bairro: '',
-    cidade: '',
-    uf: '',
     aceitouLgpd: '',
     codigoAcessoNutricionista: '',
   };
@@ -76,7 +77,9 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [role, setRole] = useState(roleInicial);
   const [nome, setNome] = useState('');
   const [documento, setDocumento] = useState('');
+  const [dataNascimento, setDataNascimento] = useState('');
   const [genero, setGenero] = useState('');
+  const [cpfInfoAberto, setCpfInfoAberto] = useState(false);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalCodigoAcessoVisible, setModalCodigoAcessoVisible] = useState(false);
   const [erroCodigoAcesso, setErroCodigoAcesso] = useState('');
@@ -100,17 +103,16 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const [mensagemCadastroSucesso, setMensagemCadastroSucesso] = useState('');
   const [fieldErrors, setFieldErrors] = useState(createCadastroFieldErrors);
 
-  const [cep, setCep] = useState('');
-  const [logradouro, setLogradouro] = useState('');
-  const [numero, setNumero] = useState('');
-  const [bairro, setBairro] = useState('');
-  const [cidade, setCidade] = useState('');
-  const [uf, setUf] = useState('');
-
-  const scrollViewRef = useRef(null);
+  const {
+    scrollViewRef,
+    registerScrollContainer,
+    registerFieldLayout,
+    scrollToField,
+  } = useKeyboardAwareScroll({ topOffset: 115 });
   const googleSessionHandledRef = useRef(false);
   const opcoesGenero = ['Masculino', 'Feminino', 'Diverso'];
   const isPaciente = role === 'Paciente';
+  const desativarAutofillIOS = shouldDisableIOSPasswordAutofill();
   const senhaCadastroValida = passwordRequirements.every((item) => item.test(senha));
   const confirmacaoSenhaValida = confirmarSenha.trim() !== '' && senha === confirmarSenha;
 
@@ -157,20 +159,18 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const formularioValido = isPaciente
     ? nome.trim() !== '' &&
       documento.trim() !== '' &&
+      dataNascimento.trim() !== '' &&
+      !validarMensagemDataNascimento(dataNascimento) &&
       genero.trim() !== '' &&
       email.trim() !== '' &&
       senhaCadastroValida &&
       confirmacaoSenhaValida &&
-      cep.trim() !== '' &&
-      logradouro.trim() !== '' &&
-      numero.trim() !== '' &&
-      bairro.trim() !== '' &&
-      cidade.trim() !== '' &&
-      uf.trim() !== '' &&
       aceitouLgpd &&
       !loading
     : nome.trim() !== '' &&
       documento.trim() !== '' &&
+      dataNascimento.trim() !== '' &&
+      !validarMensagemDataNascimento(dataNascimento) &&
       email.trim() !== '' &&
       senhaCadastroValida &&
       confirmacaoSenhaValida &&
@@ -192,7 +192,9 @@ export default function CadastroScreenFixed({ navigation, route }) {
   const limparFormulario = () => {
     setNome('');
     setDocumento('');
+    setDataNascimento('');
     setGenero('');
+    setCpfInfoAberto(false);
     setEmail('');
     setSenha('');
     setConfirmarSenha('');
@@ -200,12 +202,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
     setFocusedField('');
     setCodigoAcessoNutricionista('');
     setAceitouLgpd(false);
-    setCep('');
-    setLogradouro('');
-    setNumero('');
-    setBairro('');
-    setCidade('');
-    setUf('');
     setErroCodigoAcesso('');
     setModalValidacaoEmailVisible(false);
     setCodigoValidacaoEmail('');
@@ -233,9 +229,12 @@ export default function CadastroScreenFixed({ navigation, route }) {
       .replace(/\.(\d{3})(\d)/, '.$1-$2');
   };
 
-  const formatarCep = (valor) => {
+  const formatarDataNascimento = (valor) => {
     const numeros = valor.replace(/\D/g, '').slice(0, 8);
-    return numeros.replace(/^(\d{5})(\d)/, '$1-$2');
+
+    return numeros
+      .replace(/^(\d{2})(\d)/, '$1/$2')
+      .replace(/^(\d{2})\/(\d{2})(\d)/, '$1/$2/$3');
   };
 
   const formatarCrn = (valor) => {
@@ -265,8 +264,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
     return formatarCrn(documento);
   };
 
-  const normalizarCep = () => cep.replace(/\D/g, '');
-
   const validarEmail = (valor) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim().toLowerCase());
 
   const validarCpf = (cpf) => {
@@ -295,7 +292,46 @@ export default function CadastroScreenFixed({ navigation, route }) {
     return resto === Number(cpfLimpo.charAt(10));
   };
 
-  const validarCep = (valorCep) => valorCep.replace(/\D/g, '').length === 8;
+  function obterDataNascimentoValidada(valor) {
+    const numeros = valor.replace(/\D/g, '');
+
+    if (numeros.length !== 8) return null;
+
+    const dia = Number(numeros.slice(0, 2));
+    const mes = Number(numeros.slice(2, 4));
+    const ano = Number(numeros.slice(4, 8));
+    const data = new Date(ano, mes - 1, dia);
+    const hoje = new Date();
+    hoje.setHours(0, 0, 0, 0);
+
+    if (
+      ano < 1900 ||
+      data.getFullYear() !== ano ||
+      data.getMonth() !== mes - 1 ||
+      data.getDate() !== dia ||
+      data > hoje
+    ) {
+      return null;
+    }
+
+    return {
+      data,
+      banco: `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`,
+    };
+  }
+
+  function validarMensagemDataNascimento(valor) {
+    const dataLimpa = valor.trim();
+
+    if (!dataLimpa) return 'Informe a data de nascimento.';
+    if (dataLimpa.replace(/\D/g, '').length !== 8) {
+      return 'Digite a data no formato dd/mm/aaaa.';
+    }
+
+    return obterDataNascimentoValidada(dataLimpa)
+      ? ''
+      : 'Digite uma data de nascimento valida.';
+  }
 
   const validarCampoCadastro = (
     campo,
@@ -307,16 +343,11 @@ export default function CadastroScreenFixed({ navigation, route }) {
   ) => {
     const nomeValor = overrides.nome ?? nome;
     const documentoValor = overrides.documento ?? documento;
+    const dataNascimentoValor = overrides.dataNascimento ?? dataNascimento;
     const generoValor = overrides.genero ?? genero;
     const emailValor = overrides.email ?? email;
     const senhaValor = overrides.senha ?? senha;
     const confirmarSenhaValor = overrides.confirmarSenha ?? confirmarSenha;
-    const cepValor = overrides.cep ?? cep;
-    const logradouroValor = overrides.logradouro ?? logradouro;
-    const numeroValor = overrides.numero ?? numero;
-    const bairroValor = overrides.bairro ?? bairro;
-    const cidadeValor = overrides.cidade ?? cidade;
-    const ufValor = overrides.uf ?? uf;
     const aceitouLgpdValor = overrides.aceitouLgpd ?? aceitouLgpd;
 
     const nomeLimpo = nomeValor.trim();
@@ -325,8 +356,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
       ? documentoValor.replace(/\D/g, '')
       : formatarCrn(documentoValor);
     const emailLimpo = emailValor.trim().toLowerCase();
-    const cepBruto = cepValor.trim();
-    const cepLimpo = cepValor.replace(/\D/g, '');
     const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
 
     switch (campo) {
@@ -343,6 +372,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
           return 'Digite um CPF valido.';
         }
         return '';
+      case 'dataNascimento':
+        return validarMensagemDataNascimento(dataNascimentoValor);
       case 'genero':
         return isPaciente && !generoValor ? 'Selecione o genero do paciente.' : '';
       case 'email':
@@ -353,20 +384,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
       case 'confirmarSenha':
         if (!confirmarSenhaValor) return 'Confirme a senha.';
         return senhaValor !== confirmarSenhaValor ? 'As senhas nao coincidem.' : '';
-      case 'cep':
-        if (!isPaciente) return '';
-        if (!cepBruto) return 'Informe o CEP do paciente.';
-        return !validarCep(cepLimpo) ? 'Digite um CEP valido com 8 numeros.' : '';
-      case 'logradouro':
-        return isPaciente && !logradouroValor.trim() ? 'Informe o logradouro.' : '';
-      case 'numero':
-        return isPaciente && !numeroValor.trim() ? 'Informe o numero.' : '';
-      case 'bairro':
-        return isPaciente && !bairroValor.trim() ? 'Informe o bairro.' : '';
-      case 'cidade':
-        return isPaciente && !cidadeValor.trim() ? 'Informe a cidade.' : '';
-      case 'uf':
-        return isPaciente && !ufValor.trim() ? 'Informe a UF.' : '';
       case 'aceitouLgpd':
         return !aceitouLgpdValor
           ? 'Voce precisa aceitar os termos de LGPD para continuar.'
@@ -390,21 +407,17 @@ export default function CadastroScreenFixed({ navigation, route }) {
       ? [
           'nome',
           'documento',
+          'dataNascimento',
           'genero',
           'email',
           'senha',
           'confirmarSenha',
-          'cep',
-          'logradouro',
-          'numero',
-          'bairro',
-          'cidade',
-          'uf',
           'aceitouLgpd',
         ]
       : [
           'nome',
           'documento',
+          'dataNascimento',
           'email',
           'senha',
           'confirmarSenha',
@@ -421,9 +434,39 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
   const temErrosCadastro = (erros) => Object.values(erros).some(Boolean);
 
+  const campoCadastroTemValor = (campo, overrides = {}) => {
+    const valorCampo = {
+      nome: overrides.nome ?? nome,
+      documento: overrides.documento ?? documento,
+      dataNascimento: overrides.dataNascimento ?? dataNascimento,
+      genero: overrides.genero ?? genero,
+      email: overrides.email ?? email,
+      senha: overrides.senha ?? senha,
+      confirmarSenha: overrides.confirmarSenha ?? confirmarSenha,
+      codigoAcessoNutricionista:
+        overrides.codigoAcessoNutricionista ?? codigoAcessoNutricionista,
+    }[campo];
+
+    if (campo === 'aceitouLgpd') {
+      return true;
+    }
+
+    return String(valorCampo || '').trim() !== '';
+  };
+
   const atualizarErroCampoCadastro = (campo, opcoes = {}) => {
     setFieldErrors((atual) => {
-      if (!atual[campo]) {
+      const overrides = { ...(opcoes.overrides || {}) };
+      if (
+        campo === 'codigoAcessoNutricionista' &&
+        opcoes.codigoAcessoInformado !== undefined
+      ) {
+        overrides.codigoAcessoNutricionista = opcoes.codigoAcessoInformado;
+      }
+      const deveValidarCampo =
+        !!atual[campo] || campoCadastroTemValor(campo, overrides);
+
+      if (!deveValidarCampo) {
         return atual;
       }
 
@@ -432,60 +475,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
         [campo]: validarCampoCadastro(campo, opcoes),
       };
     });
-  };
-
-  const atualizarErrosCamposCadastro = (campos, opcoes = {}) => {
-    setFieldErrors((atual) => {
-      const proximoEstado = { ...atual };
-
-      campos.forEach((campo) => {
-        if (proximoEstado[campo]) {
-          proximoEstado[campo] = validarCampoCadastro(campo, opcoes);
-        }
-      });
-
-      return proximoEstado;
-    });
-  };
-
-  const buscarEnderecoPorCep = async () => {
-    const cepLimpo = normalizarCep();
-
-    if (!isPaciente || cepLimpo.length !== 8) return;
-
-    try {
-      const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      const data = await response.json();
-
-      if (data.erro) {
-        setFeedbackCadastro(null);
-        setFieldErrors((atual) => ({
-          ...atual,
-          cep: 'CEP invalido.',
-        }));
-        return;
-      }
-
-      const logradouroViaCep = data.logradouro || '';
-      const bairroViaCep = data.bairro || '';
-      const cidadeViaCep = data.localidade || '';
-      const ufViaCep = (data.uf || '').toUpperCase();
-
-      setLogradouro(logradouroViaCep);
-      setBairro(bairroViaCep);
-      setCidade(cidadeViaCep);
-      setUf(ufViaCep);
-      atualizarErrosCamposCadastro(['logradouro', 'bairro', 'cidade', 'uf'], {
-        overrides: {
-          logradouro: logradouroViaCep,
-          bairro: bairroViaCep,
-          cidade: cidadeViaCep,
-          uf: ufViaCep,
-        },
-      });
-    } catch (error) {
-      console.log('Erro ao buscar CEP:', error);
-    }
   };
 
   const verificarDuplicidadePaciente = async (cpfLimpo, emailLimpo) => {
@@ -595,60 +584,6 @@ export default function CadastroScreenFixed({ navigation, route }) {
     }
   };
 
-  const validarFormulario = ({
-    nomeLimpo,
-    emailLimpo,
-    documentoFormatado,
-    cepLimpo,
-    exigirCodigoAcesso = true,
-    codigoAcessoInformado = codigoAcessoNutricionista,
-  }) => {
-    const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
-
-    if (!nomeLimpo) return 'Informe o nome completo.';
-    if (!documento.trim()) return `Informe ${isPaciente ? 'o CPF' : 'o CRN/UF'}.`;
-    if (!isPaciente && exigirCodigoAcesso && !codigoAcessoNormalizado) {
-      return 'Informe o codigo de acesso da empresa para cadastrar a nutricionista.';
-    }
-    if (isPaciente && !genero) return 'Selecione o genero do paciente.';
-    if (!emailLimpo) return 'Informe o e-mail.';
-    if (!senha || !confirmarSenha) return 'Preencha a senha e a confirmacao de senha.';
-    if (isPaciente && !cep.trim()) return 'Informe o CEP do paciente.';
-
-    if (
-      isPaciente &&
-      (
-        !logradouro.trim() ||
-        !numero.trim() ||
-        !bairro.trim() ||
-        !cidade.trim() ||
-        !uf.trim()
-      )
-    ) {
-      return 'Preencha todos os campos de endereco do paciente.';
-    }
-
-    if (!aceitouLgpd) return 'Voce precisa aceitar os termos de LGPD para continuar.';
-    if (!validarEmail(emailLimpo)) return 'Digite um e-mail valido.';
-    const erroSenha = getPasswordValidationMessage(senha, 'Informe a senha.');
-    if (erroSenha) return erroSenha;
-    if (senha !== confirmarSenha) return 'As senhas nao coincidem.';
-    if (
-      !isPaciente &&
-      exigirCodigoAcesso &&
-      !isValidNutritionistAccessCode(codigoAcessoNormalizado)
-    ) {
-      return 'Codigo de acesso invalido. Use o codigo fornecido pela empresa.';
-    }
-    if (!isPaciente && !validarCrn(documentoFormatado)) {
-      return 'Digite o CRN no formato 12345/SP.';
-    }
-    if (isPaciente && !validarCpf(documentoFormatado)) return 'Digite um CPF valido.';
-    if (isPaciente && !validarCep(cepLimpo)) return 'Digite um CEP valido com 8 numeros.';
-
-    return null;
-  };
-
   const handleCadastro = async (
     codigoAcessoInformado = codigoAcessoNutricionista,
     { emailValidado = false } = {}
@@ -656,7 +591,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
     const nomeLimpo = nome.trim();
     const emailLimpo = email.trim().toLowerCase();
     const documentoFormatado = normalizarDocumento();
-    const cepLimpo = normalizarCep();
+    const dataNascimentoBanco = obterDataNascimentoValidada(dataNascimento)?.banco || null;
     const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
 
     setFeedbackCadastro(null);
@@ -697,12 +632,13 @@ export default function CadastroScreenFixed({ navigation, route }) {
           email_pac: emailLimpo,
           senha_pac: senha,
           sexo_biologico: genero,
-          cep: cepLimpo,
-          logradouro: logradouro.trim(),
-          numero: numero.trim(),
-          bairro: bairro.trim(),
-          cidade: cidade.trim(),
-          uf: uf.trim().toUpperCase(),
+          data_nascimento: dataNascimentoBanco,
+          cep: '00000000',
+          logradouro: 'Nao informado',
+          numero: '0',
+          bairro: 'Nao informado',
+          cidade: 'Nao informada',
+          uf: 'NI',
           excluido: false,
           data_exclusao: null,
         };
@@ -727,6 +663,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
           crm_numero: documentoFormatado,
           email_acesso: emailLimpo,
           senha_nutri: senha,
+          data_nascimento: dataNascimentoBanco,
         };
 
         const { data, error } = await supabase
@@ -889,7 +826,10 @@ export default function CadastroScreenFixed({ navigation, route }) {
     focusedField === campo ? styles.inputFocused : null,
   ];
 
-  const focarCampo = (campo) => setFocusedField(campo);
+  const focarCampo = (campo) => {
+    setFocusedField(campo);
+    scrollToField(campo);
+  };
 
   const desfocarCampo = (campo, callback) => {
     setFocusedField((atual) => (atual === campo ? '' : atual));
@@ -897,6 +837,16 @@ export default function CadastroScreenFixed({ navigation, route }) {
     if (typeof callback === 'function') {
       callback();
     }
+  };
+
+  const handleChangeEmailCadastro = (valor = '') => {
+    const emailMinusculo = String(valor).toLowerCase();
+
+    setEmail(emailMinusculo);
+    setFeedbackCadastro(null);
+    atualizarErroCampoCadastro('email', {
+      overrides: { email: emailMinusculo },
+    });
   };
 
   async function sincronizarPacienteGoogle(user) {
@@ -910,14 +860,18 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
   async function finalizarCadastroGoogleComUsuario(user) {
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
+    const usuarioPaciente = pacienteGoogle || user;
+    const rotaDestino = (await hasPatientOnboardingSeen(usuarioPaciente))
+      ? 'HomePaciente'
+      : 'PacienteOnboarding';
 
     navigation.reset({
       index: 0,
       routes: [
         {
-          name: 'HomePaciente',
+          name: rotaDestino,
           params: {
-            usuarioLogado: pacienteGoogle || user,
+            usuarioLogado: usuarioPaciente,
             loginSocial: true,
           },
         },
@@ -1064,7 +1018,8 @@ export default function CadastroScreenFixed({ navigation, route }) {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboard}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
       >
         <ScrollView
           ref={scrollViewRef}
@@ -1077,12 +1032,18 @@ export default function CadastroScreenFixed({ navigation, route }) {
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >
-          <BotaoVoltar
-            onPress={() => navigation.navigate('Login')}
-            style={styles.authBackButton}
-          />
+          <View
+            style={[
+              styles.authContent,
+              Platform.OS === 'web' && styles.webAuthContentBox,
+            ]}
+          >
+            <BotaoVoltar
+              onPress={() => navigation.navigate('Login')}
+              style={styles.authBackButton}
+            />
 
-          <View style={styles.card}>
+            <View style={styles.card} onLayout={registerScrollContainer}>
             <Text style={styles.title}>Crie sua conta</Text>
 
             <SeletorPerfil role={role} onChangeRole={trocarPerfil} />
@@ -1091,6 +1052,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
             <TextInput
               style={getInputStyle('nome', fieldErrors.nome)}
               value={nome}
+              onLayout={registerFieldLayout('nome')}
               onChangeText={(valor) => {
                 const nomeFormatado = formatarNome(valor);
                 setNome(nomeFormatado);
@@ -1111,6 +1073,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
             <TextInput
               style={getInputStyle('documento', fieldErrors.documento)}
               value={documento}
+              onLayout={registerFieldLayout('documento')}
               onChangeText={(valor) => {
                 if (isPaciente) {
                   setDocumento(formatarCpf(valor));
@@ -1134,121 +1097,56 @@ export default function CadastroScreenFixed({ navigation, route }) {
 
             {isPaciente ? (
               <>
-                <Text style={styles.label}>CEP</Text>
-                <TextInput
-                  style={getInputStyle('cep', fieldErrors.cep)}
-                  value={cep}
-                  onChangeText={(valor) => {
-                    const cepFormatado = formatarCep(valor);
-                    setCep(cepFormatado);
-                    setFeedbackCadastro(null);
-                    atualizarErroCampoCadastro('cep', {
-                      overrides: { cep: cepFormatado },
-                    });
-                  }}
-                  onFocus={() => focarCampo('cep')}
-                  onBlur={() => desfocarCampo('cep', buscarEnderecoPorCep)}
-                  placeholder="00000-000"
-                  placeholderTextColor="#999"
-                  keyboardType="numeric"
-                  maxLength={9}
-                />
-                {renderFieldError('cep')}
+                <TouchableOpacity
+                  style={styles.cpfInfoToggle}
+                  onPress={() => setCpfInfoAberto((atual) => !atual)}
+                  activeOpacity={0.78}
+                >
+                  <Text style={styles.cpfInfoToggleText}>
+                    Por que perguntamos seu CPF?
+                  </Text>
+                  <Ionicons
+                    name={cpfInfoAberto ? 'chevron-up' : 'chevron-down'}
+                    size={16}
+                    color={AUTH_ACCENT_GREEN}
+                  />
+                </TouchableOpacity>
 
-                <Text style={styles.label}>Logradouro</Text>
-                <TextInput
-                  style={getInputStyle('logradouro', fieldErrors.logradouro)}
-                  value={logradouro}
-                  onChangeText={(valor) => {
-                    setLogradouro(valor);
-                    atualizarErroCampoCadastro('logradouro', {
-                      overrides: { logradouro: valor },
-                    });
-                  }}
-                  onFocus={() => focarCampo('logradouro')}
-                  onBlur={() => desfocarCampo('logradouro')}
-                  placeholder="Rua, avenida..."
-                  placeholderTextColor="#999"
-                />
-                {renderFieldError('logradouro')}
-
-                <Text style={styles.label}>Numero</Text>
-                <TextInput
-                  style={getInputStyle('numero', fieldErrors.numero)}
-                  value={numero}
-                  onChangeText={(valor) => {
-                    setNumero(valor);
-                    atualizarErroCampoCadastro('numero', {
-                      overrides: { numero: valor },
-                    });
-                  }}
-                  onFocus={() => focarCampo('numero')}
-                  onBlur={() => desfocarCampo('numero')}
-                  placeholder="123"
-                  placeholderTextColor="#999"
-                />
-                {renderFieldError('numero')}
-
-                <Text style={styles.label}>Bairro</Text>
-                <TextInput
-                  style={getInputStyle('bairro', fieldErrors.bairro)}
-                  value={bairro}
-                  onChangeText={(valor) => {
-                    setBairro(valor);
-                    atualizarErroCampoCadastro('bairro', {
-                      overrides: { bairro: valor },
-                    });
-                  }}
-                  onFocus={() => focarCampo('bairro')}
-                  onBlur={() => desfocarCampo('bairro')}
-                  placeholder="Seu bairro"
-                  placeholderTextColor="#999"
-                />
-                {renderFieldError('bairro')}
-
-                <View style={styles.row}>
-                  <View style={styles.cityContainer}>
-                    <Text style={styles.label}>Cidade</Text>
-                    <TextInput
-                      style={getInputStyle('cidade', fieldErrors.cidade)}
-                      value={cidade}
-                      onChangeText={(valor) => {
-                        setCidade(valor);
-                        atualizarErroCampoCadastro('cidade', {
-                          overrides: { cidade: valor },
-                        });
-                      }}
-                      onFocus={() => focarCampo('cidade')}
-                      onBlur={() => desfocarCampo('cidade')}
-                      placeholder="Sua cidade"
-                      placeholderTextColor="#999"
-                    />
-                    {renderFieldError('cidade')}
+                {cpfInfoAberto ? (
+                  <View style={styles.cpfInfoBox}>
+                    <Text style={styles.cpfInfoText}>
+                      Solicitamos o CPF, visando promover a interoperabilidade com
+                      programas de suporte a pacientes e prontuarios medicos,
+                      utilizando-o como chave unica de identificacao. Alinhado as
+                      praticas de privacidade e seguranca para seus dados.
+                    </Text>
                   </View>
+                ) : null}
 
-                  <View style={styles.ufContainer}>
-                    <Text style={styles.label}>UF</Text>
-                    <TextInput
-                      style={getInputStyle('uf', fieldErrors.uf)}
-                      value={uf}
-                      onChangeText={(valor) => {
-                        setUf(valor.toUpperCase());
-                        atualizarErroCampoCadastro('uf', {
-                          overrides: { uf: valor.toUpperCase() },
-                        });
-                      }}
-                      onFocus={() => focarCampo('uf')}
-                      onBlur={() => desfocarCampo('uf')}
-                      placeholder="SP"
-                      placeholderTextColor="#999"
-                      maxLength={2}
-                      autoCapitalize="characters"
-                    />
-                    {renderFieldError('uf')}
-                  </View>
-                </View>
               </>
             ) : null}
+
+            <Text style={styles.label}>Data de nascimento</Text>
+            <TextInput
+              style={getInputStyle('dataNascimento', fieldErrors.dataNascimento)}
+              value={dataNascimento}
+              onLayout={registerFieldLayout('dataNascimento')}
+              onChangeText={(valor) => {
+                const dataFormatada = formatarDataNascimento(valor);
+                setDataNascimento(dataFormatada);
+                setFeedbackCadastro(null);
+                atualizarErroCampoCadastro('dataNascimento', {
+                  overrides: { dataNascimento: dataFormatada },
+                });
+              }}
+              onFocus={() => focarCampo('dataNascimento')}
+              onBlur={() => desfocarCampo('dataNascimento')}
+              placeholder="dd/mm/aaaa"
+              placeholderTextColor="#999"
+              keyboardType="numeric"
+              maxLength={10}
+            />
+            {renderFieldError('dataNascimento')}
 
             <Text style={styles.label}>
               {isPaciente ? 'Genero' : 'Genero (opcional)'}
@@ -1271,18 +1169,26 @@ export default function CadastroScreenFixed({ navigation, route }) {
             <TextInput
               style={getInputStyle('email', fieldErrors.email)}
               value={email}
-              onChangeText={(valor) => {
-                setEmail(valor);
-                atualizarErroCampoCadastro('email', {
-                  overrides: { email: valor },
-                });
-              }}
+              onLayout={registerFieldLayout('email')}
+              onChangeText={handleChangeEmailCadastro}
+              onChange={
+                Platform.OS === 'web'
+                  ? (event) =>
+                      handleChangeEmailCadastro(
+                        event?.nativeEvent?.text ?? event?.target?.value ?? ''
+                      )
+                  : undefined
+              }
               onFocus={() => focarCampo('email')}
               onBlur={() => desfocarCampo('email')}
               autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete={desativarAutofillIOS ? 'one-time-code' : 'email'}
+              importantForAutofill="no"
               placeholder="exemplo@email.com"
-              keyboardType="email-address"
+              keyboardType={Platform.OS === 'web' ? 'default' : 'email-address'}
               placeholderTextColor="#999"
+              textContentType={desativarAutofillIOS ? 'oneTimeCode' : 'emailAddress'}
             />
             {renderFieldError('email')}
             <Text style={styles.helperText}>
@@ -1290,49 +1196,63 @@ export default function CadastroScreenFixed({ navigation, route }) {
             </Text>
 
             <Text style={styles.label}>Senha</Text>
-            <CampoSenha
-              wrapperStyle={styles.passwordInputWrapper}
-              inputStyle={styles.passwordInput}
-              invalid={!!fieldErrors.senha}
-              invalidStyle={styles.inputError}
-              value={senha}
-              onChangeText={(valor) => {
-                setSenha(valor);
-                atualizarErroCampoCadastro('senha', {
-                  overrides: { senha: valor },
-                });
-                atualizarErroCampoCadastro('confirmarSenha', {
-                  overrides: { senha: valor },
-                });
-              }}
-              placeholder="Crie uma senha"
-              placeholderTextColor="#999"
-              autoComplete="new-password"
-              textContentType="newPassword"
-              onFocus={() => setSenhaFocada(true)}
-              onBlur={() => setSenhaFocada(false)}
-            />
+            <View onLayout={registerFieldLayout('senha')}>
+              <CampoSenha
+                wrapperStyle={styles.passwordInputWrapper}
+                inputStyle={styles.passwordInput}
+                invalid={!!fieldErrors.senha}
+                invalidStyle={styles.inputError}
+                value={senha}
+                onChangeText={(valor) => {
+                  setSenha(valor);
+                  atualizarErroCampoCadastro('senha', {
+                    overrides: { senha: valor },
+                  });
+                  atualizarErroCampoCadastro('confirmarSenha', {
+                    overrides: { senha: valor },
+                  });
+                }}
+                placeholder="Crie uma senha"
+                placeholderTextColor="#999"
+                autoComplete={desativarAutofillIOS ? 'one-time-code' : 'new-password'}
+                importantForAutofill="no"
+                textContentType={desativarAutofillIOS ? 'oneTimeCode' : 'newPassword'}
+                onFocus={() => {
+                  setSenhaFocada(true);
+                  focarCampo('senha');
+                }}
+                onBlur={() => {
+                  setSenhaFocada(false);
+                  desfocarCampo('senha');
+                }}
+              />
+            </View>
             {renderFieldError('senha')}
             {senhaFocada ? renderPasswordRequirements() : null}
 
             <Text style={styles.label}>Confirmar Senha</Text>
-            <CampoSenha
-              wrapperStyle={styles.passwordInputWrapper}
-              inputStyle={styles.passwordInput}
-              invalid={!!fieldErrors.confirmarSenha}
-              invalidStyle={styles.inputError}
-              value={confirmarSenha}
-              onChangeText={(valor) => {
-                setConfirmarSenha(valor);
-                atualizarErroCampoCadastro('confirmarSenha', {
-                  overrides: { confirmarSenha: valor },
-                });
-              }}
-              placeholder="Repita a senha"
-              placeholderTextColor="#999"
-              autoComplete="new-password"
-              textContentType="newPassword"
-            />
+            <View onLayout={registerFieldLayout('confirmarSenha')}>
+              <CampoSenha
+                wrapperStyle={styles.passwordInputWrapper}
+                inputStyle={styles.passwordInput}
+                invalid={!!fieldErrors.confirmarSenha}
+                invalidStyle={styles.inputError}
+                value={confirmarSenha}
+                onChangeText={(valor) => {
+                  setConfirmarSenha(valor);
+                  atualizarErroCampoCadastro('confirmarSenha', {
+                    overrides: { confirmarSenha: valor },
+                  });
+                }}
+                placeholder="Repita a senha"
+                placeholderTextColor="#999"
+                autoComplete={desativarAutofillIOS ? 'one-time-code' : 'new-password'}
+                importantForAutofill="no"
+                textContentType={desativarAutofillIOS ? 'oneTimeCode' : 'newPassword'}
+                onFocus={() => focarCampo('confirmarSenha')}
+                onBlur={() => desfocarCampo('confirmarSenha')}
+              />
+            </View>
             {renderFieldError('confirmarSenha')}
 
             <TouchableOpacity
@@ -1426,6 +1346,7 @@ export default function CadastroScreenFixed({ navigation, route }) {
                 </Text>
               </View>
             ) : null}
+            </View>
           </View>
         </ScrollView>
 
@@ -1461,73 +1382,79 @@ export default function CadastroScreenFixed({ navigation, route }) {
         </Modal>
 
         <Modal visible={modalCodigoAcessoVisible} transparent animationType="fade">
-          <TouchableWithoutFeedback onPress={() => setModalCodigoAcessoVisible(false)}>
-            <View style={styles.modalOverlay}>
-              <TouchableWithoutFeedback onPress={() => {}}>
-                <View style={styles.modalContent}>
-                  <Text style={styles.modalTitle}>Codigo de Acesso da Empresa</Text>
-                  <Text style={styles.modalDescription}>
-                    Digite o codigo fornecido pela empresa para liberar o cadastro da
-                    nutricionista.
-                  </Text>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          >
+            <TouchableWithoutFeedback onPress={() => setModalCodigoAcessoVisible(false)}>
+              <View style={styles.modalOverlay}>
+                <TouchableWithoutFeedback onPress={() => {}}>
+                  <View style={styles.modalContent}>
+                    <Text style={styles.modalTitle}>Codigo de Acesso da Empresa</Text>
+                    <Text style={styles.modalDescription}>
+                      Digite o codigo fornecido pela empresa para liberar o cadastro da
+                      nutricionista.
+                    </Text>
 
-                  <TextInput
-                    style={getInputStyle(
-                      'codigoAcessoNutricionista',
-                      erroCodigoAcesso || fieldErrors.codigoAcessoNutricionista
-                    )}
-                    value={codigoAcessoNutricionista}
-                    onChangeText={(valor) =>
-                      {
-                        setCodigoAcessoNutricionista(
-                          normalizeNutritionistAccessCode(valor)
-                        );
-                        setErroCodigoAcesso('');
-                        atualizarErroCampoCadastro('codigoAcessoNutricionista', {
-                          codigoAcessoInformado: normalizeNutritionistAccessCode(valor),
-                        });
+                    <TextInput
+                      style={getInputStyle(
+                        'codigoAcessoNutricionista',
+                        erroCodigoAcesso || fieldErrors.codigoAcessoNutricionista
+                      )}
+                      value={codigoAcessoNutricionista}
+                      onChangeText={(valor) =>
+                        {
+                          setCodigoAcessoNutricionista(
+                            normalizeNutritionistAccessCode(valor)
+                          );
+                          setErroCodigoAcesso('');
+                          atualizarErroCampoCadastro('codigoAcessoNutricionista', {
+                            codigoAcessoInformado: normalizeNutritionistAccessCode(valor),
+                          });
+                        }
                       }
-                    }
-                    placeholder="Digite o codigo"
-                    placeholderTextColor="#999"
-                    autoCapitalize="characters"
-                    autoCorrect={false}
-                    onFocus={() => focarCampo('codigoAcessoNutricionista')}
-                    onBlur={() => desfocarCampo('codigoAcessoNutricionista')}
-                  />
+                      placeholder="Digite o codigo"
+                      placeholderTextColor="#999"
+                      autoCapitalize="characters"
+                      autoCorrect={false}
+                      onFocus={() => focarCampo('codigoAcessoNutricionista')}
+                      onBlur={() => desfocarCampo('codigoAcessoNutricionista')}
+                    />
 
-                  {erroCodigoAcesso ? (
-                    <View style={styles.modalErrorBox}>
-                      <Text style={styles.modalErrorText}>{erroCodigoAcesso}</Text>
+                    {erroCodigoAcesso ? (
+                      <View style={styles.modalErrorBox}>
+                        <Text style={styles.modalErrorText}>{erroCodigoAcesso}</Text>
+                      </View>
+                    ) : null}
+
+                    <View style={styles.modalActions}>
+                      <TouchableOpacity
+                        style={[styles.modalActionButton, styles.modalActionSecondary]}
+                        onPress={() => {
+                          setErroCodigoAcesso('');
+                          setFieldErrors((atual) => ({
+                            ...atual,
+                            codigoAcessoNutricionista: '',
+                          }));
+                          setModalCodigoAcessoVisible(false);
+                        }}
+                      >
+                        <Text style={styles.modalActionSecondaryText}>Cancelar</Text>
+                      </TouchableOpacity>
+
+                      <TouchableOpacity
+                        style={[styles.modalActionButton, styles.modalActionPrimary]}
+                        onPress={handleConfirmarCodigoAcesso}
+                      >
+                        <Text style={styles.modalActionPrimaryText}>Confirmar</Text>
+                      </TouchableOpacity>
                     </View>
-                  ) : null}
-
-                  <View style={styles.modalActions}>
-                    <TouchableOpacity
-                      style={[styles.modalActionButton, styles.modalActionSecondary]}
-                      onPress={() => {
-                        setErroCodigoAcesso('');
-                        setFieldErrors((atual) => ({
-                          ...atual,
-                          codigoAcessoNutricionista: '',
-                        }));
-                        setModalCodigoAcessoVisible(false);
-                      }}
-                    >
-                      <Text style={styles.modalActionSecondaryText}>Cancelar</Text>
-                    </TouchableOpacity>
-
-                    <TouchableOpacity
-                      style={[styles.modalActionButton, styles.modalActionPrimary]}
-                      onPress={handleConfirmarCodigoAcesso}
-                    >
-                      <Text style={styles.modalActionPrimaryText}>Confirmar</Text>
-                    </TouchableOpacity>
                   </View>
-                </View>
-              </TouchableWithoutFeedback>
-            </View>
-          </TouchableWithoutFeedback>
+                </TouchableWithoutFeedback>
+              </View>
+            </TouchableWithoutFeedback>
+          </KeyboardAvoidingView>
         </Modal>
 
         <Modal
@@ -1536,8 +1463,13 @@ export default function CadastroScreenFixed({ navigation, route }) {
           animationType="fade"
           onRequestClose={handleCancelarValidacaoEmailCadastro}
         >
-          <View style={styles.modalOverlay}>
-            <View style={styles.emailModalCard}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+          >
+            <View style={styles.modalOverlay}>
+              <View style={styles.emailModalCard}>
               <Text style={styles.emailModalTitle}>Codigo enviado</Text>
               <Text style={styles.emailModalText}>
                 Digite o codigo de 6 digitos enviado para{' '}
@@ -1552,8 +1484,13 @@ export default function CadastroScreenFixed({ navigation, route }) {
                 )}
                 value={codigoValidacaoEmail}
                 onChangeText={(valor) => {
-                  setCodigoValidacaoEmail(valor.replace(/\D/g, '').slice(0, 6));
-                  setErroCodigoValidacaoEmail('');
+                  const codigoLimpo = valor.replace(/\D/g, '').slice(0, 6);
+                  setCodigoValidacaoEmail(codigoLimpo);
+                  setErroCodigoValidacaoEmail(
+                    codigoLimpo && codigoLimpo.length < 6
+                      ? 'Digite os 6 digitos enviados por e-mail.'
+                      : ''
+                  );
                 }}
                 onFocus={() => focarCampo('codigoValidacaoEmail')}
                 onBlur={() => desfocarCampo('codigoValidacaoEmail')}
@@ -1604,8 +1541,9 @@ export default function CadastroScreenFixed({ navigation, route }) {
               >
                 <Text style={styles.emailModalCancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
+              </View>
             </View>
-          </View>
+          </KeyboardAvoidingView>
         </Modal>
 
         <Modal visible={modalCadastroSucessoVisible} transparent animationType="fade">
@@ -1648,8 +1586,9 @@ export default function CadastroScreenFixed({ navigation, route }) {
 const styles = StyleSheet.create({
   container: { flex: 1, minHeight: 0, backgroundColor: '#ffffff' },
   keyboard: { flex: 1, minHeight: 0 },
+  modalKeyboard: { flex: 1 },
   scroll: { flex: 1, minHeight: 0 },
-  scrollContent: { flexGrow: 1, padding: 20, paddingBottom: 60 },
+  scrollContent: { flexGrow: 1, padding: 20, paddingBottom: 180 },
   webScroll: {
     height: '100vh',
     maxHeight: '100vh',
@@ -1657,8 +1596,15 @@ const styles = StyleSheet.create({
     overflowX: 'hidden',
   },
   webScrollContent: {
+    alignItems: 'center',
     flexGrow: 0,
     minHeight: '100%',
+  },
+  authContent: {
+    width: '100%',
+  },
+  webAuthContentBox: {
+    maxWidth: AUTH_WEB_MAX_WIDTH,
   },
   authBackButton: {
     marginTop: 10,
@@ -1668,13 +1614,14 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f4f4',
     borderRadius: 24,
     padding: 25,
+    width: '100%',
     ...softGreenBorder,
   },
   title: {
     fontSize: 22,
     fontWeight: 'bold',
     marginBottom: 20,
-    color: '#4fdfa3',
+    color: AUTH_ACCENT_GREEN,
     textAlign: 'center',
   },
   label: {
@@ -1694,9 +1641,13 @@ const styles = StyleSheet.create({
     ...softGreenBorder,
   },
   codeInput: {
+    borderColor: '#4fdfa3',
+    borderRadius: 20,
+    borderWidth: 1,
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: 4,
+    paddingVertical: 16,
     textAlign: 'center',
   },
   inputError: {
@@ -1735,6 +1686,36 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 17,
   },
+  cpfInfoToggle: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 14,
+    marginTop: -6,
+    paddingVertical: 2,
+  },
+  cpfInfoToggleText: {
+    color: AUTH_ACCENT_GREEN,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 17,
+  },
+  cpfInfoBox: {
+    backgroundColor: '#f7fefb',
+    borderColor: AUTH_ACCENT_GREEN,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 15,
+    marginTop: -4,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  cpfInfoText: {
+    color: '#4B5563',
+    fontSize: 12,
+    lineHeight: 18,
+  },
   requirementsBox: {
     marginBottom: 14,
     marginTop: -7,
@@ -1768,16 +1749,6 @@ const styles = StyleSheet.create({
   },
   inputPickerError: {
     borderColor: '#d96666',
-  },
-  row: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cityContainer: {
-    flex: 1,
-  },
-  ufContainer: {
-    width: 80,
   },
   checkboxContainer: {
     flexDirection: 'row',
@@ -1919,7 +1890,8 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#f4f4f4',
-    width: '85%',
+    width: '100%',
+    maxWidth: 420,
     borderRadius: 15,
     padding: 20,
     ...softGreenBorder,
@@ -1962,11 +1934,11 @@ const styles = StyleSheet.create({
     transitionDuration: '0s',
   },
   emailModalSecondaryButton: {
-    borderRadius: 8,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#4fdfa3',
     alignItems: 'center',
-    paddingVertical: 13,
+    padding: 16,
     marginTop: 10,
   },
   emailModalSecondaryButtonText: {

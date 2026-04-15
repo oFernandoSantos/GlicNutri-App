@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { temaPaciente, sombraPaciente } from '../theme/temaPaciente';
 
@@ -34,6 +34,8 @@ const abasPrincipais = [
   },
 ];
 
+const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed' } : null;
+
 function IconeAba({ aba, ativo }) {
   const cor = ativo ? temaPaciente.cores.primariaForte : '#98A2A7';
 
@@ -54,7 +56,7 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
   }
 
   return (
-    <View style={styles.areaFixa}>
+    <View style={[styles.areaFixa, rodapeWebFixo]}>
       <View style={styles.barra}>
         {abasPrincipais.map((aba) => {
           const ativo = rotaAtual === aba.rota;
@@ -84,12 +86,16 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
 
 const styles = StyleSheet.create({
   areaFixa: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
     width: '100%',
     zIndex: 40,
     elevation: 14,
     backgroundColor: temaPaciente.cores.fundo,
     borderTopWidth: 1,
-    borderTopColor: temaPaciente.cores.borda,
+    borderTopColor: '#FFFFFF',
   },
   barra: {
     width: '100%',
@@ -102,6 +108,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     ...sombraPaciente,
+    borderColor: '#FFFFFF',
   },
   aba: {
     flex: 1,
