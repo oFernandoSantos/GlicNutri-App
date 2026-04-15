@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../theme/patientTheme';
 
@@ -13,6 +13,8 @@ const abasPrincipais = [
   { rota: 'NutricionistaMensagens', rotulo: 'Mensagens', icone: 'chatbubbles-outline' },
   { rota: 'NutricionistaRelatorios', rotulo: 'Relatorios', icone: 'bar-chart-outline' },
 ];
+
+const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed' } : null;
 
 export default function BarraAbasNutricionista({
   navigation,
@@ -28,7 +30,7 @@ export default function BarraAbasNutricionista({
   }
 
   return (
-    <View style={styles.areaFixa}>
+    <View style={[styles.areaFixa, rodapeWebFixo]}>
       <View style={styles.barra}>
         {abasPrincipais.map((aba) => {
           const ativo = rotaAtual === aba.rota;
@@ -57,12 +59,16 @@ export default function BarraAbasNutricionista({
 
 const styles = StyleSheet.create({
   areaFixa: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
     width: '100%',
     zIndex: 40,
     elevation: 14,
     backgroundColor: patientTheme.colors.background,
     borderTopWidth: 1,
-    borderTopColor: patientTheme.colors.border,
+    borderTopColor: '#ffffff',
   },
   barra: {
     width: '100%',
@@ -75,6 +81,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     ...patientShadow,
+    borderColor: '#ffffff',
   },
   aba: {
     flex: 1,

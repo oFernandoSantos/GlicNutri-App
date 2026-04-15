@@ -9,8 +9,8 @@ import {
   StatusBar,
 } from 'react-native';
 import { patientTheme, patientShadow } from '../../theme/patientTheme';
-import BotaoVoltar from '../../components/BotaoVoltar';
 import BarraAbasNutricionista, {
+  NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
 } from '../../components/BarraAbasNutricionista';
 import { nutritionistSectionContent } from '../../data/nutritionistDashboardData';
@@ -50,15 +50,6 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
       >
-        <View style={styles.headerRow}>
-          <BotaoVoltar
-            navigation={navigation}
-            fallbackRoute="HomeNutricionista"
-            fallbackParams={{ usuarioLogado }}
-            preferFallback
-          />
-        </View>
-
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -117,8 +108,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100vh',
-    maxHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
     overflow: 'hidden',
   },
   scroll: {
@@ -128,7 +119,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
-    paddingBottom: 40 + NUTRI_TAB_BAR_SPACE,
+    paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
   },
   webScroll: {
     height: '100%',
@@ -139,12 +130,6 @@ const styles = StyleSheet.create({
   webScrollContent: {
     flexGrow: 1,
     minHeight: '100%',
-  },
-  headerRow: {
-    marginTop: 14,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
   },
   menuPills: {
     paddingVertical: 18,

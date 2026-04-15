@@ -8,6 +8,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { inputFocusBorder, inputWebFocusReset } from '../theme/inputFocusTheme';
+import { shouldDisableIOSPasswordAutofill } from '../utils/platformAutofill';
 
 let webPasswordStyleInjected = false;
 
@@ -69,6 +70,7 @@ export default function CampoSenha({
   const [visivel, setVisivel] = useState(false);
   const [focado, setFocado] = useState(false);
   const editable = textInputProps.editable !== false;
+  const desativarAutofillIOS = shouldDisableIOSPasswordAutofill();
 
   useEffect(() => {
     injectWebPasswordStyle();
@@ -106,9 +108,10 @@ export default function CampoSenha({
         placeholder={placeholder}
         placeholderTextColor={placeholderTextColor}
         autoCapitalize={autoCapitalize}
-        autoComplete={autoComplete}
+        autoComplete={desativarAutofillIOS ? 'one-time-code' : autoComplete}
         autoCorrect={autoCorrect}
-        textContentType={textContentType}
+        importantForAutofill={desativarAutofillIOS ? 'no' : textInputProps.importantForAutofill}
+        textContentType={desativarAutofillIOS ? 'oneTimeCode' : textContentType}
         secureTextEntry={Platform.OS !== 'web' && !visivel}
         onFocus={handleFocus}
         onBlur={handleBlur}

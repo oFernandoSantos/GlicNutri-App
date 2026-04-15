@@ -8,8 +8,10 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
-import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from './BarraAbasPaciente';
-import BotaoVoltar from './BotaoVoltar';
+import BarraAbasPaciente, {
+  PATIENT_TAB_BAR_HEIGHT,
+  PATIENT_TAB_BAR_SPACE,
+} from './BarraAbasPaciente';
 import { patientTheme } from '../theme/patientTheme';
 
 export default function PatientScreenLayout({
@@ -29,12 +31,6 @@ export default function PatientScreenLayout({
 
       <View style={styles.body}>
         <View style={styles.header}>
-          <BotaoVoltar
-            navigation={navigation}
-            fallbackRoute="HomePaciente"
-            preferFallback
-          />
-
           <View style={styles.headerText}>
             <Text style={styles.title}>{title}</Text>
             {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
@@ -77,8 +73,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100vh',
-    maxHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
     overflow: 'hidden',
   },
   body: {
@@ -87,7 +83,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: patientTheme.spacing.screen,
-    paddingTop: 18,
+    paddingTop: 10,
     paddingBottom: 8,
   },
   scroll: {
@@ -101,7 +97,6 @@ const styles = StyleSheet.create({
     overflowX: 'hidden',
   },
   headerText: {
-    marginTop: 18,
     marginRight: 72,
   },
   title: {
@@ -129,7 +124,7 @@ const styles = StyleSheet.create({
     paddingBottom: 36,
   },
   contentWithTabBar: {
-    paddingBottom: PATIENT_TAB_BAR_SPACE + 4,
+    paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
   },
   webContent: {
     flexGrow: 1,

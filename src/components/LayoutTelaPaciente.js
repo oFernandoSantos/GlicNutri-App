@@ -8,8 +8,10 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
-import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from './BarraAbasPaciente';
-import BotaoVoltar from './BotaoVoltar';
+import BarraAbasPaciente, {
+  PATIENT_TAB_BAR_HEIGHT,
+  PATIENT_TAB_BAR_SPACE,
+} from './BarraAbasPaciente';
 import { temaPaciente, sombraPaciente } from '../theme/temaPaciente';
 
 export default function LayoutTelaPaciente({
@@ -23,7 +25,6 @@ export default function LayoutTelaPaciente({
   children,
   acaoDireita,
   rightAction,
-  mostrarVoltar = true,
   estiloConteudo,
   contentContainerStyle,
   mostrarBarraAbas = true,
@@ -36,18 +37,10 @@ export default function LayoutTelaPaciente({
   const cabecalho = (
     <View style={styles.cabecalho}>
       <View style={styles.topoCabecalho}>
-        {mostrarVoltar ? (
-          <BotaoVoltar
-            navigation={navigation}
-            fallbackRoute="HomePaciente"
-            preferFallback
-          />
-        ) : (
-          <View style={styles.insigniaPaciente}>
-            <View style={styles.pontoOnline} />
-            <Text style={styles.textoInsignia}>Paciente conectado</Text>
-          </View>
-        )}
+        <View style={styles.insigniaPaciente}>
+          <View style={styles.pontoOnline} />
+          <Text style={styles.textoInsignia}>Paciente conectado</Text>
+        </View>
 
         <View style={styles.acaoDireita}>{acaoCabecalho || null}</View>
       </View>
@@ -162,7 +155,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   scrollConteudoComBarra: {
-    paddingBottom: PATIENT_TAB_BAR_SPACE + 18,
+    paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
   },
   webScrollConteudo: {
     flexGrow: 0,
@@ -174,7 +167,7 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
   },
   conteudoFixoComBarra: {
-    paddingBottom: PATIENT_TAB_BAR_SPACE + 18,
+    paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
   },
   conteudo: {
     paddingHorizontal: temaPaciente.espacos.tela,

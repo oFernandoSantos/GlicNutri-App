@@ -17,7 +17,6 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../../theme/patientTheme';
-import BotaoVoltar from '../../components/BotaoVoltar';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -385,13 +384,6 @@ export default function GerenciarPacientesScreen({ navigation, route }) {
         nestedScrollEnabled
       >
         <View style={styles.headerRow}>
-          <BotaoVoltar
-            navigation={navigation}
-            fallbackRoute="HomeNutricionista"
-            fallbackParams={{ usuarioLogado }}
-            preferFallback
-          />
-
           <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
             <Ionicons
               name="refresh-outline"

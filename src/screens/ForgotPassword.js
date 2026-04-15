@@ -18,6 +18,7 @@ import SeletorPerfil from '../components/SeletorPerfil';
 import BotaoVoltar from '../components/BotaoVoltar';
 import CampoSenha from '../components/CampoSenha';
 import { inputFocusBorder } from '../theme/inputFocusTheme';
+import { useKeyboardAwareScroll } from '../utils/keyboardAwareScroll';
 import {
   confirmarCodigoRecuperacaoSenha,
   solicitarCodigoRecuperacaoSenha,
@@ -31,6 +32,8 @@ const softGreenBorder = {
   borderWidth: 1.5,
   borderColor: '#f4f4f4',
 };
+
+const AUTH_WEB_MAX_WIDTH = 440;
 
 const camposIniciaisErro = {
   email: '',
@@ -52,6 +55,12 @@ export default function ForgotPassword({ navigation }) {
   const [focusedField, setFocusedField] = useState('');
   const [loading, setLoading] = useState(false);
   const [validandoCodigo, setValidandoCodigo] = useState(false);
+  const {
+    scrollViewRef,
+    registerScrollContainer,
+    registerFieldLayout,
+    scrollToField,
+  } = useKeyboardAwareScroll({ topOffset: 115 });
 
   const senhaRecuperacaoValida = passwordRequirements.every((item) =>
     item.test(novaSenha)
@@ -68,8 +77,21 @@ export default function ForgotPassword({ navigation }) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim().toLowerCase());
   }
 
-  function validarFormularioSenha() {
-    const emailLimpo = email.trim().toLowerCase();
+  function focarCampoRecuperacao(campo) {
+    setFocusedField(campo);
+    scrollToField(campo);
+  }
+
+  function desfocarCampoRecuperacao(campo) {
+    setFocusedField((atual) => (atual === campo ? '' : atual));
+  }
+
+  function obterErrosFormularioSenha({
+    emailValor = email,
+    novaSenhaValor = novaSenha,
+    confirmarSenhaValor = confirmarSenha,
+  } = {}) {
+    const emailLimpo = emailValor.trim().toLowerCase();
     const proximosErros = {
       email: '',
       novaSenha: '',
@@ -83,15 +105,22 @@ export default function ForgotPassword({ navigation }) {
     }
 
     proximosErros.novaSenha = getPasswordValidationMessage(
-      novaSenha,
+      novaSenhaValor,
       'Informe a nova senha.'
     );
 
-    if (!confirmarSenha) {
+    if (!confirmarSenhaValor) {
       proximosErros.confirmarSenha = 'Confirme a nova senha.';
-    } else if (novaSenha !== confirmarSenha) {
+    } else if (novaSenhaValor !== confirmarSenhaValor) {
       proximosErros.confirmarSenha = 'As senhas nao coincidem.';
     }
+
+    return proximosErros;
+  }
+
+  function validarFormularioSenha() {
+    const emailLimpo = email.trim().toLowerCase();
+    const proximosErros = obterErrosFormularioSenha();
 
     setFieldErrors(proximosErros);
 
@@ -102,8 +131,47 @@ export default function ForgotPassword({ navigation }) {
     return emailLimpo;
   }
 
-  function limparErroCampo(campo) {
-    setFieldErrors((atual) => ({ ...atual, [campo]: '' }));
+  function handleChangeEmail(valor) {
+    const emailMinusculo = valor.toLowerCase();
+
+    setEmail(emailMinusculo);
+    setFeedbackSucesso('');
+    setFieldErrors((atual) => ({
+      ...atual,
+      email:
+        emailMinusculo.trim() || atual.email
+          ? obterErrosFormularioSenha({ emailValor: emailMinusculo }).email
+          : '',
+    }));
+  }
+
+  function handleChangeNovaSenha(valor) {
+    setNovaSenha(valor);
+    setFeedbackSucesso('');
+
+    const proximosErros = obterErrosFormularioSenha({ novaSenhaValor: valor });
+
+    setFieldErrors((atual) => ({
+      ...atual,
+      novaSenha: valor || atual.novaSenha ? proximosErros.novaSenha : '',
+      confirmarSenha:
+        confirmarSenha || atual.confirmarSenha
+          ? proximosErros.confirmarSenha
+          : atual.confirmarSenha,
+    }));
+  }
+
+  function handleChangeConfirmarSenha(valor) {
+    setConfirmarSenha(valor);
+    setFeedbackSucesso('');
+
+    setFieldErrors((atual) => ({
+      ...atual,
+      confirmarSenha:
+        valor || atual.confirmarSenha
+          ? obterErrosFormularioSenha({ confirmarSenhaValor: valor }).confirmarSenha
+          : '',
+    }));
   }
 
   function renderPasswordRequirements() {
@@ -228,9 +296,11 @@ export default function ForgotPassword({ navigation }) {
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboard}
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
       >
         <ScrollView
+          ref={scrollViewRef}
           style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
           contentContainerStyle={[
             styles.scrollContent,
@@ -240,115 +310,124 @@ export default function ForgotPassword({ navigation }) {
           showsVerticalScrollIndicator={false}
           nestedScrollEnabled
         >
-          <BotaoVoltar
-            onPress={() => navigation.navigate('Login')}
-            style={styles.authBackButton}
-          />
-
-          <View style={styles.card}>
-            <Text style={styles.title}>Recuperar senha</Text>
-
-            <SeletorPerfil
-              role={role}
-              onChangeRole={(perfil) => {
-                setRole(perfil);
-                setEmail('');
-                setCodigo('');
-                setCodigoErro('');
-                setFieldErrors(camposIniciaisErro);
-                setFeedbackSucesso('');
-                setModalCodigoVisible(false);
-                setNovaSenhaFocada(false);
-              }}
+          <View
+            style={[
+              styles.authContent,
+              Platform.OS === 'web' && styles.webAuthContentBox,
+            ]}
+          >
+            <BotaoVoltar
+              onPress={() => navigation.navigate('Login')}
+              style={styles.authBackButton}
             />
 
-            <Text style={styles.label}>E-mail cadastrado</Text>
-            <TextInput
-              style={[
-                styles.input,
-                fieldErrors.email ? styles.inputError : null,
-                focusedField === 'email' ? styles.inputFocused : null,
-              ]}
-              value={email}
-              onChangeText={(valor) => {
-                setEmail(valor);
-                setFeedbackSucesso('');
-                limparErroCampo('email');
-              }}
-              onFocus={() => setFocusedField('email')}
-              onBlur={() => setFocusedField('')}
-              placeholder="email@exemplo.com"
-              placeholderTextColor="#999"
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoCorrect={false}
-            />
-            {fieldErrors.email ? (
-              <Text style={styles.fieldErrorText}>{fieldErrors.email}</Text>
-            ) : null}
-            <Text style={styles.hint}>
-              Enviaremos um codigo de verificacao para este e-mail.
-            </Text>
+            <View style={styles.card} onLayout={registerScrollContainer}>
+              <Text style={styles.title}>Recuperar senha</Text>
 
-            <Text style={styles.label}>Nova senha</Text>
-            <CampoSenha
-              wrapperStyle={styles.passwordInputWrapper}
-              inputStyle={styles.passwordInput}
-              invalid={!!fieldErrors.novaSenha}
-              invalidStyle={styles.inputError}
-              value={novaSenha}
-              onChangeText={(valor) => {
-                setNovaSenha(valor);
-                setFeedbackSucesso('');
-                limparErroCampo('novaSenha');
-              }}
-              placeholder="Digite a nova senha"
-              placeholderTextColor="#999"
-              autoComplete="new-password"
-              textContentType="newPassword"
-              onFocus={() => setNovaSenhaFocada(true)}
-              onBlur={() => setNovaSenhaFocada(false)}
-            />
-            {fieldErrors.novaSenha ? (
-              <Text style={styles.fieldErrorText}>{fieldErrors.novaSenha}</Text>
-            ) : null}
-            {novaSenhaFocada ? renderPasswordRequirements() : null}
+              <SeletorPerfil
+                role={role}
+                onChangeRole={(perfil) => {
+                  setRole(perfil);
+                  setEmail('');
+                  setCodigo('');
+                  setCodigoErro('');
+                  setFieldErrors(camposIniciaisErro);
+                  setFeedbackSucesso('');
+                  setModalCodigoVisible(false);
+                  setNovaSenhaFocada(false);
+                }}
+              />
 
-            <Text style={styles.label}>Confirmar nova senha</Text>
-            <CampoSenha
-              wrapperStyle={styles.passwordInputWrapper}
-              inputStyle={styles.passwordInput}
-              invalid={!!fieldErrors.confirmarSenha}
-              invalidStyle={styles.inputError}
-              value={confirmarSenha}
-              onChangeText={(valor) => {
-                setConfirmarSenha(valor);
-                setFeedbackSucesso('');
-                limparErroCampo('confirmarSenha');
-              }}
-              placeholder="Repita a nova senha"
-              placeholderTextColor="#999"
-              autoComplete="new-password"
-              textContentType="newPassword"
-            />
-            {fieldErrors.confirmarSenha ? (
-              <Text style={styles.fieldErrorText}>{fieldErrors.confirmarSenha}</Text>
-            ) : null}
+              <Text style={styles.label}>E-mail cadastrado</Text>
+              <TextInput
+                style={[
+                  styles.input,
+                  fieldErrors.email ? styles.inputError : null,
+                  focusedField === 'email' ? styles.inputFocused : null,
+                ]}
+                value={email}
+                onChangeText={handleChangeEmail}
+                onLayout={registerFieldLayout('email')}
+                onFocus={() => focarCampoRecuperacao('email')}
+                onBlur={() => desfocarCampoRecuperacao('email')}
+                placeholder="email@exemplo.com"
+                placeholderTextColor="#999"
+                keyboardType="email-address"
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="email"
+              />
+              {fieldErrors.email ? (
+                <Text style={styles.fieldErrorText}>{fieldErrors.email}</Text>
+              ) : null}
+              <Text style={styles.hint}>
+                Enviaremos um codigo de verificacao para este e-mail.
+              </Text>
 
-            <TouchableOpacity
-              style={[
-                styles.button,
-                !podeEnviarCodigo ? styles.buttonInactive : null,
-              ]}
-              onPress={() => handleEnviarCodigo()}
-              disabled={!podeEnviarCodigo}
-            >
-              {loading ? (
-                <ActivityIndicator color="#FFF" />
-              ) : (
-                <Text style={styles.buttonText}>Enviar codigo por e-mail</Text>
-              )}
-            </TouchableOpacity>
+              <Text style={styles.label}>Nova senha</Text>
+              <View onLayout={registerFieldLayout('novaSenha')}>
+                <CampoSenha
+                  wrapperStyle={styles.passwordInputWrapper}
+                  inputStyle={styles.passwordInput}
+                  invalid={!!fieldErrors.novaSenha}
+                  invalidStyle={styles.inputError}
+                  value={novaSenha}
+                  onChangeText={handleChangeNovaSenha}
+                  placeholder="Digite a nova senha"
+                  placeholderTextColor="#999"
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  onFocus={() => {
+                    setNovaSenhaFocada(true);
+                    focarCampoRecuperacao('novaSenha');
+                  }}
+                  onBlur={() => {
+                    setNovaSenhaFocada(false);
+                    desfocarCampoRecuperacao('novaSenha');
+                  }}
+                />
+              </View>
+              {fieldErrors.novaSenha ? (
+                <Text style={styles.fieldErrorText}>{fieldErrors.novaSenha}</Text>
+              ) : null}
+              {novaSenhaFocada ? renderPasswordRequirements() : null}
+
+              <Text style={styles.label}>Confirmar nova senha</Text>
+              <View onLayout={registerFieldLayout('confirmarSenha')}>
+                <CampoSenha
+                  wrapperStyle={styles.passwordInputWrapper}
+                  inputStyle={styles.passwordInput}
+                  invalid={!!fieldErrors.confirmarSenha}
+                  invalidStyle={styles.inputError}
+                  value={confirmarSenha}
+                  onChangeText={handleChangeConfirmarSenha}
+                  placeholder="Repita a nova senha"
+                  placeholderTextColor="#999"
+                  autoComplete="new-password"
+                  textContentType="newPassword"
+                  onFocus={() => focarCampoRecuperacao('confirmarSenha')}
+                  onBlur={() => desfocarCampoRecuperacao('confirmarSenha')}
+                />
+              </View>
+              {fieldErrors.confirmarSenha ? (
+                <Text style={styles.fieldErrorText}>{fieldErrors.confirmarSenha}</Text>
+              ) : null}
+
+              <TouchableOpacity
+                style={[
+                  styles.button,
+                  !podeEnviarCodigo ? styles.buttonInactive : null,
+                ]}
+                onPress={() => handleEnviarCodigo()}
+                disabled={!podeEnviarCodigo}
+              >
+                {loading ? (
+                  <ActivityIndicator color="#FFF" />
+                ) : (
+                  <Text style={styles.buttonText}>Enviar codigo por e-mail</Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </ScrollView>
       </KeyboardAvoidingView>
@@ -359,7 +438,12 @@ export default function ForgotPassword({ navigation }) {
         animationType="fade"
         onRequestClose={feedbackSucesso ? irParaLogin : () => setModalCodigoVisible(false)}
       >
-        <View style={styles.modalOverlay}>
+        <KeyboardAvoidingView
+          style={styles.modalKeyboard}
+          behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        >
+          <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
             {feedbackSucesso ? (
               <>
@@ -386,8 +470,13 @@ export default function ForgotPassword({ navigation }) {
                   ]}
                   value={codigo}
                   onChangeText={(valor) => {
-                    setCodigo(valor.replace(/\D/g, '').slice(0, 6));
-                    setCodigoErro('');
+                    const codigoLimpo = valor.replace(/\D/g, '').slice(0, 6);
+                    setCodigo(codigoLimpo);
+                    setCodigoErro(
+                      codigoLimpo && codigoLimpo.length < 6
+                        ? 'Digite os 6 digitos enviados por e-mail.'
+                        : ''
+                    );
                   }}
                   onFocus={() => setFocusedField('codigo')}
                   onBlur={() => setFocusedField('')}
@@ -437,7 +526,8 @@ export default function ForgotPassword({ navigation }) {
               </>
             )}
           </View>
-        </View>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
     </SafeAreaView>
   );
@@ -447,7 +537,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, minHeight: 0, backgroundColor: '#ffffff' },
   keyboard: { flex: 1, minHeight: 0 },
   scroll: { flex: 1, minHeight: 0 },
-  scrollContent: { flexGrow: 1, padding: 20 },
+  scrollContent: { flexGrow: 1, padding: 20, paddingBottom: 180 },
+  modalKeyboard: { flex: 1 },
   webScroll: {
     height: '100vh',
     maxHeight: '100vh',
@@ -455,8 +546,15 @@ const styles = StyleSheet.create({
     overflowX: 'hidden',
   },
   webScrollContent: {
+    alignItems: 'center',
     flexGrow: 0,
     minHeight: '100%',
+  },
+  authContent: {
+    width: '100%',
+  },
+  webAuthContentBox: {
+    maxWidth: AUTH_WEB_MAX_WIDTH,
   },
   authBackButton: {
     marginTop: 10,
@@ -466,6 +564,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#f4f4f4',
     borderRadius: 24,
     padding: 25,
+    width: '100%',
     ...softGreenBorder,
   },
   title: {
@@ -555,9 +654,13 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   codeInput: {
+    borderColor: '#4fdfa3',
+    borderRadius: 20,
+    borderWidth: 1,
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: 4,
+    paddingVertical: 16,
     textAlign: 'center',
   },
   button: {
@@ -610,11 +713,11 @@ const styles = StyleSheet.create({
     marginBottom: 18,
   },
   secondaryButton: {
-    borderRadius: 8,
+    borderRadius: 20,
     borderWidth: 1,
     borderColor: '#4fdfa3',
     alignItems: 'center',
-    paddingVertical: 13,
+    padding: 16,
     marginTop: 10,
   },
   secondaryButtonText: {

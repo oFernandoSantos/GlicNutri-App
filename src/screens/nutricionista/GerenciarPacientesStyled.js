@@ -17,14 +17,26 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../../theme/patientTheme';
-import BotaoVoltar from '../../components/BotaoVoltar';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
 } from '../../components/BarraAbasNutricionista';
+import {
+  buildPatientClinicalRows,
+  buildPatientDataRows,
+} from '../../utils/patientProfileFields';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
+}
+
+function ProfileInfoRow({ label, value }) {
+  return (
+    <View style={styles.profileInfoRow}>
+      <Text style={styles.profileInfoLabel}>{label}</Text>
+      <Text style={styles.profileInfoValue}>{value}</Text>
+    </View>
+  );
 }
 
 function getInitials(name) {
@@ -45,7 +57,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [loadingExcluirId, setLoadingExcluirId] = useState(null);
   const [modalVisible, setModalVisible] = useState(false);
   const [modalExclusaoVisible, setModalExclusaoVisible] = useState(false);
+  const [modalPerfilVisible, setModalPerfilVisible] = useState(false);
   const [pacienteParaExcluir, setPacienteParaExcluir] = useState(null);
+  const [pacientePerfil, setPacientePerfil] = useState(null);
+  const [perfilVisao, setPerfilVisao] = useState('patient');
   const [feedbackEdicao, setFeedbackEdicao] = useState(null);
 
   const [editandoId, setEditandoId] = useState(null);
@@ -53,6 +68,8 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [cpf, setCpf] = useState('');
   const [genero, setGenero] = useState('');
   const [email, setEmail] = useState('');
+  const [telefone, setTelefone] = useState('');
+  const [dataNascimento, setDataNascimento] = useState('');
   const [cep, setCep] = useState('');
   const [logradouro, setLogradouro] = useState('');
   const [numero, setNumero] = useState('');
@@ -75,6 +92,54 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const formatarCep = (valor) => {
     const numeros = valor.replace(/\D/g, '').slice(0, 8);
     return numeros.replace(/^(\d{5})(\d)/, '$1-$2');
+  };
+
+  const formatarDataNascimento = (valor) => {
+    const numeros = String(valor || '').replace(/\D/g, '').slice(0, 8);
+    return numeros
+      .replace(/^(\d{2})(\d)/, '$1/$2')
+      .replace(/^(\d{2})\/(\d{2})(\d)/, '$1/$2/$3');
+  };
+
+  const formatarDataNascimentoBanco = (valor) => {
+    if (!valor) return '';
+
+    const dataSomente = String(valor).match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (dataSomente) {
+      const [, ano, mes, dia] = dataSomente;
+      return `${dia}/${mes}/${ano}`;
+    }
+
+    const data = new Date(valor);
+    if (Number.isNaN(data.getTime())) return '';
+
+    return data.toLocaleDateString('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+    });
+  };
+
+  const converterDataNascimentoParaBanco = (valor) => {
+    const numeros = String(valor || '').replace(/\D/g, '');
+
+    if (!numeros) return null;
+    if (numeros.length !== 8) return '';
+
+    const dia = Number(numeros.slice(0, 2));
+    const mes = Number(numeros.slice(2, 4));
+    const ano = Number(numeros.slice(4, 8));
+    const data = new Date(ano, mes - 1, dia);
+
+    if (
+      data.getFullYear() !== ano ||
+      data.getMonth() !== mes - 1 ||
+      data.getDate() !== dia
+    ) {
+      return '';
+    }
+
+    return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
   };
 
   const exibirCpf = (valor) => {
@@ -125,6 +190,8 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     setCpf('');
     setGenero('');
     setEmail('');
+    setTelefone('');
+    setDataNascimento('');
     setCep('');
     setLogradouro('');
     setNumero('');
@@ -177,6 +244,8 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     setCpf(formatarCpf(String(paciente.cpf_paciente || '')));
     setGenero(paciente.sexo_biologico || '');
     setEmail(paciente.email_pac || '');
+    setTelefone(paciente.telefone || '');
+    setDataNascimento(formatarDataNascimentoBanco(paciente.data_nascimento));
     setCep(formatarCep(String(paciente.cep || '')));
     setLogradouro(paciente.logradouro || '');
     setNumero(paciente.numero || '');
@@ -234,6 +303,8 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     const nomeLimpo = nome.trim();
     const cpfLimpo = cpf.replace(/\D/g, '');
     const emailLimpo = email.trim().toLowerCase();
+    const telefoneLimpo = telefone.trim();
+    const dataNascimentoBanco = converterDataNascimentoParaBanco(dataNascimento);
     const cepLimpo = cep.replace(/\D/g, '');
     const generoLimpo = genero.trim();
     const ufLimpo = uf.trim().toUpperCase();
@@ -266,6 +337,13 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       return;
     }
 
+    if (dataNascimento.trim() && !dataNascimentoBanco) {
+      const mensagem = 'Digite uma data de nascimento valida no formato DD/MM/AAAA.';
+      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
+      Alert.alert('Data invalida', mensagem);
+      return;
+    }
+
     if (cepLimpo && !validarCep(cepLimpo)) {
       const mensagem = 'Digite um CEP valido com 8 numeros.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
@@ -286,6 +364,8 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
           cpf_paciente: cpfLimpo,
           sexo_biologico: generoLimpo || null,
           email_pac: emailLimpo,
+          telefone: telefoneLimpo || null,
+          data_nascimento: dataNascimentoBanco || null,
           cep: cepLimpo || null,
           logradouro: logradouro.trim() || null,
           numero: numero.trim() || null,
@@ -368,6 +448,18 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     setModalExclusaoVisible(true);
   };
 
+  const abrirModalPerfil = (paciente) => {
+    setPacientePerfil(paciente);
+    setPerfilVisao('patient');
+    setModalPerfilVisible(true);
+  };
+
+  const fecharModalPerfil = () => {
+    setModalPerfilVisible(false);
+    setPacientePerfil(null);
+    setPerfilVisao('patient');
+  };
+
   const nomeNutri =
     usuarioLogado?.nome_completo_nutri ||
     usuarioLogado?.nome_nutri ||
@@ -382,6 +474,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const totalCadastrosCompletos = pacientes.filter(
     (item) => item.logradouro && item.numero && item.bairro && item.cidade && item.uf
   ).length;
+  const perfilRows =
+    perfilVisao === 'patient'
+      ? buildPatientDataRows(pacientePerfil || {})
+      : buildPatientClinicalRows(pacientePerfil || {});
 
   return (
     <SafeAreaView style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
@@ -401,13 +497,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         nestedScrollEnabled
       >
         <View style={styles.headerRow}>
-          <BotaoVoltar
-            navigation={navigation}
-            fallbackRoute="HomeNutricionista"
-            fallbackParams={{ usuarioLogado }}
-            preferFallback
-          />
-
           <View style={styles.headerIconGroup}>
             <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
               <Ionicons
@@ -583,6 +672,18 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
 
               <View style={styles.actionsRow}>
                 <TouchableOpacity
+                  style={styles.profileButton}
+                  onPress={() => abrirModalPerfil(paciente)}
+                >
+                  <Ionicons
+                    name="document-text-outline"
+                    size={18}
+                    color={patientTheme.colors.primaryDark}
+                  />
+                  <Text style={styles.profileButtonText}>Perfil</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.editButton}
                   onPress={() => abrirModalEdicao(paciente)}
                 >
@@ -617,6 +718,75 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
           ))
         )}
       </ScrollView>
+
+      <Modal visible={modalPerfilVisible} transparent animationType="slide">
+        <View style={styles.modalOverlay}>
+          <View style={styles.profileModalContent}>
+            <View style={styles.modalHeader}>
+              <View style={styles.modalHeaderCopy}>
+                <Text style={styles.modalTitle}>Perfil completo</Text>
+                <Text style={styles.modalSubtitle}>
+                  {pacientePerfil?.nome_completo || 'Paciente'} com dados separados para análise.
+                </Text>
+              </View>
+
+              <TouchableOpacity style={styles.closeButton} onPress={fecharModalPerfil}>
+                <Ionicons name="close" size={20} color={patientTheme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.profileTabRow}>
+              <TouchableOpacity
+                style={[
+                  styles.profileTabButton,
+                  perfilVisao === 'patient' && styles.profileTabButtonActive,
+                ]}
+                onPress={() => setPerfilVisao('patient')}
+              >
+                <Text
+                  style={[
+                    styles.profileTabText,
+                    perfilVisao === 'patient' && styles.profileTabTextActive,
+                  ]}
+                >
+                  Dados do paciente
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.profileTabButton,
+                  perfilVisao === 'clinical' && styles.profileTabButtonActive,
+                ]}
+                onPress={() => setPerfilVisao('clinical')}
+              >
+                <Text
+                  style={[
+                    styles.profileTabText,
+                    perfilVisao === 'clinical' && styles.profileTabTextActive,
+                  ]}
+                >
+                  Dados clínicos
+                </Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.profileModalScroll}
+              contentContainerStyle={styles.profileModalScrollContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {perfilRows.map((row) => (
+                <ProfileInfoRow
+                  key={`${perfilVisao}-${row.label}`}
+                  label={row.label}
+                  value={row.value}
+                />
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       <Modal visible={modalVisible} transparent animationType="slide">
         <KeyboardAvoidingView
@@ -694,6 +864,27 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                 placeholderTextColor={patientTheme.colors.textMuted}
                 autoCapitalize="none"
                 keyboardType="email-address"
+              />
+
+              <Text style={styles.label}>Telefone</Text>
+              <TextInput
+                style={styles.input}
+                value={telefone}
+                onChangeText={setTelefone}
+                placeholder="(00) 00000-0000"
+                placeholderTextColor={patientTheme.colors.textMuted}
+                keyboardType="phone-pad"
+              />
+
+              <Text style={styles.label}>Data de nascimento</Text>
+              <TextInput
+                style={styles.input}
+                value={dataNascimento}
+                onChangeText={(valor) => setDataNascimento(formatarDataNascimento(valor))}
+                placeholder="DD/MM/AAAA"
+                placeholderTextColor={patientTheme.colors.textMuted}
+                keyboardType="numeric"
+                maxLength={10}
               />
 
               <Text style={styles.label}>CEP</Text>
@@ -854,8 +1045,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100vh',
-    maxHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
     overflow: 'hidden',
   },
   scroll: {
@@ -863,8 +1054,8 @@ const styles = StyleSheet.create({
     minHeight: 0,
   },
   webScroll: {
-    height: '100vh',
-    maxHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
     overflowY: 'auto',
     overflowX: 'hidden',
   },
@@ -886,7 +1077,7 @@ const styles = StyleSheet.create({
   headerRow: {
     marginTop: 14,
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    justifyContent: 'flex-end',
     alignItems: 'center',
   },
   headerIconGroup: {
@@ -1127,6 +1318,21 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 10,
   },
+  profileButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    ...patientShadow,
+  },
+  profileButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '700',
+  },
   editButton: {
     flex: 1,
     minHeight: 48,
@@ -1175,6 +1381,10 @@ const styles = StyleSheet.create({
     alignItems: 'flex-start',
     marginBottom: 18,
   },
+  modalHeaderCopy: {
+    flex: 1,
+    paddingRight: 12,
+  },
   modalTitle: {
     fontSize: 22,
     fontWeight: '700',
@@ -1194,6 +1404,69 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     ...patientShadow,
+  },
+  profileModalContent: {
+    maxHeight: '90%',
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: patientTheme.spacing.card,
+    ...patientShadow,
+  },
+  profileTabRow: {
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderRadius: patientTheme.radius.lg,
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 14,
+    padding: 6,
+    ...patientShadow,
+  },
+  profileTabButton: {
+    alignItems: 'center',
+    borderRadius: patientTheme.radius.lg,
+    flex: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 10,
+  },
+  profileTabButtonActive: {
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  profileTabText: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  profileTabTextActive: {
+    color: patientTheme.colors.onPrimary,
+  },
+  profileModalScroll: {
+    maxHeight: 520,
+  },
+  profileModalScrollContent: {
+    gap: 10,
+    paddingBottom: 4,
+  },
+  profileInfoRow: {
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderRadius: patientTheme.radius.lg,
+    padding: 14,
+    ...patientShadow,
+  },
+  profileInfoLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
+  },
+  profileInfoValue: {
+    color: patientTheme.colors.text,
+    fontSize: 15,
+    fontWeight: '600',
+    lineHeight: 21,
+    marginTop: 6,
   },
   label: {
     marginBottom: 6,

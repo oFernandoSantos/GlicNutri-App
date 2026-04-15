@@ -11,9 +11,11 @@ import {
   Platform,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
-import BarraAbasPaciente, { PATIENT_TAB_BAR_SPACE } from '../../components/BarraAbasPaciente';
+import BarraAbasPaciente, {
+  PATIENT_TAB_BAR_HEIGHT,
+  PATIENT_TAB_BAR_SPACE,
+} from '../../components/BarraAbasPaciente';
 import PatientDrawer from '../../components/PatientDrawer';
-import BotaoMenuHamburguer from '../../components/BotaoMenuHamburguer';
 import { supabase } from '../../services/supabaseConfig';
 import { patientTheme, patientShadow } from '../../theme/patientTheme';
 import {
@@ -224,6 +226,13 @@ export default function PacienteHomeScreen({
     carregarDados();
   }, [idPaciente, canResolvePatient]);
 
+  useEffect(() => {
+    navigation.setOptions({
+      readerOnMenuPress: () => setMenuVisible(true),
+      readerMenuDisabled: saindo,
+    });
+  }, [navigation, saindo]);
+
   const onRefresh = () => {
     setRefreshing(true);
     carregarDados();
@@ -327,6 +336,12 @@ export default function PacienteHomeScreen({
       route: 'PacientePlano',
       icon: 'chatbubbles-outline',
     },
+    {
+      title: 'Perfil',
+      subtitle: 'Dados do paciente, histórico clínico e respostas iniciais.',
+      route: 'PacientePerfil',
+      icon: 'person-circle-outline',
+    },
   ];
 
   if (loading) {
@@ -368,13 +383,6 @@ export default function PacienteHomeScreen({
           <View style={styles.headerCopy}>
             <Text style={styles.greeting}>{greetingMeta.title}</Text>
             <Text style={styles.headerSubtitle}>{greetingMeta.subtitle}</Text>
-          </View>
-
-          <View style={styles.headerActions}>
-            <BotaoMenuHamburguer
-              onPress={() => setMenuVisible(true)}
-              disabled={saindo}
-            />
           </View>
         </View>
 
@@ -543,8 +551,8 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   containerWeb: {
-    height: '100vh',
-    maxHeight: '100vh',
+    height: '100%',
+    maxHeight: '100%',
     overflow: 'hidden',
   },
   loadingContainer: {
@@ -564,7 +572,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
-    paddingBottom: 36,
+    paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
   },
   webScroll: {
     height: '100%',

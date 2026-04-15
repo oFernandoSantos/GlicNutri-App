@@ -19,6 +19,7 @@ const menuItems = [
   { label: 'Assistente IA', route: 'PacienteAssistente', icon: 'sparkles-outline', library: 'ion' },
   { label: 'Bem-estar', route: 'PacienteBemEstar', icon: 'body-outline', library: 'ion' },
   { label: 'Meu plano', route: 'PacientePlano', icon: 'food-apple-outline', library: 'material' },
+  { label: 'Perfil', route: 'PacientePerfil', icon: 'person-circle-outline', library: 'ion' },
 ];
 
 function DrawerIcon({ item, active }) {
