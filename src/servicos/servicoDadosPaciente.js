@@ -517,7 +517,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     rpcMessage.includes('registrar_glicemia_manual_paciente');
 
   if (!rpcMissing) {
-    throw rpcError;
+    console.log('RPC de glicemia falhou; tentando insert direto:', rpcError?.message);
   }
 
   const payload = {

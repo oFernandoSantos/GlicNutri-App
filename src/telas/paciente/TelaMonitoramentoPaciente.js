@@ -612,6 +612,7 @@ export default function PacienteMonitoramentoScreen({
   function handleCloseManualModal() {
     setManualModalVisible(false);
     setGlucoseTypeDropdownVisible(false);
+    setGlucoseConfirmVisible(false);
     setFocusedManualField(null);
   }
 
@@ -637,6 +638,7 @@ export default function PacienteMonitoramentoScreen({
     setManualMeasurementTime('');
     setManualGlucoseType('');
     setGlucoseTypeDropdownVisible(false);
+    setGlucoseConfirmVisible(false);
     setFocusedManualField(null);
 
     setManualChoiceVisible(false);
@@ -644,6 +646,11 @@ export default function PacienteMonitoramentoScreen({
   }
 
   function handleOpenGlucoseConfirmation() {
+    if (!activePatientId) {
+      Alert.alert('Atenção', 'Paciente sem identificador para registrar glicemia.');
+      return;
+    }
+
     if (!hasValidNewGlucose) {
       Alert.alert('Atenção', 'Informe um valor de glicose válido.');
       return;
@@ -664,6 +671,8 @@ export default function PacienteMonitoramentoScreen({
       return;
     }
 
+    setGlucoseTypeDropdownVisible(false);
+    setFocusedManualField(null);
     setGlucoseConfirmVisible(true);
   }
 
@@ -1208,22 +1217,15 @@ export default function PacienteMonitoramentoScreen({
             <TouchableOpacity
               style={[
                 styles.modalPrimaryButton,
-                !canSubmitManualGlucose && styles.modalPrimaryButtonDisabled,
+                savingGlucose && styles.modalPrimaryButtonDisabled,
               ]}
               onPress={handleOpenGlucoseConfirmation}
-              disabled={savingGlucose || !activePatientId || !canSubmitManualGlucose}
+              disabled={savingGlucose}
             >
               {savingGlucose ? (
                 <ActivityIndicator color={patientTheme.colors.onPrimary} />
               ) : (
-                <Text
-                  style={[
-                    styles.primaryButtonText,
-                    !canSubmitManualGlucose && styles.modalPrimaryButtonDisabledText,
-                  ]}
-                >
-                  Salvar glicemia
-                </Text>
+                <Text style={styles.primaryButtonText}>Salvar glicemia</Text>
               )}
             </TouchableOpacity>
             </View>
@@ -1281,52 +1283,51 @@ export default function PacienteMonitoramentoScreen({
               </View>
             </View>
           ) : null}
-          </View>
-      </Modal>
 
-      <Modal
-        visible={glucoseConfirmVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setGlucoseConfirmVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={styles.confirmCard}>
-            <View style={styles.confirmIconWrap}>
-              <Ionicons name="water-outline" size={24} color={patientTheme.colors.primaryDark} />
+          {glucoseConfirmVisible ? (
+            <View style={styles.inlinePopupOverlay}>
+              <View style={styles.confirmCard}>
+                <View style={styles.confirmIconWrap}>
+                  <Ionicons
+                    name="water-outline"
+                    size={24}
+                    color={patientTheme.colors.primaryDark}
+                  />
+                </View>
+
+                <Text style={styles.confirmTitle}>Confirmar glicemia?</Text>
+                <Text style={styles.confirmText}>
+                  Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
+                  {isPreviousGlucoseEntry
+                    ? ` em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}?`
+                    : ' agora?'} {manualGlucoseType ? `Tipo: ${manualGlucoseType}. ` : ''}Essa leitura vai atualizar a tela de glicose e o Início.
+                </Text>
+
+                <View style={styles.confirmActions}>
+                  <TouchableOpacity
+                    style={styles.confirmCancelButton}
+                    onPress={() => setGlucoseConfirmVisible(false)}
+                    disabled={savingGlucose}
+                  >
+                    <Text style={styles.confirmCancelText}>Cancelar</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={styles.confirmSaveButton}
+                    onPress={handleAddGlucose}
+                    disabled={savingGlucose}
+                  >
+                    {savingGlucose ? (
+                      <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                    ) : (
+                      <Text style={styles.confirmSaveText}>Confirmar registro</Text>
+                    )}
+                  </TouchableOpacity>
+                </View>
+              </View>
             </View>
-
-            <Text style={styles.confirmTitle}>Confirmar glicemia?</Text>
-            <Text style={styles.confirmText}>
-              Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
-              {isPreviousGlucoseEntry
-                ? ` em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}?`
-                : ' agora?'} {manualGlucoseType ? `Tipo: ${manualGlucoseType}. ` : ''}Essa leitura vai atualizar a tela de glicose e o Início.
-            </Text>
-
-            <View style={styles.confirmActions}>
-              <TouchableOpacity
-                style={styles.confirmCancelButton}
-                onPress={() => setGlucoseConfirmVisible(false)}
-                disabled={savingGlucose}
-              >
-                <Text style={styles.confirmCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.confirmSaveButton}
-                onPress={handleAddGlucose}
-                disabled={savingGlucose}
-              >
-                {savingGlucose ? (
-                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                ) : (
-                  <Text style={styles.confirmSaveText}>Confirmar registro</Text>
-                )}
-              </TouchableOpacity>
-            </View>
+          ) : null}
           </View>
-        </View>
       </Modal>
 
       <Modal
