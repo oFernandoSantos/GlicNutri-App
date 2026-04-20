@@ -24,6 +24,7 @@ export default function PatientScreenLayout({
   rightAction,
   contentContainerStyle,
   showTabBar = true,
+  scrollEnabled = true,
 }) {
   const showHeader = Boolean(title || subtitle || rightAction);
 
@@ -43,20 +44,34 @@ export default function PatientScreenLayout({
           </View>
         ) : null}
 
-        <ScrollView
-          style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
-          contentContainerStyle={[
-            styles.content,
-            showTabBar && styles.contentWithTabBar,
-            Platform.OS === 'web' && styles.webContent,
-            contentContainerStyle,
-          ]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          nestedScrollEnabled
-        >
-          {children}
-        </ScrollView>
+        {scrollEnabled ? (
+          <ScrollView
+            style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
+            contentContainerStyle={[
+              styles.content,
+              showTabBar && styles.contentWithTabBar,
+              Platform.OS === 'web' && styles.webContent,
+              contentContainerStyle,
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            nestedScrollEnabled
+          >
+            {children}
+          </ScrollView>
+        ) : (
+          <View
+            style={[
+              styles.scroll,
+              styles.content,
+              styles.fixedContent,
+              showTabBar && styles.contentWithTabBar,
+              contentContainerStyle,
+            ]}
+          >
+            {children}
+          </View>
+        )}
       </View>
 
       {showTabBar ? (
@@ -123,6 +138,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: patientTheme.spacing.screen,
     paddingTop: 8,
     paddingBottom: 36,
+  },
+  fixedContent: {
+    flex: 1,
+    flexGrow: 0,
+    minHeight: 0,
   },
   contentWithTabBar: {
     paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,

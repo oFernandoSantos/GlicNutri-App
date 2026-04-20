@@ -5,7 +5,7 @@ export const patientTheme = {
     surface: '#f4f4f4',
     surfaceMuted: '#ffffff',
     primary: '#4fdfa3',
-    primaryDark: '#32c98a',
+    primaryDark: '#4fdfa3',
     primarySoft: '#e8fff5',
     surfaceBorder: '#f4f4f4',
     onPrimary: '#ffffff',
