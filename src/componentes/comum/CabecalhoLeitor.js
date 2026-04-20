@@ -63,7 +63,7 @@ function getHomeRoute(route) {
 }
 
 export default function ReaderTopo({ navigation, route, options }) {
-  const title = getTitle(route);
+  const title = options?.readerTitle || getTitle(route);
   const topSpacing = Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0;
   const isHome = HOME_ROUTES.has(route?.name);
   const isLogin = route?.name === 'Login';
