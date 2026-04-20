@@ -13,27 +13,28 @@ import { CardStyleInterpolators, createStackNavigator } from '@react-navigation/
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
-import IntroScreen from './src/screens/IntroScreen';
-import LoginScreen from './src/screens/LoginScreen';
-import CadastroScreen from './src/screens/CadastroScreenFixed';
-import ForgotPassword from './src/screens/ForgotPassword';
-import PacienteOnboardingScreen from './src/screens/paciente/PacienteOnboardingScreen';
-import HomePaciente from './src/screens/paciente/PacienteHomeScreen';
-import HomeNutricionista from './src/screens/nutricionista/NutricionistaHomeDashboardScreen';
-import GerenciarPacientesScreen from './src/screens/nutricionista/GerenciarPacientesStyled';
-import NutricionistaSectionScreen from './src/screens/nutricionista/NutricionistaSectionScreen';
-import PacienteDiarioScreen from './src/screens/paciente/PacienteDiarioScreen';
-import PacienteMonitoramentoScreen from './src/screens/paciente/PacienteMonitoramentoScreen';
-import PacienteAssistenteScreen from './src/screens/paciente/PacienteAssistenteScreen';
-import PacienteBemEstarScreen from './src/screens/paciente/PacienteBemEstarScreen';
-import PacientePlanoScreen from './src/screens/paciente/PacientePlanoScreen';
-import PacientePerfilScreen from './src/screens/paciente/PacientePerfilScreen';
-import ReaderTopo from './src/components/ReaderTopo';
-import { supabase } from './src/services/supabaseConfig';
-import { syncGooglePatientRecord } from './src/services/googlePatientSync';
-import { patientTheme } from './src/theme/patientTheme';
-import { INTRO_SEEN_STORAGE_KEY } from './src/constants/storageKeys';
-import { hasPatientOnboardingSeen } from './src/services/patientOnboardingService';
+import TelaIntroducao from './src/telas/autenticacao/TelaIntroducao';
+import TelaLogin from './src/telas/autenticacao/TelaLogin';
+import TelaCadastro from './src/telas/autenticacao/TelaCadastro';
+import ForgotPassword from './src/telas/autenticacao/TelaRecuperarSenha';
+import PacienteOnboardingScreen from './src/telas/paciente/TelaOnboardingPaciente';
+import HomePaciente from './src/telas/paciente/TelaInicioPaciente';
+import HomeNutricionista from './src/telas/nutricionista/TelaInicioNutricionista';
+import GerenciarPacientesScreen from './src/telas/nutricionista/TelaPacientesNutricionista';
+import NutricionistaSectionScreen from './src/telas/nutricionista/TelaSecaoNutricionista';
+import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
+import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
+import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
+import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
+import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
+import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
+import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
+import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
+import { supabase } from './src/servicos/configSupabase';
+import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
+import { patientTheme } from './src/temas/temaVisualPaciente';
+import { INTRO_SEEN_STORAGE_KEY } from './src/constantes/chavesArmazenamento';
+import { hasPatientOnboardingSeen } from './src/servicos/servicoOnboardingPaciente';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -118,6 +119,7 @@ export default function App() {
   const [introSeen, setIntroSeen] = useState(false);
   const [patientOnboardingReady, setPatientOnboardingReady] = useState(false);
   const [patientOnboardingSeen, setPatientOnboardingSeen] = useState(false);
+  const [patientSessionOverride, setPatientSessionOverride] = useState(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -190,6 +192,10 @@ export default function App() {
       subscription.unsubscribe();
     };
   }, []);
+
+  useEffect(() => {
+    setPatientSessionOverride(null);
+  }, [session?.user?.id]);
 
   useEffect(() => {
     let isMounted = true;
@@ -269,7 +275,11 @@ export default function App() {
   function getPacienteProps(props) {
     return {
       ...props,
-      usuarioLogado: props.route?.params?.usuarioLogado || session?.user || null,
+      usuarioLogado:
+        props.route?.params?.usuarioLogado ||
+        patientSessionOverride ||
+        session?.user ||
+        null,
     };
   }
 
@@ -324,7 +334,7 @@ export default function App() {
               >
               <Stack.Screen name="Intro">
                 {(props) => (
-                  <IntroScreen
+                  <TelaIntroducao
                     {...props}
                     session={session}
                     onIntroFinished={() => setIntroSeen(true)}
@@ -334,7 +344,7 @@ export default function App() {
 
               <Stack.Screen name="Login" options={readerScreenOptions}>
                 {(props) => (
-                  <LoginScreen
+                  <TelaLogin
                     {...props}
                     session={session}
                   />
@@ -343,7 +353,7 @@ export default function App() {
 
               <Stack.Screen
                 name="Cadastro"
-                component={CadastroScreen}
+                component={TelaCadastro}
                 options={readerScreenOptions}
               />
               <Stack.Screen
@@ -356,7 +366,12 @@ export default function App() {
                 {(props) => (
                   <PacienteOnboardingScreen
                     {...getPacienteProps(props)}
-                    onOnboardingFinished={() => setPatientOnboardingSeen(true)}
+                    onOnboardingFinished={(updatedPatient) => {
+                      if (updatedPatient) {
+                        setPatientSessionOverride(updatedPatient);
+                      }
+                      setPatientOnboardingSeen(true);
+                    }}
                   />
                 )}
               </Stack.Screen>
@@ -375,6 +390,10 @@ export default function App() {
 
               <Stack.Screen name="PacienteAssistente" options={readerScreenOptions}>
                 {(props) => <PacienteAssistenteScreen {...getPacienteProps(props)} />}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteAgendamentos" options={readerScreenOptions}>
+                {(props) => <PacienteAgendamentosScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteBemEstar" options={readerScreenOptions}>
