@@ -220,8 +220,6 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
-      title="Diario alimentar"
-      subtitle="Registre refeicoes, agua e rotina metabolica em uma linha do tempo simples."
     >
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Input facilitado</Text>

@@ -1092,6 +1092,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
+    paddingTop: 6,
     paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
   },
   webScroll: {
@@ -1140,13 +1141,13 @@ const styles = StyleSheet.create({
     marginTop: 22,
   },
   metricCarouselWrap: {
-    marginTop: 22,
+    marginTop: 0,
   },
   metricCarouselContent: {
     alignItems: 'stretch',
   },
   metricSlide: {
-    minHeight: 318,
+    height: 466,
   },
   carouselDots: {
     alignItems: 'center',

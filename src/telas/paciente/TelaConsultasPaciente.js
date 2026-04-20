@@ -70,17 +70,7 @@ export default function PacienteAgendamentosScreen({
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
-      title="Agendamentos"
-      subtitle="Escolha um profissional e veja os proximos horarios disponiveis."
     >
-      <View style={styles.heroCard}>
-        <Text style={styles.heroEyebrow}>Agenda disponivel</Text>
-        <Text style={styles.heroTitle}>Profissionais prontos para acompanhar voce</Text>
-        <Text style={styles.heroText}>
-          Toque em um horario para iniciar a solicitacao do agendamento.
-        </Text>
-      </View>
-
       <View style={styles.summaryRow}>
         <View style={styles.summaryPill}>
           <Ionicons name="people-outline" size={18} color={patientTheme.colors.primaryDark} />
@@ -141,32 +131,6 @@ export default function PacienteAgendamentosScreen({
 }
 
 const styles = StyleSheet.create({
-  heroCard: {
-    backgroundColor: patientTheme.colors.primary,
-    borderRadius: patientTheme.radius.xl,
-    padding: 18,
-  },
-  heroEyebrow: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
-    color: patientTheme.colors.onPrimary,
-    fontSize: 22,
-    fontWeight: '800',
-    lineHeight: 28,
-    marginTop: 8,
-  },
-  heroText: {
-    color: 'rgba(255,255,255,0.92)',
-    fontSize: 14,
-    fontWeight: '600',
-    lineHeight: 20,
-    marginTop: 8,
-  },
   summaryRow: {
     flexDirection: 'row',
     gap: 8,
