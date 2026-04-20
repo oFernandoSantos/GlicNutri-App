@@ -24,6 +24,7 @@ import GerenciarPacientesScreen from './src/telas/nutricionista/TelaPacientesNut
 import NutricionistaSectionScreen from './src/telas/nutricionista/TelaSecaoNutricionista';
 import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
+import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
 import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
 import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
@@ -386,6 +387,10 @@ export default function App() {
 
               <Stack.Screen name="PacienteMonitoramento" options={readerScreenOptions}>
                 {(props) => <PacienteMonitoramentoScreen {...getPacienteProps(props)} />}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteHistoricoRegistros" options={readerScreenOptions}>
+                {(props) => <PacienteHistoricoRegistrosScreen {...getPacienteProps(props)} />}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteAssistente" options={readerScreenOptions}>

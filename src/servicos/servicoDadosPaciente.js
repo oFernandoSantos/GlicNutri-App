@@ -151,22 +151,30 @@ function buildUuid() {
 }
 
 function buildGlucoseReadingFromPayload(payload, fallbackValue) {
+  const symptoms = payload.sintomas_associados || payload.symptoms || '';
+  const glucoseTypeMatch = String(symptoms).match(/Tipo da glicemia:\s*(.+)$/i);
+
   return {
     id: payload.id_glicemia_manual_uuid || `${payload.data}-${payload.hora}-${Date.now()}`,
     patientId: payload.id_paciente_uuid,
     value: Number(payload.valor_glicose_mgdl) || Number(fallbackValue) || 0,
     date: payload.data || buildTodayDateString(),
     time: payload.hora || buildCurrentTimeString(),
+    glucoseType: payload.glucoseType || glucoseTypeMatch?.[1] || '',
   };
 }
 
 function normalizeGlucoseReadingRow(item, index = 0) {
+  const symptoms = item.sintomas_associados || '';
+  const glucoseTypeMatch = String(symptoms).match(/Tipo da glicemia:\s*(.+)$/i);
+
   return {
     id: item.id_glicemia_manual_uuid || `${item.data || 'sem-data'}-${item.hora || 'sem-hora'}-${index}`,
     patientId: item.id_paciente_uuid,
     value: Number(item.valor_glicose_mgdl) || 0,
     date: item.data || buildTodayDateString(),
     time: item.hora || buildCurrentTimeString(),
+    glucoseType: item.glucoseType || glucoseTypeMatch?.[1] || '',
   };
 }
 
@@ -453,13 +461,26 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
     console.log('Erro ao buscar glicemia por RPC:', rpcError.message);
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('registro_glicemia_manual')
-    .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora')
+    .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora, sintomas_associados')
     .eq('id_paciente_uuid', patientId)
     .order('data', { ascending: false })
     .order('hora', { ascending: false })
     .limit(limit);
+
+  if (String(error?.message || '').toLowerCase().includes('sintomas_associados')) {
+    const retry = await supabase
+      .from('registro_glicemia_manual')
+      .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora')
+      .eq('id_paciente_uuid', patientId)
+      .order('data', { ascending: false })
+      .order('hora', { ascending: false })
+      .limit(limit);
+
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.log('Erro ao buscar glicemia:', error.message);
@@ -563,6 +584,24 @@ export async function addGlucoseReading(patientId, value, options = {}) {
   );
 }
 
+export async function deleteGlucoseReading(patientId, reading) {
+  if (!patientId || !reading?.id) {
+    throw new Error('Registro de glicemia sem identificador para excluir.');
+  }
+
+  const { error } = await supabase
+    .from('registro_glicemia_manual')
+    .delete()
+    .eq('id_paciente_uuid', patientId)
+    .eq('id_glicemia_manual_uuid', reading.id);
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
+}
+
 export function buildMealEntry({ mode, description, glucoseNote, aiNote, time }) {
   return {
     id: `meal-${Date.now()}`,
@@ -593,6 +632,7 @@ export function buildMedicationEntry(label) {
     id: `med-${Date.now()}`,
     kind: 'medication',
     label,
+    date: buildTodayDateString(),
     time: buildCurrentTimeString().slice(0, 5),
   };
 }
@@ -629,8 +669,13 @@ export function buildMonitorSeries(glucoseReadings, range = 'Hoje') {
   }
 
   if (range === 'Hoje') {
-    return normalized
-      .filter((item) => item.date === buildTodayDateString())
+    const todayReadings = normalized.filter((item) => item.date === buildTodayDateString());
+    const latestDate = normalized[0]?.date || buildTodayDateString();
+    const dayReadings = todayReadings.length
+      ? todayReadings
+      : normalized.filter((item) => item.date === latestDate);
+
+    return dayReadings
       .slice(0, 12)
       .reverse();
   }
@@ -654,6 +699,7 @@ function groupReadingsByDate(readings, maxDays) {
   });
 
   return Array.from(map.entries())
+    .sort(([leftDate], [rightDate]) => rightDate.localeCompare(leftDate))
     .slice(0, maxDays)
     .reverse()
     .map(([date, values]) => ({

@@ -192,21 +192,27 @@ function getGlucoseStatus(value) {
 function GlucoseLineChart({ series }) {
   const [chartWidth, setChartWidth] = useState(0);
   const chartHeight = 300;
-  const chartPadding = 24;
+  const chartPaddingHorizontal = 44;
+  const chartPaddingTop = 34;
+  const chartPaddingBottom = 38;
   const chartMarks = [50, 100, 150, 200, 250, 300, 350, 400, 450, 500, 550, 600];
+  const chartContentWidth = Math.max(
+    chartWidth,
+    chartPaddingHorizontal * 2 + Math.max(series.length - 1, 1) * 62
+  );
   const min = 50;
   const max = 600;
   const rangeSize = Math.max(max - min, 1);
-  const contentWidth = Math.max(chartWidth - chartPadding * 2, 1);
-  const contentHeight = chartHeight - chartPadding * 2;
+  const contentWidth = Math.max(chartContentWidth - chartPaddingHorizontal * 2, 1);
+  const contentHeight = chartHeight - chartPaddingTop - chartPaddingBottom;
   const getTopForValue = (value) =>
-    chartPadding +
+    chartPaddingTop +
     (1 - (Math.min(Math.max(value, min), max) - min) / rangeSize) * contentHeight;
   const safeRangeTop = getTopForValue(180);
   const safeRangeHeight = getTopForValue(70) - safeRangeTop;
   const points = series.map((item, index) => {
     const x =
-      chartPadding +
+      chartPaddingHorizontal +
       (series.length === 1 ? contentWidth : (index / (series.length - 1)) * contentWidth);
     const y = getTopForValue(item.value);
 
@@ -215,9 +221,15 @@ function GlucoseLineChart({ series }) {
 
   return (
     <View
-      style={styles.lineChart}
       onLayout={({ nativeEvent }) => setChartWidth(nativeEvent.layout.width)}
+      style={styles.lineChartViewport}
     >
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={styles.lineChartScrollContent}
+      >
+      <View style={[styles.lineChart, { width: chartContentWidth }]}>
       <View style={[styles.safeRangeBand, { top: safeRangeTop, height: safeRangeHeight }]} />
 
       {chartMarks.map((lineValue) => {
@@ -258,6 +270,23 @@ function GlucoseLineChart({ series }) {
         : null}
 
       {chartWidth > 0
+        ? points.map((point, index) => (
+            <Text
+              key={`value-${point.label}-${point.value}-${index}`}
+              style={[
+                styles.linePointValue,
+                {
+                  left: Math.min(Math.max(point.x - 22, 4), chartContentWidth - 48),
+                  top: Math.max(point.y - 24, 6),
+                },
+              ]}
+            >
+              {point.value}
+            </Text>
+          ))
+        : null}
+
+      {chartWidth > 0
         ? points.map((point) => {
             const status = getGlucoseStatus(point.value);
 
@@ -281,12 +310,22 @@ function GlucoseLineChart({ series }) {
         : null}
 
       <View style={styles.chartLabelsRow}>
-        {series.slice(0, 5).map((item) => (
-          <Text key={`${item.label}-${item.value}`} style={styles.lineChartLabel}>
+        {points.map((item, index) => (
+          <Text
+            key={`label-${item.label}-${item.value}-${index}`}
+            style={[
+              styles.lineChartLabel,
+              {
+                left: Math.min(Math.max(item.x - 24, 4), chartContentWidth - 52),
+              },
+            ]}
+          >
             {item.label}
           </Text>
         ))}
       </View>
+      </View>
+      </ScrollView>
     </View>
   );
 }
@@ -908,25 +947,25 @@ export default function PacienteMonitoramentoScreen({
               Registro manual
             </Text>
           </TouchableOpacity>
-
-          <TouchableOpacity
-            style={[styles.currentActionButton, styles.libreViewActionButton]}
-            onPress={handleSyncLibreView}
-            disabled={syncingLibreView || !activePatientId}
-          >
-            {syncingLibreView ? (
-              <ActivityIndicator color="#1F2F6B" />
-            ) : (
-              <>
-                <LibreSensorIcon />
-                <Text style={[styles.currentActionText, styles.libreViewActionText]}>
-                  FreeStyle Libre
-                </Text>
-              </>
-            )}
-          </TouchableOpacity>
         </View>
       </View>
+
+      <TouchableOpacity
+        style={styles.libreViewStandaloneButton}
+        onPress={handleSyncLibreView}
+        disabled={syncingLibreView || !activePatientId}
+      >
+        {syncingLibreView ? (
+          <ActivityIndicator color="#1F2F6B" />
+        ) : (
+          <>
+            <LibreSensorIcon />
+            <Text style={[styles.currentActionText, styles.libreViewActionText]}>
+              FreeStyle Libre
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
 
       <TouchableOpacity
         style={styles.medicationQuickCard}
@@ -934,7 +973,7 @@ export default function PacienteMonitoramentoScreen({
         disabled={!canResolvePatient}
       >
         <View style={styles.medicationIcon}>
-          <Ionicons name="medical-outline" size={20} color="#d96666" />
+          <MaterialCommunityIcons name="pill" size={20} color="#ffffff" />
         </View>
         <View style={styles.medicationCopy}>
           <Text style={styles.medicationTitle}>Registrar medicação</Text>
@@ -943,20 +982,54 @@ export default function PacienteMonitoramentoScreen({
         <Ionicons name="chevron-forward" size={20} color={patientTheme.colors.textMuted} />
       </TouchableOpacity>
 
-      <View style={styles.tabRow}>
-        {rangeOptions.map((item) => {
-          const active = item === range;
+      <View style={styles.evolutionSection}>
+        <Text style={styles.evolutionTitle}>Sua Evolução</Text>
 
-          return (
-            <TouchableOpacity
-              key={item}
-              style={[styles.tab, active && styles.tabActive]}
-              onPress={() => setRange(item)}
-            >
-              <Text style={[styles.tabText, active && styles.tabTextActive]}>{item}</Text>
-            </TouchableOpacity>
-          );
-        })}
+        <View style={styles.tabRow}>
+          {rangeOptions.map((item) => {
+            const active = item === range;
+
+            return (
+              <TouchableOpacity
+                key={item}
+                style={[styles.tab, active && styles.tabActive]}
+                onPress={() => setRange(item)}
+              >
+                <Text style={[styles.tabText, active && styles.tabTextActive]}>{item}</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      </View>
+
+      <View style={styles.metricsRow}>
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Media</Text>
+          <Text style={styles.metricValue}>{metrics.avg}</Text>
+          <Text style={styles.metricUnit}>mg/dL</Text>
+        </View>
+
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Variabilidade</Text>
+          <Text style={styles.metricValue}>
+            {metrics.variability === '--' ? '--' : `${metrics.variability}%`}
+          </Text>
+          <Text style={styles.metricUnit}>amplitude</Text>
+        </View>
+
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>GMI</Text>
+          <Text style={styles.metricValue}>{metrics.gmi}</Text>
+          <Text style={styles.metricUnit}>estimado</Text>
+        </View>
+
+        <View style={styles.metricCard}>
+          <Text style={styles.metricLabel}>Tempo no alvo</Text>
+          <Text style={styles.metricValue}>
+            {glucoseReadings.length ? `${timeInRange}%` : '--'}
+          </Text>
+          <Text style={styles.metricUnit}>TIR</Text>
+        </View>
       </View>
 
       <View style={styles.chartCard}>
@@ -991,27 +1064,20 @@ export default function PacienteMonitoramentoScreen({
         </Text>
       </View>
 
-      <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Media</Text>
-          <Text style={styles.metricValue}>{metrics.avg}</Text>
-          <Text style={styles.metricUnit}>mg/dL</Text>
+      <TouchableOpacity
+        style={styles.historyButton}
+        onPress={() =>
+          navigation.navigate('PacienteHistoricoRegistros', {
+            usuarioLogado,
+          })
+        }
+      >
+        <View style={styles.historyButtonIcon}>
+          <Ionicons name="document-text-outline" size={20} color={patientTheme.colors.primaryDark} />
         </View>
-
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Variabilidade</Text>
-          <Text style={styles.metricValue}>
-            {metrics.variability === '--' ? '--' : `${metrics.variability}%`}
-          </Text>
-          <Text style={styles.metricUnit}>amplitude</Text>
-        </View>
-
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>GMI</Text>
-          <Text style={styles.metricValue}>{metrics.gmi}</Text>
-          <Text style={styles.metricUnit}>estimado</Text>
-        </View>
-      </View>
+        <Text style={styles.historyButtonText}>Histórico de Registros</Text>
+        <Ionicons name="chevron-forward" size={20} color={patientTheme.colors.textMuted} />
+      </TouchableOpacity>
 
       <View style={styles.insightCard}>
         <Text style={styles.insightTitle}>Leitura guiada</Text>
@@ -1468,9 +1534,21 @@ const styles = StyleSheet.create({
   libreViewActionButton: {
     backgroundColor: '#FFE600',
   },
+  libreViewStandaloneButton: {
+    alignItems: 'center',
+    backgroundColor: '#FFE600',
+    borderRadius: 18,
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    marginTop: 14,
+    minHeight: 46,
+    paddingHorizontal: 18,
+  },
   libreViewActionText: {
     color: '#1F2F6B',
-    fontWeight: '600',
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 8,
   },
   libreSensorIconOuter: {
     alignItems: 'center',
@@ -1500,12 +1578,14 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
     marginTop: 14,
-    padding: 16,
+    minHeight: 62,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     ...patientShadow,
   },
   medicationIcon: {
     alignItems: 'center',
-    backgroundColor: '#fff0f0',
+    backgroundColor: '#E50914',
     borderRadius: 21,
     height: 42,
     justifyContent: 'center',
@@ -1565,8 +1645,16 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontWeight: '700',
   },
-  tabRow: {
+  evolutionSection: {
     marginTop: 18,
+  },
+  evolutionTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '700',
+    marginBottom: 12,
+  },
+  tabRow: {
     flexDirection: 'row',
     gap: 10,
   },
@@ -1699,6 +1787,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  lineChartViewport: {
+    minWidth: 280,
+  },
+  lineChartScrollContent: {
+    flexGrow: 1,
+  },
   lineChart: {
     backgroundColor: '#ffffff',
     borderColor: patientTheme.colors.border,
@@ -1720,7 +1814,7 @@ const styles = StyleSheet.create({
   chartGridLine: {
     backgroundColor: patientTheme.colors.border,
     height: 1,
-    left: 42,
+    left: 46,
     opacity: 0.7,
     position: 'absolute',
     right: 0,
@@ -1729,7 +1823,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontSize: 9,
     fontWeight: '700',
-    left: -34,
+    left: -38,
     position: 'absolute',
     top: -8,
   },
@@ -1748,47 +1842,93 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 14,
   },
+  linePointValue: {
+    color: patientTheme.colors.text,
+    fontSize: 10,
+    fontWeight: '800',
+    position: 'absolute',
+    textAlign: 'center',
+    width: 44,
+  },
   chartLabelsRow: {
     bottom: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    left: 22,
+    height: 18,
+    left: 0,
     position: 'absolute',
-    right: 10,
+    right: 0,
   },
   lineChartLabel: {
     color: patientTheme.colors.textMuted,
     fontSize: 10,
     fontWeight: '700',
+    position: 'absolute',
+    textAlign: 'center',
+    width: 48,
   },
   metricsRow: {
     marginTop: 18,
     flexDirection: 'row',
-    gap: 10,
+    gap: 8,
   },
   metricCard: {
+    alignItems: 'center',
     flex: 1,
+    aspectRatio: 1,
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 16,
+    borderRadius: patientTheme.radius.lg,
+    justifyContent: 'center',
+    minWidth: 0,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
     ...patientShadow,
   },
   metricLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
+    fontSize: 8.5,
+    lineHeight: 11,
+    minHeight: 12,
+    textAlign: 'center',
     textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   metricValue: {
-    marginTop: 12,
+    marginTop: 3,
     color: patientTheme.colors.text,
-    fontSize: 28,
+    fontSize: 21,
     fontWeight: '700',
+    lineHeight: 25,
+    textAlign: 'center',
   },
   metricUnit: {
-    marginTop: 6,
+    marginTop: 2,
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
+    fontSize: 9,
+    textAlign: 'center',
+  },
+  historyButton: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    flexDirection: 'row',
+    marginTop: 14,
+    minHeight: 56,
+    padding: 14,
+    ...patientShadow,
+  },
+  historyButtonIcon: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: 20,
+    height: 40,
+    justifyContent: 'center',
+    marginRight: 12,
+    width: 40,
+  },
+  historyButtonText: {
+    color: patientTheme.colors.text,
+    flex: 1,
+    fontSize: 15,
+    fontWeight: '800',
   },
   insightCard: {
     marginTop: 18,

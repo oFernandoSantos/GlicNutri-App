@@ -8,6 +8,7 @@ const AUTH_BACK_ROUTES = new Set(['Cadastro', 'ForgotPassword']);
 const PATIENT_ROUTES = new Set([
   'PacienteDiario',
   'PacienteMonitoramento',
+  'PacienteHistoricoRegistros',
   'PacienteAssistente',
   'PacienteAgendamentos',
   'PacienteBemEstar',
@@ -28,6 +29,7 @@ const routeTitles = {
   ForgotPassword: 'Recuperar senha',
   PacienteDiario: 'Diário',
   PacienteMonitoramento: 'Glicose',
+  PacienteHistoricoRegistros: 'Histórico de Registros',
   PacienteAssistente: 'IA',
   PacienteAgendamentos: 'Agendamentos',
   PacienteBemEstar: 'Bem-estar',
@@ -74,6 +76,7 @@ export default function ReaderTopo({ navigation, route, options }) {
   const notificationCount = Number(options?.readerNotificationCount || 0);
   const notificationAction = options?.readerOnNotificationPress;
   const notificationDisabled = options?.readerNotificationDisabled;
+  const extraContent = options?.readerExtraContent;
   const hasNotifications = notificationCount > 0;
 
   function handleBack() {
@@ -190,6 +193,7 @@ export default function ReaderTopo({ navigation, route, options }) {
           ) : null}
         </View>
       </View>
+      {extraContent ? <View style={styles.extraContent}>{extraContent}</View> : null}
     </View>
   );
 }
@@ -284,5 +288,11 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  extraContent: {
+    backgroundColor: '#ffffff',
+    paddingBottom: 12,
+    paddingHorizontal: 20,
+    paddingTop: 8,
   },
 });
