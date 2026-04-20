@@ -10,7 +10,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import {
@@ -30,8 +30,15 @@ import {
 
 const historyTabs = [
   { key: 'glucose', label: 'Glicemia' },
-  { key: 'medication', label: 'Medicação' },
+  { key: 'medication', label: 'Medicações' },
+  { key: 'food', label: 'Alimentações' },
 ];
+
+const historyTitles = {
+  glucose: 'Registros de Glicemias',
+  medication: 'Registros de Medicações',
+  food: 'Registros de Alimentares',
+};
 
 const periodTabs = [
   { key: 'today', label: 'Hoje' },
@@ -173,11 +180,61 @@ function sortByDateTime(items) {
   });
 }
 
+function parseMedicationLabel(label) {
+  const parts = String(label || '')
+    .split(' - ')
+    .map((part) => part.trim())
+    .filter(Boolean);
+  const doseParts = String(parts[1] || '').split(/\s+/).filter(Boolean);
+
+  return {
+    name: parts[0] || '',
+    quantity: doseParts[0] || '',
+    unit: doseParts.slice(1).join(' '),
+    usage: parts[3] || '',
+  };
+}
+
+function getMedicationDisplay(entry) {
+  const parsedLabel = parseMedicationLabel(entry.label);
+  const title =
+    String(entry.medicineName || '').trim() ||
+    parsedLabel.name ||
+    (entry.medicationKind === 'insulin' ? String(entry.label || '').trim() : '') ||
+    'Medicação';
+  const quantity = String(entry.medicineQuantity || '').trim() || parsedLabel.quantity;
+  const unit = String(entry.medicineUnit || '').trim() || parsedLabel.unit;
+  const usage =
+    entry.medicationKind === 'medicine'
+      ? entry.medicineContinuousUse
+        ? 'Uso continuo'
+        : String(entry.medicineDays || '').trim()
+          ? `${String(entry.medicineDays).trim()} dia(s)`
+          : parsedLabel.usage
+      : '';
+  const type =
+    entry.medicationKind === 'insulin'
+      ? 'Insulina'
+      : entry.medicationKind === 'medicine' || entry.medicineName || quantity || unit
+        ? 'Medicamento'
+        : 'Registro de medicação';
+
+  return {
+    title,
+    type,
+    quantity,
+    unit,
+    usage,
+  };
+}
+
 function EmptyState({ activeTab }) {
   const text =
     activeTab === 'glucose'
       ? 'Nenhum registro glicêmico encontrado.'
-      : 'Nenhum registro de medicação encontrado.';
+      : activeTab === 'medication'
+        ? 'Nenhum registro de medicação encontrado.'
+        : 'Nenhum registro alimentar encontrado.';
 
   return (
     <View style={styles.emptyCard}>
@@ -266,6 +323,18 @@ export default function PacienteHistoricoRegistrosScreen({
     [appState.medicationEntries]
   );
 
+  const foodEntries = useMemo(
+    () =>
+      sortByDateTime(
+        (appState.mealEntries || []).map((item) => ({
+          ...item,
+          date: item.date || new Date().toISOString().slice(0, 10),
+          time: item.time || '00:00',
+        }))
+      ),
+    [appState.mealEntries]
+  );
+
   const sortedGlucoseReadings = useMemo(
     () => sortByDateTime(glucoseReadings),
     [glucoseReadings]
@@ -279,6 +348,11 @@ export default function PacienteHistoricoRegistrosScreen({
   const filteredGlucoseReadings = useMemo(
     () => filterByPeriod(sortedGlucoseReadings, activePeriod, searchStartDate, searchEndDate),
     [activePeriod, searchEndDate, searchStartDate, sortedGlucoseReadings]
+  );
+
+  const filteredFoodEntries = useMemo(
+    () => filterByPeriod(foodEntries, activePeriod, searchStartDate, searchEndDate),
+    [activePeriod, foodEntries, searchEndDate, searchStartDate]
   );
 
   const headerSelectors = useMemo(
@@ -353,14 +427,16 @@ export default function PacienteHistoricoRegistrosScreen({
   useLayoutEffect(() => {
     navigation.setOptions({
       readerExtraContent: headerSelectors,
+      readerTitle: historyTitles[activeTab],
     });
 
     return () => {
       navigation.setOptions({
         readerExtraContent: null,
+        readerTitle: null,
       });
     };
-  }, [headerSelectors, navigation]);
+  }, [activeTab, headerSelectors, navigation]);
 
   function confirmDeleteGlucose(reading) {
     Alert.alert(
@@ -392,9 +468,11 @@ export default function PacienteHistoricoRegistrosScreen({
   }
 
   function confirmDeleteMedication(entry) {
+    const medicationDisplay = getMedicationDisplay(entry);
+
     Alert.alert(
       'Excluir registro?',
-      `Deseja excluir "${entry.label}" de ${formatDate(entry.date)} às ${formatTime(entry.time)}?`,
+      `Deseja excluir "${medicationDisplay.title}" de ${formatDate(entry.date)} às ${formatTime(entry.time)}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -441,7 +519,9 @@ export default function PacienteHistoricoRegistrosScreen({
   const listIsEmpty =
     activeTab === 'glucose'
       ? filteredGlucoseReadings.length === 0
-      : filteredMedicationEntries.length === 0;
+      : activeTab === 'medication'
+        ? filteredMedicationEntries.length === 0
+        : filteredFoodEntries.length === 0;
 
   return (
     <PatientScreenLayout
@@ -544,7 +624,7 @@ export default function PacienteHistoricoRegistrosScreen({
           {filteredGlucoseReadings.map((reading) => (
             <View key={reading.id} style={styles.recordCard}>
               <View style={styles.recordIcon}>
-                <Ionicons name="water-outline" size={20} color={patientTheme.colors.primaryDark} />
+                <Ionicons name="water-outline" size={20} color="#E50914" />
               </View>
               <View style={styles.recordBody}>
                 <Text style={styles.recordTitle}>{reading.value} mg/dL</Text>
@@ -569,31 +649,70 @@ export default function PacienteHistoricoRegistrosScreen({
             </View>
           ))}
         </View>
+      ) : activeTab === 'medication' ? (
+        <View style={styles.list}>
+          {filteredMedicationEntries.map((entry) => {
+            const medicationDisplay = getMedicationDisplay(entry);
+
+            return (
+              <View key={entry.id} style={styles.recordCard}>
+                <View style={[styles.recordIcon, styles.medicationIcon]}>
+                  <MaterialCommunityIcons name="pill" size={20} color="#ffffff" />
+                </View>
+                <View style={styles.recordBody}>
+                  <Text style={styles.recordTitle}>{medicationDisplay.title}</Text>
+                  <Text style={styles.recordLine}>Tipo: {medicationDisplay.type}</Text>
+                  {medicationDisplay.unit ? (
+                    <Text style={styles.recordLine}>
+                      Unidade de medida: {medicationDisplay.unit}
+                    </Text>
+                  ) : null}
+                  {medicationDisplay.quantity ? (
+                    <Text style={styles.recordLine}>
+                      Quantidade: {medicationDisplay.quantity}
+                    </Text>
+                  ) : null}
+                  {medicationDisplay.usage ? (
+                    <Text style={styles.recordLine}>Uso: {medicationDisplay.usage}</Text>
+                  ) : null}
+                  <Text style={styles.recordLine}>
+                    Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => confirmDeleteMedication(entry)}
+                  disabled={deletingId === entry.id}
+                >
+                  {deletingId === entry.id ? (
+                    <ActivityIndicator size="small" color="#E50914" />
+                  ) : (
+                    <Ionicons name="trash-outline" size={20} color="#E50914" />
+                  )}
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </View>
       ) : (
         <View style={styles.list}>
-          {filteredMedicationEntries.map((entry) => (
+          {filteredFoodEntries.map((entry) => (
             <View key={entry.id} style={styles.recordCard}>
-              <View style={[styles.recordIcon, styles.medicationIcon]}>
-                <Ionicons name="medical-outline" size={20} color="#d96666" />
+              <View style={[styles.recordIcon, styles.foodIcon]}>
+                <MaterialCommunityIcons name="food-variant" size={20} color="#ffffff" />
               </View>
               <View style={styles.recordBody}>
-                <Text style={styles.recordTitle}>{entry.label || 'Medicação'}</Text>
-                <Text style={styles.recordLine}>Tipo: Registro de medicação</Text>
+                <Text style={styles.recordTitle}>{entry.title || 'Alimentação'}</Text>
+                <Text style={styles.recordLine}>
+                  Tipo: {entry.mode === 'photo' ? 'Foto' : entry.mode === 'voice' ? 'Áudio' : 'Texto'}
+                </Text>
+                {entry.description ? (
+                  <Text style={styles.recordLine}>{entry.description}</Text>
+                ) : null}
                 <Text style={styles.recordLine}>
                   Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
                 </Text>
               </View>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => confirmDeleteMedication(entry)}
-                disabled={deletingId === entry.id}
-              >
-                {deletingId === entry.id ? (
-                  <ActivityIndicator size="small" color="#E50914" />
-                ) : (
-                  <Ionicons name="trash-outline" size={20} color="#E50914" />
-                )}
-              </TouchableOpacity>
             </View>
           ))}
         </View>
@@ -654,6 +773,9 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.surface,
     borderRadius: selectorButtonRadius,
     flex: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+    paddingHorizontal: 6,
     paddingVertical: 12,
     ...patientShadow,
   },
@@ -662,7 +784,9 @@ const styles = StyleSheet.create({
   },
   tabText: {
     color: patientTheme.colors.text,
+    fontSize: 12,
     fontWeight: '800',
+    textAlign: 'center',
   },
   tabTextActive: {
     color: patientTheme.colors.onPrimary,
@@ -771,7 +895,7 @@ const styles = StyleSheet.create({
   },
   recordIcon: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: '#ffffff',
     borderRadius: 20,
     height: 40,
     justifyContent: 'center',
@@ -779,7 +903,10 @@ const styles = StyleSheet.create({
     width: 40,
   },
   medicationIcon: {
-    backgroundColor: '#fff0f0',
+    backgroundColor: '#E50914',
+  },
+  foodIcon: {
+    backgroundColor: patientTheme.colors.primary,
   },
   recordBody: {
     flex: 1,
