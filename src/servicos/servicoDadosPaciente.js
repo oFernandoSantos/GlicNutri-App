@@ -35,10 +35,14 @@ export function createDefaultAppState() {
     version: 1,
     waterCount: 0,
     mealEntries: [],
+    hiddenMealEntryIds: [],
     activityEntries: [],
     medicationEntries: [],
+    hiddenMedicationEntryIds: [],
     symptomEntries: [],
     assistantMessages: [],
+    patientNotifications: [],
+    hiddenGlucoseReadingIds: [],
     nutritionistThread,
     planSections: mealPlanSections,
     wellness: {
@@ -74,10 +78,14 @@ function normalizeAppState(rawState) {
     ...appState,
     waterCount: Number.isFinite(appState.waterCount) ? appState.waterCount : defaults.waterCount,
     mealEntries: ensureArray(appState.mealEntries),
+    hiddenMealEntryIds: ensureArray(appState.hiddenMealEntryIds),
     activityEntries: ensureArray(appState.activityEntries),
     medicationEntries: ensureArray(appState.medicationEntries),
+    hiddenMedicationEntryIds: ensureArray(appState.hiddenMedicationEntryIds),
     symptomEntries: ensureArray(appState.symptomEntries),
     assistantMessages: ensureArray(appState.assistantMessages),
+    patientNotifications: ensureArray(appState.patientNotifications),
+    hiddenGlucoseReadingIds: ensureArray(appState.hiddenGlucoseReadingIds),
     nutritionistThread: ensureArray(appState.nutritionistThread).length
       ? appState.nutritionistThread
       : defaults.nutritionistThread,
@@ -86,6 +94,25 @@ function normalizeAppState(rawState) {
       : defaults.planSections,
     wellness: ensureWellness(appState.wellness),
   };
+}
+
+function prepareAppStateForStorage(appState) {
+  const normalized = normalizeAppState(appState);
+
+  return {
+    ...normalized,
+    medicationEntries: normalized.medicationEntries.filter(
+      (entry) => entry?.storageOrigin !== 'database'
+    ),
+  };
+}
+
+function appendUniqueId(array, id) {
+  if (!id) {
+    return ensureArray(array);
+  }
+
+  return uniqueValues([id, ...ensureArray(array)]);
 }
 
 export function extractObjectiveAndAppState(rawText) {
@@ -120,7 +147,7 @@ export function extractObjectiveAndAppState(rawText) {
 
 function serializeObjectiveAndAppState(objectiveText, appState) {
   const baseText = (objectiveText || '').trim();
-  const payload = JSON.stringify(normalizeAppState(appState));
+  const payload = JSON.stringify(prepareAppStateForStorage(appState));
 
   if (baseText) {
     return `${baseText}\n\n${META_START}\n${payload}\n${META_END}`;
@@ -148,6 +175,119 @@ function buildUuid() {
 
     return value.toString(16);
   });
+}
+
+function normalizeMedicationType(value) {
+  return value === 'insulin' ? 'insulin' : 'medicine';
+}
+
+function normalizeMedicationDate(value) {
+  return String(value || buildTodayDateString()).slice(0, 10);
+}
+
+function normalizeMedicationTime(value) {
+  return String(value || buildCurrentTimeString()).slice(0, 5);
+}
+
+function normalizeMedicationNumber(value) {
+  if (value === '' || value === null || typeof value === 'undefined') {
+    return null;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildMedicationSignature(entry) {
+  return [
+    normalizeMedicationDate(entry?.date),
+    normalizeMedicationTime(entry?.time),
+    normalizeMedicationType(entry?.medicationKind || entry?.tipo_registro),
+    String(entry?.medicineName || entry?.nome_medicamento || '').trim().toLowerCase(),
+    String(entry?.medicineUnit || entry?.unidade_medida || '').trim().toLowerCase(),
+    String(entry?.medicineQuantity || entry?.quantidade || '').trim().toLowerCase(),
+    entry?.medicineContinuousUse || entry?.uso_continuo ? 'continuous' : 'dated',
+    String(entry?.medicineDays || entry?.dias_tratamento || '').trim().toLowerCase(),
+    String(entry?.label || entry?.descricao || '').trim().toLowerCase(),
+  ].join('|');
+}
+
+function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
+  const normalizedType = normalizeMedicationType(item?.medicationKind || item?.tipo_registro);
+  const date = normalizeMedicationDate(item?.date || item?.data);
+  const time = normalizeMedicationTime(item?.time || item?.hora);
+  const medicineName = String(item?.medicineName || item?.nome_medicamento || '').trim();
+  const medicineUnit = String(item?.medicineUnit || item?.unidade_medida || '').trim();
+  const medicineQuantity = String(item?.medicineQuantity || item?.quantidade || '').trim();
+  const daysValue = item?.medicineDays ?? item?.dias_tratamento ?? '';
+  const medicineDays = daysValue === null || typeof daysValue === 'undefined'
+    ? ''
+    : String(daysValue).trim();
+  const medicineContinuousUse = Boolean(item?.medicineContinuousUse ?? item?.uso_continuo);
+  const label = String(item?.label || item?.descricao || '').trim() || 'Medicacao / insulina';
+  const databaseId = item?.id_registro_medicacao_uuid || null;
+
+  return {
+    id:
+      item?.id ||
+      databaseId ||
+      item?.id_registro_legado ||
+      `med-${date}-${time}-${index}`,
+    kind: 'medication',
+    label,
+    date,
+    time,
+    medicationKind: normalizedType,
+    medicineName,
+    medicineUnit,
+    medicineQuantity,
+    medicineDays,
+    medicineContinuousUse,
+    patientId: item?.id_paciente_uuid || item?.patientId || null,
+    storageOrigin,
+    databaseId,
+    legacyId: item?.id || item?.id_registro_legado || null,
+  };
+}
+
+function mergeMedicationEntries(databaseEntries, legacyEntries) {
+  const merged = [];
+  const seenIds = new Set();
+  const seenSignatures = new Set();
+
+  [...ensureArray(databaseEntries), ...ensureArray(legacyEntries)].forEach((entry, index) => {
+    const normalized = normalizeMedicationEntry(entry, entry?.storageOrigin, index);
+    const entryId = String(normalized.databaseId || normalized.id || '');
+    const signature = buildMedicationSignature(normalized);
+
+    if (entryId && seenIds.has(entryId)) {
+      return;
+    }
+
+    if (signature && seenSignatures.has(signature)) {
+      return;
+    }
+
+    if (entryId) {
+      seenIds.add(entryId);
+    }
+
+    if (signature) {
+      seenSignatures.add(signature);
+    }
+
+    merged.push(normalized);
+  });
+
+  return merged.sort((left, right) => {
+    const leftStamp = `${left.date || '1970-01-01'}T${left.time || '00:00:00'}`;
+    const rightStamp = `${right.date || '1970-01-01'}T${right.time || '00:00:00'}`;
+    return rightStamp.localeCompare(leftStamp);
+  });
+}
+
+function buildMedicationEntryFromPayload(payload) {
+  return normalizeMedicationEntry(payload, 'database');
 }
 
 function buildGlucoseReadingFromPayload(payload, fallbackValue) {
@@ -327,13 +467,47 @@ export async function fetchPatientExperience(patientId, options = {}) {
   const patient = await fetchPatientById(patientId, options);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
-  const glucoseReadings = await fetchGlucoseReadings(effectivePatientId);
+  const normalizedAppState = normalizeAppState(parsed.appState);
+  const [glucoseReadings, databaseMedicationEntries] = await Promise.all([
+    fetchGlucoseReadings(effectivePatientId),
+    fetchMedicationEntries(effectivePatientId),
+  ]);
+  const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
+    (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
+  );
+  const medicationEntries = mergeMedicationEntries(
+    databaseMedicationEntries,
+    legacyMedicationEntries
+  );
+  const includeHidden = Boolean(options.includeHidden);
+  const visibleMealEntries = includeHidden
+    ? normalizedAppState.mealEntries
+    : normalizedAppState.mealEntries.filter(
+        (entry) => !normalizedAppState.hiddenMealEntryIds.includes(entry?.id)
+      );
+  const visibleMedicationEntries = includeHidden
+    ? medicationEntries
+    : medicationEntries.filter(
+        (entry) =>
+          !normalizedAppState.hiddenMedicationEntryIds.includes(
+            entry?.databaseId || entry?.legacyId || entry?.id
+          )
+      );
+  const visibleGlucoseReadings = includeHidden
+    ? glucoseReadings
+    : glucoseReadings.filter(
+        (entry) => !normalizedAppState.hiddenGlucoseReadingIds.includes(entry?.id)
+      );
 
   return {
     patient,
     clinicalObjective: parsed.objectiveText,
-    appState: parsed.appState,
-    glucoseReadings,
+    appState: {
+      ...normalizedAppState,
+      mealEntries: visibleMealEntries,
+      medicationEntries: visibleMedicationEntries,
+    },
+    glucoseReadings: visibleGlucoseReadings,
   };
 }
 
@@ -493,6 +667,69 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
   ).slice(0, limit);
 }
 
+export async function fetchMedicationEntries(patientId, limit = 120) {
+  if (!patientId) {
+    return [];
+  }
+
+  let rpcEntries = [];
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'listar_medicacoes_paciente',
+    {
+      p_id_paciente_uuid: patientId,
+      p_limite: limit,
+    }
+  );
+
+  if (!rpcError && Array.isArray(rpcData)) {
+    rpcEntries = rpcData.map((item, index) =>
+      normalizeMedicationEntry(item, 'database', index)
+    );
+  }
+
+  const rpcMessage = String(rpcError?.message || '').toLowerCase();
+  const rpcMissing =
+    rpcMessage.includes('could not find the function') ||
+    rpcMessage.includes('schema cache') ||
+    rpcMessage.includes('listar_medicacoes_paciente');
+
+  if (rpcError && !rpcMissing) {
+    console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
+  }
+
+  const { data, error } = await supabase
+    .from('registro_medicacao')
+    .select([
+      'id_registro_medicacao_uuid',
+      'id_paciente_uuid',
+      'tipo_registro',
+      'descricao',
+      'nome_medicamento',
+      'unidade_medida',
+      'quantidade',
+      'data',
+      'hora',
+      'dias_tratamento',
+      'uso_continuo',
+      'observacao',
+      'id_registro_legado',
+    ].join(', '))
+    .eq('id_paciente_uuid', patientId)
+    .order('data', { ascending: false })
+    .order('hora', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.log('Erro ao buscar medicacoes:', error.message);
+    return rpcEntries;
+  }
+
+  return mergeMedicationEntries(
+    (data || []).map((item, index) => normalizeMedicationEntry(item, 'database', index)),
+    rpcEntries
+  ).slice(0, limit);
+}
+
 export async function addGlucoseReading(patientId, value, options = {}) {
   if (!patientId) {
     throw new Error('Paciente sem identificador para registrar glicemia.');
@@ -584,6 +821,96 @@ export async function addGlucoseReading(patientId, value, options = {}) {
   );
 }
 
+export async function addMedicationEntry(patientId, entry) {
+  if (!patientId) {
+    throw new Error('Paciente sem identificador para registrar medicacao.');
+  }
+
+  const normalizedEntry = normalizeMedicationEntry(entry, 'database');
+  const fallbackPayload = {
+    id_registro_medicacao_uuid: buildUuid(),
+    id_paciente_uuid: patientId,
+    tipo_registro: normalizeMedicationType(normalizedEntry.medicationKind),
+    descricao: normalizedEntry.label,
+    nome_medicamento: normalizedEntry.medicineName || null,
+    unidade_medida: normalizedEntry.medicineUnit || null,
+    quantidade: normalizedEntry.medicineQuantity || null,
+    data: normalizedEntry.date,
+    hora: normalizedEntry.time,
+    dias_tratamento: normalizedEntry.medicineContinuousUse
+      ? null
+      : normalizeMedicationNumber(normalizedEntry.medicineDays),
+    uso_continuo: normalizedEntry.medicineContinuousUse,
+    observacao: null,
+    id_registro_legado: normalizedEntry.legacyId || normalizedEntry.id || null,
+  };
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'registrar_medicacao_paciente',
+    {
+      p_id_paciente_uuid: patientId,
+      p_tipo_registro: fallbackPayload.tipo_registro,
+      p_descricao: fallbackPayload.descricao,
+      p_nome_medicamento: fallbackPayload.nome_medicamento,
+      p_unidade_medida: fallbackPayload.unidade_medida,
+      p_quantidade: fallbackPayload.quantidade,
+      p_data: fallbackPayload.data,
+      p_hora: fallbackPayload.hora,
+      p_dias_tratamento: fallbackPayload.dias_tratamento,
+      p_uso_continuo: fallbackPayload.uso_continuo,
+      p_observacao: fallbackPayload.observacao,
+      p_id_registro_legado: fallbackPayload.id_registro_legado,
+    }
+  );
+
+  if (!rpcError) {
+    const saved = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    return buildMedicationEntryFromPayload({
+      ...fallbackPayload,
+      ...saved,
+    });
+  }
+
+  const rpcMessage = String(rpcError?.message || '').toLowerCase();
+  const rpcMissing =
+    rpcMessage.includes('could not find the function') ||
+    rpcMessage.includes('schema cache') ||
+    rpcMessage.includes('registrar_medicacao_paciente');
+
+  if (!rpcMissing) {
+    console.log('RPC de medicacao falhou; tentando insert direto:', rpcError?.message);
+  }
+
+  const { data, error } = await supabase
+    .from('registro_medicacao')
+    .insert([fallbackPayload])
+    .select([
+      'id_registro_medicacao_uuid',
+      'id_paciente_uuid',
+      'tipo_registro',
+      'descricao',
+      'nome_medicamento',
+      'unidade_medida',
+      'quantidade',
+      'data',
+      'hora',
+      'dias_tratamento',
+      'uso_continuo',
+      'observacao',
+      'id_registro_legado',
+    ].join(', '))
+    .maybeSingle();
+
+  if (error) {
+    throw error;
+  }
+
+  return buildMedicationEntryFromPayload({
+    ...fallbackPayload,
+    ...data,
+  });
+}
+
 export async function deleteGlucoseReading(patientId, reading) {
   if (!patientId || !reading?.id) {
     throw new Error('Registro de glicemia sem identificador para excluir.');
@@ -600,6 +927,115 @@ export async function deleteGlucoseReading(patientId, reading) {
   }
 
   return true;
+}
+
+export async function deleteMedicationEntry(patientId, entry) {
+  const databaseId = entry?.databaseId || entry?.id;
+
+  if (!patientId || !databaseId) {
+    throw new Error('Registro de medicacao sem identificador para excluir.');
+  }
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'excluir_medicacao_paciente',
+    {
+      p_id_paciente_uuid: patientId,
+      p_id_registro_medicacao_uuid: databaseId,
+    }
+  );
+
+  if (!rpcError) {
+    return typeof rpcData === 'boolean' ? rpcData : true;
+  }
+
+  const rpcMessage = String(rpcError?.message || '').toLowerCase();
+  const rpcMissing =
+    rpcMessage.includes('could not find the function') ||
+    rpcMessage.includes('schema cache') ||
+    rpcMessage.includes('excluir_medicacao_paciente');
+
+  if (!rpcMissing) {
+    console.log('RPC de exclusao de medicacao falhou; tentando delete direto:', rpcError?.message);
+  }
+
+  const { error } = await supabase
+    .from('registro_medicacao')
+    .delete()
+    .eq('id_paciente_uuid', patientId)
+    .eq('id_registro_medicacao_uuid', databaseId);
+
+  if (error) {
+    throw error;
+  }
+
+  return true;
+}
+
+export async function hideGlucoseReadingForPatient({
+  patientId,
+  objectiveText,
+  appState,
+  reading,
+  currentPatient,
+  patientContext,
+}) {
+  const nextState = {
+    ...normalizeAppState(appState),
+    hiddenGlucoseReadingIds: appendUniqueId(appState?.hiddenGlucoseReadingIds, reading?.id),
+  };
+
+  return await savePatientAppState({
+    patientId,
+    objectiveText,
+    appState: nextState,
+    currentPatient,
+    patientContext,
+  });
+}
+
+export async function hideMedicationEntryForPatient({
+  patientId,
+  objectiveText,
+  appState,
+  entry,
+  currentPatient,
+  patientContext,
+}) {
+  const hiddenId = entry?.databaseId || entry?.legacyId || entry?.id;
+  const nextState = {
+    ...normalizeAppState(appState),
+    hiddenMedicationEntryIds: appendUniqueId(appState?.hiddenMedicationEntryIds, hiddenId),
+  };
+
+  return await savePatientAppState({
+    patientId,
+    objectiveText,
+    appState: nextState,
+    currentPatient,
+    patientContext,
+  });
+}
+
+export async function hideMealEntryForPatient({
+  patientId,
+  objectiveText,
+  appState,
+  entry,
+  currentPatient,
+  patientContext,
+}) {
+  const nextState = {
+    ...normalizeAppState(appState),
+    hiddenMealEntryIds: appendUniqueId(appState?.hiddenMealEntryIds, entry?.id),
+  };
+
+  return await savePatientAppState({
+    patientId,
+    objectiveText,
+    appState: nextState,
+    currentPatient,
+    patientContext,
+  });
 }
 
 export function buildMealEntry({ mode, description, glucoseNote, aiNote, time }) {

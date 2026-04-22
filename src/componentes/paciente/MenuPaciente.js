@@ -16,9 +16,15 @@ const menuItems = [
   { label: 'Início', route: 'HomePaciente', icon: 'home-outline', library: 'ion' },
   { label: 'Diário', route: 'PacienteDiario', icon: 'book-outline', library: 'ion' },
   { label: 'Glicose', route: 'PacienteMonitoramento', icon: 'pulse-outline', library: 'ion' },
-  { label: 'Assistente IA', route: 'PacienteAssistente', icon: 'sparkles-outline', library: 'ion' },
   { label: 'Bem-estar', route: 'PacienteBemEstar', icon: 'body-outline', library: 'ion' },
   { label: 'Meu plano', route: 'PacientePlano', icon: 'food-apple-outline', library: 'material' },
+  {
+    label: 'Ver Histórico de Registros',
+    route: 'PacienteHistoricoRegistros',
+    icon: 'document-text-outline',
+    library: 'ion',
+  },
+  { label: 'Suporte', route: 'PacienteAssistente', icon: 'headset', library: 'material' },
 ];
 
 function DrawerIcon({ item, active }) {
@@ -29,6 +35,13 @@ function DrawerIcon({ item, active }) {
   }
 
   return <Ionicons name={item.icon} size={22} color={color} />;
+}
+
+function getFirstName(name) {
+  return String(name || 'Paciente')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)[0] || 'Paciente';
 }
 
 export default function PatientDrawer({
@@ -74,7 +87,7 @@ export default function PatientDrawer({
                 numberOfLines={1}
                 ellipsizeMode="tail"
               >
-                {userName || 'Paciente'}
+                {getFirstName(userName)}
               </Text>
             </View>
 
@@ -95,7 +108,7 @@ export default function PatientDrawer({
 
                 return (
                   <TouchableOpacity
-                    key={item.route}
+                    key={`${item.route}-${item.label}`}
                     style={[
                       styles.menuItem,
                       compact && styles.menuItemCompact,
@@ -104,7 +117,7 @@ export default function PatientDrawer({
                     onPress={() => {
                       onClose();
                       setTimeout(() => {
-                        onNavigate(item.route);
+                        onNavigate(item.route, item.params);
                       }, 120);
                     }}
                   >
@@ -177,7 +190,8 @@ const styles = StyleSheet.create({
   },
   header: {
     margin: 16,
-    padding: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
     borderRadius: patientTheme.radius.xl,
     backgroundColor: patientTheme.colors.primary,
     flexDirection: 'row',
@@ -186,30 +200,31 @@ const styles = StyleSheet.create({
   },
   headerCompact: {
     margin: 12,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
     backgroundColor: 'rgba(255,255,255,0.24)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   avatarCompact: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     marginRight: 10,
   },
   avatarText: {
     color: patientTheme.colors.onPrimary,
-    fontSize: 20,
+    fontSize: 18,
     fontWeight: '700',
   },
   avatarTextCompact: {
-    fontSize: 18,
+    fontSize: 16,
   },
   headerText: {
     flex: 1,
@@ -226,11 +241,11 @@ const styles = StyleSheet.create({
   },
   userName: {
     color: patientTheme.colors.onPrimary,
-    fontSize: 14,
+    fontSize: 17,
     fontWeight: '700',
   },
   userNameCompact: {
-    fontSize: 13,
+    fontSize: 15,
   },
   closeButton: {
     marginLeft: 8,
@@ -280,9 +295,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: '#fee2e2',
-    borderColor: '#fca5a5',
-    borderWidth: 1,
   },
   logoutButtonCompact: {
     paddingHorizontal: 12,

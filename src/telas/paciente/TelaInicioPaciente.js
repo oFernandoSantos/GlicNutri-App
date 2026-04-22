@@ -22,7 +22,6 @@ import PatientDrawer from '../../componentes/paciente/MenuPaciente';
 import { supabase } from '../../servicos/configSupabase';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
-  glucoseSparkline,
   buildHomeInsights,
   getTrendMeta,
 } from '../../dados/dadosExperienciaPaciente';
@@ -63,28 +62,84 @@ function getGlucoseLevelColor(value) {
   return '#E50914';
 }
 
+function getGlucoseStatusMeta(value) {
+  if (!value) {
+    return {
+      label: 'Sem leitura',
+      icon: 'remove-outline',
+      color: patientTheme.colors.textMuted,
+      textColor: patientTheme.colors.textMuted,
+    };
+  }
+
+  if (value < 54) {
+    return {
+      label: 'Muito grave',
+      icon: 'alert-circle-outline',
+      color: '#E50914',
+      textColor: '#ffffff',
+    };
+  }
+
+  if (value < 70) {
+    return {
+      label: 'Baixo',
+      icon: 'trending-down-outline',
+      color: '#f28c28',
+      textColor: '#ffffff',
+    };
+  }
+
+  if (value <= 180) {
+    return {
+      label: 'Ideal',
+      icon: 'checkmark-circle-outline',
+      color: patientTheme.colors.primaryDark,
+      textColor: '#ffffff',
+    };
+  }
+
+  if (value <= 250) {
+    return {
+      label: 'Alto leve',
+      icon: 'trending-up-outline',
+      color: '#FFD600',
+      textColor: '#ffffff',
+    };
+  }
+
+  return {
+    label: 'Grave',
+    icon: 'alert-circle-outline',
+    color: '#E50914',
+    textColor: '#ffffff',
+  };
+}
+
 function Sparkline({ data }) {
   const [chartWidth, setChartWidth] = useState(0);
-  const chartHeight = 230;
-  const chartPadding = 24;
-  const chartData = data.length ? data : glucoseSparkline;
+  const chartHeight = 220;
+  const chartPaddingHorizontal = 42;
+  const chartPaddingTop = 30;
+  const chartPaddingBottom = 34;
+  const chartData = data;
   const chartMarks = [50, 100, 150, 200, 250, 300, 350, 400];
   const min = 50;
   const max = 400;
   const range = Math.max(max - min, 1);
-  const contentWidth = Math.max(chartWidth - chartPadding * 2, 1);
-  const contentHeight = chartHeight - chartPadding * 2;
+  const contentWidth = Math.max(chartWidth - chartPaddingHorizontal * 2, 1);
+  const contentHeight = chartHeight - chartPaddingTop - chartPaddingBottom;
   const getTopForValue = (value) =>
-    chartPadding + (1 - (Math.min(Math.max(value, min), max) - min) / range) * contentHeight;
+    chartPaddingTop + (1 - (Math.min(Math.max(value, min), max) - min) / range) * contentHeight;
   const safeRangeTop = getTopForValue(180);
   const safeRangeHeight = getTopForValue(70) - safeRangeTop;
-  const points = chartData.map((value, index) => {
+  const points = chartData.map((item, index) => {
     const x =
-      chartPadding +
+      chartPaddingHorizontal +
       (chartData.length === 1 ? contentWidth : (index / (chartData.length - 1)) * contentWidth);
-    const y = getTopForValue(value);
+    const y = getTopForValue(item.value);
 
-    return { x, y, value };
+    return { ...item, x, y };
   });
 
   return (
@@ -150,6 +205,39 @@ function Sparkline({ data }) {
           );
         })
       ) : null}
+
+      {chartWidth > 0 && points.length ? (
+        points.map((point, index) => (
+          <Text
+            key={`${point.value}-value-${index}`}
+            style={[
+              styles.glucosePointValue,
+              {
+                left: Math.min(Math.max(point.x - 18, 4), Math.max(chartWidth - 42, 4)),
+                top: Math.max(point.y - 23, 5),
+              },
+            ]}
+          >
+            {point.value}
+          </Text>
+        ))
+      ) : null}
+
+      <View style={styles.glucoseChartLabelsRow}>
+        {points.map((point, index) => (
+          <Text
+            key={`${point.label || point.value}-label-${index}`}
+            style={[
+              styles.glucoseChartLabel,
+              {
+                left: Math.min(Math.max(point.x - 22, 4), Math.max(chartWidth - 48, 4)),
+              },
+            ]}
+          >
+            {point.label}
+          </Text>
+        ))}
+      </View>
     </View>
   );
 }
@@ -165,19 +253,57 @@ function TimeInRangeBar({ summary }) {
       <View style={styles.rangeBar}>
         {hasReadings ? (
           <>
-            <View style={[styles.rangeSegment, styles.rangePrimary, { flex: Math.max(inRange, 1) }]} />
-            <View style={[styles.rangeSegment, styles.rangeWarning, { flex: Math.max(above, 1) }]} />
-            <View style={[styles.rangeSegment, styles.rangeInfo, { flex: Math.max(below, 1) }]} />
+            {inRange > 0 ? (
+              <View
+                style={[
+                  styles.rangeSegment,
+                  styles.rangePrimary,
+                  { width: `${inRange}%` },
+                ]}
+              />
+            ) : null}
+            {above > 0 ? (
+              <View
+                style={[
+                  styles.rangeSegment,
+                  styles.rangeWarning,
+                  { width: `${above}%` },
+                ]}
+              />
+            ) : null}
+            {below > 0 ? (
+              <View
+                style={[
+                  styles.rangeSegment,
+                  styles.rangeInfo,
+                  { width: `${below}%` },
+                ]}
+              />
+            ) : null}
           </>
         ) : (
-          <View style={[styles.rangeSegment, styles.rangeEmpty, { flex: 1 }]} />
+          <View style={[styles.rangeSegment, styles.rangeEmpty, { width: '100%' }]} />
         )}
       </View>
 
       <View style={styles.rangeLegend}>
-        <Text style={styles.rangeLegendText}>{inRange}% na meta</Text>
-        <Text style={styles.rangeLegendText}>{above}% acima</Text>
-        <Text style={styles.rangeLegendText}>{below}% abaixo</Text>
+        <View style={styles.rangeLegendItem}>
+          <View
+            style={[
+              styles.rangeLegendDot,
+              { backgroundColor: patientTheme.colors.primaryDark },
+            ]}
+          />
+          <Text style={styles.rangeLegendText}>{inRange}% na meta</Text>
+        </View>
+        <View style={styles.rangeLegendItem}>
+          <View style={[styles.rangeLegendDot, { backgroundColor: '#FFD600' }]} />
+          <Text style={styles.rangeLegendText}>{above}% acima</Text>
+        </View>
+        <View style={styles.rangeLegendItem}>
+          <View style={[styles.rangeLegendDot, { backgroundColor: '#f28c28' }]} />
+          <Text style={styles.rangeLegendText}>{below}% abaixo</Text>
+        </View>
       </View>
     </View>
   );
@@ -366,13 +492,7 @@ function GlucoseMetricCard({
 }) {
   const glucoseLabel = currentGlucose ? `${currentGlucose} mg/dL` : '-- mg/dL';
   const updatedLabel = latestGlucose?.time ? `Atualizado ${latestGlucose.time}` : 'Sem registro hoje';
-  const levelColor = getGlucoseLevelColor(currentGlucose);
-  const badgeTextColor = currentGlucose && currentGlucose <= 250 && currentGlucose > 180
-    ? '#ffffff'
-    : currentGlucose
-      ? '#ffffff'
-      : patientTheme.colors.textMuted;
-  const badgeBackgroundColor = currentGlucose ? levelColor : patientTheme.colors.surfaceMuted;
+  const statusMeta = getGlucoseStatusMeta(currentGlucose);
 
   return (
     <SectionCard style={[styles.metricSlide, { width }]}>
@@ -382,26 +502,19 @@ function GlucoseMetricCard({
           <Text style={styles.glucoseValue}>{glucoseLabel}</Text>
         </View>
 
-        <View style={[styles.trendBadge, { backgroundColor: badgeBackgroundColor }]}>
+        <View style={[styles.trendBadge, { backgroundColor: statusMeta.color }]}>
           <Ionicons
-            name={trendMeta.icon}
+            name={statusMeta.icon}
             size={18}
-            color={badgeTextColor}
+            color={statusMeta.textColor}
           />
-          <Text style={[styles.trendBadgeText, { color: badgeTextColor }]}>
-            {trendMeta.label}
+          <Text style={[styles.trendBadgeText, { color: statusMeta.textColor }]}>
+            {statusMeta.label}
           </Text>
         </View>
       </View>
 
       <Text style={styles.heroHelper}>{trendMeta.helper}</Text>
-      <Sparkline data={sparklineData} />
-
-      <View style={styles.sparklineFooter}>
-        <Text style={styles.sparklineLabel}>Últimas leituras</Text>
-        <Text style={styles.sparklineLabel}>{updatedLabel}</Text>
-      </View>
-
       <View style={styles.rangeHeader}>
         <Text style={styles.rangeTitle}>Tempo na meta hoje</Text>
         <Text style={styles.rangeValue}>
@@ -409,6 +522,13 @@ function GlucoseMetricCard({
         </Text>
       </View>
       <TimeInRangeBar summary={glucoseSummary} />
+
+      <Sparkline data={sparklineData} />
+
+      <View style={styles.sparklineFooter}>
+        <Text style={styles.sparklineLabel}>Últimas leituras</Text>
+        <Text style={styles.sparklineLabel}>{updatedLabel}</Text>
+      </View>
     </SectionCard>
   );
 }
@@ -693,8 +813,20 @@ export default function PacienteHomeScreen({
     [glucoseForInsights, mealEntries.length]
   );
   const allNotificationItems = useMemo(
-    () =>
-      insights.map((item, index) => {
+    () => {
+      const guidedNotifications = (appState?.patientNotifications || []).map((item) => {
+        const createdAt = item?.createdAt ? new Date(item.createdAt) : new Date();
+
+        return {
+          ...item,
+          date: formatNotificationDate(createdAt),
+          time: formatNotificationTime(createdAt),
+          notificationKey: `${item.id}-${item.createdAt || item.text}`,
+          optionLabel: 'Leitura guiada',
+        };
+      });
+
+      const insightNotifications = insights.map((item, index) => {
         const createdAt = new Date(notificationBaseTime.getTime() - index * 18 * 60 * 1000);
 
         return {
@@ -709,8 +841,11 @@ export default function PacienteHomeScreen({
                 ? 'Resumo do dia'
                 : 'Lembrete de cuidado',
         };
-      }),
-    [insights, notificationBaseTime]
+      });
+
+      return [...guidedNotifications, ...insightNotifications];
+    },
+    [appState?.patientNotifications, insights, notificationBaseTime]
   );
   const notificationItems = useMemo(
     () =>
@@ -721,12 +856,17 @@ export default function PacienteHomeScreen({
   );
   const notificationCount = notificationItems.length;
   const sparklineData =
-    glucoseReadings.length >= 2
+    glucoseReadings.length
       ? glucoseReadings
-          .slice(0, 10)
+          .slice(0, 7)
           .reverse()
-          .map((item) => item.value)
-      : glucoseSparkline;
+          .map((item) => ({
+            value: item.value,
+            label: String(item.time || '').slice(0, 5),
+            date: item.date,
+            time: item.time,
+          }))
+      : [];
   const metricDots = ['Glicose', 'Macros', 'Micros'];
 
   useEffect(() => {
@@ -814,9 +954,19 @@ export default function PacienteHomeScreen({
 
   if (loading) {
     return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-        <Text style={styles.loadingText}>Montando seu painel de cuidado...</Text>
+      <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
+        <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
+          <Text style={styles.loadingText}>Montando seu painel de cuidado...</Text>
+        </View>
+
+        <BarraAbasPaciente
+          navigation={navigation}
+          rotaAtual={route?.name || 'HomePaciente'}
+          usuarioLogado={usuarioLogado}
+        />
       </View>
     );
   }
@@ -829,7 +979,7 @@ export default function PacienteHomeScreen({
         <PatientDrawer
           visible={menuVisible}
           onClose={() => setMenuVisible(false)}
-          onNavigate={(screen) => navigation.navigate(screen, { usuarioLogado })}
+          onNavigate={(screen, params) => navigation.navigate(screen, { usuarioLogado, ...params })}
           onLogout={handleLogout}
           currentRoute={route?.name || 'HomePaciente'}
           userName={nomeUsuario}
@@ -1147,7 +1297,7 @@ const styles = StyleSheet.create({
     alignItems: 'stretch',
   },
   metricSlide: {
-    height: 466,
+    height: 468,
   },
   carouselDots: {
     alignItems: 'center',
@@ -1208,8 +1358,8 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     borderRadius: 18,
     borderWidth: 1,
-    height: 230,
-    marginTop: 18,
+    height: 220,
+    marginTop: 12,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -1255,9 +1405,33 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     width: 12,
   },
+  glucosePointValue: {
+    color: patientTheme.colors.text,
+    fontSize: 10,
+    fontWeight: '800',
+    position: 'absolute',
+    textAlign: 'center',
+    width: 36,
+  },
+  glucoseChartLabelsRow: {
+    bottom: 8,
+    height: 16,
+    left: 0,
+    position: 'absolute',
+    right: 0,
+  },
+  glucoseChartLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+    position: 'absolute',
+    textAlign: 'center',
+    width: 44,
+  },
   sparklineFooter: {
     marginTop: 10,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
   },
   sparklineLabel: {
@@ -1265,7 +1439,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
   },
   rangeHeader: {
-    marginTop: 18,
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1280,8 +1454,8 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
   },
   rangeBar: {
-    marginTop: 12,
-    height: 12,
+    marginTop: 8,
+    height: 10,
     flexDirection: 'row',
     overflow: 'hidden',
     borderRadius: 8,
@@ -1291,7 +1465,7 @@ const styles = StyleSheet.create({
     height: '100%',
   },
   rangePrimary: {
-    backgroundColor: patientTheme.colors.primary,
+    backgroundColor: patientTheme.colors.primaryDark,
   },
   rangeWarning: {
     backgroundColor: '#FFD600',
@@ -1300,12 +1474,24 @@ const styles = StyleSheet.create({
     backgroundColor: '#f28c28',
   },
   rangeEmpty: {
+    borderRadius: 8,
     backgroundColor: patientTheme.colors.surfaceMuted,
   },
   rangeLegend: {
-    marginTop: 10,
+    marginTop: 6,
+    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
+  },
+  rangeLegendItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  rangeLegendDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
   },
   rangeLegendText: {
     fontSize: 11,
