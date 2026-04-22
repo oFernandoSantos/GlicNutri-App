@@ -17,8 +17,7 @@ import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   addGlucoseReading,
-  appendNewestEntry,
-  buildMedicationEntry,
+  addMedicationEntry,
   buildMonitorSeries,
   createDefaultAppState,
   fetchPatientExperience,
@@ -29,6 +28,7 @@ import {
   fetchLibreViewReadings,
   isLibreViewSyncConfigured,
 } from '../../servicos/servicoLibreView';
+import { buscarMedicamentosAnvisa } from '../../servicos/servicoMedicamentosAnvisa';
 import {
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
@@ -51,6 +51,162 @@ const glucoseTypeOptions = [
   'Outro Momento',
 ];
 
+const medicationUnitOptions = [
+  'Comprimido',
+  'Cápsula',
+  'Drágea',
+  'Dose',
+  'Gota',
+  'mL',
+  'UI',
+  'Ampola',
+  'Sachê',
+  'Xarope',
+  'Creme',
+  'Pomada',
+  'Spray',
+];
+
+const medicationUnitMeta = {
+  Comprimido: {
+    quantityLabel: 'Quantidade de comprimidos',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Informe quantos comprimidos serão tomados.',
+    inputType: 'integer',
+  },
+  'Cápsula': {
+    quantityLabel: 'Quantidade de cápsulas',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Informe quantas cápsulas serão tomadas.',
+    inputType: 'integer',
+  },
+  'Drágea': {
+    quantityLabel: 'Quantidade de drágeas',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Informe quantas drágeas serão tomadas.',
+    inputType: 'integer',
+  },
+  Dose: {
+    quantityLabel: 'Quantidade de doses',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Use quando a orientação vier em dose.',
+    inputType: 'decimal',
+  },
+  Gota: {
+    quantityLabel: 'Quantidade de gotas',
+    quantityPlaceholder: 'Ex: 20',
+    hint: 'Informe o número de gotas.',
+    inputType: 'integer',
+  },
+  mL: {
+    quantityLabel: 'Volume em mL',
+    quantityPlaceholder: 'Ex: 5',
+    hint: 'Informe o volume em mililitros.',
+    inputType: 'decimal',
+  },
+  UI: {
+    quantityLabel: 'Quantidade em UI',
+    quantityPlaceholder: 'Ex: 10',
+    hint: 'Use para unidades internacionais, comum em insulinas.',
+    inputType: 'integer',
+  },
+  Ampola: {
+    quantityLabel: 'Quantidade de ampolas',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Informe quantas ampolas foram usadas.',
+    inputType: 'integer',
+  },
+  'Sachê': {
+    quantityLabel: 'Quantidade de sachês',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Informe quantos sachês serão usados.',
+    inputType: 'integer',
+  },
+  Xarope: {
+    quantityLabel: 'Volume do xarope',
+    quantityPlaceholder: 'Ex: 10 mL',
+    hint: 'Prefira informar o volume em mL.',
+    inputType: 'decimal',
+  },
+  Creme: {
+    quantityLabel: 'Quantidade aplicada',
+    quantityPlaceholder: 'Ex: 1 aplicação',
+    hint: 'Informe aplicações ou quantidade orientada.',
+    inputType: 'decimal',
+  },
+  Pomada: {
+    quantityLabel: 'Quantidade aplicada',
+    quantityPlaceholder: 'Ex: 1 aplicação',
+    hint: 'Informe aplicações ou quantidade orientada.',
+    inputType: 'decimal',
+  },
+  Spray: {
+    quantityLabel: 'Quantidade de jatos',
+    quantityPlaceholder: 'Ex: 2',
+    hint: 'Informe quantos jatos foram usados.',
+    inputType: 'integer',
+  },
+};
+
+const insulinCategoryOptions = [
+  {
+    id: 'basal',
+    title: 'Insulina basal',
+    detail: '(fixa)',
+    helper: 'Categoria usada para cobertura basal, em geral com rotina fixa diária.',
+  },
+  {
+    id: 'prandial',
+    title: 'Insulina bolus',
+    detail: '(para refeição/correção)',
+    helper: 'Categoria usada antes de refeição ou para correção da glicemia.',
+  },
+  {
+    id: 'premixed',
+    title: 'Insulina pré-misturada',
+    detail: '(basal + prandial)',
+    helper: 'Formulação que combina componentes basal e prandial em uma mesma aplicação.',
+  },
+  {
+    id: 'inhaled',
+    title: 'Insulina inalável',
+    detail: '(ação ultrarrápida)',
+    helper: 'Insulina humana inalada de ação ultrarrápida, usada conforme prescrição.',
+  },
+];
+
+const insulinTypeOptions = {
+  basal: [
+    'NPH',
+    'Glargina U100',
+    'Glargina U300',
+    'Detemir',
+    'Degludeca',
+    'Icodec',
+  ],
+  prandial: [
+    'Regular',
+    'Lispro',
+    'Asparte',
+    'Glulisina',
+    'Asparte ultrarrápida',
+  ],
+  premixed: [
+    'NPH/Regular 70/30',
+    'NPL/Lispro 75/25',
+    'NPL/Lispro 50/50',
+    'NPA/Asparte 70/30',
+  ],
+  inhaled: ['Insulina humana inalável'],
+};
+
+const insulinUsageOptions = {
+  basal: ['Rotina da manhã', 'Rotina da noite', 'Semanal', 'Outro horário fixo'],
+  prandial: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
+  premixed: ['Antes da refeição', 'Rotina prescrita', 'Outro horário fixo'],
+  inhaled: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
+};
+
 const eventIcons = {
   meal: {
     library: 'material',
@@ -63,9 +219,10 @@ const eventIcons = {
     color: patientTheme.colors.warning,
   },
   medication: {
-    library: 'ion',
-    icon: 'medical-outline',
-    color: '#d47a7a',
+    library: 'material',
+    icon: 'pill',
+    color: '#ffffff',
+    backgroundColor: '#E50914',
   },
   sleep: {
     library: 'ion',
@@ -85,7 +242,14 @@ function EventBadge({ event, compact = false }) {
   if (!meta) return null;
 
   return (
-    <View style={[styles.eventBadge, compact && styles.eventBadgeCompact]}>
+    <View
+      style={[
+        styles.eventBadge,
+        meta.backgroundColor && { backgroundColor: meta.backgroundColor },
+        compact && styles.eventBadgeCompact,
+        compact && meta.backgroundColor && { backgroundColor: meta.backgroundColor },
+      ]}
+    >
       {meta.library === 'material' ? (
         <MaterialCommunityIcons name={meta.icon} size={14} color={meta.color} />
       ) : (
@@ -157,7 +321,7 @@ function getGlucoseStatus(value) {
       softColor: 'rgba(255,255,255,0.24)',
       textColor: patientTheme.colors.text,
       mutedTextColor: 'rgba(47,52,56,0.76)',
-      badgeColor: patientTheme.colors.primaryDark,
+      badgeColor: '#0E8A5A',
       icon: 'checkmark-circle-outline',
     };
   }
@@ -368,6 +532,32 @@ function formatGlucoseInput(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 4);
 }
 
+function formatMedicineQuantityInput(value, inputType = 'decimal') {
+  const rawValue = String(value || '');
+
+  if (inputType === 'integer') {
+    return rawValue.replace(/\D/g, '').slice(0, 4);
+  }
+
+  const normalizedValue = rawValue.replace(',', '.').replace(/[^\d.]/g, '');
+  const [integerPart = '', decimalPart = ''] = normalizedValue.split('.');
+  const safeInteger = integerPart.replace(/\D/g, '').slice(0, 4);
+  const safeDecimal = decimalPart.replace(/\D/g, '').slice(0, 2);
+
+  if (normalizedValue.includes('.')) {
+    return safeDecimal ? `${safeInteger},${safeDecimal}` : `${safeInteger},`;
+  }
+
+  return safeInteger;
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
 function formatManualDateInput(value) {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
 
@@ -479,8 +669,34 @@ export default function PacienteMonitoramentoScreen({
   const [glucoseTypeDropdownVisible, setGlucoseTypeDropdownVisible] = useState(false);
   const [focusedManualField, setFocusedManualField] = useState(null);
   const [glucoseConfirmVisible, setGlucoseConfirmVisible] = useState(false);
+  const [medicationChoiceVisible, setMedicationChoiceVisible] = useState(false);
+  const [insulinChoiceVisible, setInsulinChoiceVisible] = useState(false);
   const [medicationModalVisible, setMedicationModalVisible] = useState(false);
+  const [medicineFormVisible, setMedicineFormVisible] = useState(false);
+  const [medicineSearchVisible, setMedicineSearchVisible] = useState(false);
+  const [medicineUnitVisible, setMedicineUnitVisible] = useState(false);
+  const [medicineOptions, setMedicineOptions] = useState([]);
+  const [loadingMedicineOptions, setLoadingMedicineOptions] = useState(false);
+  const [medicineOptionsLoaded, setMedicineOptionsLoaded] = useState(false);
+  const [medicationKind, setMedicationKind] = useState('');
   const [medicationLabel, setMedicationLabel] = useState('');
+  const [insulinCategory, setInsulinCategory] = useState('');
+  const [insulinType, setInsulinType] = useState('');
+  const [insulinUsage, setInsulinUsage] = useState('');
+  const [insulinDose, setInsulinDose] = useState('');
+  const [insulinDate, setInsulinDate] = useState('');
+  const [insulinTime, setInsulinTime] = useState('');
+  const [insulinNotes, setInsulinNotes] = useState('');
+  const [insulinTypeVisible, setInsulinTypeVisible] = useState(false);
+  const [insulinUsageVisible, setInsulinUsageVisible] = useState(false);
+  const [medicineName, setMedicineName] = useState('');
+  const [medicineSearchQuery, setMedicineSearchQuery] = useState('');
+  const [medicineUnit, setMedicineUnit] = useState('');
+  const [medicineQuantity, setMedicineQuantity] = useState('');
+  const [medicineDate, setMedicineDate] = useState('');
+  const [medicineTime, setMedicineTime] = useState('');
+  const [medicineDays, setMedicineDays] = useState('');
+  const [medicineContinuousUse, setMedicineContinuousUse] = useState(false);
   const [patient, setPatient] = useState(null);
   const [objectiveText, setObjectiveText] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
@@ -542,6 +758,67 @@ export default function PacienteMonitoramentoScreen({
     });
   }, [activePatientId]);
 
+  useEffect(() => {
+    const quickRegister = route?.params?.openQuickRegister;
+    const shouldOpenMedicationChoice = route?.params?.openMedication;
+
+    if (!quickRegister && !shouldOpenMedicationChoice) {
+      return undefined;
+    }
+
+    const timer = setTimeout(() => {
+      if (quickRegister === 'glucose') {
+        handleOpenManualChoice();
+      } else if (quickRegister === 'insulin') {
+        handleSelectMedicationKind('insulin');
+      } else if (quickRegister === 'medicine') {
+        handleSelectMedicationKind('medicine');
+      } else if (shouldOpenMedicationChoice) {
+        handleOpenMedicationChoice();
+      }
+
+      if (navigation?.setParams) {
+        navigation.setParams({
+          openMedication: undefined,
+          openQuickRegister: undefined,
+        });
+      }
+    }, 120);
+
+    return () => clearTimeout(timer);
+  }, [navigation, route?.params?.openMedication, route?.params?.openQuickRegister]);
+
+  useEffect(() => {
+    if (!medicineSearchVisible) return undefined;
+
+    let active = true;
+    const searchTimeout = setTimeout(async () => {
+      setLoadingMedicineOptions(true);
+      setMedicineOptionsLoaded(false);
+
+      try {
+        const options = await buscarMedicamentosAnvisa(medicineSearchQuery, 40);
+        if (active) {
+          setMedicineOptions(options);
+          setMedicineOptionsLoaded(true);
+        }
+      } catch (error) {
+        console.log('Erro ao buscar medicamentos:', error);
+        if (active) {
+          setMedicineOptions([]);
+          setMedicineOptionsLoaded(true);
+        }
+      } finally {
+        if (active) setLoadingMedicineOptions(false);
+      }
+    }, 250);
+
+    return () => {
+      active = false;
+      clearTimeout(searchTimeout);
+    };
+  }, [medicineSearchQuery, medicineSearchVisible]);
+
   const eventEntries = useMemo(
     () => [
       ...(appState.mealEntries || []).map((item) => ({
@@ -588,27 +865,32 @@ export default function PacienteMonitoramentoScreen({
   }, [eventEntries, glucoseReadings, range]);
 
   const metrics = useMemo(() => {
-    if (!glucoseReadings.length) {
+    if (!series.length) {
       return {
         avg: '--',
         variability: '--',
         gmi: '--',
+        tir: '--',
       };
     }
 
-    const values = glucoseReadings.map((item) => item.value);
+    const values = series.map((item) => item.value);
     const avg = Math.round(values.reduce((sum, item) => sum + item, 0) / values.length);
     const max = Math.max(...values);
     const min = Math.min(...values);
     const variability = avg ? Math.round(((max - min) / avg) * 100) : 0;
     const gmi = (3.31 + 0.02392 * avg).toFixed(1);
+    const tir = Math.round(
+      (values.filter((item) => item >= 70 && item <= 180).length / values.length) * 100
+    );
 
     return {
       avg,
       variability,
       gmi,
+      tir,
     };
-  }, [glucoseReadings]);
+  }, [series]);
 
   const latestReading = glucoseReadings[0] || null;
   const latestStatus = getGlucoseStatus(latestReading?.value);
@@ -622,16 +904,32 @@ export default function PacienteMonitoramentoScreen({
   const hasSelectedGlucoseType = Boolean(manualGlucoseType);
   const canSubmitManualGlucose =
     hasValidNewGlucose && hasValidManualDate && hasValidManualTime && hasSelectedGlucoseType;
-  const timeInRange = useMemo(() => {
-    if (!glucoseReadings.length) return 0;
-
-    const inRange = glucoseReadings.filter((item) => item.value >= 70 && item.value <= 180).length;
-
-    return Math.round((inRange / glucoseReadings.length) * 100);
-  }, [glucoseReadings]);
-  const guidedText = latestReading
-    ? `${latestStatus.helper} A ultima leitura foi ${latestReading.value} mg/dL as ${String(latestReading.time).slice(0, 5)}. Hoje, ${timeInRange}% das leituras analisadas ficaram na meta.`
-    : 'Registre a primeira glicemia manual ou sincronize o LibreView para gerar uma leitura guiada com contexto real.';
+  const canSubmitMedicine =
+    Boolean(medicineName) &&
+    Boolean(medicineUnit) &&
+    Boolean(String(medicineQuantity || '').trim()) &&
+    isValidManualDate(medicineDate) &&
+    isValidManualTime(medicineTime) &&
+    (medicineContinuousUse || Boolean(String(medicineDays || '').trim()));
+  const canSubmitInsulin =
+    medicationKind === 'insulin' &&
+    Boolean(insulinCategory) &&
+    Boolean(insulinType) &&
+    Boolean(String(insulinDose || '').trim()) &&
+    isValidManualDate(insulinDate) &&
+    isValidManualTime(insulinTime) &&
+    Boolean(insulinUsage);
+  const selectedMedicineUnitMeta = medicationUnitMeta[medicineUnit] || {
+    quantityLabel: 'Quantidade',
+    quantityPlaceholder: 'Ex: 1',
+    hint: 'Escolha a unidade para orientar o preenchimento.',
+    inputType: 'decimal',
+  };
+  const selectedInsulinTypeOptions = insulinTypeOptions[insulinCategory] || [];
+  const selectedInsulinUsageOptions = insulinUsageOptions[insulinCategory] || [];
+  const selectedInsulinCategoryMeta =
+    insulinCategoryOptions.find((option) => option.id === insulinCategory) || null;
+  const timeInRange = metrics.tir === '--' ? 0 : metrics.tir;
   const manualModalLift =
     !glucoseTypeDropdownVisible && focusedManualField === 'glucose'
       ? isPreviousGlucoseEntry
@@ -643,6 +941,68 @@ export default function PacienteMonitoramentoScreen({
           ? -26
           : 0;
   const medicationModalLift = focusedManualField === 'medication' ? -12 : 0;
+  const insulinModalLift =
+    !insulinTypeVisible && !insulinUsageVisible && focusedManualField === 'insulinDose'
+      ? -8
+      : !insulinTypeVisible && !insulinUsageVisible && focusedManualField === 'insulinTime'
+        ? -20
+        : !insulinTypeVisible && !insulinUsageVisible && focusedManualField === 'insulinDate'
+          ? -32
+          : !insulinTypeVisible && !insulinUsageVisible && focusedManualField === 'insulinNotes'
+            ? -44
+            : 0;
+  const medicineModalLift =
+    !medicineSearchVisible && !medicineUnitVisible && focusedManualField === 'medicineQuantity'
+      ? -10
+      : !medicineSearchVisible && !medicineUnitVisible && focusedManualField === 'medicineTime'
+        ? -22
+        : !medicineSearchVisible && !medicineUnitVisible && focusedManualField === 'medicineDate'
+          ? -34
+          : !medicineSearchVisible && !medicineUnitVisible && focusedManualField === 'medicineDays'
+            ? -46
+            : 0;
+
+  function buildGuidedGlucoseNotification(reading, allReadings) {
+    const tir = Math.round(
+      (allReadings.filter((item) => item.value >= 70 && item.value <= 180).length /
+        Math.max(allReadings.length, 1)) *
+        100
+    );
+    const readingStatus = getGlucoseStatus(reading?.value);
+
+    return {
+      id: `glucose-guidance-${reading?.id || Date.now()}`,
+      type: 'glucose-guidance',
+      title: 'Leitura guiada',
+      text: `${readingStatus.helper} A ultima leitura foi ${reading?.value} mg/dL as ${String(reading?.time || '').slice(0, 5)}. Hoje, ${tir}% das leituras analisadas ficaram na meta.`,
+      createdAt: new Date().toISOString(),
+    };
+  }
+
+  function resetMedicineForm() {
+    setMedicineName('');
+    setMedicineSearchQuery('');
+    setMedicineUnit('');
+    setMedicineQuantity('');
+    setMedicineDate('');
+    setMedicineTime('');
+    setMedicineDays('');
+    setMedicineContinuousUse(false);
+    setMedicineSearchVisible(false);
+    setMedicineUnitVisible(false);
+  }
+
+  function resetInsulinForm() {
+    setInsulinCategory('');
+    setInsulinType('');
+    setInsulinUsage('');
+    setInsulinDose('');
+    setInsulinDate('');
+    setInsulinTime('');
+    setInsulinNotes('');
+    setInsulinTypeVisible(false);
+    setInsulinUsageVisible(false);
+  }
 
   function handleOpenManualChoice() {
     setManualChoiceVisible(true);
@@ -667,6 +1027,73 @@ export default function PacienteMonitoramentoScreen({
 
   function handleCloseMedicationModal() {
     setMedicationModalVisible(false);
+    setMedicationKind('');
+    setMedicationLabel('');
+    resetInsulinForm();
+    resetMedicineForm();
+    setFocusedManualField(null);
+  }
+
+  function handleCloseMedicationFlow() {
+    setMedicationChoiceVisible(false);
+    setInsulinChoiceVisible(false);
+    setMedicationModalVisible(false);
+    setMedicineFormVisible(false);
+    setMedicationKind('');
+    setMedicationLabel('');
+    resetInsulinForm();
+    resetMedicineForm();
+    setFocusedManualField(null);
+  }
+
+  function handleOpenMedicationChoice() {
+    setMedicationChoiceVisible(true);
+    setInsulinChoiceVisible(false);
+    setMedicationModalVisible(false);
+    setMedicineFormVisible(false);
+  }
+
+  function handleSelectMedicationKind(kind) {
+    if (kind === 'insulin') {
+      setMedicationKind('insulin');
+      setMedicationChoiceVisible(false);
+      setInsulinChoiceVisible(true);
+      return;
+    }
+
+    setMedicationKind('medicine');
+    setMedicationLabel('');
+    resetMedicineForm();
+    setMedicineDate(formatDateForDisplay(buildLocalDateString()));
+    setMedicineTime(formatManualTimeInput(buildLocalTimeString()));
+    setMedicationChoiceVisible(false);
+    setMedicineFormVisible(true);
+  }
+
+  function handleSelectInsulinType(label) {
+    setMedicationKind('insulin');
+    setInsulinCategory(label);
+    setInsulinType('');
+    setInsulinUsage('');
+    setInsulinDose('');
+    setInsulinNotes('');
+    setInsulinDate(formatDateForDisplay(buildLocalDateString()));
+    setInsulinTime(formatManualTimeInput(buildLocalTimeString()));
+    setInsulinChoiceVisible(false);
+    setMedicationModalVisible(true);
+  }
+
+  function handleSelectMedicineName(name) {
+    setMedicineName(name);
+    setMedicineSearchQuery(name);
+    setMedicineSearchVisible(false);
+    setFocusedManualField(null);
+  }
+
+  function handleSelectMedicineUnit(unit) {
+    setMedicineUnit(unit);
+    setMedicineQuantity('');
+    setMedicineUnitVisible(false);
     setFocusedManualField(null);
   }
 
@@ -696,12 +1123,12 @@ export default function PacienteMonitoramentoScreen({
     }
 
     if (isPreviousGlucoseEntry && !hasValidManualDate) {
-      Alert.alert('AtenÃ§Ã£o', 'Informe uma data vÃ¡lida no formato DD/MM/AAAA.');
+      Alert.alert('AtenÃƒÂ§ÃƒÂ£o', 'Informe uma data vÃƒÂ¡lida no formato DD/MM/AAAA.');
       return;
     }
 
     if (isPreviousGlucoseEntry && !hasValidManualTime) {
-      Alert.alert('AtenÃ§Ã£o', 'Informe uma hora vÃ¡lida no formato HH:MM.');
+      Alert.alert('AtenÃƒÂ§ÃƒÂ£o', 'Informe uma hora vÃƒÂ¡lida no formato HH:MM.');
       return;
     }
 
@@ -758,9 +1185,30 @@ export default function PacienteMonitoramentoScreen({
           (item) => item.id !== optimisticReading.id
         )
       );
+      const glucoseNotification = buildGuidedGlucoseNotification(
+        savedReading,
+        confirmedReadings
+      );
+      const nextAppState = {
+        ...appState,
+        patientNotifications: [
+          glucoseNotification,
+          ...((appState.patientNotifications || []).filter(
+            (item) => item?.id !== glucoseNotification.id
+          )),
+        ].slice(0, 20),
+      };
 
       setGlucoseReadings(confirmedReadings);
       replaceCachedGlucoseReadings(activePatientId, confirmedReadings);
+      setAppState(nextAppState);
+      await savePatientAppState({
+        patientId: activePatientId,
+        objectiveText,
+        appState: nextAppState,
+        currentPatient: patient,
+        patientContext: usuarioLogado,
+      });
       setNewGlucoseValue('');
       setManualMeasurementDate('');
       setManualMeasurementTime('');
@@ -770,7 +1218,7 @@ export default function PacienteMonitoramentoScreen({
       setManualMeasurementType('current');
       Alert.alert(
         'Glicemia registrada',
-        `Leitura de ${parsedValue} mg/dL salva com sucesso. O painel ja foi atualizado.`
+        `Leitura de ${parsedValue} mg/dL salva com sucesso. A leitura guiada foi enviada para notificacoes.`
       );
     } catch (error) {
       if (optimisticReading?.id) {
@@ -861,38 +1309,95 @@ export default function PacienteMonitoramentoScreen({
   async function handleRegisterMedication() {
     try {
       setSavingMedication(true);
-      const label = medicationLabel.trim() || 'Medicacao / insulina';
-      const nextState = {
-        ...appState,
-        medicationEntries: appendNewestEntry(
-          appState.medicationEntries,
-          buildMedicationEntry(label)
-        ),
-      };
+      let entryDate = buildLocalDateString();
+      let entryTime = buildLocalTimeString().slice(0, 5);
+      let label = '';
 
-      setAppState(nextState);
+      if (medicationKind === 'medicine') {
+        const normalizedDate = normalizeManualDateInput(medicineDate);
+        const normalizedTime = normalizeManualTimeInput(medicineTime);
+        const quantity = String(medicineQuantity || '').trim();
+        const days = String(medicineDays || '').trim();
 
-      if (!canResolvePatient) {
-        throw new Error('Paciente sem contexto para salvar a medicacao.');
+        if (!medicineName || !medicineUnit || !quantity || !normalizedDate || !normalizedTime) {
+          Alert.alert('Atenção', 'Informe medicamento, unidade, quantidade, data e hora.');
+          return;
+        }
+
+        if (!medicineContinuousUse && !days) {
+          Alert.alert('Atenção', 'Informe o número de dias ou marque uso contínuo.');
+          return;
+        }
+
+        entryDate = normalizedDate;
+        entryTime = normalizedTime.slice(0, 5);
+        label = [
+          medicineName,
+          `${quantity} ${medicineUnit}`,
+          `Hora ${entryTime}`,
+          medicineContinuousUse ? 'Uso contínuo' : `${days} dia(s)`,
+        ].join(' - ');
+      } else {
+        const normalizedDate = normalizeManualDateInput(insulinDate);
+        const normalizedTime = normalizeManualTimeInput(insulinTime);
+        const dose = String(insulinDose || '').trim();
+        const notes = String(insulinNotes || '').trim();
+
+        if (!insulinCategory || !insulinType || !dose || !normalizedDate || !normalizedTime || !insulinUsage) {
+          Alert.alert(
+            'Atenção',
+            'Informe categoria, tipo, dose em UI, data, hora e objetivo do uso.'
+          );
+          return;
+        }
+
+        entryDate = normalizedDate;
+        entryTime = normalizedTime.slice(0, 5);
+        label = [
+          insulinType,
+          `${dose} UI`,
+          insulinUsage,
+          `Hora ${entryTime}`,
+          notes ? `Obs. ${notes}` : '',
+        ]
+          .filter(Boolean)
+          .join(' - ');
       }
 
-      const saved = await savePatientAppState({
-        patientId: activePatientId,
-        objectiveText,
-        appState: nextState,
-        currentPatient: patient,
-        patientContext: usuarioLogado,
-      });
+      const medicationEntry = {
+        id: `med-${Date.now()}`,
+        kind: 'medication',
+        label,
+        date: entryDate,
+        time: entryTime,
+        medicationKind,
+        medicineName: medicationKind === 'medicine' ? medicineName : insulinType,
+        medicineUnit: medicationKind === 'medicine' ? medicineUnit : 'UI',
+        medicineQuantity: medicationKind === 'medicine' ? medicineQuantity : insulinDose,
+        medicineDays: medicationKind === 'medicine' ? medicineDays : '',
+        medicineContinuousUse: medicationKind === 'medicine' ? medicineContinuousUse : false,
+        insulinCategory: medicationKind === 'insulin' ? insulinCategory : '',
+        insulinUsage: medicationKind === 'insulin' ? insulinUsage : '',
+        insulinNotes: medicationKind === 'insulin' ? insulinNotes : '',
+        storageOrigin: 'database',
+      };
 
-      setPatient(saved.patient || patient);
-      setObjectiveText(saved.clinicalObjective || objectiveText);
-      setAppState(saved.appState);
+      if (!canResolvePatient) {
+        throw new Error('Paciente sem contexto para salvar a medicação.');
+      }
+
+      const savedMedication = await addMedicationEntry(activePatientId, medicationEntry);
+      setAppState((current) => ({
+        ...current,
+        medicationEntries: [savedMedication, ...(current.medicationEntries || [])],
+      }));
       setMedicationLabel('');
-      setMedicationModalVisible(false);
-      Alert.alert('Registro salvo', 'Medicacao registrada com sucesso.');
+      setMedicationKind('');
+      handleCloseMedicationFlow();
+      Alert.alert('Registro salvo', 'Medicação registrada com sucesso.');
     } catch (error) {
-      console.log('Erro ao salvar medicacao:', error);
-      Alert.alert('Erro', 'Nao foi possivel salvar a medicacao agora.');
+      console.log('Erro ao salvar medicação:', error);
+      Alert.alert('Erro', 'Não foi possível salvar a medicação agora.');
     } finally {
       setSavingMedication(false);
     }
@@ -915,7 +1420,7 @@ export default function PacienteMonitoramentoScreen({
             </Text>
             <Text style={[styles.currentTime, styles.currentCardWhiteText]}>
               {latestReading
-                ? `Última leitura às ${String(latestReading.time).slice(0, 5)}`
+                ? `Ãšltima leitura Ã s ${String(latestReading.time).slice(0, 5)}`
                 : 'Sem leitura registrada'}
             </Text>
           </View>
@@ -951,25 +1456,8 @@ export default function PacienteMonitoramentoScreen({
       </View>
 
       <TouchableOpacity
-        style={styles.libreViewStandaloneButton}
-        onPress={handleSyncLibreView}
-        disabled={syncingLibreView || !activePatientId}
-      >
-        {syncingLibreView ? (
-          <ActivityIndicator color="#1F2F6B" />
-        ) : (
-          <>
-            <LibreSensorIcon />
-            <Text style={[styles.currentActionText, styles.libreViewActionText]}>
-              FreeStyle Libre
-            </Text>
-          </>
-        )}
-      </TouchableOpacity>
-
-      <TouchableOpacity
         style={styles.medicationQuickCard}
-        onPress={() => setMedicationModalVisible(true)}
+        onPress={handleOpenMedicationChoice}
         disabled={!canResolvePatient}
       >
         <View style={styles.medicationIcon}>
@@ -1026,7 +1514,7 @@ export default function PacienteMonitoramentoScreen({
         <View style={styles.metricCard}>
           <Text style={styles.metricLabel}>Tempo no alvo</Text>
           <Text style={styles.metricValue}>
-            {glucoseReadings.length ? `${timeInRange}%` : '--'}
+            {metrics.tir === '--' ? '--' : `${metrics.tir}%`}
           </Text>
           <Text style={styles.metricUnit}>TIR</Text>
         </View>
@@ -1073,16 +1561,33 @@ export default function PacienteMonitoramentoScreen({
         }
       >
         <View style={styles.historyButtonIcon}>
-          <Ionicons name="document-text-outline" size={20} color={patientTheme.colors.primaryDark} />
+          <Ionicons name="document-text-outline" size={20} color="#ffffff" />
         </View>
-        <Text style={styles.historyButtonText}>Histórico de Registros</Text>
+        <View style={styles.historyButtonCopy}>
+          <Text style={styles.historyButtonText}>Histórico de Registros</Text>
+          <Text style={styles.historyButtonSubtitle}>Glicemia, refeições e eventos salvos</Text>
+        </View>
         <Ionicons name="chevron-forward" size={20} color={patientTheme.colors.textMuted} />
       </TouchableOpacity>
 
-      <View style={styles.insightCard}>
-        <Text style={styles.insightTitle}>Leitura guiada</Text>
-        <Text style={styles.insightText}>{guidedText}</Text>
-      </View>
+      <TouchableOpacity
+        style={styles.libreViewStandaloneButton}
+        onPress={handleSyncLibreView}
+        disabled={syncingLibreView || !activePatientId}
+      >
+        {syncingLibreView ? (
+          <ActivityIndicator color="#1F2F6B" />
+        ) : (
+          <>
+            <View style={styles.libreViewStandaloneIcon}>
+              <LibreSensorIcon />
+            </View>
+            <Text style={[styles.currentActionText, styles.libreViewActionText]}>
+              FreeStyle Libre
+            </Text>
+          </>
+        )}
+      </TouchableOpacity>
 
       <Modal
         visible={manualChoiceVisible}
@@ -1101,7 +1606,6 @@ export default function PacienteMonitoramentoScreen({
                 <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
               </TouchableOpacity>
             </View>
-
             <Text style={styles.modalText}>
               Escolha se a leitura foi feita agora ou se deseja registrar uma medição anterior.
             </Text>
@@ -1261,7 +1765,7 @@ export default function PacienteMonitoramentoScreen({
                 </View>
 
                 <View style={styles.formField}>
-                  <Text style={styles.fieldLabel}>Hora</Text>
+                  <Text style={styles.fieldLabel}>Hora do uso</Text>
                   <TextInput
                     style={[
                       styles.input,
@@ -1397,6 +1901,471 @@ export default function PacienteMonitoramentoScreen({
       </Modal>
 
       <Modal
+        visible={medicationChoiceVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseMedicationFlow}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Registrar medicações</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={handleCloseMedicationFlow}
+              >
+                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalText}>
+              Escolha se deseja registrar uma insulina ou outro medicamento.
+            </Text>
+
+            <View style={styles.measurementChoiceList}>
+              <TouchableOpacity
+                style={[
+                  styles.measurementChoiceButton,
+                  styles.measurementChoiceButtonCurrent,
+                ]}
+                onPress={() => handleSelectMedicationKind('insulin')}
+              >
+                <Text style={styles.measurementChoiceTextCurrent}>Insulina</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.measurementChoiceButton,
+                  styles.measurementChoiceButtonPrevious,
+                ]}
+                onPress={() => handleSelectMedicationKind('medicine')}
+              >
+                <Text style={styles.measurementChoiceTextPrevious}>Outro medicamento</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={insulinChoiceVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseMedicationFlow}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Registrar medicações</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={handleCloseMedicationFlow}
+              >
+                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalText}>
+              Escolha o tipo de insulina usado neste registro.
+            </Text>
+
+            <View style={styles.measurementChoiceList}>
+              <TouchableOpacity
+                style={[
+                  styles.measurementChoiceButton,
+                  styles.measurementChoiceButtonCurrent,
+                ]}
+                onPress={() => handleSelectInsulinType('basal')}
+              >
+                <Text style={styles.measurementChoiceTextCurrent}>Insulina basal</Text>
+                <Text style={styles.insulinOptionDetailCurrent}>(fixa)</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.measurementChoiceButton,
+                  styles.measurementChoiceButtonPrevious,
+                ]}
+                onPress={() => handleSelectInsulinType('prandial')}
+              >
+                <Text style={styles.measurementChoiceTextPrevious}>Insulina bolus</Text>
+                <Text style={styles.insulinOptionDetailPrevious}>(para correção)</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={medicineFormVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseMedicationFlow}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+            keyboardVerticalOffset={Platform.OS === 'ios' ? 8 : 0}
+          >
+            <View
+              style={[
+                styles.modalCard,
+                styles.keyboardLiftCard,
+                medicineModalLift ? { transform: [{ translateY: medicineModalLift }] } : null,
+              ]}
+            >
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Registrar medicamento</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={handleCloseMedicationFlow}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalText}>
+                Informe o medicamento, dose e rotina para aparecer junto da curva.
+              </Text>
+
+              <ScrollView
+                style={styles.medicineFormScroll}
+                contentContainerStyle={styles.medicineFormContent}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+                <View style={[styles.formField, styles.currentFirstFormField]}>
+                  <Text style={styles.fieldLabel}>Medicamento</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.labeledInput,
+                      styles.dropdownButton,
+                      focusedManualField === 'medicineName' && styles.inputFocused,
+                    ]}
+                    onPress={() => {
+                      setFocusedManualField('medicineName');
+                      setMedicineSearchVisible(true);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownButtonText,
+                        !medicineName && styles.dropdownPlaceholderText,
+                      ]}
+                    >
+                      {medicineName || 'Buscar medicamento'}
+                    </Text>
+                    <Ionicons name="search-outline" size={18} color={patientTheme.colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.formField, styles.stackedFormField]}>
+                  <Text style={styles.fieldLabel}>Unidade de medida</Text>
+                  <TouchableOpacity
+                    activeOpacity={0.85}
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.labeledInput,
+                      styles.dropdownButton,
+                      focusedManualField === 'medicineUnit' && styles.inputFocused,
+                    ]}
+                    onPress={() => {
+                      setFocusedManualField('medicineUnit');
+                      setMedicineUnitVisible(true);
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownButtonText,
+                        !medicineUnit && styles.dropdownPlaceholderText,
+                      ]}
+                    >
+                      {medicineUnit || 'Selecione a unidade'}
+                    </Text>
+                    <Ionicons name="chevron-down" size={18} color={patientTheme.colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.formField, styles.stackedFormField]}>
+                  <Text style={styles.fieldLabel}>
+                    {selectedMedicineUnitMeta.quantityLabel}
+                  </Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.labeledInput,
+                      focusedManualField === 'medicineQuantity' && styles.inputFocused,
+                    ]}
+                    placeholder={selectedMedicineUnitMeta.quantityPlaceholder}
+                    placeholderTextColor="#8a9095"
+                    keyboardType="numeric"
+                    value={medicineQuantity}
+                    onChangeText={(value) =>
+                      setMedicineQuantity(
+                        formatMedicineQuantityInput(value, selectedMedicineUnitMeta.inputType)
+                      )
+                    }
+                    onFocus={() => setFocusedManualField('medicineQuantity')}
+                    onBlur={() => setFocusedManualField(null)}
+                  />
+                  <Text style={styles.fieldHelperText}>{selectedMedicineUnitMeta.hint}</Text>
+                </View>
+
+                <View style={[styles.formField, styles.stackedFormField]}>
+                  <Text style={styles.fieldLabel}>Hora</Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.labeledInput,
+                      focusedManualField === 'medicineTime' && styles.inputFocused,
+                    ]}
+                    placeholder="Ex: 10:23"
+                    placeholderTextColor="#8a9095"
+                    keyboardType="numeric"
+                    value={medicineTime}
+                    onChangeText={(value) => setMedicineTime(formatManualTimeInput(value))}
+                    onFocus={() => setFocusedManualField('medicineTime')}
+                    onBlur={() => setFocusedManualField(null)}
+                  />
+                </View>
+
+                <View style={[styles.formField, styles.stackedFormField]}>
+                  <Text style={styles.fieldLabel}>Data do uso</Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.labeledInput,
+                      focusedManualField === 'medicineDate' && styles.inputFocused,
+                    ]}
+                    placeholder="Ex: 20/04/2026"
+                    placeholderTextColor="#8a9095"
+                    keyboardType="numeric"
+                    value={medicineDate}
+                    onChangeText={(value) => setMedicineDate(formatManualDateInput(value))}
+                    onFocus={() => setFocusedManualField('medicineDate')}
+                    onBlur={() => setFocusedManualField(null)}
+                  />
+                </View>
+
+                <View style={[styles.formField, styles.stackedFormField]}>
+                  <Text style={styles.fieldLabel}>Número de dias</Text>
+                  <TextInput
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.labeledInput,
+                      focusedManualField === 'medicineDays' && styles.inputFocused,
+                      medicineContinuousUse && styles.inputDisabled,
+                    ]}
+                    placeholder="Ex: 7"
+                    placeholderTextColor="#8a9095"
+                    keyboardType="numeric"
+                    editable={!medicineContinuousUse}
+                    value={medicineDays}
+                    onChangeText={(value) => setMedicineDays(String(value || '').replace(/\D/g, '').slice(0, 3))}
+                    onFocus={() => setFocusedManualField('medicineDays')}
+                    onBlur={() => setFocusedManualField(null)}
+                  />
+                </View>
+
+                <TouchableOpacity
+                  activeOpacity={0.85}
+                  style={styles.continuousUseRow}
+                  onPress={() => {
+                    const nextValue = !medicineContinuousUse;
+                    setMedicineContinuousUse(nextValue);
+                    if (nextValue) setMedicineDays('');
+                  }}
+                >
+                  <View
+                    style={[
+                      styles.continuousUseFlag,
+                      medicineContinuousUse && styles.continuousUseFlagActive,
+                    ]}
+                  >
+                    {medicineContinuousUse ? (
+                      <Ionicons name="checkmark" size={14} color="#ffffff" />
+                    ) : null}
+                  </View>
+                  <Text style={styles.continuousUseText}>Uso contínuo</Text>
+                </TouchableOpacity>
+              </ScrollView>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalPrimaryButton,
+                  (!canSubmitMedicine || savingMedication) && styles.modalPrimaryButtonDisabled,
+                ]}
+                onPress={handleRegisterMedication}
+                disabled={!canSubmitMedicine || savingMedication || !canResolvePatient}
+              >
+                {savingMedication ? (
+                  <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.primaryButtonText,
+                      !canSubmitMedicine && styles.modalPrimaryButtonDisabledText,
+                    ]}
+                  >
+                    Salvar medicamento
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={medicineSearchVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setMedicineSearchVisible(false);
+          setFocusedManualField(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Medicamento</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setMedicineSearchVisible(false);
+                  setFocusedManualField(null);
+                }}
+              >
+                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <TextInput
+              style={styles.input}
+              placeholder="Buscar medicamento"
+              placeholderTextColor="#8a9095"
+              value={medicineSearchQuery}
+              onChangeText={setMedicineSearchQuery}
+              autoFocus
+            />
+
+            <ScrollView style={styles.optionList} keyboardShouldPersistTaps="handled">
+              {loadingMedicineOptions ? (
+                <View style={styles.optionLoadingItem}>
+                  <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                  <Text style={styles.optionLoadingText}>Buscando na base da Anvisa...</Text>
+                </View>
+              ) : null}
+
+              {!loadingMedicineOptions && medicineOptionsLoaded ? (
+                <Text style={styles.optionResultCount}>
+                  {medicineOptions.length
+                    ? `${medicineOptions.length} resultado(s) encontrado(s) na base da Anvisa`
+                    : `Nenhum resultado online para "${medicineSearchQuery.trim()}"`}
+                </Text>
+              ) : null}
+
+              {!loadingMedicineOptions
+                ? medicineOptions.map((item) => (
+                    <TouchableOpacity
+                      key={item}
+                      activeOpacity={0.82}
+                      style={styles.optionItem}
+                      onPress={() => handleSelectMedicineName(item)}
+                    >
+                      <Text style={styles.optionItemText}>{item}</Text>
+                    </TouchableOpacity>
+                  ))
+                : null}
+
+              {!loadingMedicineOptions && medicineOptions.length === 0 && medicineSearchQuery.trim() ? (
+                <>
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={styles.optionItem}
+                    onPress={() => {
+                      const retryValue = medicineSearchQuery.trim();
+                      setMedicineSearchQuery('');
+                      setTimeout(() => setMedicineSearchQuery(retryValue), 0);
+                    }}
+                  >
+                    <Text style={styles.optionItemText}>Tentar busca online novamente</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    activeOpacity={0.82}
+                    style={styles.optionItem}
+                    onPress={() => handleSelectMedicineName(medicineSearchQuery.trim())}
+                  >
+                    <Text style={styles.optionItemText}>
+                      Usar "{medicineSearchQuery.trim()}"
+                    </Text>
+                  </TouchableOpacity>
+                </>
+              ) : null}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={medicineUnitVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          setMedicineUnitVisible(false);
+          setFocusedManualField(null);
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Unidade de medida</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={() => {
+                  setMedicineUnitVisible(false);
+                  setFocusedManualField(null);
+                }}
+              >
+                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.unitOptionList}
+              contentContainerStyle={styles.unitOptionListContent}
+              showsVerticalScrollIndicator={false}
+            >
+              {medicationUnitOptions.map((unit, index) => (
+                <TouchableOpacity
+                  key={unit}
+                  style={[
+                    styles.measurementChoiceButton,
+                    styles.measurementChoiceButtonPrevious,
+                  ]}
+                  onPress={() => handleSelectMedicineUnit(unit)}
+                >
+                  <Text style={styles.measurementChoiceTextPrevious}>
+                    {unit}
+                  </Text>
+                </TouchableOpacity>
+              ))}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={medicationModalVisible}
         transparent
         animationType="fade"
@@ -1412,11 +2381,22 @@ export default function PacienteMonitoramentoScreen({
               style={[
                 styles.modalCard,
                 styles.keyboardLiftCard,
-                medicationModalLift ? { transform: [{ translateY: medicationModalLift }] } : null,
+                (medicationKind === 'insulin' ? insulinModalLift : medicationModalLift)
+                  ? {
+                      transform: [
+                        {
+                          translateY:
+                            medicationKind === 'insulin' ? insulinModalLift : medicationModalLift,
+                        },
+                      ],
+                    }
+                  : null,
               ]}
             >
               <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Registrar medicação</Text>
+                <Text style={styles.modalTitle}>
+                  {medicationKind === 'insulin' ? 'Registrar insulina' : 'Registrar medicamento'}
+                </Text>
                 <TouchableOpacity
                   style={styles.modalCloseButton}
                   onPress={handleCloseMedicationModal}
@@ -1425,34 +2405,301 @@ export default function PacienteMonitoramentoScreen({
                 </TouchableOpacity>
               </View>
 
-            <Text style={styles.modalText}>
-              Descreva a medicação, dose ou insulina aplicada para aparecer junto da curva.
-            </Text>
+              {medicationKind === 'insulin' ? (
+                <>
+                  <Text style={styles.modalText}>
+                    Registro estruturado de insulina com categoria, tipo, dose em UI, data, hora e
+                    objetivo do uso.
+                  </Text>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Ex: Metformina 850mg ou Insulina"
-              placeholderTextColor="#8a9095"
-              value={medicationLabel}
-              onChangeText={setMedicationLabel}
-              onFocus={() => setFocusedManualField('medication')}
-              onBlur={() => setFocusedManualField(null)}
-              autoFocus
-            />
+                  <ScrollView
+                    style={styles.medicineFormScroll}
+                    contentContainerStyle={styles.medicineFormContent}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <View style={[styles.formField, styles.firstLabeledFormField]}>
+                      <Text style={styles.fieldLabel}>Categoria clínica</Text>
+                      <Text style={styles.fieldHelperText}>
+                        {selectedInsulinCategoryMeta?.helper ||
+                          'Selecione se o uso foi basal ou bolus.'}
+                      </Text>
+                    </View>
 
-            <TouchableOpacity
-              style={styles.modalSecondaryButton}
-              onPress={handleRegisterMedication}
-              disabled={savingMedication || !canResolvePatient}
-            >
-              {savingMedication ? (
-                <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                    <View style={[styles.formField, styles.stackedFormField]}>
+                      <Text style={styles.fieldLabel}>Tipo de insulina</Text>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={[
+                          styles.input,
+                          styles.manualModalInput,
+                          styles.labeledInput,
+                          styles.dropdownButton,
+                          focusedManualField === 'insulinType' && styles.inputFocused,
+                        ]}
+                        onPress={() => {
+                          setFocusedManualField('insulinType');
+                          setInsulinTypeVisible(true);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownButtonText,
+                            !insulinType && styles.dropdownPlaceholderText,
+                          ]}
+                        >
+                          {insulinType || 'Selecione o tipo'}
+                        </Text>
+                        <Ionicons
+                          name="chevron-down"
+                          size={18}
+                          color={patientTheme.colors.textMuted}
+                        />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={[styles.formField, styles.stackedFormField]}>
+                      <Text style={styles.fieldLabel}>Dose aplicada (UI)</Text>
+                      <View
+                        style={[
+                          styles.input,
+                          styles.manualModalInput,
+                          styles.glucoseInputWrap,
+                          styles.labeledInput,
+                          focusedManualField === 'insulinDose' && styles.inputFocused,
+                        ]}
+                      >
+                        <TextInput
+                          style={styles.glucoseInput}
+                          placeholder="Ex: 10"
+                          placeholderTextColor="#8a9095"
+                          keyboardType="numeric"
+                          value={insulinDose}
+                          onChangeText={(value) =>
+                            setInsulinDose(formatMedicineQuantityInput(value, 'integer'))
+                          }
+                          onFocus={() => setFocusedManualField('insulinDose')}
+                          onBlur={() => setFocusedManualField(null)}
+                        />
+                        {insulinDose ? <Text style={styles.inputUnit}>UI</Text> : null}
+                      </View>
+                    </View>
+
+                    <View style={[styles.formField, styles.stackedFormField]}>
+                      <Text style={styles.fieldLabel}>Objetivo do uso</Text>
+                      <TouchableOpacity
+                        activeOpacity={0.85}
+                        style={[
+                          styles.input,
+                          styles.manualModalInput,
+                          styles.labeledInput,
+                          styles.dropdownButton,
+                          focusedManualField === 'insulinUsage' && styles.inputFocused,
+                        ]}
+                        onPress={() => {
+                          setFocusedManualField('insulinUsage');
+                          setInsulinUsageVisible(true);
+                        }}
+                      >
+                        <Text
+                          style={[
+                            styles.dropdownButtonText,
+                            !insulinUsage && styles.dropdownPlaceholderText,
+                          ]}
+                        >
+                          {insulinUsage || 'Selecione o objetivo'}
+                        </Text>
+                        <Ionicons
+                          name="chevron-down"
+                          size={18}
+                          color={patientTheme.colors.textMuted}
+                        />
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={[styles.formField, styles.stackedFormField]}>
+                      <Text style={styles.fieldLabel}>Hora do uso</Text>
+                      <TextInput
+                        style={[
+                          styles.input,
+                          styles.manualModalInput,
+                          styles.labeledInput,
+                          focusedManualField === 'insulinTime' && styles.inputFocused,
+                        ]}
+                        placeholder="Ex: 07:30"
+                        placeholderTextColor="#8a9095"
+                        keyboardType="numeric"
+                        value={insulinTime}
+                        onChangeText={(value) => setInsulinTime(formatManualTimeInput(value))}
+                        onFocus={() => setFocusedManualField('insulinTime')}
+                        onBlur={() => setFocusedManualField(null)}
+                      />
+                    </View>
+
+                    <View style={[styles.formField, styles.stackedFormField]}>
+                      <Text style={styles.fieldLabel}>Data do uso</Text>
+                      <TextInput
+                        style={[
+                          styles.input,
+                          styles.manualModalInput,
+                          styles.labeledInput,
+                          focusedManualField === 'insulinDate' && styles.inputFocused,
+                        ]}
+                        placeholder="Ex: 21/04/2026"
+                        placeholderTextColor="#8a9095"
+                        keyboardType="numeric"
+                        value={insulinDate}
+                        onChangeText={(value) => setInsulinDate(formatManualDateInput(value))}
+                        onFocus={() => setFocusedManualField('insulinDate')}
+                        onBlur={() => setFocusedManualField(null)}
+                      />
+                    </View>
+
+                    <View style={[styles.formField, styles.stackedFormField]}>
+                      <Text style={styles.fieldLabel}>Observação</Text>
+                      <TextInput
+                        style={[
+                          styles.input,
+                          styles.manualModalInput,
+                          styles.labeledInput,
+                          focusedManualField === 'insulinNotes' && styles.inputFocused,
+                        ]}
+                        placeholder="Ex: aplicado antes do jantar"
+                        placeholderTextColor="#8a9095"
+                        value={insulinNotes}
+                        onChangeText={setInsulinNotes}
+                        onFocus={() => setFocusedManualField('insulinNotes')}
+                        onBlur={() => setFocusedManualField(null)}
+                      />
+                    </View>
+                  </ScrollView>
+
+                  <TouchableOpacity
+                    style={[
+                      styles.modalSecondaryButton,
+                      (!canSubmitInsulin || savingMedication || !canResolvePatient) &&
+                        styles.modalPrimaryButtonDisabled,
+                    ]}
+                    onPress={handleRegisterMedication}
+                    disabled={savingMedication || !canResolvePatient || !canSubmitInsulin}
+                  >
+                    {savingMedication ? (
+                      <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                    ) : (
+                      <Text style={styles.secondaryButtonText}>Salvar insulina</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
               ) : (
-                <Text style={styles.secondaryButtonText}>Salvar medicação</Text>
+                <>
+                  <Text style={styles.modalText}>
+                    Descreva o medicamento, dose ou horario para aparecer junto da curva.
+                  </Text>
+
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Ex: Metformina 850mg"
+                    placeholderTextColor="#8a9095"
+                    value={medicationLabel}
+                    onChangeText={setMedicationLabel}
+                    onFocus={() => setFocusedManualField('medication')}
+                    onBlur={() => setFocusedManualField(null)}
+                    autoFocus
+                  />
+
+                  <TouchableOpacity
+                    style={styles.modalSecondaryButton}
+                    onPress={handleRegisterMedication}
+                    disabled={savingMedication || !canResolvePatient}
+                  >
+                    {savingMedication ? (
+                      <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                    ) : (
+                      <Text style={styles.secondaryButtonText}>Salvar medicamento</Text>
+                    )}
+                  </TouchableOpacity>
+                </>
               )}
-            </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
+
+          {insulinTypeVisible ? (
+            <View style={styles.inlinePopupOverlay}>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Tipo de insulina</Text>
+                  <TouchableOpacity
+                    style={styles.modalCloseButton}
+                    onPress={() => {
+                      setInsulinTypeVisible(false);
+                      setFocusedManualField(null);
+                    }}
+                  >
+                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  style={styles.unitOptionList}
+                  contentContainerStyle={styles.unitOptionListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {selectedInsulinTypeOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.measurementChoiceButton, styles.measurementChoiceButtonPrevious]}
+                      onPress={() => {
+                        setInsulinType(option);
+                        setInsulinTypeVisible(false);
+                        setFocusedManualField(null);
+                      }}
+                    >
+                      <Text style={styles.measurementChoiceTextPrevious}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          ) : null}
+
+          {insulinUsageVisible ? (
+            <View style={styles.inlinePopupOverlay}>
+              <View style={styles.modalCard}>
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>Objetivo do uso</Text>
+                  <TouchableOpacity
+                    style={styles.modalCloseButton}
+                    onPress={() => {
+                      setInsulinUsageVisible(false);
+                      setFocusedManualField(null);
+                    }}
+                  >
+                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
+
+                <ScrollView
+                  style={styles.unitOptionList}
+                  contentContainerStyle={styles.unitOptionListContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {selectedInsulinUsageOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      style={[styles.measurementChoiceButton, styles.measurementChoiceButtonPrevious]}
+                      onPress={() => {
+                        setInsulinUsage(option);
+                        setInsulinUsageVisible(false);
+                        setFocusedManualField(null);
+                      }}
+                    >
+                      <Text style={styles.measurementChoiceTextPrevious}>{option}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            </View>
+          ) : null}
         </View>
       </Modal>
     </PatientScreenLayout>
@@ -1494,10 +2741,10 @@ const styles = StyleSheet.create({
   },
   statusPill: {
     alignItems: 'center',
-    borderRadius: 8,
+    borderRadius: 18,
     flexDirection: 'row',
-    paddingHorizontal: 9,
-    paddingVertical: 7,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   statusPillText: {
     color: '#ffffff',
@@ -1530,6 +2777,7 @@ const styles = StyleSheet.create({
   },
   manualActionText: {
     color: patientTheme.colors.primaryDark,
+    fontWeight: '700',
   },
   libreViewActionButton: {
     backgroundColor: '#FFE600',
@@ -1539,38 +2787,43 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFE600',
     borderRadius: 18,
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     marginTop: 14,
     minHeight: 46,
+    position: 'relative',
     paddingHorizontal: 18,
+  },
+  libreViewStandaloneIcon: {
+    left: 12,
+    position: 'absolute',
   },
   libreViewActionText: {
     color: '#1F2F6B',
-    fontSize: 13,
+    fontSize: 15,
     fontWeight: '700',
-    marginLeft: 8,
+    textAlign: 'center',
   },
   libreSensorIconOuter: {
     alignItems: 'center',
     backgroundColor: '#E6CF00',
-    borderRadius: 11,
-    height: 22,
+    borderRadius: 15,
+    height: 30,
     justifyContent: 'center',
-    width: 22,
+    width: 30,
   },
   libreSensorIconMiddle: {
     alignItems: 'center',
     backgroundColor: '#FFFFFF',
-    borderRadius: 7,
-    height: 14,
+    borderRadius: 10,
+    height: 20,
     justifyContent: 'center',
-    width: 14,
+    width: 20,
   },
   libreSensorIconCenter: {
     backgroundColor: '#E6CF00',
-    borderRadius: 3,
-    height: 6,
-    width: 6,
+    borderRadius: 4,
+    height: 8,
+    width: 8,
   },
   medicationQuickCard: {
     alignItems: 'center',
@@ -1642,7 +2895,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   secondaryButtonText: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.text,
     fontWeight: '700',
   },
   evolutionSection: {
@@ -1663,15 +2916,19 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 18,
     backgroundColor: patientTheme.colors.surface,
+    borderWidth: 0,
     alignItems: 'center',
     ...patientShadow,
+    borderWidth: 0,
   },
   tabActive: {
     backgroundColor: patientTheme.colors.primaryDark,
   },
   tabText: {
     color: patientTheme.colors.text,
+    fontSize: 12,
     fontWeight: '700',
+    textAlign: 'center',
   },
   tabTextActive: {
     color: patientTheme.colors.onPrimary,
@@ -1705,10 +2962,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 18,
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.primaryDark,
   },
   chartRangeText: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.onPrimary,
     fontWeight: '700',
   },
   chartRow: {
@@ -1911,24 +3168,33 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
     marginTop: 14,
-    minHeight: 56,
-    padding: 14,
+    minHeight: 62,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
     ...patientShadow,
   },
   historyButtonIcon: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderRadius: 20,
-    height: 40,
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: 21,
+    height: 42,
     justifyContent: 'center',
     marginRight: 12,
-    width: 40,
+    width: 42,
+  },
+  historyButtonCopy: {
+    flex: 1,
   },
   historyButtonText: {
     color: patientTheme.colors.text,
-    flex: 1,
     fontSize: 15,
     fontWeight: '800',
+  },
+  historyButtonSubtitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3,
   },
   insightCard: {
     marginTop: 18,
@@ -2034,6 +3300,18 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
+  insulinOptionDetailCurrent: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+  },
+  insulinOptionDetailPrevious: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '500',
+    marginTop: 2,
+  },
   previousMeasurementFields: {
     gap: 8,
     marginTop: 8,
@@ -2060,6 +3338,12 @@ const styles = StyleSheet.create({
   fieldErrorText: {
     color: '#c74747',
     fontSize: 12,
+    fontWeight: '600',
+    marginTop: 4,
+  },
+  fieldHelperText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
     fontWeight: '600',
     marginTop: 4,
   },
@@ -2095,6 +3379,91 @@ const styles = StyleSheet.create({
   dropdownPlaceholderText: {
     color: '#8a9095',
     fontWeight: '500',
+  },
+  inputDisabled: {
+    opacity: 0.55,
+  },
+  medicineFormScroll: {
+    marginTop: 10,
+    maxHeight: 420,
+    width: '100%',
+  },
+  medicineFormContent: {
+    paddingBottom: 2,
+  },
+  continuousUseRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 2,
+    minHeight: 38,
+  },
+  continuousUseFlag: {
+    alignItems: 'center',
+    backgroundColor: '#f1f3f5',
+    borderColor: patientTheme.colors.border,
+    borderRadius: 7,
+    borderWidth: 1,
+    height: 22,
+    justifyContent: 'center',
+    width: 22,
+  },
+  continuousUseFlagActive: {
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  continuousUseText: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  optionList: {
+    marginTop: 14,
+    maxHeight: 280,
+  },
+  unitOptionList: {
+    marginTop: 16,
+    maxHeight: 360,
+  },
+  unitOptionListContent: {
+    gap: 10,
+    paddingBottom: 2,
+  },
+  optionItem: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.surfaceBorder,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    minHeight: 44,
+    justifyContent: 'center',
+    marginBottom: 8,
+    paddingHorizontal: 14,
+  },
+  optionItemText: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  optionLoadingItem: {
+    alignItems: 'center',
+    gap: 8,
+    minHeight: 72,
+    justifyContent: 'center',
+  },
+  optionLoadingText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  optionResultCount: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 10,
+    textAlign: 'center',
   },
   glucoseTypeModalCard: {
     backgroundColor: '#ffffff',

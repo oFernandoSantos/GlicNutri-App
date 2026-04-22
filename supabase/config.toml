@@ -5,3 +5,6 @@ verify_jwt = true
 
 [functions.email-verification]
 verify_jwt = false
+
+[functions.medicines-search]
+verify_jwt = true
