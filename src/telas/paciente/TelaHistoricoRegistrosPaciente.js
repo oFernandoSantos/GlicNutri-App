@@ -212,7 +212,10 @@ function getMedicationDisplay(entry) {
         : String(entry.medicineDays || '').trim()
           ? `${String(entry.medicineDays).trim()} dia(s)`
           : parsedLabel.usage
+      : entry.medicationKind === 'insulin'
+        ? String(entry.insulinUsage || '').trim() || parsedLabel.usage
       : '';
+  const notes = entry.medicationKind === 'insulin' ? String(entry.insulinNotes || '').trim() : '';
   const type =
     entry.medicationKind === 'insulin'
       ? 'Insulina'
@@ -226,6 +229,7 @@ function getMedicationDisplay(entry) {
     quantity,
     unit,
     usage,
+    notes,
   };
 }
 
@@ -253,6 +257,18 @@ export default function PacienteHistoricoRegistrosScreen({
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const initialTab = route?.params?.initialTab;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const canResolvePatient = useMemo(
+    () =>
+      Boolean(
+        patientId ||
+        usuarioLogado?.id_paciente_uuid ||
+        usuarioLogado?.cpf_paciente ||
+        usuarioLogado?.email_pac ||
+        usuarioLogado?.email ||
+        usuarioLogado?.id
+      ),
+    [patientId, usuarioLogado]
+  );
   const [activeTab, setActiveTab] = useState(initialTab || 'glucose');
   const [activePeriod, setActivePeriod] = useState('today');
   const [searchStartDate, setSearchStartDate] = useState('');
@@ -271,6 +287,14 @@ export default function PacienteHistoricoRegistrosScreen({
     async function load() {
       try {
         setLoading(true);
+        if (!canResolvePatient) {
+          if (!active) return;
+          setPatient(null);
+          setObjectiveText('');
+          setAppState(createDefaultAppState());
+          setGlucoseReadings([]);
+          return;
+        }
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
         });
@@ -303,7 +327,7 @@ export default function PacienteHistoricoRegistrosScreen({
     return () => {
       active = false;
     };
-  }, [patientId, usuarioLogado]);
+  }, [patientId, usuarioLogado, canResolvePatient]);
 
   useEffect(() => {
     if (!activePatientId) return undefined;
@@ -747,6 +771,9 @@ export default function PacienteHistoricoRegistrosScreen({
                   ) : null}
                   {medicationDisplay.usage ? (
                     <Text style={styles.recordLine}>Uso: {medicationDisplay.usage}</Text>
+                  ) : null}
+                  {medicationDisplay.notes ? (
+                    <Text style={styles.recordLine}>Observação: {medicationDisplay.notes}</Text>
                   ) : null}
                   <Text style={styles.recordLine}>
                     Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}

@@ -1165,6 +1165,29 @@ export default function PacienteHomeScreen({
           ))}
         </View>
 
+        <View style={styles.secondaryQuickRow}>
+          <TouchableOpacity
+            style={styles.secondaryQuickButton}
+            onPress={() =>
+              navigation.navigate('PacienteHistoricoRegistros', {
+                usuarioLogado,
+                initialTab: 'glucose',
+              })
+            }
+          >
+            <Ionicons name="time-outline" size={18} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.secondaryQuickButtonText}>Abrir histórico</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryQuickButton}
+            onPress={() => navigation.navigate('PacientePerfil', { usuarioLogado })}
+          >
+            <Ionicons name="person-outline" size={18} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.secondaryQuickButtonText}>Abrir perfil</Text>
+          </TouchableOpacity>
+        </View>
+
         <Text style={styles.sectionTitle}>Meu plano de hoje</Text>
         <SectionCard>
           {(planSections.length > 0 ? planSections.slice(0, 3) : [null, null]).map((item, index) => (
@@ -1616,6 +1639,30 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     marginHorizontal: -3,
+  },
+  secondaryQuickRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 12,
+    marginBottom: 4,
+  },
+  secondaryQuickButton: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 16,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    ...patientShadow,
+  },
+  secondaryQuickButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 13,
+    fontWeight: '700',
   },
   quickCard: {
     alignItems: 'center',

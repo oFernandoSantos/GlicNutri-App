@@ -17,6 +17,7 @@ import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
 } from '../../servicos/sincronizarPacienteGoogle';
+import { sanitizeSensitivePatientData } from '../../servicos/servicoDadosPaciente';
 import {
   maybeCompleteGoogleOAuthSession,
   startGoogleOAuth,
@@ -140,7 +141,6 @@ export default function TelaLogin({ navigation, route, session }) {
   ) {
     const tabela = perfil === 'Paciente' ? 'paciente' : 'nutricionista';
     const colunaEmail = perfil === 'Paciente' ? 'email_pac' : 'email_acesso';
-    const colunaSenha = perfil === 'Paciente' ? 'senha_pac' : 'senha_nutri';
     const colunaId = perfil === 'Paciente' ? 'id_paciente_uuid' : 'id_nutricionista_uuid';
     const funcaoLogin =
       perfil === 'Paciente'
@@ -174,7 +174,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
       if (usuarioEncontrado) {
         return {
-          usuario: usuarioEncontrado,
+          usuario: sanitizeSensitivePatientData(usuarioEncontrado),
           motivo: '',
         };
       }
@@ -193,65 +193,14 @@ export default function TelaLogin({ navigation, route, session }) {
         mensagem.includes('schema cache') ||
         mensagem.includes('does not exist');
 
-      if (!funcaoNaoExiste) {
-        throw error;
+      if (funcaoNaoExiste) {
+        throw new Error(
+          'A verificacao segura de senha nao esta disponivel no banco. Aplique a migracao de hash antes de liberar login por senha.'
+        );
       }
 
-      console.log(
-        'Funcao de login criptografado ainda nao disponivel; usando validacao legada temporaria.'
-      );
-    }
-
-    const candidatos = [];
-
-    function adicionarCandidatos(registros) {
-      (registros || []).forEach((item) => {
-        const chave =
-          item?.id_paciente_uuid ||
-          item?.id_nutricionista_uuid ||
-          item?.email_pac ||
-          item?.email_acesso;
-
-        if (!candidatos.some((existente) => {
-          const chaveExistente =
-            existente?.id_paciente_uuid ||
-            existente?.id_nutricionista_uuid ||
-            existente?.email_pac ||
-            existente?.email_acesso;
-
-          return chaveExistente === chave;
-        })) {
-          candidatos.push(item);
-        }
-      });
-    }
-
-    const { data, error } = await supabase
-      .from(tabela)
-      .select('*')
-      .ilike(colunaEmail, emailNormalizado);
-
-    if (error) {
       throw error;
     }
-
-    adicionarCandidatos(data);
-
-    const usuarioEncontrado = (data || []).find(
-      (item) => String(item?.[colunaSenha] || '').trim() === senhaNormalizada
-    );
-
-    if (usuarioEncontrado) {
-      return {
-        usuario: usuarioEncontrado,
-        motivo: '',
-      };
-    }
-
-    return {
-      usuario: null,
-      motivo: candidatos.length > 0 ? 'senha_incorreta' : 'usuario_nao_encontrado',
-    };
   }
 
   useEffect(() => {

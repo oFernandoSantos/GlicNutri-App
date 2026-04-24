@@ -30,6 +30,18 @@ export function getPatientDisplayName(usuario) {
   );
 }
 
+export function sanitizeSensitivePatientData(patient) {
+  if (!patient || typeof patient !== 'object') {
+    return patient;
+  }
+
+  const sanitized = { ...patient };
+  delete sanitized.senha_pac;
+  delete sanitized.senha_nutri;
+
+  return sanitized;
+}
+
 export function createDefaultAppState() {
   return {
     version: 1,
@@ -198,6 +210,40 @@ function normalizeMedicationNumber(value) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseMedicationObservation(value) {
+  const observation = String(value || '').trim();
+  const categoryMatch = observation.match(/Categoria da insulina:\s*(.+)$/im);
+  const usageMatch = observation.match(/Objetivo do uso:\s*(.+)$/im);
+  const notesMatch = observation.match(/Observacoes:\s*(.+)$/im);
+
+  return {
+    insulinCategory: categoryMatch?.[1]?.trim() || '',
+    insulinUsage: usageMatch?.[1]?.trim() || '',
+    insulinNotes: notesMatch?.[1]?.trim() || '',
+  };
+}
+
+function buildMedicationObservation(entry) {
+  const insulinCategory = String(entry?.insulinCategory || '').trim();
+  const insulinUsage = String(entry?.insulinUsage || '').trim();
+  const insulinNotes = String(entry?.insulinNotes || '').trim();
+  const observationLines = [];
+
+  if (insulinCategory) {
+    observationLines.push(`Categoria da insulina: ${insulinCategory}`);
+  }
+
+  if (insulinUsage) {
+    observationLines.push(`Objetivo do uso: ${insulinUsage}`);
+  }
+
+  if (insulinNotes) {
+    observationLines.push(`Observacoes: ${insulinNotes}`);
+  }
+
+  return observationLines.length ? observationLines.join('\n') : null;
+}
+
 function buildMedicationSignature(entry) {
   return [
     normalizeMedicationDate(entry?.date),
@@ -226,6 +272,8 @@ function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
   const medicineContinuousUse = Boolean(item?.medicineContinuousUse ?? item?.uso_continuo);
   const label = String(item?.label || item?.descricao || '').trim() || 'Medicacao / insulina';
   const databaseId = item?.id_registro_medicacao_uuid || null;
+  const observation = String(item?.observacao || '').trim();
+  const parsedObservation = parseMedicationObservation(observation);
 
   return {
     id:
@@ -244,6 +292,10 @@ function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
     medicineDays,
     medicineContinuousUse,
     patientId: item?.id_paciente_uuid || item?.patientId || null,
+    insulinCategory: String(item?.insulinCategory || parsedObservation.insulinCategory || '').trim(),
+    insulinUsage: String(item?.insulinUsage || parsedObservation.insulinUsage || '').trim(),
+    insulinNotes: String(item?.insulinNotes || parsedObservation.insulinNotes || '').trim(),
+    observation,
     storageOrigin,
     databaseId,
     legacyId: item?.id || item?.id_registro_legado || null,
@@ -381,7 +433,7 @@ async function fetchPatientByEmail(email) {
     throw error;
   }
 
-  return (data || [])[0] || null;
+  return sanitizeSensitivePatientData((data || [])[0] || null);
 }
 
 async function fetchPatientByCpf(cpf) {
@@ -397,7 +449,7 @@ async function fetchPatientByCpf(cpf) {
     throw error;
   }
 
-  return (data || [])[0] || null;
+  return sanitizeSensitivePatientData((data || [])[0] || null);
 }
 
 async function resolvePatientRecord({
@@ -423,7 +475,7 @@ async function resolvePatientRecord({
     }
 
     if (data) {
-      return data;
+      return sanitizeSensitivePatientData(data);
     }
   }
 
@@ -561,7 +613,7 @@ export async function savePatientAppState({
   }
 
   return {
-    patient: data,
+    patient: sanitizeSensitivePatientData(data),
     appState: normalized,
     clinicalObjective: objectiveText,
   };
@@ -604,7 +656,7 @@ export async function updatePatientProfile({
     throw new Error('O banco nao confirmou a atualizacao dos dados do paciente.');
   }
 
-  return data;
+  return sanitizeSensitivePatientData(data);
 }
 
 export async function fetchGlucoseReadings(patientId, limit = 120) {
@@ -735,12 +787,14 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     throw new Error('Paciente sem identificador para registrar glicemia.');
   }
 
+  const normalizedSymptoms = options.symptoms || 'Registro manual pelo app';
   const fallbackPayload = {
     id_glicemia_manual_uuid: options.id || buildUuid(),
     id_paciente_uuid: patientId,
     valor_glicose_mgdl: Number(value),
     data: options.date || buildTodayDateString(),
     hora: options.time || buildCurrentTimeString(),
+    sintomas_associados: normalizedSymptoms,
   };
 
   const { data: rpcData, error: rpcError } = await supabase
@@ -749,7 +803,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
       p_valor_glicose_mgdl: fallbackPayload.valor_glicose_mgdl,
       p_data: fallbackPayload.data,
       p_hora: fallbackPayload.hora,
-      p_sintomas_associados: options.symptoms || 'Registro manual pelo app',
+      p_sintomas_associados: normalizedSymptoms,
     });
 
   if (!rpcError) {
@@ -780,7 +834,6 @@ export async function addGlucoseReading(patientId, value, options = {}) {
 
   const payload = {
     ...fallbackPayload,
-    sintomas_associados: options.symptoms || 'Registro manual pelo app',
   };
 
   let { data, error } = await supabase
@@ -841,7 +894,7 @@ export async function addMedicationEntry(patientId, entry) {
       ? null
       : normalizeMedicationNumber(normalizedEntry.medicineDays),
     uso_continuo: normalizedEntry.medicineContinuousUse,
-    observacao: null,
+    observacao: buildMedicationObservation(normalizedEntry),
     id_registro_legado: normalizedEntry.legacyId || normalizedEntry.id || null,
   };
 

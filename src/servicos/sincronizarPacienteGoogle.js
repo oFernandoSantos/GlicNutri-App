@@ -28,7 +28,6 @@ export function buildGooglePatientFallback(user) {
       'Paciente',
     email_pac: user?.email?.toLowerCase() || null,
     cpf_paciente: placeholderCpf,
-    senha_pac: `google-${user?.id || 'paciente'}`,
     sexo_biologico: 'Nao informado',
     cep: '00000000',
     logradouro: 'Login Google',
@@ -39,6 +38,18 @@ export function buildGooglePatientFallback(user) {
     excluido: false,
     data_exclusao: null,
   };
+}
+
+function sanitizeSensitivePatientData(patient) {
+  if (!patient || typeof patient !== 'object') {
+    return patient;
+  }
+
+  const sanitized = { ...patient };
+  delete sanitized.senha_pac;
+  delete sanitized.senha_nutri;
+
+  return sanitized;
 }
 
 function buildGoogleCpfPlaceholder(user) {
@@ -90,7 +101,6 @@ export async function syncGooglePatientRecord(user) {
       .update({
         nome_completo: pacienteExistente.nome_completo || fallback.nome_completo,
         email_pac: pacienteExistente.email_pac || fallback.email_pac,
-        senha_pac: pacienteExistente.senha_pac || fallback.senha_pac,
         cpf_paciente: pacienteExistente.cpf_paciente || fallback.cpf_paciente,
         sexo_biologico: pacienteExistente.sexo_biologico || fallback.sexo_biologico,
         cep: pacienteExistente.cep || fallback.cep,
@@ -110,7 +120,7 @@ export async function syncGooglePatientRecord(user) {
       throw erroAtualizacao;
     }
 
-    return atualizado || pacienteExistente;
+    return sanitizeSensitivePatientData(atualizado || pacienteExistente);
   }
 
   const { data: criado, error: erroInsert } = await supabase
@@ -123,5 +133,5 @@ export async function syncGooglePatientRecord(user) {
     throw erroInsert;
   }
 
-  return criado || fallback;
+  return sanitizeSensitivePatientData(criado || fallback);
 }
