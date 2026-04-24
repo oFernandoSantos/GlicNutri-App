@@ -43,6 +43,7 @@ import {
   confirmarCodigoValidacaoEmailCadastro,
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
+import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -654,6 +655,19 @@ export default function TelaCadastroFixed({ navigation, route }) {
           throw new Error('O paciente nao foi confirmado no banco de dados.');
         }
 
+        await registrarLogAuditoria({
+          actor: data,
+          targetPatientId: data.id_paciente_uuid,
+          action: 'paciente_cadastrado',
+          entity: 'paciente',
+          entityId: data.id_paciente_uuid,
+          origin: 'cadastro',
+          details: {
+            metodo: 'email_senha',
+            email: data.email_pac,
+          },
+        });
+
         console.log('Paciente salvo com sucesso:', data);
       } else {
         await verificarDuplicidadeNutricionista(documentoFormatado, emailLimpo);
@@ -676,6 +690,19 @@ export default function TelaCadastroFixed({ navigation, route }) {
         if (!data?.id_nutricionista_uuid) {
           throw new Error('O nutricionista nao foi confirmado no banco de dados.');
         }
+
+        await registrarLogAuditoria({
+          actor: data,
+          actorType: 'nutricionista',
+          action: 'nutricionista_cadastrado',
+          entity: 'nutricionista',
+          entityId: data.id_nutricionista_uuid,
+          origin: 'cadastro',
+          details: {
+            metodo: 'email_senha',
+            email: data.email_acesso,
+          },
+        });
 
         console.log('Nutricionista salvo com sucesso:', data);
       }

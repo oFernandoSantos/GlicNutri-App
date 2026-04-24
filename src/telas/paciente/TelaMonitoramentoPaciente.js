@@ -1193,6 +1193,8 @@ export default function PacienteMonitoramentoScreen({
         date: optimisticReading.date,
         time: optimisticReading.time,
         symptoms: `Tipo da glicemia: ${manualGlucoseType}`,
+        actor: patient || usuarioLogado,
+        auditSource: 'monitoramento_manual',
       });
       const confirmedReadings = mergeCachedGlucoseReadings(
         [savedReading],
@@ -1292,6 +1294,8 @@ export default function PacienteMonitoramentoScreen({
         await addGlucoseReading(activePatientId, reading.value, {
           date: reading.date,
           time: reading.time,
+          actor: patient || usuarioLogado,
+          auditSource: 'libreview_sync',
         });
       }
 
@@ -1427,6 +1431,8 @@ export default function PacienteMonitoramentoScreen({
         insulinUsage: medicationKind === 'insulin' ? insulinUsage : '',
         insulinNotes: medicationKind === 'insulin' ? insulinNotes : '',
         storageOrigin: 'database',
+        actor: patient || usuarioLogado,
+        auditSource: 'monitoramento_manual',
       };
 
       if (!canResolvePatient) {

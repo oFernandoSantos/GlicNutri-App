@@ -1,4 +1,5 @@
 import { supabase } from './configSupabase';
+import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
 import {
@@ -612,6 +613,25 @@ export async function savePatientAppState({
     throw new Error('O banco nao confirmou a atualizacao dos dados do paciente.');
   }
 
+  await registrarLogAuditoria({
+    actor: currentPatient || patientContext || data,
+    targetPatientId: data.id_paciente_uuid,
+    action: 'paciente_app_state_atualizado',
+    entity: 'paciente',
+    entityId: data.id_paciente_uuid,
+    origin: 'app_state',
+    details: {
+      waterCount: normalized.waterCount,
+      mealEntries: normalized.mealEntries.length,
+      medicationEntries: normalized.medicationEntries.length,
+      activityEntries: normalized.activityEntries.length,
+      symptomEntries: normalized.symptomEntries.length,
+      hiddenMealEntryIds: normalized.hiddenMealEntryIds.length,
+      hiddenMedicationEntryIds: normalized.hiddenMedicationEntryIds.length,
+      hiddenGlucoseReadingIds: normalized.hiddenGlucoseReadingIds.length,
+    },
+  });
+
   return {
     patient: sanitizeSensitivePatientData(data),
     appState: normalized,
@@ -655,6 +675,18 @@ export async function updatePatientProfile({
   if (!data?.id_paciente_uuid) {
     throw new Error('O banco nao confirmou a atualizacao dos dados do paciente.');
   }
+
+  await registrarLogAuditoria({
+    actor: currentPatient || patientContext || data,
+    targetPatientId: data.id_paciente_uuid,
+    action: 'paciente_perfil_atualizado',
+    entity: 'paciente',
+    entityId: data.id_paciente_uuid,
+    origin: 'perfil',
+    details: {
+      camposAtualizados: Object.keys(patch || {}),
+    },
+  });
 
   return sanitizeSensitivePatientData(data);
 }
@@ -808,18 +840,32 @@ export async function addGlucoseReading(patientId, value, options = {}) {
 
   if (!rpcError) {
     const saved = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    const savedReading = saved
+      ? buildGlucoseReadingFromPayload(
+          {
+            ...fallbackPayload,
+            ...saved,
+          },
+          value
+        )
+      : buildGlucoseReadingFromPayload(fallbackPayload, value);
 
-    if (!saved) {
-      return buildGlucoseReadingFromPayload(fallbackPayload, value);
-    }
-
-    return buildGlucoseReadingFromPayload(
-      {
-        ...fallbackPayload,
-        ...saved,
+    await registrarLogAuditoria({
+      actor: options.actor || null,
+      targetPatientId: patientId,
+      action: 'glicemia_manual_cadastrada',
+      entity: 'registro_glicemia_manual',
+      entityId: savedReading.id,
+      origin: options.auditSource || 'monitoramento_manual',
+      details: {
+        valorMgDl: savedReading.value,
+        data: savedReading.date,
+        hora: savedReading.time,
+        tipoGlicemia: savedReading.glucoseType || '',
       },
-      value
-    );
+    });
+
+    return savedReading;
   }
 
   const rpcMessage = String(rpcError?.message || '').toLowerCase();
@@ -862,16 +908,48 @@ export async function addGlucoseReading(patientId, value, options = {}) {
   }
 
   if (!data) {
-    return buildGlucoseReadingFromPayload(payload, value);
+    const fallbackReading = buildGlucoseReadingFromPayload(payload, value);
+    await registrarLogAuditoria({
+      actor: options.actor || null,
+      targetPatientId: patientId,
+      action: 'glicemia_manual_cadastrada',
+      entity: 'registro_glicemia_manual',
+      entityId: fallbackReading.id,
+      origin: options.auditSource || 'monitoramento_manual',
+      details: {
+        valorMgDl: fallbackReading.value,
+        data: fallbackReading.date,
+        hora: fallbackReading.time,
+        tipoGlicemia: fallbackReading.glucoseType || '',
+      },
+    });
+    return fallbackReading;
   }
 
-  return buildGlucoseReadingFromPayload(
+  const savedReading = buildGlucoseReadingFromPayload(
     {
       ...payload,
       ...data,
     },
     value
   );
+
+  await registrarLogAuditoria({
+    actor: options.actor || null,
+    targetPatientId: patientId,
+    action: 'glicemia_manual_cadastrada',
+    entity: 'registro_glicemia_manual',
+    entityId: savedReading.id,
+    origin: options.auditSource || 'monitoramento_manual',
+    details: {
+      valorMgDl: savedReading.value,
+      data: savedReading.date,
+      hora: savedReading.time,
+      tipoGlicemia: savedReading.glucoseType || '',
+    },
+  });
+
+  return savedReading;
 }
 
 export async function addMedicationEntry(patientId, entry) {
@@ -918,10 +996,31 @@ export async function addMedicationEntry(patientId, entry) {
 
   if (!rpcError) {
     const saved = Array.isArray(rpcData) ? rpcData[0] : rpcData;
-    return buildMedicationEntryFromPayload({
+    const savedEntry = buildMedicationEntryFromPayload({
       ...fallbackPayload,
       ...saved,
     });
+
+    await registrarLogAuditoria({
+      actor: entry?.actor || null,
+      targetPatientId: patientId,
+      action: normalizedEntry.medicationKind === 'insulin'
+        ? 'insulina_cadastrada'
+        : 'medicacao_cadastrada',
+      entity: 'registro_medicacao',
+      entityId: savedEntry.databaseId || savedEntry.id,
+      origin: entry?.auditSource || 'monitoramento_manual',
+      details: {
+        tipoRegistro: normalizedEntry.medicationKind,
+        nome: savedEntry.medicineName || '',
+        quantidade: savedEntry.medicineQuantity || '',
+        unidade: savedEntry.medicineUnit || '',
+        data: savedEntry.date,
+        hora: savedEntry.time,
+      },
+    });
+
+    return savedEntry;
   }
 
   const rpcMessage = String(rpcError?.message || '').toLowerCase();
@@ -958,10 +1057,31 @@ export async function addMedicationEntry(patientId, entry) {
     throw error;
   }
 
-  return buildMedicationEntryFromPayload({
+  const savedEntry = buildMedicationEntryFromPayload({
     ...fallbackPayload,
     ...data,
   });
+
+  await registrarLogAuditoria({
+    actor: entry?.actor || null,
+    targetPatientId: patientId,
+    action: normalizedEntry.medicationKind === 'insulin'
+      ? 'insulina_cadastrada'
+      : 'medicacao_cadastrada',
+    entity: 'registro_medicacao',
+    entityId: savedEntry.databaseId || savedEntry.id,
+    origin: entry?.auditSource || 'monitoramento_manual',
+    details: {
+      tipoRegistro: normalizedEntry.medicationKind,
+      nome: savedEntry.medicineName || '',
+      quantidade: savedEntry.medicineQuantity || '',
+      unidade: savedEntry.medicineUnit || '',
+      data: savedEntry.date,
+      hora: savedEntry.time,
+    },
+  });
+
+  return savedEntry;
 }
 
 export async function deleteGlucoseReading(patientId, reading) {
@@ -978,6 +1098,20 @@ export async function deleteGlucoseReading(patientId, reading) {
   if (error) {
     throw error;
   }
+
+  await registrarLogAuditoria({
+    actor: reading?.actor || null,
+    targetPatientId: patientId,
+    action: 'glicemia_excluida',
+    entity: 'registro_glicemia_manual',
+    entityId: reading.id,
+    origin: reading?.auditSource || 'historico',
+    details: {
+      valorMgDl: reading?.value || null,
+      data: reading?.date || null,
+      hora: reading?.time || null,
+    },
+  });
 
   return true;
 }
@@ -1021,6 +1155,20 @@ export async function deleteMedicationEntry(patientId, entry) {
     throw error;
   }
 
+  await registrarLogAuditoria({
+    actor: entry?.actor || null,
+    targetPatientId: patientId,
+    action: entry?.medicationKind === 'insulin' ? 'insulina_excluida' : 'medicacao_excluida',
+    entity: 'registro_medicacao',
+    entityId: databaseId,
+    origin: entry?.auditSource || 'historico',
+    details: {
+      nome: entry?.medicineName || '',
+      data: entry?.date || null,
+      hora: entry?.time || null,
+    },
+  });
+
   return true;
 }
 
@@ -1037,13 +1185,29 @@ export async function hideGlucoseReadingForPatient({
     hiddenGlucoseReadingIds: appendUniqueId(appState?.hiddenGlucoseReadingIds, reading?.id),
   };
 
-  return await savePatientAppState({
+  const result = await savePatientAppState({
     patientId,
     objectiveText,
     appState: nextState,
     currentPatient,
     patientContext,
   });
+
+  await registrarLogAuditoria({
+    actor: currentPatient || patientContext || null,
+    targetPatientId: patientId,
+    action: 'glicemia_ocultada_historico',
+    entity: 'registro_glicemia_manual',
+    entityId: reading?.id || null,
+    origin: 'historico',
+    details: {
+      valorMgDl: reading?.value || null,
+      data: reading?.date || null,
+      hora: reading?.time || null,
+    },
+  });
+
+  return result;
 }
 
 export async function hideMedicationEntryForPatient({
@@ -1060,13 +1224,31 @@ export async function hideMedicationEntryForPatient({
     hiddenMedicationEntryIds: appendUniqueId(appState?.hiddenMedicationEntryIds, hiddenId),
   };
 
-  return await savePatientAppState({
+  const result = await savePatientAppState({
     patientId,
     objectiveText,
     appState: nextState,
     currentPatient,
     patientContext,
   });
+
+  await registrarLogAuditoria({
+    actor: currentPatient || patientContext || null,
+    targetPatientId: patientId,
+    action: entry?.medicationKind === 'insulin'
+      ? 'insulina_ocultada_historico'
+      : 'medicacao_ocultada_historico',
+    entity: 'registro_medicacao',
+    entityId: hiddenId || null,
+    origin: 'historico',
+    details: {
+      nome: entry?.medicineName || '',
+      data: entry?.date || null,
+      hora: entry?.time || null,
+    },
+  });
+
+  return result;
 }
 
 export async function hideMealEntryForPatient({
@@ -1082,13 +1264,29 @@ export async function hideMealEntryForPatient({
     hiddenMealEntryIds: appendUniqueId(appState?.hiddenMealEntryIds, entry?.id),
   };
 
-  return await savePatientAppState({
+  const result = await savePatientAppState({
     patientId,
     objectiveText,
     appState: nextState,
     currentPatient,
     patientContext,
   });
+
+  await registrarLogAuditoria({
+    actor: currentPatient || patientContext || null,
+    targetPatientId: patientId,
+    action: 'alimentacao_ocultada_historico',
+    entity: 'registro_alimentacao',
+    entityId: entry?.id || null,
+    origin: 'historico',
+    details: {
+      titulo: entry?.title || '',
+      data: entry?.date || null,
+      hora: entry?.time || null,
+    },
+  });
+
+  return result;
 }
 
 export function buildMealEntry({ mode, description, glucoseNote, aiNote, time }) {
