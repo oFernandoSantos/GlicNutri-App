@@ -11,17 +11,13 @@ import {
   Modal,
   TextInput,
   KeyboardAvoidingView,
-  SafeAreaView,
   StatusBar,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
-import BarraAbasNutricionista, {
-  NUTRI_TAB_BAR_HEIGHT,
-  NUTRI_TAB_BAR_SPACE,
-} from '../../componentes/nutricionista/BarraAbasNutricionista';
 import {
   buildPatientClinicalRows,
   buildPatientDataRows,
@@ -520,7 +516,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       : buildPatientClinicalRows(pacientePerfil || {});
 
   return (
-    <SafeAreaView style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
+    <SafeAreaView
+      edges={Platform.OS === 'web' ? undefined : []}
+      style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
+    >
       <StatusBar
         barStyle="dark-content"
         backgroundColor={patientTheme.colors.background}
@@ -1069,11 +1068,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         </View>
       </Modal>
 
-      <BarraAbasNutricionista
-        navigation={navigation}
-        rotaAtual={route?.name || 'GerenciarPacientes'}
-        usuarioLogado={usuarioLogado}
-      />
     </SafeAreaView>
   );
 }
@@ -1099,7 +1093,7 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
-    paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
+    paddingBottom: 32,
   },
   webContent: {
     flexGrow: 0,

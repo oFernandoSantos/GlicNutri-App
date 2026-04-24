@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   Modal,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,6 +8,7 @@ import {
   View,
   useWindowDimensions,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
@@ -40,7 +40,10 @@ export default function NutricionistaDrawer({
       <View style={styles.root}>
         <TouchableOpacity style={styles.backdrop} activeOpacity={1} onPress={onClose} />
 
-        <SafeAreaView style={[styles.drawer, { width: drawerWidth }]}>
+        <SafeAreaView
+          edges={Platform.OS === 'web' ? undefined : ['top']}
+          style={[styles.drawer, { width: drawerWidth }]}
+        >
           <View style={[styles.header, compact && styles.headerCompact]}>
             <View style={[styles.avatar, compact && styles.avatarCompact]}>
               <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>

@@ -14,7 +14,6 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import BarraAbasPaciente, { PATIENT_TAB_BAR_HEIGHT, PATIENT_TAB_BAR_SPACE } from '../../componentes/paciente/BarraAbasPaciente';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import {
@@ -1950,11 +1949,6 @@ export default function PacientePerfilScreen({
         </KeyboardAvoidingView>
       </Modal>
 
-      <BarraAbasPaciente
-        navigation={navigation}
-        rotaAtual={route?.name || 'PacientePerfil'}
-        usuarioLogado={usuarioLogado}
-      />
     </View>
   );
 }
@@ -1994,7 +1988,7 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
     paddingTop: 8,
-    paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
+    paddingBottom: 32,
   },
   webScrollContent: {
     flexGrow: 0,

@@ -9,9 +9,9 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../servicos/configSupabase';
 import {
   buildGooglePatientFallback,
@@ -711,7 +711,7 @@ export default function TelaLogin({ navigation, route, session }) {
   };
 
   return (
-    <SafeAreaView style={safeAreaStyle}>
+    <SafeAreaView edges={Platform.OS === 'web' ? undefined : []} style={safeAreaStyle}>
       <KeyboardAvoidingView
         style={keyboardStyle}
         behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}

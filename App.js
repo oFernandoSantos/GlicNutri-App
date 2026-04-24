@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
-  SafeAreaView,
   StatusBar,
   View,
   ActivityIndicator,
   Platform,
   StyleSheet,
+  Dimensions,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
@@ -33,7 +33,9 @@ import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPacien
 import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
+import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
+import SwipeBackContainer from './src/componentes/comum/SwipeBackContainer';
 import { supabase } from './src/servicos/configSupabase';
 import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
 import { configurarCapturaGlobalLogs } from './src/servicos/servicoLogSistema';
@@ -45,6 +47,7 @@ import { carregarSessaoAdmin, limparSessaoAdmin } from './src/servicos/servicoAd
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
 const READER_TOPO_WEB_HEIGHT = 59;
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 function useWebDocumentScroll() {
   useEffect(() => {
@@ -292,7 +295,7 @@ export default function App() {
 
   if (!authReady || !introReady || !patientOnboardingReady || !adminReady) {
     return (
-      <SafeAreaView
+      <View
         style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
       >
         <StatusBar
@@ -304,7 +307,7 @@ export default function App() {
         >
           <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
         </View>
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -330,6 +333,14 @@ export default function App() {
     };
   }
 
+  function withSwipeBack(props, content) {
+    return (
+      <SwipeBackContainer navigation={props.navigation}>
+        {content}
+      </SwipeBackContainer>
+    );
+  }
+
   const initialRouteName = adminSession
     ? 'AdminHome'
     : session
@@ -340,13 +351,21 @@ export default function App() {
         ? 'Login'
         : 'Intro';
   const useFullBleedIntro = initialRouteName === 'Intro';
-  const AppSurface = useFullBleedIntro ? View : SafeAreaView;
 
   const readerScreenOptions = {
-    animationEnabled: false,
+    animationEnabled: Platform.OS !== 'web',
     cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
-    cardStyleInterpolator: CardStyleInterpolators.forNoAnimation,
-    gestureEnabled: false,
+    cardStyleInterpolator:
+      Platform.OS === 'ios'
+        ? CardStyleInterpolators.forHorizontalIOS
+        : Platform.OS === 'web'
+          ? CardStyleInterpolators.forNoAnimation
+          : undefined,
+    gestureEnabled: Platform.OS !== 'web',
+    gestureDirection: 'horizontal',
+    gestureResponseDistance: {
+      horizontal: SCREEN_WIDTH,
+    },
     header: (props) => <ReaderTopo {...props} />,
     headerShown: true,
   };
@@ -354,7 +373,7 @@ export default function App() {
   return (
     <GestureHandlerRootView style={[styles.gestureRoot, Platform.OS === 'web' && styles.webDocumentRoot]}>
       <SafeAreaProvider>
-        <AppSurface
+        <View
           style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
         >
           {!useFullBleedIntro ? (
@@ -367,152 +386,189 @@ export default function App() {
             <NavigationContainer>
               <Stack.Navigator
                 key={
-                  session
-                    ? patientOnboardingSeen
-                      ? 'auth'
-                      : 'auth-onboarding'
-                    : introSeen
-                      ? 'guest-seen'
-                      : 'guest-first'
+                  adminSession
+                    ? 'admin-auth'
+                    : session
+                      ? patientOnboardingSeen
+                        ? 'auth'
+                        : 'auth-onboarding'
+                      : introSeen
+                        ? 'guest-seen'
+                        : 'guest-first'
                 }
                 initialRouteName={initialRouteName}
                 screenOptions={{
+                  animationEnabled: Platform.OS !== 'web',
                   cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
+                  cardStyleInterpolator:
+                    Platform.OS === 'ios'
+                      ? CardStyleInterpolators.forHorizontalIOS
+                      : Platform.OS === 'web'
+                        ? CardStyleInterpolators.forNoAnimation
+                        : undefined,
+                  gestureEnabled: Platform.OS !== 'web',
+                  gestureDirection: 'horizontal',
+                  gestureResponseDistance: {
+                    horizontal: SCREEN_WIDTH,
+                  },
                   headerShown: false,
                 }}
               >
               <Stack.Screen name="Intro">
                 {(props) => (
-                  <TelaIntroducao
-                    {...props}
-                    session={session}
-                    onIntroFinished={() => setIntroSeen(true)}
-                  />
+                  withSwipeBack(
+                    props,
+                    <TelaIntroducao
+                      {...props}
+                      session={session}
+                      onIntroFinished={() => setIntroSeen(true)}
+                    />
+                  )
                 )}
               </Stack.Screen>
 
               <Stack.Screen name="Login" options={readerScreenOptions}>
                 {(props) => (
-                  <TelaLogin
-                    {...props}
-                    session={session}
-                    route={{
-                      ...props.route,
-                      params: {
-                        ...(props.route?.params || {}),
-                        onAdminLogin: (adminUser) => setAdminSession(adminUser),
-                      },
-                    }}
-                  />
+                  withSwipeBack(
+                    props,
+                    <TelaLogin
+                      {...props}
+                      session={session}
+                      route={{
+                        ...props.route,
+                        params: {
+                          ...(props.route?.params || {}),
+                          onAdminLogin: (adminUser) => setAdminSession(adminUser),
+                        },
+                      }}
+                    />
+                  )
                 )}
               </Stack.Screen>
 
               <Stack.Screen
                 name="Cadastro"
-                component={TelaCadastro}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <TelaCadastro {...props} />)}
+              </Stack.Screen>
               <Stack.Screen
                 name="ForgotPassword"
-                component={ForgotPassword}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <ForgotPassword {...props} />)}
+              </Stack.Screen>
 
               <Stack.Screen name="PacienteOnboarding">
                 {(props) => (
-                  <PacienteOnboardingScreen
-                    {...getPacienteProps(props)}
-                    onOnboardingFinished={(updatedPatient) => {
-                      if (updatedPatient) {
-                        setPatientSessionOverride(updatedPatient);
-                      }
-                      setPatientOnboardingSeen(true);
-                    }}
-                  />
+                  withSwipeBack(
+                    props,
+                    <PacienteOnboardingScreen
+                      {...getPacienteProps(props)}
+                      onOnboardingFinished={(updatedPatient) => {
+                        if (updatedPatient) {
+                          setPatientSessionOverride(updatedPatient);
+                        }
+                        setPatientOnboardingSeen(true);
+                      }}
+                    />
+                  )
                 )}
               </Stack.Screen>
 
               <Stack.Screen name="HomePaciente" options={readerScreenOptions}>
-                {(props) => <HomePaciente {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <HomePaciente {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteDiario" options={readerScreenOptions}>
-                {(props) => <PacienteDiarioScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacienteDiarioScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteMonitoramento" options={readerScreenOptions}>
-                {(props) => <PacienteMonitoramentoScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacienteMonitoramentoScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteHistoricoRegistros" options={readerScreenOptions}>
-                {(props) => <PacienteHistoricoRegistrosScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacienteHistoricoRegistrosScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteAssistente" options={readerScreenOptions}>
-                {(props) => <PacienteAssistenteScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacienteAssistenteScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteAgendamentos" options={readerScreenOptions}>
-                {(props) => <PacienteAgendamentosScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacienteAgendamentosScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteBemEstar" options={readerScreenOptions}>
-                {(props) => <PacienteBemEstarScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacienteBemEstarScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacientePlano" options={readerScreenOptions}>
-                {(props) => <PacientePlanoScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacientePlanoScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacientePerfil" options={readerScreenOptions}>
-                {(props) => <PacientePerfilScreen {...getPacienteProps(props)} />}
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen
+                name="RegistroRefeicaoIA"
+                options={readerScreenOptions}
+              >
+                {(props) => withSwipeBack(props, <RegistroRefeicaoIAScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen
                 name="HomeNutricionista"
-                component={HomeNutricionista}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <HomeNutricionista {...props} />)}
+              </Stack.Screen>
 
               <Stack.Screen
                 name="GerenciarPacientes"
-                component={GerenciarPacientesScreen}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <GerenciarPacientesScreen {...props} />)}
+              </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaAgenda"
-                component={NutricionistaSectionScreen}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <NutricionistaSectionScreen {...props} />)}
+              </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaMensagens"
-                component={NutricionistaSectionScreen}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <NutricionistaSectionScreen {...props} />)}
+              </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaRelatorios"
-                component={NutricionistaSectionScreen}
                 options={readerScreenOptions}
-              />
+              >
+                {(props) => withSwipeBack(props, <NutricionistaSectionScreen {...props} />)}
+              </Stack.Screen>
 
               <Stack.Screen name="AdminHome" options={readerScreenOptions}>
-                {(props) => <TelaHomeAdmin {...getAdminProps(props)} />}
+                {(props) => withSwipeBack(props, <TelaHomeAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="AdminAuditoria" options={readerScreenOptions}>
-                {(props) => <TelaAuditoriaAdmin {...getAdminProps(props)} />}
+                {(props) => withSwipeBack(props, <TelaAuditoriaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="AdminLogsSistema" options={readerScreenOptions}>
-                {(props) => <TelaLogsSistemaAdmin {...getAdminProps(props)} />}
+                {(props) => withSwipeBack(props, <TelaLogsSistemaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
               </Stack.Navigator>
             </NavigationContainer>
           </View>
-        </AppSurface>
+        </View>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

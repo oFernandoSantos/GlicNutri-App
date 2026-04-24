@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Platform,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
@@ -12,6 +11,7 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import BotaoVoltar from '../../componentes/comum/BotaoVoltar';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
@@ -383,7 +383,7 @@ export default function PacienteOnboardingScreen({
 
   if (finished) {
     return (
-      <SafeAreaView style={styles.container}>
+      <SafeAreaView edges={Platform.OS === 'web' ? undefined : ['top']} style={styles.container}>
         <View style={styles.successContent}>
           <View style={styles.successIcon}>
             <Ionicons name="checkmark" size={38} color={patientTheme.colors.primaryDark} />
@@ -396,7 +396,7 @@ export default function PacienteOnboardingScreen({
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={Platform.OS === 'web' ? undefined : ['top']} style={styles.container}>
       <View style={[styles.readerTop, Platform.OS === 'web' && styles.readerTopWebFixed]}>
         <View style={[styles.topBar, { width: contentWidth }]}>
           <View style={styles.topSide}>

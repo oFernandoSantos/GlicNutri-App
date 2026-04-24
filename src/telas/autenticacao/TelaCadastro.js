@@ -11,10 +11,10 @@ import {
   Modal,
   KeyboardAvoidingView,
   Platform,
-  SafeAreaView,
   StyleSheet,
   Image,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
 import {
@@ -947,7 +947,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={Platform.OS === 'web' ? undefined : []} style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboard}
         behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}

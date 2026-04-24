@@ -8,3 +8,6 @@ verify_jwt = false
 
 [functions.medicines-search]
 verify_jwt = true
+
+[functions.analisar-refeicao-ia]
+verify_jwt = false
