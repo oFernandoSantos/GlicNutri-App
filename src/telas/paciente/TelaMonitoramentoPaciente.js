@@ -1133,7 +1133,7 @@ export default function PacienteMonitoramentoScreen({
     }
 
     if (!hasSelectedGlucoseType) {
-      Alert.alert('Atenção', 'Selecione o tipo da glicose.');
+      Alert.alert('Atenção', 'Selecione o tipo da glicemia.');
       return;
     }
 
@@ -1154,6 +1154,21 @@ export default function PacienteMonitoramentoScreen({
 
     if (!parsedValue || parsedValue <= 0) {
       Alert.alert('Atencao', 'Informe um valor de glicose valido.');
+      return;
+    }
+
+    if (isPreviousGlucoseEntry && !hasValidManualDate) {
+      Alert.alert('Atencao', 'Informe uma data valida no formato DD/MM/AAAA.');
+      return;
+    }
+
+    if (isPreviousGlucoseEntry && !hasValidManualTime) {
+      Alert.alert('Atencao', 'Informe uma hora valida no formato HH:MM.');
+      return;
+    }
+
+    if (!hasSelectedGlucoseType) {
+      Alert.alert('Atencao', 'Selecione o tipo da glicemia.');
       return;
     }
 
@@ -1218,7 +1233,9 @@ export default function PacienteMonitoramentoScreen({
       setManualMeasurementType('current');
       Alert.alert(
         'Glicemia registrada',
-        `Leitura de ${parsedValue} mg/dL salva com sucesso. A leitura guiada foi enviada para notificacoes.`
+        isPreviousGlucoseEntry
+          ? `Leitura de ${parsedValue} mg/dL salva com sucesso em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}.`
+          : `Leitura de ${parsedValue} mg/dL salva com sucesso.`
       );
     } catch (error) {
       if (optimisticReading?.id) {
@@ -1308,19 +1325,37 @@ export default function PacienteMonitoramentoScreen({
 
   async function handleRegisterMedication() {
     try {
+      if (!activePatientId) {
+        Alert.alert('Atenção', 'Paciente sem identificador para registrar medicação.');
+        return;
+      }
+
       setSavingMedication(true);
       let entryDate = buildLocalDateString();
       let entryTime = buildLocalTimeString().slice(0, 5);
       let label = '';
+      let successMessage = 'Medicação registrada com sucesso.';
 
       if (medicationKind === 'medicine') {
         const normalizedDate = normalizeManualDateInput(medicineDate);
         const normalizedTime = normalizeManualTimeInput(medicineTime);
         const quantity = String(medicineQuantity || '').trim();
         const days = String(medicineDays || '').trim();
+        const trimmedMedicineName = String(medicineName || '').trim();
+        const trimmedMedicineUnit = String(medicineUnit || '').trim();
 
-        if (!medicineName || !medicineUnit || !quantity || !normalizedDate || !normalizedTime) {
-          Alert.alert('Atenção', 'Informe medicamento, unidade, quantidade, data e hora.');
+        if (!trimmedMedicineName || !trimmedMedicineUnit || !quantity) {
+          Alert.alert('Atenção', 'Informe medicamento, unidade e quantidade.');
+          return;
+        }
+
+        if (!isValidManualDate(medicineDate)) {
+          Alert.alert('Atenção', 'Informe uma data válida no formato DD/MM/AAAA.');
+          return;
+        }
+
+        if (!isValidManualTime(medicineTime)) {
+          Alert.alert('Atenção', 'Informe uma hora válida no formato HH:MM.');
           return;
         }
 
@@ -1332,22 +1367,33 @@ export default function PacienteMonitoramentoScreen({
         entryDate = normalizedDate;
         entryTime = normalizedTime.slice(0, 5);
         label = [
-          medicineName,
-          `${quantity} ${medicineUnit}`,
+          trimmedMedicineName,
+          `${quantity} ${trimmedMedicineUnit}`,
           `Hora ${entryTime}`,
           medicineContinuousUse ? 'Uso contínuo' : `${days} dia(s)`,
         ].join(' - ');
+        successMessage = `Medicamento ${trimmedMedicineName} registrado com sucesso.`;
       } else {
         const normalizedDate = normalizeManualDateInput(insulinDate);
         const normalizedTime = normalizeManualTimeInput(insulinTime);
         const dose = String(insulinDose || '').trim();
         const notes = String(insulinNotes || '').trim();
 
-        if (!insulinCategory || !insulinType || !dose || !normalizedDate || !normalizedTime || !insulinUsage) {
+        if (!insulinCategory || !insulinType || !dose || !insulinUsage) {
           Alert.alert(
             'Atenção',
-            'Informe categoria, tipo, dose em UI, data, hora e objetivo do uso.'
+            'Informe categoria, tipo, dose em UI e objetivo do uso.'
           );
+          return;
+        }
+
+        if (!isValidManualDate(insulinDate)) {
+          Alert.alert('Atenção', 'Informe uma data válida no formato DD/MM/AAAA.');
+          return;
+        }
+
+        if (!isValidManualTime(insulinTime)) {
+          Alert.alert('Atenção', 'Informe uma hora válida no formato HH:MM.');
           return;
         }
 
@@ -1362,6 +1408,7 @@ export default function PacienteMonitoramentoScreen({
         ]
           .filter(Boolean)
           .join(' - ');
+        successMessage = `Insulina ${insulinType} registrada com sucesso.`;
       }
 
       const medicationEntry = {
@@ -1394,10 +1441,10 @@ export default function PacienteMonitoramentoScreen({
       setMedicationLabel('');
       setMedicationKind('');
       handleCloseMedicationFlow();
-      Alert.alert('Registro salvo', 'Medicação registrada com sucesso.');
+      Alert.alert('Registro salvo', successMessage);
     } catch (error) {
       console.log('Erro ao salvar medicação:', error);
-      Alert.alert('Erro', 'Não foi possível salvar a medicação agora.');
+      Alert.alert('Erro', error?.message || 'Não foi possível salvar a medicação agora.');
     } finally {
       setSavingMedication(false);
     }
@@ -1787,10 +1834,10 @@ export default function PacienteMonitoramentoScreen({
             <TouchableOpacity
               style={[
                 styles.modalPrimaryButton,
-                savingGlucose && styles.modalPrimaryButtonDisabled,
+                (!canSubmitManualGlucose || savingGlucose) && styles.modalPrimaryButtonDisabled,
               ]}
               onPress={handleOpenGlucoseConfirmation}
-              disabled={savingGlucose}
+              disabled={!canSubmitManualGlucose || savingGlucose}
             >
               {savingGlucose ? (
                 <ActivityIndicator color={patientTheme.colors.onPrimary} />

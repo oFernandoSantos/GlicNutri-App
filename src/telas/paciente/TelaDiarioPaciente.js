@@ -162,12 +162,19 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       : selectedMode === 'voice'
         ? 'Fale sua refeicao como em uma mensagem de audio curta.'
         : 'Descreva rapidamente o prato, horario e quantidade.';
+  const canSubmitMeal = Boolean(mealText.trim()) && canResolvePatient && !saving;
 
   async function handleAddMeal() {
     const description = mealText.trim();
+    const previousState = appState;
 
     if (!description) {
       Alert.alert('Atencao', 'Descreva a refeicao antes de salvar.');
+      return;
+    }
+
+    if (!canResolvePatient) {
+      Alert.alert('Atenção', 'Paciente sem identificador para registrar a refeição.');
       return;
     }
 
@@ -192,24 +199,24 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     setSaving(true);
 
     try {
-      if (canResolvePatient) {
-        const saved = await savePatientAppState({
-          patientId,
-          objectiveText,
-          appState: nextState,
-          currentPatient: patient,
-          patientContext: usuarioLogado,
-        });
+      const saved = await savePatientAppState({
+        patientId,
+        objectiveText,
+        appState: nextState,
+        currentPatient: patient,
+        patientContext: usuarioLogado,
+      });
 
-        setPatient(saved.patient || patient);
-        setObjectiveText(saved.clinicalObjective || objectiveText);
-        setAppState(saved.appState);
-      }
+      setPatient(saved.patient || patient);
+      setObjectiveText(saved.clinicalObjective || objectiveText);
+      setAppState(saved.appState);
 
-      Alert.alert('Registro pronto', 'A refeicao foi salva no Supabase.');
+      Alert.alert('Registro pronto', 'Refeição registrada com sucesso.');
     } catch (error) {
       console.log('Erro ao salvar refeicao:', error);
-      Alert.alert('Erro', 'Nao foi possivel salvar a refeicao agora.');
+      setAppState(previousState);
+      setMealText(description);
+      Alert.alert('Erro', error?.message || 'Nao foi possivel salvar a refeicao agora.');
     } finally {
       setSaving(false);
     }
@@ -257,7 +264,11 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
           multiline
         />
 
-        <TouchableOpacity style={styles.primaryButton} onPress={handleAddMeal} disabled={saving}>
+        <TouchableOpacity
+          style={[styles.primaryButton, !canSubmitMeal && styles.primaryButtonDisabled]}
+          onPress={handleAddMeal}
+          disabled={!canSubmitMeal}
+        >
           {saving ? (
             <ActivityIndicator color={patientTheme.colors.onPrimary} />
           ) : (
@@ -287,7 +298,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         {loading ? (
           <View style={styles.emptyState}>
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
-            <Text style={styles.emptyStateText}>Carregando registros do Supabase...</Text>
+            <Text style={styles.emptyStateText}>Carregando seus registros...</Text>
           </View>
         ) : timelineEntries.length > 0 ? (
           timelineEntries.map((entry, index) => {
@@ -390,6 +401,9 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     borderRadius: 20,
     backgroundColor: patientTheme.colors.primary,
+  },
+  primaryButtonDisabled: {
+    opacity: 0.55,
   },
   primaryButtonText: {
     color: patientTheme.colors.onPrimary,

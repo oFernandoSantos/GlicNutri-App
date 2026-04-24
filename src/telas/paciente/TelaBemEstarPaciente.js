@@ -110,6 +110,8 @@ export default function PacienteBemEstarScreen({
 
     return 'Seu contexto de bem-estar esta favoravel para um dia mais estavel. Continue registrando sintomas para refinar as correlacoes.';
   }, [selectedSleep, selectedStress]);
+  const canSaveWellness = selectedSymptoms.length > 0 && canResolvePatient && !saving;
+  const canRegisterActivity = canResolvePatient && !saving;
 
   function toggleSymptom(id) {
     setSelectedSymptoms((current) =>
@@ -118,6 +120,18 @@ export default function PacienteBemEstarScreen({
   }
 
   async function handleSaveWellness() {
+    const previousState = appState;
+
+    if (!selectedSymptoms.length) {
+      Alert.alert('Atenção', 'Selecione pelo menos um sintoma ou estado atual.');
+      return;
+    }
+
+    if (!canResolvePatient) {
+      Alert.alert('Atenção', 'Paciente sem identificador para registrar o bem-estar.');
+      return;
+    }
+
     const nextState = {
       ...appState,
       wellness: {
@@ -135,31 +149,36 @@ export default function PacienteBemEstarScreen({
 
     try {
       setSaving(true);
+      const saved = await savePatientAppState({
+        patientId,
+        objectiveText,
+        appState: nextState,
+        currentPatient: patient,
+        patientContext: usuarioLogado,
+      });
 
-      if (canResolvePatient) {
-        const saved = await savePatientAppState({
-          patientId,
-          objectiveText,
-          appState: nextState,
-          currentPatient: patient,
-          patientContext: usuarioLogado,
-        });
+      setPatient(saved.patient || patient);
+      setObjectiveText(saved.clinicalObjective || objectiveText);
+      setAppState(saved.appState);
 
-        setPatient(saved.patient || patient);
-        setObjectiveText(saved.clinicalObjective || objectiveText);
-        setAppState(saved.appState);
-      }
-
-      Alert.alert('Bem-estar salvo', 'Seus sinais do dia foram atualizados no Supabase.');
+      Alert.alert('Bem-estar salvo', 'Seus sinais do dia foram atualizados com sucesso.');
     } catch (error) {
       console.log('Erro ao salvar bem-estar:', error);
-      Alert.alert('Erro', 'Nao foi possivel salvar seu bem-estar agora.');
+      setAppState(previousState);
+      Alert.alert('Erro', error?.message || 'Nao foi possivel salvar seu bem-estar agora.');
     } finally {
       setSaving(false);
     }
   }
 
   async function handleQuickActivity() {
+    const previousState = appState;
+
+    if (!canResolvePatient) {
+      Alert.alert('Atenção', 'Paciente sem identificador para registrar atividade.');
+      return;
+    }
+
     const nextState = {
       ...appState,
       activityEntries: appendNewestEntry(
@@ -177,25 +196,23 @@ export default function PacienteBemEstarScreen({
 
     try {
       setSaving(true);
+      const saved = await savePatientAppState({
+        patientId,
+        objectiveText,
+        appState: nextState,
+        currentPatient: patient,
+        patientContext: usuarioLogado,
+      });
 
-      if (canResolvePatient) {
-        const saved = await savePatientAppState({
-          patientId,
-          objectiveText,
-          appState: nextState,
-          currentPatient: patient,
-          patientContext: usuarioLogado,
-        });
+      setPatient(saved.patient || patient);
+      setObjectiveText(saved.clinicalObjective || objectiveText);
+      setAppState(saved.appState);
 
-        setPatient(saved.patient || patient);
-        setObjectiveText(saved.clinicalObjective || objectiveText);
-        setAppState(saved.appState);
-      }
-
-      Alert.alert('Atividade registrada', 'A caminhada foi salva no Supabase.');
+      Alert.alert('Atividade registrada', 'A caminhada foi registrada com sucesso.');
     } catch (error) {
       console.log('Erro ao salvar atividade:', error);
-      Alert.alert('Erro', 'Nao foi possivel registrar a atividade agora.');
+      setAppState(previousState);
+      Alert.alert('Erro', error?.message || 'Nao foi possivel registrar a atividade agora.');
     } finally {
       setSaving(false);
     }
@@ -299,11 +316,19 @@ export default function PacienteBemEstarScreen({
       </View>
 
       <View style={styles.actionRow}>
-        <TouchableOpacity style={styles.secondaryAction} onPress={handleQuickActivity}>
+        <TouchableOpacity
+          style={[styles.secondaryAction, !canRegisterActivity && styles.actionDisabled]}
+          onPress={handleQuickActivity}
+          disabled={!canRegisterActivity}
+        >
           <Text style={styles.secondaryActionText}>Registrar caminhada leve</Text>
         </TouchableOpacity>
 
-        <TouchableOpacity style={styles.primaryAction} onPress={handleSaveWellness}>
+        <TouchableOpacity
+          style={[styles.primaryAction, !canSaveWellness && styles.actionDisabled]}
+          onPress={handleSaveWellness}
+          disabled={!canSaveWellness}
+        >
           {saving ? (
             <ActivityIndicator color={patientTheme.colors.onPrimary} />
           ) : (
@@ -442,6 +467,9 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  actionDisabled: {
+    opacity: 0.55,
   },
   primaryAction: {
     flex: 1,
