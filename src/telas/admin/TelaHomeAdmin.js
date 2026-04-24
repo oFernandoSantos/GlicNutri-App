@@ -152,7 +152,7 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     await onAdminLogout?.();
     navigation.reset({
       index: 0,
-      routes: [{ name: 'Login', params: { roleInicial: 'Admin' } }],
+      routes: [{ name: 'Login' }],
     });
   }
 

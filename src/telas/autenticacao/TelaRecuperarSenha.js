@@ -8,11 +8,11 @@ import {
   Alert,
   Modal,
   ActivityIndicator,
-  SafeAreaView,
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
@@ -292,7 +292,7 @@ export default function ForgotPassword({ navigation }) {
   }
 
   return (
-    <SafeAreaView style={styles.container}>
+    <SafeAreaView edges={Platform.OS === 'web' ? undefined : []} style={styles.container}>
       <KeyboardAvoidingView
         style={styles.keyboard}
         behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}

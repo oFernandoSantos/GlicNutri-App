@@ -2,10 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Platform, View, Text, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { temaPaciente, sombraPaciente } from '../../temas/temaPaciente';
 
 export const PATIENT_TAB_BAR_HEIGHT = 64;
-export const PATIENT_TAB_BAR_SPACE = 4;
+export const PATIENT_TAB_BAR_SPACE = 14;
 const TAB_HIGHLIGHT_COLOR = '#4fdfa3';
 const TAB_ACTIVE_BACKGROUND = '#FFFFFF';
 const QUICK_MENU_BOTTOM = 232;
@@ -16,7 +17,7 @@ const DOUBLE_TAP_DELAY = 320;
 const HEADER_VISIBLE_SPACE = 0;
 
 const abasPrincipais = [
-  { rota: 'PacienteDiario', rotulo: 'Diário', biblioteca: 'ion', icone: 'book-outline' },
+  { rota: 'PacienteDiario', rotulo: 'Alimentação', biblioteca: 'ion', icone: 'restaurant-outline' },
   {
     rota: 'PacienteMonitoramento',
     rotulo: 'Glicose',
@@ -57,6 +58,7 @@ function IconeAba({ aba, ativo }) {
 }
 
 export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado }) {
+  const insets = useSafeAreaInsets();
   const { height: alturaTela, width: larguraTela } = useWindowDimensions();
   const [rotaVisual, setRotaVisual] = useState(rotaAtual);
   const [menuRapidoVisivel, setMenuRapidoVisivel] = useState(false);
@@ -211,7 +213,10 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
     setAcaoRapidaEmFoco(null);
 
     if (tipo === 'meal') {
-      navegar('PacienteDiario');
+      navigation.navigate('RegistroRefeicaoIA', {
+        usuarioLogado,
+        openMealTimingChoice: true,
+      });
       return;
     }
 
@@ -256,25 +261,25 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
   const acoesRapidas = [
     {
       id: 'medicine',
-      label: 'Registro de medicação',
+      label: '\u0052\u0065\u0067\u0069\u0073\u0074\u0072\u0061\u0072\u0020\u004d\u0065\u0064\u0069\u0063\u0061\u00e7\u00e3\u006f',
       icon: 'pill',
       library: 'material',
     },
     {
       id: 'glucose',
-      label: 'Registro de glicose',
+      label: 'Registrar Glicose',
       icon: 'water-outline',
       library: 'ion',
     },
     {
       id: 'meal',
-      label: 'Registro de refeição',
-      icon: 'food-apple-outline',
+      label: '\u0052\u0065\u0067\u0069\u0073\u0074\u0072\u0061\u0072\u0020\u0041\u006c\u0069\u006d\u0065\u006e\u0074\u0061\u00e7\u00e3\u006f',
+      icon: 'camera-outline',
       library: 'material',
     },
     {
       id: 'insulin',
-      label: 'Registro de insulina',
+      label: 'Registrar Insulina',
       icon: 'needle',
       library: 'material',
     },
@@ -303,6 +308,8 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
 
     return null;
   }
+
+  const bottomOffset = Platform.OS === 'web' ? 0 : Math.max(10, Math.min(insets.bottom || 0, 14));
 
   return (
     <View style={[styles.areaFixa, rodapeWebFixo]}>
@@ -373,7 +380,7 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
       ) : null}
 
       <View
-        style={styles.barra}
+        style={[styles.barra, { marginBottom: bottomOffset }]}
         onLayout={(event) => {
           larguraBarraRef.current = event.nativeEvent.layout.width;
         }}
@@ -620,18 +627,22 @@ const styles = StyleSheet.create({
     backgroundColor: TAB_ACTIVE_BACKGROUND,
     borderColor: TAB_HIGHLIGHT_COLOR,
     borderWidth: 1.5,
-    borderRadius: 32,
+    borderRadius: 34,
     elevation: 8,
-    height: 64,
-    marginTop: -10,
+    height: 68,
+    justifyContent: 'center',
+    marginTop: -13,
     shadowColor: TAB_HIGHLIGHT_COLOR,
     shadowOffset: { width: 0, height: 0 },
     shadowOpacity: 0.45,
     shadowRadius: 10,
-    width: 64,
+    width: 68,
   },
   iconeAbaInnerAtivo: {
-    transform: [{ scale: 1.08 }],
+    alignItems: 'center',
+    gap: 4,
+    justifyContent: 'center',
+    transform: [{ translateY: -2 }],
   },
   rotuloAba: {
     marginTop: 1,
@@ -640,9 +651,16 @@ const styles = StyleSheet.create({
     color: '#8B95A1',
   },
   rotuloAbaDentroAtivo: {
+    alignSelf: 'center',
     color: TAB_HIGHLIGHT_COLOR,
     fontSize: 9,
     fontWeight: '700',
-    marginTop: 1,
+    lineHeight: 11,
+    marginTop: 0,
+    textAlign: 'center',
   },
 });
+
+
+
+

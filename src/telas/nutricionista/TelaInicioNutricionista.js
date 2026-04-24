@@ -46,6 +46,7 @@ function getRiskTone(risk) {
 
 export default function NutricionistaHomeDashboardScreen({ route, navigation }) {
   const { usuarioLogado } = route.params || {};
+  const showTabBar = route?.name === 'HomeNutricionista';
   const [menuVisible, setMenuVisible] = useState(false);
   const [loadingLogout, setLoadingLogout] = useState(false);
 
@@ -124,6 +125,7 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
         style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
         contentContainerStyle={[
           styles.scrollContent,
+          showTabBar && styles.scrollContentWithTabBar,
           Platform.OS === 'web' && styles.webScrollContent,
         ]}
         showsVerticalScrollIndicator={false}
@@ -284,11 +286,13 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
         <View style={styles.listFooter} />
       </ScrollView>
 
-      <BarraAbasNutricionista
-        navigation={navigation}
-        rotaAtual={route?.name || 'HomeNutricionista'}
-        usuarioLogado={usuarioLogado}
-      />
+      {showTabBar ? (
+        <BarraAbasNutricionista
+          navigation={navigation}
+          rotaAtual={route?.name || 'HomeNutricionista'}
+          usuarioLogado={usuarioLogado}
+        />
+      ) : null}
     </View>
   );
 }
@@ -310,6 +314,9 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
+    paddingBottom: 32,
+  },
+  scrollContentWithTabBar: {
     paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
   },
   webScroll: {

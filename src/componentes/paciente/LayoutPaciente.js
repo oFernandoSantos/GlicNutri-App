@@ -1,6 +1,5 @@
 import React from 'react';
 import {
-  SafeAreaView,
   View,
   Text,
   ScrollView,
@@ -8,6 +7,7 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import BarraAbasPaciente, {
   PATIENT_TAB_BAR_HEIGHT,
   PATIENT_TAB_BAR_SPACE,
@@ -23,13 +23,17 @@ export default function PatientScreenLayout({
   children,
   rightAction,
   contentContainerStyle,
-  showTabBar = true,
+  showTabBar = route?.name === 'HomePaciente',
   scrollEnabled = true,
+  footerOverlay,
 }) {
   const showHeader = Boolean(title || subtitle || rightAction);
 
   return (
-    <SafeAreaView style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
+    <SafeAreaView
+      edges={Platform.OS === 'web' ? undefined : []}
+      style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
+    >
       <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
 
       <View style={styles.body}>
@@ -72,6 +76,18 @@ export default function PatientScreenLayout({
             {children}
           </View>
         )}
+
+        {footerOverlay ? (
+          <View
+            style={[
+              styles.footerOverlay,
+              showTabBar && styles.footerOverlayWithTabBar,
+            ]}
+            pointerEvents="box-none"
+          >
+            {footerOverlay}
+          </View>
+        ) : null}
       </View>
 
       {showTabBar ? (
@@ -150,5 +166,14 @@ const styles = StyleSheet.create({
   webContent: {
     flexGrow: 1,
     minHeight: '100%',
+  },
+  footerOverlay: {
+    position: 'absolute',
+    left: patientTheme.spacing.screen,
+    right: patientTheme.spacing.screen,
+    bottom: 16,
+  },
+  footerOverlayWithTabBar: {
+    bottom: PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16,
   },
 });

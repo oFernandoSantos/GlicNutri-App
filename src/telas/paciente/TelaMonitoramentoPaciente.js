@@ -1461,6 +1461,21 @@ export default function PacienteMonitoramentoScreen({
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
+      contentContainerStyle={styles.screenContent}
+      footerOverlay={
+        <TouchableOpacity
+          style={[
+            styles.primaryButton,
+            styles.fixedPrimaryButton,
+            !activePatientId && styles.buttonDisabled,
+          ]}
+          onPress={handleOpenManualChoice}
+          disabled={!activePatientId}
+        >
+          <Ionicons name="water-outline" size={18} color={patientTheme.colors.onPrimary} />
+          <Text style={styles.primaryButtonText}>Registrar Glicose</Text>
+        </TouchableOpacity>
+      }
     >
       <View style={[styles.currentCard, { backgroundColor: latestStatus.cardColor }]}>
         <View style={styles.currentHeader}>
@@ -1486,26 +1501,6 @@ export default function PacienteMonitoramentoScreen({
           </View>
         </View>
 
-        <View style={styles.currentActions}>
-          <TouchableOpacity
-            style={[
-              styles.currentActionButton,
-              styles.manualActionButton,
-            ]}
-            onPress={handleOpenManualChoice}
-            disabled={!activePatientId}
-          >
-            <Text
-              style={[
-                styles.currentActionText,
-                styles.manualActionText,
-                { color: latestStatus.color },
-              ]}
-            >
-              Registro manual
-            </Text>
-          </TouchableOpacity>
-        </View>
       </View>
 
       <TouchableOpacity
@@ -2760,6 +2755,9 @@ export default function PacienteMonitoramentoScreen({
 }
 
 const styles = StyleSheet.create({
+  screenContent: {
+    paddingBottom: 160,
+  },
   currentCard: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
@@ -2935,9 +2933,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  fixedPrimaryButton: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    ...patientShadow,
+  },
   primaryButtonText: {
     color: patientTheme.colors.onPrimary,
     fontWeight: '700',
+  },
+  buttonDisabled: {
+    opacity: 0.55,
   },
   secondaryButton: {
     flex: 1,

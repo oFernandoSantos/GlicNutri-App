@@ -9,10 +9,6 @@ import {
   StatusBar,
 } from 'react-native';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
-import BarraAbasNutricionista, {
-  NUTRI_TAB_BAR_HEIGHT,
-  NUTRI_TAB_BAR_SPACE,
-} from '../../componentes/nutricionista/BarraAbasNutricionista';
 import { nutritionistSectionContent } from '../../dados/dadosPainelNutricionista';
 
 function SectionCard({ children, style }) {
@@ -91,12 +87,6 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
 
         <View style={styles.listFooter} />
       </ScrollView>
-
-      <BarraAbasNutricionista
-        navigation={navigation}
-        rotaAtual={route?.name}
-        usuarioLogado={usuarioLogado}
-      />
     </View>
   );
 }
@@ -118,7 +108,7 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     padding: patientTheme.spacing.screen,
-    paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
+    paddingBottom: 32,
   },
   webScroll: {
     overflowY: 'visible',

@@ -1,10 +1,11 @@
 import React from 'react';
 import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
 export const NUTRI_TAB_BAR_HEIGHT = 64;
-export const NUTRI_TAB_BAR_SPACE = 8;
+export const NUTRI_TAB_BAR_SPACE = 14;
 
 const abasPrincipais = [
   { rota: 'NutricionistaAgenda', rotulo: 'Agenda', icone: 'calendar-outline' },
@@ -21,6 +22,8 @@ export default function BarraAbasNutricionista({
   rotaAtual,
   usuarioLogado,
 }) {
+  const insets = useSafeAreaInsets();
+
   function navegar(rota) {
     if (rotaAtual === rota) {
       return;
@@ -29,9 +32,11 @@ export default function BarraAbasNutricionista({
     navigation.navigate(rota, { usuarioLogado });
   }
 
+  const bottomOffset = Platform.OS === 'web' ? 0 : Math.max(10, Math.min(insets.bottom || 0, 14));
+
   return (
     <View style={[styles.areaFixa, rodapeWebFixo]}>
-      <View style={styles.barra}>
+      <View style={[styles.barra, { marginBottom: bottomOffset }]}>
         {abasPrincipais.map((aba) => {
           const ativo = rotaAtual === aba.rota;
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { adminTheme } from '../../temas/temaVisualAdmin';
 
@@ -15,6 +16,7 @@ const PATIENT_ROUTES = new Set([
   'PacienteBemEstar',
   'PacientePlano',
   'PacientePerfil',
+  'RegistroRefeicaoIA',
 ]);
 const NUTRITIONIST_ROUTES = new Set([
   'GerenciarPacientes',
@@ -32,7 +34,7 @@ const routeTitles = {
   Login: 'GlicNutri',
   Cadastro: 'Cadastro',
   ForgotPassword: 'Recuperar senha',
-  PacienteDiario: 'Diário',
+  PacienteDiario: 'Alimentação',
   PacienteMonitoramento: 'Glicose',
   PacienteHistoricoRegistros: 'Histórico de Registros',
   PacienteAssistente: 'IA',
@@ -40,6 +42,7 @@ const routeTitles = {
   PacienteBemEstar: 'Bem-estar',
   PacientePlano: 'Plano',
   PacientePerfil: 'Perfil',
+  RegistroRefeicaoIA: 'Registrar Refeição',
   HomeNutricionista: 'GlicNutri',
   AdminHome: 'Admin',
   AdminAuditoria: 'Auditoria',
@@ -59,6 +62,10 @@ function getTitle(route) {
 }
 
 function getHomeRoute(route) {
+  if (route?.name === 'RegistroRefeicaoIA') {
+    return 'PacienteDiario';
+  }
+
   if (route?.name === 'AdminHome' || ADMIN_ROUTES.has(route?.name)) {
     return 'AdminHome';
   }
@@ -75,8 +82,9 @@ function getHomeRoute(route) {
 }
 
 export default function ReaderTopo({ navigation, route, options }) {
+  const insets = useSafeAreaInsets();
   const title = options?.readerTitle || getTitle(route);
-  const topSpacing = Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0;
+  const topSpacing = Platform.OS === 'web' ? 0 : insets.top || StatusBar.currentHeight || 0;
   const isHome = HOME_ROUTES.has(route?.name);
   const isLogin = route?.name === 'Login';
   const isAdminLogin = isLogin && route?.params?.roleInicial === 'Admin';
@@ -95,6 +103,11 @@ export default function ReaderTopo({ navigation, route, options }) {
   const hasNotifications = notificationCount > 0;
 
   function handleBack() {
+    if (navigation?.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
+
     if (isAuthBack) {
       navigation?.navigate?.('Login');
       return;

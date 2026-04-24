@@ -14,7 +14,11 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.glicnutri.app"
+      "bundleIdentifier": "com.glicnutri.app",
+      "infoPlist": {
+        "NSCameraUsageDescription": "O GlicNutri usa a camera para fotografar refeicoes e analisar alimentos com IA.",
+        "NSPhotoLibraryUsageDescription": "O GlicNutri acessa sua galeria para selecionar fotos de refeicoes e analisar alimentos com IA."
+      }
     },
     "android": {
       "package": "com.glicnutri.app",
@@ -29,7 +33,14 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-web-browser"
+      "expo-web-browser",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "O GlicNutri acessa sua galeria para selecionar fotos de refeicoes e analisar alimentos com IA.",
+          "cameraPermission": "O GlicNutri usa a camera para fotografar refeicoes e analisar alimentos com IA."
+        }
+      ]
     ]
   }
 }
