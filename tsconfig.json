@@ -1,5 +1,5 @@
 {
   "compilerOptions": {},
   "extends": "expo/tsconfig.base",
-  "exclude": ["supabase"]
+  "exclude": ["supabase", "dist"]
 }

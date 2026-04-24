@@ -22,6 +22,9 @@ import HomePaciente from './src/telas/paciente/TelaInicioPaciente';
 import HomeNutricionista from './src/telas/nutricionista/TelaInicioNutricionista';
 import GerenciarPacientesScreen from './src/telas/nutricionista/TelaPacientesNutricionista';
 import NutricionistaSectionScreen from './src/telas/nutricionista/TelaSecaoNutricionista';
+import TelaAuditoriaAdmin from './src/telas/admin/TelaAuditoriaAdmin';
+import TelaHomeAdmin from './src/telas/admin/TelaHomeAdmin';
+import TelaLogsSistemaAdmin from './src/telas/admin/TelaLogsSistemaAdmin';
 import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
@@ -33,9 +36,11 @@ import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
 import { supabase } from './src/servicos/configSupabase';
 import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
+import { configurarCapturaGlobalLogs } from './src/servicos/servicoLogSistema';
 import { patientTheme } from './src/temas/temaVisualPaciente';
 import { INTRO_SEEN_STORAGE_KEY } from './src/constantes/chavesArmazenamento';
 import { hasPatientOnboardingSeen } from './src/servicos/servicoOnboardingPaciente';
+import { carregarSessaoAdmin, limparSessaoAdmin } from './src/servicos/servicoAdmin';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -114,6 +119,10 @@ function useWebDocumentScroll() {
 export default function App() {
   useWebDocumentScroll();
 
+  useEffect(() => {
+    configurarCapturaGlobalLogs();
+  }, []);
+
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [introReady, setIntroReady] = useState(false);
@@ -121,6 +130,32 @@ export default function App() {
   const [patientOnboardingReady, setPatientOnboardingReady] = useState(false);
   const [patientOnboardingSeen, setPatientOnboardingSeen] = useState(false);
   const [patientSessionOverride, setPatientSessionOverride] = useState(null);
+  const [adminSession, setAdminSession] = useState(null);
+  const [adminReady, setAdminReady] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function carregarAdmin() {
+      const admin = await carregarSessaoAdmin();
+      if (isMounted) {
+        setAdminSession(admin);
+        setAdminReady(true);
+      }
+    }
+
+    carregarAdmin();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (session?.user && adminSession) {
+      limparSessaoAdmin();
+      setAdminSession(null);
+    }
+  }, [session, adminSession]);
 
   useEffect(() => {
     let isMounted = true;
@@ -255,7 +290,7 @@ export default function App() {
     };
   }, []);
 
-  if (!authReady || !introReady || !patientOnboardingReady) {
+  if (!authReady || !introReady || !patientOnboardingReady || !adminReady) {
     return (
       <SafeAreaView
         style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
@@ -284,13 +319,26 @@ export default function App() {
     };
   }
 
-  const initialRouteName = session
-    ? patientOnboardingSeen
-      ? 'HomePaciente'
-      : 'PacienteOnboarding'
-    : introSeen
-      ? 'Login'
-      : 'Intro';
+  function getAdminProps(props) {
+    return {
+      ...props,
+      usuarioLogado: props.route?.params?.usuarioLogado || adminSession || null,
+      onAdminLogout: async () => {
+        await limparSessaoAdmin();
+        setAdminSession(null);
+      },
+    };
+  }
+
+  const initialRouteName = adminSession
+    ? 'AdminHome'
+    : session
+      ? patientOnboardingSeen
+        ? 'HomePaciente'
+        : 'PacienteOnboarding'
+      : introSeen
+        ? 'Login'
+        : 'Intro';
   const useFullBleedIntro = initialRouteName === 'Intro';
   const AppSurface = useFullBleedIntro ? View : SafeAreaView;
 
@@ -348,6 +396,13 @@ export default function App() {
                   <TelaLogin
                     {...props}
                     session={session}
+                    route={{
+                      ...props.route,
+                      params: {
+                        ...(props.route?.params || {}),
+                        onAdminLogin: (adminUser) => setAdminSession(adminUser),
+                      },
+                    }}
                   />
                 )}
               </Stack.Screen>
@@ -442,6 +497,18 @@ export default function App() {
                 component={NutricionistaSectionScreen}
                 options={readerScreenOptions}
               />
+
+              <Stack.Screen name="AdminHome" options={readerScreenOptions}>
+                {(props) => <TelaHomeAdmin {...getAdminProps(props)} />}
+              </Stack.Screen>
+
+              <Stack.Screen name="AdminAuditoria" options={readerScreenOptions}>
+                {(props) => <TelaAuditoriaAdmin {...getAdminProps(props)} />}
+              </Stack.Screen>
+
+              <Stack.Screen name="AdminLogsSistema" options={readerScreenOptions}>
+                {(props) => <TelaLogsSistemaAdmin {...getAdminProps(props)} />}
+              </Stack.Screen>
               </Stack.Navigator>
             </NavigationContainer>
           </View>
