@@ -2,8 +2,9 @@ import React from 'react';
 import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { adminTheme } from '../../temas/temaVisualAdmin';
 
-const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista']);
+const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista', 'AdminHome']);
 const AUTH_BACK_ROUTES = new Set(['Cadastro', 'ForgotPassword']);
 const PATIENT_ROUTES = new Set([
   'PacienteDiario',
@@ -21,6 +22,10 @@ const NUTRITIONIST_ROUTES = new Set([
   'NutricionistaMensagens',
   'NutricionistaRelatorios',
 ]);
+const ADMIN_ROUTES = new Set([
+  'AdminAuditoria',
+  'AdminLogsSistema',
+]);
 
 const routeTitles = {
   HomePaciente: 'GlicNutri',
@@ -36,6 +41,9 @@ const routeTitles = {
   PacientePlano: 'Plano',
   PacientePerfil: 'Perfil',
   HomeNutricionista: 'GlicNutri',
+  AdminHome: 'Admin',
+  AdminAuditoria: 'Auditoria',
+  AdminLogsSistema: 'Logs do Sistema',
   GerenciarPacientes: 'Pacientes',
   NutricionistaAgenda: 'Agenda',
   NutricionistaMensagens: 'Mensagens',
@@ -51,6 +59,10 @@ function getTitle(route) {
 }
 
 function getHomeRoute(route) {
+  if (route?.name === 'AdminHome' || ADMIN_ROUTES.has(route?.name)) {
+    return 'AdminHome';
+  }
+
   if (route?.name === 'HomeNutricionista' || NUTRITIONIST_ROUTES.has(route?.name)) {
     return 'HomeNutricionista';
   }
@@ -67,9 +79,12 @@ export default function ReaderTopo({ navigation, route, options }) {
   const topSpacing = Platform.OS === 'android' ? StatusBar.currentHeight || 0 : 0;
   const isHome = HOME_ROUTES.has(route?.name);
   const isLogin = route?.name === 'Login';
+  const isAdminLogin = isLogin && route?.params?.roleInicial === 'Admin';
   const isAuthBack = AUTH_BACK_ROUTES.has(route?.name);
   const hideCenteredTitle = isLogin || isAuthBack;
   const isPatientHome = route?.name === 'HomePaciente';
+  const isAdminHome = route?.name === 'AdminHome';
+  const isAdminContext = isAdminLogin || isAdminHome || ADMIN_ROUTES.has(route?.name);
   const menuAction = options?.readerOnMenuPress;
   const menuDisabled = options?.readerMenuDisabled;
   const menuLoading = options?.readerMenuLoading;
@@ -100,13 +115,19 @@ export default function ReaderTopo({ navigation, route, options }) {
   }
 
   return (
-    <View style={[styles.reader, Platform.OS === 'web' && styles.readerWebFixed]}>
+    <View
+      style={[
+        styles.reader,
+        isAdminContext && styles.readerAdmin,
+        Platform.OS === 'web' && styles.readerWebFixed,
+      ]}
+    >
       <View style={{ height: topSpacing }} />
 
       <View style={styles.bar}>
         <View style={[styles.side, isLogin && styles.brandSide]}>
           {isLogin ? (
-            <Text style={styles.brandText} numberOfLines={1}>
+            <Text style={[styles.brandText, isAdminContext && styles.brandTextAdmin]} numberOfLines={1}>
               GlicNutri
             </Text>
           ) : isPatientHome ? (
@@ -116,12 +137,20 @@ export default function ReaderTopo({ navigation, route, options }) {
               accessibilityRole="button"
               disabled={menuDisabled || menuLoading}
               onPress={menuAction}
-              style={[styles.readerButton, (menuDisabled || menuLoading) && styles.readerButtonDisabled]}
+              style={[
+                styles.readerButton,
+                isAdminContext && styles.readerButtonAdmin,
+                (menuDisabled || menuLoading) && styles.readerButtonDisabled,
+              ]}
             >
               {menuLoading ? (
-                <ActivityIndicator size="small" color={patientTheme.colors.primary} />
+                <ActivityIndicator size="small" color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary} />
               ) : (
-                <Ionicons name="menu-outline" size={22} color={patientTheme.colors.primary} />
+                <Ionicons
+                  name="menu-outline"
+                  size={22}
+                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+                />
               )}
             </TouchableOpacity>
           ) : isAuthBack || !isHome ? (
@@ -130,16 +159,20 @@ export default function ReaderTopo({ navigation, route, options }) {
               accessibilityLabel="Voltar"
               accessibilityRole="button"
               onPress={handleBack}
-              style={styles.readerButton}
+              style={[styles.readerButton, isAdminContext && styles.readerButtonAdmin]}
             >
-              <Ionicons name="chevron-back" size={22} color={patientTheme.colors.primary} />
+              <Ionicons
+                name="chevron-back"
+                size={22}
+                color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+              />
             </TouchableOpacity>
           ) : null}
         </View>
 
         {!hideCenteredTitle ? (
           <View pointerEvents="none" style={styles.titleWrap}>
-            <Text style={styles.title} numberOfLines={1}>
+            <Text style={[styles.title, isAdminContext && styles.titleAdmin]} numberOfLines={1}>
               {title}
             </Text>
           </View>
@@ -159,13 +192,14 @@ export default function ReaderTopo({ navigation, route, options }) {
               onPress={notificationAction}
               style={[
                 styles.readerButton,
+                isAdminContext && styles.readerButtonAdmin,
                 notificationDisabled && styles.readerButtonDisabled,
               ]}
             >
               <Ionicons
                 name="notifications-outline"
                 size={21}
-                color={patientTheme.colors.primary}
+                color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
               />
               {hasNotifications ? (
                 <View style={styles.notificationBadge}>
@@ -175,25 +209,35 @@ export default function ReaderTopo({ navigation, route, options }) {
                 </View>
               ) : null}
             </TouchableOpacity>
-          ) : isHome ? (
+          ) : isHome && !isAdminHome ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel="Abrir menu"
               accessibilityRole="button"
               disabled={menuDisabled || menuLoading}
               onPress={menuAction}
-              style={[styles.readerButton, (menuDisabled || menuLoading) && styles.readerButtonDisabled]}
+              style={[
+                styles.readerButton,
+                isAdminContext && styles.readerButtonAdmin,
+                (menuDisabled || menuLoading) && styles.readerButtonDisabled,
+              ]}
             >
               {menuLoading ? (
-                <ActivityIndicator size="small" color={patientTheme.colors.primary} />
+                <ActivityIndicator size="small" color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary} />
               ) : (
-                <Ionicons name="menu-outline" size={22} color={patientTheme.colors.primary} />
+                <Ionicons
+                  name="menu-outline"
+                  size={22}
+                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+                />
               )}
             </TouchableOpacity>
           ) : null}
         </View>
       </View>
-      {extraContent ? <View style={styles.extraContent}>{extraContent}</View> : null}
+      {extraContent ? (
+        <View style={[styles.extraContent, isAdminContext && styles.extraContentAdmin]}>{extraContent}</View>
+      ) : null}
     </View>
   );
 }
@@ -207,6 +251,11 @@ const styles = StyleSheet.create({
     ...patientShadow,
     borderColor: '#ffffff',
     borderBottomColor: '#ffffff',
+  },
+  readerAdmin: {
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.background,
+    borderBottomColor: adminTheme.colors.background,
   },
   readerWebFixed: {
     left: 0,
@@ -240,6 +289,9 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '700',
   },
+  brandTextAdmin: {
+    color: adminTheme.colors.primary,
+  },
   readerButton: {
     alignItems: 'center',
     backgroundColor: '#f4f4f4',
@@ -250,6 +302,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     width: 40,
     ...patientShadow,
+  },
+  readerButtonAdmin: {
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.background,
   },
   notificationBadge: {
     alignItems: 'center',
@@ -289,10 +345,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
+  titleAdmin: {
+    color: adminTheme.colors.primary,
+  },
   extraContent: {
     backgroundColor: '#ffffff',
     paddingBottom: 12,
     paddingHorizontal: 20,
     paddingTop: 8,
+  },
+  extraContentAdmin: {
+    backgroundColor: adminTheme.colors.background,
   },
 });

@@ -23,6 +23,11 @@ import {
   startGoogleOAuth,
 } from '../../servicos/servicoOAuthGoogle';
 import { hasPatientOnboardingSeen } from '../../servicos/servicoOnboardingPaciente';
+import {
+  limparSessaoAdmin,
+  salvarSessaoAdmin,
+  sanitizeAdminUser,
+} from '../../servicos/servicoAdmin';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
@@ -40,8 +45,11 @@ const googleLogo = {
 };
 
 export default function TelaLogin({ navigation, route, session }) {
+  const isAdminAccess = route?.params?.roleInicial === 'Admin';
   const roleInicial =
-    route?.params?.roleInicial === 'Nutricionista' ? 'Nutricionista' : 'Paciente';
+    route?.params?.roleInicial === 'Nutricionista'
+      ? 'Nutricionista'
+      : 'Paciente';
 
   const [role, setRole] = useState(roleInicial);
   const [identificador, setIdentificador] = useState('');
@@ -139,13 +147,26 @@ export default function TelaLogin({ navigation, route, session }) {
     identificadorInformado,
     senhaInformada
   ) {
-    const tabela = perfil === 'Paciente' ? 'paciente' : 'nutricionista';
-    const colunaEmail = perfil === 'Paciente' ? 'email_pac' : 'email_acesso';
-    const colunaId = perfil === 'Paciente' ? 'id_paciente_uuid' : 'id_nutricionista_uuid';
+    const tabela =
+      perfil === 'Paciente'
+        ? 'paciente'
+        : perfil === 'Nutricionista'
+          ? 'nutricionista'
+          : 'administrador';
+    const colunaEmail =
+      perfil === 'Paciente' ? 'email_pac' : 'email_acesso';
+    const colunaId =
+      perfil === 'Paciente'
+        ? 'id_paciente_uuid'
+        : perfil === 'Nutricionista'
+          ? 'id_nutricionista_uuid'
+          : 'id_admin_uuid';
     const funcaoLogin =
       perfil === 'Paciente'
         ? 'verificar_login_paciente'
-        : 'verificar_login_nutricionista';
+        : perfil === 'Nutricionista'
+          ? 'verificar_login_nutricionista'
+          : 'verificar_login_admin';
 
     const emailNormalizado = identificadorInformado.trim().toLowerCase();
     const senhaNormalizada = senhaInformada.trim();
@@ -173,8 +194,16 @@ export default function TelaLogin({ navigation, route, session }) {
       const usuarioEncontrado = Array.isArray(data) ? data[0] : data;
 
       if (usuarioEncontrado) {
+        const usuarioSanitizado =
+          perfil === 'Admin'
+            ? sanitizeAdminUser({
+                ...usuarioEncontrado,
+                tipo_perfil: 'admin',
+              })
+            : sanitizeSensitivePatientData(usuarioEncontrado);
+
         return {
-          usuario: sanitizeSensitivePatientData(usuarioEncontrado),
+          usuario: usuarioSanitizado,
           motivo: '',
         };
       }
@@ -197,6 +226,44 @@ export default function TelaLogin({ navigation, route, session }) {
         throw new Error(
           'A verificacao segura de senha nao esta disponivel no banco. Aplique a migracao de hash antes de liberar login por senha.'
         );
+      }
+
+      throw error;
+    }
+  }
+
+  async function buscarAdminPorCredenciais(identificadorInformado, senhaInformada) {
+    const emailNormalizado = identificadorInformado.trim().toLowerCase();
+    const senhaNormalizada = senhaInformada.trim();
+
+    try {
+      const { data, error } = await supabase.rpc('verificar_login_admin', {
+        p_identificador: emailNormalizado,
+        p_senha: senhaNormalizada,
+      });
+
+      if (error) throw error;
+
+      const usuarioEncontrado = Array.isArray(data) ? data[0] : data;
+
+      if (!usuarioEncontrado) {
+        return null;
+      }
+
+      return sanitizeAdminUser({
+        ...usuarioEncontrado,
+        tipo_perfil: 'admin',
+      });
+    } catch (error) {
+      const mensagem = String(error?.message || '').toLowerCase();
+      const funcaoNaoExiste =
+        mensagem.includes('verificar_login_admin') ||
+        mensagem.includes('could not find the function') ||
+        mensagem.includes('schema cache') ||
+        mensagem.includes('does not exist');
+
+      if (funcaoNaoExiste) {
+        return null;
       }
 
       throw error;
@@ -260,11 +327,20 @@ export default function TelaLogin({ navigation, route, session }) {
     setLoading(true);
 
     try {
-      const { usuario, motivo } = await buscarUsuarioPorCredenciais(
+      let { usuario, motivo } = await buscarUsuarioPorCredenciais(
         role,
         identificador,
         senha
       );
+
+      if (!usuario) {
+        const adminUser = await buscarAdminPorCredenciais(identificador, senha);
+
+        if (adminUser) {
+          usuario = adminUser;
+          motivo = '';
+        }
+      }
 
       if (!usuario) {
         setFieldErrors({
@@ -273,11 +349,34 @@ export default function TelaLogin({ navigation, route, session }) {
               ? ''
               : role === 'Paciente'
                 ? 'Paciente nao encontrado. Confira o e-mail informado.'
-                : 'Nutricionista nao encontrado. Confira o e-mail informado.',
+                : role === 'Nutricionista'
+                  ? 'Nutricionista nao encontrado. Confira o e-mail informado.'
+                  : 'Administrador nao encontrado. Confira o e-mail informado.',
           senha:
             motivo === 'senha_incorreta'
               ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
               : '',
+        });
+        return;
+      }
+
+      await limparSessaoAdmin();
+
+      if (usuario.tipo_perfil === 'admin') {
+        const adminUser = await salvarSessaoAdmin(usuario);
+
+        if (route?.params?.onAdminLogin) {
+          route.params.onAdminLogin(adminUser);
+        }
+
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'AdminHome',
+              params: { usuarioLogado: adminUser },
+            },
+          ],
         });
         return;
       }
@@ -432,9 +531,19 @@ export default function TelaLogin({ navigation, route, session }) {
     fontSize: 24,
     fontWeight: 'bold',
     marginBottom: 20,
-    color: '#4fdfa3',
+    color: isAdminAccess ? '#091413' : '#4fdfa3',
     textAlign: 'center',
   };
+
+  const adminHeaderStyle = isAdminAccess
+    ? {
+        backgroundColor: '#4fdfa3',
+        borderRadius: 18,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        marginBottom: 20,
+      }
+    : null;
 
   const labelStyle = {
     fontSize: 14,
@@ -637,7 +746,9 @@ export default function TelaLogin({ navigation, route, session }) {
           Platform.OS === 'web' && webAuthBoxStyle,
         ]}
       >
-        <Text style={titleStyle}>Bem-vindo</Text>
+        <View style={adminHeaderStyle}>
+          <Text style={titleStyle}>{isAdminAccess ? 'Acesso Admin' : 'Bem-vindo'}</Text>
+        </View>
 
         <SeletorPerfil
           role={role}

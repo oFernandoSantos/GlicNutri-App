@@ -16,6 +16,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
+import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
@@ -382,6 +383,32 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         throw new Error('O banco nao confirmou a atualizacao do paciente.');
       }
 
+      await registrarLogAuditoria({
+        actor: usuarioLogado,
+        actorType: 'nutricionista',
+        targetPatientId: data.id_paciente_uuid,
+        action: 'paciente_atualizado_por_nutricionista',
+        entity: 'paciente',
+        entityId: data.id_paciente_uuid,
+        origin: 'gestao_pacientes',
+        details: {
+          camposAtualizados: [
+            'nome_completo',
+            'cpf_paciente',
+            'sexo_biologico',
+            'email_pac',
+            'telefone',
+            'data_nascimento',
+            'cep',
+            'logradouro',
+            'numero',
+            'bairro',
+            'cidade',
+            'uf',
+          ],
+        },
+      });
+
       setPacientes((atual) =>
         atual.map((item) =>
           getPacienteId(item) === data.id_paciente_uuid ? data : item
@@ -428,6 +455,19 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       if (!data?.id_paciente_uuid || data.excluido !== true) {
         throw new Error('O banco nao confirmou a exclusao logica do paciente.');
       }
+
+      await registrarLogAuditoria({
+        actor: usuarioLogado,
+        actorType: 'nutricionista',
+        targetPatientId: data.id_paciente_uuid,
+        action: 'paciente_excluido_logicamente',
+        entity: 'paciente',
+        entityId: data.id_paciente_uuid,
+        origin: 'gestao_pacientes',
+        details: {
+          dataExclusao: data.data_exclusao,
+        },
+      });
 
       setPacientes((atual) => atual.filter((item) => getPacienteId(item) !== pacienteId));
       setModalExclusaoVisible(false);
