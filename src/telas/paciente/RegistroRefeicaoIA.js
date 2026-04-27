@@ -175,10 +175,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   );
   const [mealTimingDetailsVisible, setMealTimingDetailsVisible] = useState(false);
   const [mealTimingMode, setMealTimingMode] = useState('current');
-  const [mealTimingDate, setMealTimingDate] = useState(formatManualDateInput(buildLocalDateString()));
+  const [mealTimingDate, setMealTimingDate] = useState(
+    formatDateForDisplay(buildLocalDateString())
+  );
   const [mealTimingTime, setMealTimingTime] = useState(formatManualTimeInput(buildLocalTimeString()));
   const [mealType, setMealType] = useState('');
-  const [mealTypeModalVisible, setMealTypeModalVisible] = useState(false);
+  const [mealTypeMenuVisible, setMealTypeMenuVisible] = useState(false);
+  const [pendingMealAction, setPendingMealAction] = useState(null);
   const [selectedImage, setSelectedImage] = useState(null);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [alimentos, setAlimentos] = useState([]);
@@ -372,13 +375,17 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setMealType('');
 
     if (mode === 'current') {
-      setMealTimingDate(formatManualDateInput(buildLocalDateString(now)));
+      setMealTimingDate(formatDateForDisplay(buildLocalDateString(now)));
       setMealTimingTime(formatManualTimeInput(buildLocalTimeString(now)));
+      setMealTypeMenuVisible(false);
       setMealTimingChoiceVisible(false);
       setMealTimingDetailsVisible(true);
       return;
     }
 
+    setMealTimingDate(formatDateForDisplay(buildLocalDateString(now)));
+    setMealTimingTime(formatManualTimeInput(buildLocalTimeString(now)));
+    setMealTypeMenuVisible(false);
     setMealTimingChoiceVisible(false);
     setMealTimingDetailsVisible(true);
   }
@@ -396,7 +403,42 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
     setMealTimingChoiceVisible(false);
     setMealTimingDetailsVisible(false);
-    setMealTypeModalVisible(false);
+    setMealTypeMenuVisible(false);
+    runPendingMealAction();
+  }
+
+  function openMealTimingBefore(action) {
+    setPendingMealAction(action);
+    setMealTypeMenuVisible(false);
+    setMealTimingDetailsVisible(false);
+    setMealTimingChoiceVisible(true);
+  }
+
+  function runPendingMealAction() {
+    const nextAction = pendingMealAction;
+    setPendingMealAction(null);
+
+    if (!nextAction) {
+      return;
+    }
+
+    const delay = Platform.OS === 'web' ? 0 : 80;
+
+    setTimeout(() => {
+      if (nextAction === 'camera') {
+        tirarFoto();
+        return;
+      }
+
+      if (nextAction === 'gallery') {
+        escolherDaGaleria();
+        return;
+      }
+
+      if (nextAction === 'manual') {
+        adicionarItemManual();
+      }
+    }, delay);
   }
 
   async function confirmarSalvar() {
@@ -465,9 +507,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         visible={mealTimingChoiceVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setMealTimingChoiceVisible(false)}
+        onRequestClose={() => {
+          setPendingMealAction(null);
+          setMealTimingChoiceVisible(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
+        <View style={styles.overlayLayer}>
+          <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
             style={styles.modalKeyboard}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -477,7 +523,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 <Text style={styles.modalTitle}>Registrar alimentação</Text>
                 <TouchableOpacity
                   style={styles.modalCloseButton}
-                  onPress={() => setMealTimingChoiceVisible(false)}
+                  onPress={() => {
+                    setPendingMealAction(null);
+                    setMealTimingChoiceVisible(false);
+                  }}
                 >
                   <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
                 </TouchableOpacity>
@@ -530,6 +579,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
               </View>
             </View>
           </KeyboardAvoidingView>
+          </View>
         </View>
       </Modal>
 
@@ -537,9 +587,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         visible={mealTimingDetailsVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setMealTimingDetailsVisible(false)}
+        onRequestClose={() => {
+          setMealTypeMenuVisible(false);
+          setMealTimingDetailsVisible(false);
+        }}
       >
-        <View style={styles.modalOverlay}>
+        <View style={styles.overlayLayer}>
+          <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
             style={styles.modalKeyboard}
             behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -551,7 +605,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 </Text>
                 <TouchableOpacity
                   style={styles.modalCloseButton}
-                  onPress={() => setMealTimingDetailsVisible(false)}
+                  onPress={() => {
+                    setMealTypeMenuVisible(false);
+                    setMealTimingDetailsVisible(false);
+                  }}
                 >
                   <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
                 </TouchableOpacity>
@@ -567,7 +624,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 <Text style={styles.modalFieldLabel}>{'Tipo da Refei\u00e7\u00e3o'}</Text>
                 <TouchableOpacity
                   style={[styles.input, styles.manualModalInput, styles.dropdownButton]}
-                  onPress={() => setMealTypeModalVisible(true)}
+                  onPress={() => setMealTypeMenuVisible((current) => !current)}
                   activeOpacity={0.85}
                 >
                   <Text
@@ -579,18 +636,56 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                     {mealType || 'Selecione o tipo'}
                   </Text>
                   <Ionicons
-                    name="chevron-forward"
+                    name={mealTypeMenuVisible ? 'chevron-up' : 'chevron-forward'}
                     size={18}
                     color={patientTheme.colors.textMuted}
                   />
                 </TouchableOpacity>
+
+                {mealTypeMenuVisible ? (
+                  <View style={styles.mealTypeInlineList}>
+                    {mealTypeOptions.map((option) => {
+                      const isSelected = mealType === option;
+
+                      return (
+                        <TouchableOpacity
+                          key={option}
+                          style={[
+                            styles.mealTypeOptionButton,
+                            isSelected && styles.mealTypeOptionButtonSelected,
+                          ]}
+                          onPress={() => {
+                            setMealType(option);
+                            setMealTypeMenuVisible(false);
+                          }}
+                        >
+                          <Text
+                            style={[
+                              styles.mealTypeOptionText,
+                              isSelected && styles.mealTypeOptionTextSelected,
+                            ]}
+                          >
+                            {option}
+                          </Text>
+                          {isSelected ? (
+                            <Ionicons
+                              name="checkmark"
+                              size={18}
+                              color={patientTheme.colors.primaryDark}
+                            />
+                          ) : null}
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                ) : null}
 
                 {mealTimingMode === 'previous' ? (
                   <>
                     <Text style={styles.modalFieldLabel}>Data</Text>
                     <TextInput
                       style={[styles.input, styles.manualModalInput, styles.modalInput]}
-                      placeholder="Ex: 24/04/2026"
+                      placeholder="Ex: dd/mm/aaaa"
                       placeholderTextColor="#8a9095"
                       value={mealTimingDate}
                       onChangeText={(value) => setMealTimingDate(formatManualDateInput(value))}
@@ -620,68 +715,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
               </TouchableOpacity>
             </View>
           </KeyboardAvoidingView>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={mealTypeModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setMealTypeModalVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.modalCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>{'Tipo da Refei\u00e7\u00e3o'}</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setMealTypeModalVisible(false)}
-                >
-                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.mealTypeOptionList}>
-                {mealTypeOptions.map((option) => {
-                  const isSelected = mealType === option;
-
-                  return (
-                    <TouchableOpacity
-                      key={option}
-                      style={[
-                        styles.mealTypeOptionButton,
-                        isSelected && styles.mealTypeOptionButtonSelected,
-                      ]}
-                      onPress={() => {
-                        setMealType(option);
-                        setMealTypeModalVisible(false);
-                      }}
-                    >
-                      <Text
-                        style={[
-                          styles.mealTypeOptionText,
-                          isSelected && styles.mealTypeOptionTextSelected,
-                        ]}
-                      >
-                        {option}
-                      </Text>
-                      {isSelected ? (
-                        <Ionicons
-                          name="checkmark"
-                          size={18}
-                          color={patientTheme.colors.primaryDark}
-                        />
-                      ) : null}
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            </View>
-          </KeyboardAvoidingView>
+          </View>
         </View>
       </Modal>
 
@@ -704,14 +738,18 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </Text>
 
         <View style={styles.actionRow}>
-          <TouchableOpacity style={styles.secondaryButton} onPress={tirarFoto} disabled={isBusy}>
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => openMealTimingBefore('camera')}
+            disabled={isBusy}
+          >
             <Ionicons name="camera-outline" size={18} color={patientTheme.colors.text} />
             <Text style={styles.secondaryButtonText}>Tirar foto</Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={styles.secondaryButton}
-            onPress={escolherDaGaleria}
+            onPress={() => openMealTimingBefore('gallery')}
             disabled={isBusy}
           >
             <Ionicons name="image-outline" size={18} color={patientTheme.colors.text} />
@@ -801,7 +839,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
         <TouchableOpacity
           style={[styles.addFoodPrimaryButton, isBusy && styles.buttonDisabled]}
-          onPress={adicionarItemManual}
+          onPress={() => openMealTimingBefore('manual')}
           disabled={isBusy}
         >
           <Ionicons name="add-circle-outline" size={18} color={patientTheme.colors.onPrimary} />
@@ -1215,6 +1253,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 22,
   },
+  overlayLayer: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1000,
+  },
   modalKeyboard: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -1338,7 +1380,7 @@ const styles = StyleSheet.create({
     minHeight: 48,
     width: '100%',
   },
-  mealTypeOptionList: {
+  mealTypeInlineList: {
     gap: 8,
     marginTop: 14,
   },

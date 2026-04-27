@@ -2,6 +2,7 @@ import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
+import { replaceCachedPatientAppState } from './centralAppState';
 import {
   mealPlanSections,
   nutritionistThread,
@@ -128,6 +129,31 @@ function appendUniqueId(array, id) {
   return uniqueValues([id, ...ensureArray(array)]);
 }
 
+function mergeHiddenEntriesPreservingStorage({
+  incomingEntries,
+  storedEntries,
+  hiddenIds,
+  getEntryId,
+}) {
+  const normalizedIncoming = ensureArray(incomingEntries);
+  const normalizedStored = ensureArray(storedEntries);
+  const hiddenIdSet = new Set(ensureArray(hiddenIds).filter(Boolean));
+  const visibleEntryIds = new Set(
+    normalizedIncoming.map((entry) => getEntryId(entry)).filter(Boolean)
+  );
+  const hiddenEntriesToPreserve = normalizedStored.filter((entry) => {
+    const entryId = getEntryId(entry);
+
+    return Boolean(entryId) && hiddenIdSet.has(entryId) && !visibleEntryIds.has(entryId);
+  });
+
+  if (!hiddenEntriesToPreserve.length) {
+    return normalizedIncoming;
+  }
+
+  return [...normalizedIncoming, ...hiddenEntriesToPreserve];
+}
+
 export function extractObjectiveAndAppState(rawText) {
   const text = rawText || '';
   const startIndex = text.indexOf(META_START);
@@ -207,8 +233,14 @@ function normalizeMedicationNumber(value) {
     return null;
   }
 
-  const parsed = Number(value);
+  const parsed = Number(String(value).replace(',', '.'));
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    String(value || '').trim()
+  );
 }
 
 function parseMedicationObservation(value) {
@@ -584,16 +616,37 @@ export async function savePatientAppState({
     throw new Error('Paciente sem identificador valido para salvar.');
   }
 
+  const storedPatientState = extractObjectiveAndAppState(
+    resolvedPatient?.objetivo_principal_consulta
+  ).appState;
   const normalized = normalizeAppState(appState);
+  const normalizedWithHiddenPreserved = {
+    ...normalized,
+    mealEntries: mergeHiddenEntriesPreservingStorage({
+      incomingEntries: normalized.mealEntries,
+      storedEntries: storedPatientState?.mealEntries,
+      hiddenIds: normalized.hiddenMealEntryIds,
+      getEntryId: (entry) => entry?.id,
+    }),
+    medicationEntries: mergeHiddenEntriesPreservingStorage({
+      incomingEntries: normalized.medicationEntries,
+      storedEntries: storedPatientState?.medicationEntries,
+      hiddenIds: normalized.hiddenMedicationEntryIds,
+      getEntryId: (entry) => entry?.databaseId || entry?.legacyId || entry?.id,
+    }),
+  };
   const latestActivity =
-    normalized.activityEntries[0]?.label ||
+    normalizedWithHiddenPreserved.activityEntries[0]?.label ||
     resolvedPatient?.nivel_atividade_fisica_atual ||
     currentPatient?.nivel_atividade_fisica_atual ||
     null;
 
   const patch = {
-    objetivo_principal_consulta: serializeObjectiveAndAppState(objectiveText, normalized),
-    qualidade_sono_media: mapSleepToLabel(normalized.wellness.selectedSleep),
+    objetivo_principal_consulta: serializeObjectiveAndAppState(
+      objectiveText,
+      normalizedWithHiddenPreserved
+    ),
+    qualidade_sono_media: mapSleepToLabel(normalizedWithHiddenPreserved.wellness.selectedSleep),
     nivel_atividade_fisica_atual: latestActivity,
     data_hora_ultima_atualizacao: new Date().toISOString(),
   };
@@ -621,20 +674,22 @@ export async function savePatientAppState({
     entityId: data.id_paciente_uuid,
     origin: 'app_state',
     details: {
-      waterCount: normalized.waterCount,
-      mealEntries: normalized.mealEntries.length,
-      medicationEntries: normalized.medicationEntries.length,
-      activityEntries: normalized.activityEntries.length,
-      symptomEntries: normalized.symptomEntries.length,
-      hiddenMealEntryIds: normalized.hiddenMealEntryIds.length,
-      hiddenMedicationEntryIds: normalized.hiddenMedicationEntryIds.length,
-      hiddenGlucoseReadingIds: normalized.hiddenGlucoseReadingIds.length,
+      waterCount: normalizedWithHiddenPreserved.waterCount,
+      mealEntries: normalizedWithHiddenPreserved.mealEntries.length,
+      medicationEntries: normalizedWithHiddenPreserved.medicationEntries.length,
+      activityEntries: normalizedWithHiddenPreserved.activityEntries.length,
+      symptomEntries: normalizedWithHiddenPreserved.symptomEntries.length,
+      hiddenMealEntryIds: normalizedWithHiddenPreserved.hiddenMealEntryIds.length,
+      hiddenMedicationEntryIds: normalizedWithHiddenPreserved.hiddenMedicationEntryIds.length,
+      hiddenGlucoseReadingIds: normalizedWithHiddenPreserved.hiddenGlucoseReadingIds.length,
     },
   });
 
+  replaceCachedPatientAppState(data.id_paciente_uuid, normalizedWithHiddenPreserved);
+
   return {
     patient: sanitizeSensitivePatientData(data),
-    appState: normalized,
+    appState: normalizedWithHiddenPreserved,
     clinicalObjective: objectiveText,
   };
 }
@@ -958,6 +1013,12 @@ export async function addMedicationEntry(patientId, entry) {
   }
 
   const normalizedEntry = normalizeMedicationEntry(entry, 'database');
+  const normalizedQuantity = String(normalizedEntry.medicineQuantity || '').trim();
+  const normalizedLegacyId = isUuidLike(normalizedEntry.legacyId)
+    ? normalizedEntry.legacyId
+    : isUuidLike(normalizedEntry.id)
+      ? normalizedEntry.id
+      : null;
   const fallbackPayload = {
     id_registro_medicacao_uuid: buildUuid(),
     id_paciente_uuid: patientId,
@@ -965,7 +1026,7 @@ export async function addMedicationEntry(patientId, entry) {
     descricao: normalizedEntry.label,
     nome_medicamento: normalizedEntry.medicineName || null,
     unidade_medida: normalizedEntry.medicineUnit || null,
-    quantidade: normalizedEntry.medicineQuantity || null,
+    quantidade: normalizedQuantity || null,
     data: normalizedEntry.date,
     hora: normalizedEntry.time,
     dias_tratamento: normalizedEntry.medicineContinuousUse
@@ -973,7 +1034,7 @@ export async function addMedicationEntry(patientId, entry) {
       : normalizeMedicationNumber(normalizedEntry.medicineDays),
     uso_continuo: normalizedEntry.medicineContinuousUse,
     observacao: buildMedicationObservation(normalizedEntry),
-    id_registro_legado: normalizedEntry.legacyId || normalizedEntry.id || null,
+    id_registro_legado: normalizedLegacyId,
   };
 
   const { data: rpcData, error: rpcError } = await supabase.rpc(
@@ -1085,91 +1146,15 @@ export async function addMedicationEntry(patientId, entry) {
 }
 
 export async function deleteGlucoseReading(patientId, reading) {
-  if (!patientId || !reading?.id) {
-    throw new Error('Registro de glicemia sem identificador para excluir.');
-  }
-
-  const { error } = await supabase
-    .from('registro_glicemia_manual')
-    .delete()
-    .eq('id_paciente_uuid', patientId)
-    .eq('id_glicemia_manual_uuid', reading.id);
-
-  if (error) {
-    throw error;
-  }
-
-  await registrarLogAuditoria({
-    actor: reading?.actor || null,
-    targetPatientId: patientId,
-    action: 'glicemia_excluida',
-    entity: 'registro_glicemia_manual',
-    entityId: reading.id,
-    origin: reading?.auditSource || 'historico',
-    details: {
-      valorMgDl: reading?.value || null,
-      data: reading?.date || null,
-      hora: reading?.time || null,
-    },
-  });
-
-  return true;
+  throw new Error(
+    'Exclusao fisica de glicemia desabilitada. Use hideGlucoseReadingForPatient para ocultar apenas na visao do paciente.'
+  );
 }
 
 export async function deleteMedicationEntry(patientId, entry) {
-  const databaseId = entry?.databaseId || entry?.id;
-
-  if (!patientId || !databaseId) {
-    throw new Error('Registro de medicacao sem identificador para excluir.');
-  }
-
-  const { data: rpcData, error: rpcError } = await supabase.rpc(
-    'excluir_medicacao_paciente',
-    {
-      p_id_paciente_uuid: patientId,
-      p_id_registro_medicacao_uuid: databaseId,
-    }
+  throw new Error(
+    'Exclusao fisica de medicacao desabilitada. Use hideMedicationEntryForPatient para ocultar apenas na visao do paciente.'
   );
-
-  if (!rpcError) {
-    return typeof rpcData === 'boolean' ? rpcData : true;
-  }
-
-  const rpcMessage = String(rpcError?.message || '').toLowerCase();
-  const rpcMissing =
-    rpcMessage.includes('could not find the function') ||
-    rpcMessage.includes('schema cache') ||
-    rpcMessage.includes('excluir_medicacao_paciente');
-
-  if (!rpcMissing) {
-    console.log('RPC de exclusao de medicacao falhou; tentando delete direto:', rpcError?.message);
-  }
-
-  const { error } = await supabase
-    .from('registro_medicacao')
-    .delete()
-    .eq('id_paciente_uuid', patientId)
-    .eq('id_registro_medicacao_uuid', databaseId);
-
-  if (error) {
-    throw error;
-  }
-
-  await registrarLogAuditoria({
-    actor: entry?.actor || null,
-    targetPatientId: patientId,
-    action: entry?.medicationKind === 'insulin' ? 'insulina_excluida' : 'medicacao_excluida',
-    entity: 'registro_medicacao',
-    entityId: databaseId,
-    origin: entry?.auditSource || 'historico',
-    details: {
-      nome: entry?.medicineName || '',
-      data: entry?.date || null,
-      hora: entry?.time || null,
-    },
-  });
-
-  return true;
 }
 
 export async function hideGlucoseReadingForPatient({
