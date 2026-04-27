@@ -9,7 +9,7 @@ import {
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
-import { CardStyleInterpolators, createStackNavigator } from '@react-navigation/stack';
+import { createStackNavigator } from '@react-navigation/stack';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 
@@ -48,6 +48,11 @@ const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
 const READER_TOPO_WEB_HEIGHT = 59;
 const SCREEN_WIDTH = Dimensions.get('window').width;
+const fadeCardInterpolator = ({ current }) => ({
+  cardStyle: {
+    opacity: current.progress,
+  },
+});
 
 function useWebDocumentScroll() {
   useEffect(() => {
@@ -353,14 +358,9 @@ export default function App() {
   const useFullBleedIntro = initialRouteName === 'Intro';
 
   const readerScreenOptions = {
-    animationEnabled: Platform.OS !== 'web',
+    animationEnabled: true,
     cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
-    cardStyleInterpolator:
-      Platform.OS === 'ios'
-        ? CardStyleInterpolators.forHorizontalIOS
-        : Platform.OS === 'web'
-          ? CardStyleInterpolators.forNoAnimation
-          : undefined,
+    cardStyleInterpolator: fadeCardInterpolator,
     gestureEnabled: Platform.OS !== 'web',
     gestureDirection: 'horizontal',
     gestureResponseDistance: {
@@ -398,14 +398,9 @@ export default function App() {
                 }
                 initialRouteName={initialRouteName}
                 screenOptions={{
-                  animationEnabled: Platform.OS !== 'web',
+                  animationEnabled: true,
                   cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
-                  cardStyleInterpolator:
-                    Platform.OS === 'ios'
-                      ? CardStyleInterpolators.forHorizontalIOS
-                      : Platform.OS === 'web'
-                        ? CardStyleInterpolators.forNoAnimation
-                        : undefined,
+                  cardStyleInterpolator: fadeCardInterpolator,
                   gestureEnabled: Platform.OS !== 'web',
                   gestureDirection: 'horizontal',
                   gestureResponseDistance: {

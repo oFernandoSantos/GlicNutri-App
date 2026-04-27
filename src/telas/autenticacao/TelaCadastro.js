@@ -255,6 +255,32 @@ export default function TelaCadastroFixed({ navigation, route }) {
       `${espaco}${letra.toLocaleUpperCase('pt-BR')}`
     );
 
+  const validarNomeCompleto = (valor) => {
+    const nomeLimpo = String(valor || '').trim();
+    const nomeNormalizado = nomeLimpo
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    if (!nomeLimpo) {
+      return 'Informe o nome completo.';
+    }
+
+    if (/\d/.test(nomeLimpo)) {
+      return 'O nome nao pode conter numeros.';
+    }
+
+    if (nomeNormalizado === 'teste') {
+      return 'Digite um nome valido.';
+    }
+
+    if (nomeLimpo.length < 2) {
+      return 'Digite um nome valido.';
+    }
+
+    return '';
+  };
+
   const validarCrn = (crn) => /^\d{5}\/[A-Z]{2}$/.test(crn.trim());
 
   const normalizarDocumento = () => {
@@ -361,7 +387,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
 
     switch (campo) {
       case 'nome':
-        return !nomeLimpo ? 'Informe o nome completo.' : '';
+        return validarNomeCompleto(nomeLimpo);
       case 'documento':
         if (!documentoBruto) {
           return `Informe ${isPaciente ? 'o CPF' : 'o CRN/UF'}.`;

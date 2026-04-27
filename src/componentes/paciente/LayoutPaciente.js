@@ -81,7 +81,9 @@ export default function PatientScreenLayout({
           <View
             style={[
               styles.footerOverlay,
+              Platform.OS === 'web' && styles.footerOverlayWeb,
               showTabBar && styles.footerOverlayWithTabBar,
+              Platform.OS === 'web' && showTabBar && styles.footerOverlayWithTabBarWeb,
             ]}
             pointerEvents="box-none"
           >
@@ -173,7 +175,17 @@ const styles = StyleSheet.create({
     right: patientTheme.spacing.screen,
     bottom: 16,
   },
+  footerOverlayWeb: {
+    position: 'fixed',
+    left: patientTheme.spacing.screen,
+    right: patientTheme.spacing.screen,
+    bottom: 16,
+    zIndex: 900,
+  },
   footerOverlayWithTabBar: {
+    bottom: PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16,
+  },
+  footerOverlayWithTabBarWeb: {
     bottom: PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16,
   },
 });

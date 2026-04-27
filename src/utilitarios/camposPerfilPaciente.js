@@ -155,6 +155,36 @@ export function buildPatientClinicalRows(patient) {
   const objectiveText = cleanObjectiveText(patient?.objetivo_principal_consulta);
   const onboardingObjectives = formatListValue(onboarding.objetivos);
   const bodyFat = findValueByPrefix(patient, ['percentual_gordura']);
+  const insulinProfiles = onboarding?.insulin_profiles || {};
+  const legacyCategory = String(onboarding?.insulin_category_default || '').trim();
+  const legacyProfile = {
+    type: String(onboarding?.insulin_type_default || '').trim(),
+    usage: String(onboarding?.insulin_usage_default || '').trim(),
+    dose: String(onboarding?.insulin_dose_default || '').trim(),
+    notes: String(onboarding?.insulin_notes_default || '').trim(),
+  };
+  const basalSummary = [
+    insulinProfiles?.basal?.type || (legacyCategory === 'basal' ? legacyProfile.type : ''),
+    insulinProfiles?.basal?.usage || (legacyCategory === 'basal' ? legacyProfile.usage : ''),
+    insulinProfiles?.basal?.dose
+      ? `${insulinProfiles.basal.dose} UI`
+      : legacyCategory === 'basal' && legacyProfile.dose
+        ? `${legacyProfile.dose} UI`
+        : '',
+  ]
+    .filter((item) => String(item || '').trim())
+    .join(', ');
+  const bolusSummary = [
+    insulinProfiles?.bolus?.type || (legacyCategory === 'prandial' ? legacyProfile.type : ''),
+    insulinProfiles?.bolus?.usage || (legacyCategory === 'prandial' ? legacyProfile.usage : ''),
+    insulinProfiles?.bolus?.dose
+      ? `${insulinProfiles.bolus.dose} UI`
+      : legacyCategory === 'prandial' && legacyProfile.dose
+        ? `${legacyProfile.dose} UI`
+        : '',
+  ]
+    .filter((item) => String(item || '').trim())
+    .join(', ');
 
   return [
     {
@@ -166,6 +196,21 @@ export function buildPatientClinicalRows(patient) {
     { label: 'Situações clínicas informadas', value: formatListValue(onboarding.situacoes) },
     { label: 'Procedimentos clínicos informados', value: formatListValue(onboarding.procedimentos) },
     { label: 'Outro procedimento descrito', value: valueOrMissing(onboarding.procedimento_outros) },
+    { label: 'Uso atual de insulina', value: valueOrMissing(onboarding.insulinoterapia_atual) },
+    { label: 'Perfil de insulina basal', value: valueOrMissing(basalSummary) },
+    {
+      label: 'Observacoes da insulina basal',
+      value: valueOrMissing(
+        insulinProfiles?.basal?.notes || (legacyCategory === 'basal' ? legacyProfile.notes : '')
+      ),
+    },
+    { label: 'Perfil de insulina bolus', value: valueOrMissing(bolusSummary) },
+    {
+      label: 'Observacoes da insulina bolus',
+      value: valueOrMissing(
+        insulinProfiles?.bolus?.notes || (legacyCategory === 'prandial' ? legacyProfile.notes : '')
+      ),
+    },
     { label: 'Percentual de gordura corporal', value: formatNumberValue(bodyFat, '%') },
     {
       label: 'Nível de atividade física atual',
@@ -184,6 +229,55 @@ export function buildPatientClinicalRows(patient) {
   ];
 }
 
+export function buildPatientPharmacologyRows(patient) {
+  const onboarding = getOnboardingAnswers(patient);
+  const plans = Array.isArray(onboarding?.terapia_farmacologica_insulinas)
+    ? onboarding.terapia_farmacologica_insulinas
+    : [];
+
+  if (!plans.length) {
+    return [{ label: 'Plano farmacológico', value: MISSING_VALUE }];
+  }
+
+  return plans.map((plan, index) => {
+    const timingSummary = Array.isArray(plan?.tabela_horarios)
+      ? plan.tabela_horarios
+          .map((item) =>
+            [
+              item?.dia_semana,
+              item?.refeicao,
+              item?.horario,
+              item?.dose ? `${item.dose} ${item?.dose_unidade || 'UI'}` : '',
+              item?.tipo_dose,
+              item?.observacao,
+            ]
+              .filter(Boolean)
+              .join(' - ')
+          )
+          .filter(Boolean)
+          .join('; ')
+      : '';
+
+    return {
+      label: `${index + 1}. ${valueOrMissing(plan?.categoria_funcional).toUpperCase()} - ${valueOrMissing(
+        plan?.marca
+      )}`,
+      value: [
+        plan?.molecula,
+        plan?.classe_acao,
+        plan?.dispositivo,
+        plan?.apresentacao,
+        plan?.via,
+        plan?.dose ? `${plan.dose} ${plan?.dose_unidade || 'UI'}` : '',
+        timingSummary ? `Horários: ${timingSummary}` : '',
+        plan?.status,
+      ]
+        .filter(Boolean)
+        .join(' | '),
+    };
+  });
+}
+
 export function buildPatientProfileSections(patient) {
   return [
     {
@@ -197,6 +291,12 @@ export function buildPatientProfileSections(patient) {
       title: 'Dados clínicos',
       helper: 'Informações nutricionais, clínicas e respostas do onboarding.',
       rows: buildPatientClinicalRows(patient),
+    },
+    {
+      key: 'pharmacology',
+      title: 'Terapia Farmacológica',
+      helper: 'Insulinas, doses e horários.',
+      rows: buildPatientPharmacologyRows(patient),
     },
   ];
 }

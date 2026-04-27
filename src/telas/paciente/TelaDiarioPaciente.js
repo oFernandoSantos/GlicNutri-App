@@ -18,6 +18,10 @@ import {
   fetchPatientExperience,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import {
+  replaceCachedPatientAppState,
+  subscribeToPatientAppState,
+} from '../../servicos/centralAppState';
 
 const mealKindStyle = {
   icon: 'restaurant-outline',
@@ -255,6 +259,10 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         if (!active) return;
 
         setAppState(experience.appState);
+        replaceCachedPatientAppState(
+          experience.patient?.id_paciente_uuid || patientId,
+          experience.appState
+        );
       } catch (error) {
         console.log('Erro ao carregar diario:', error);
       } finally {
@@ -268,6 +276,16 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       active = false;
     };
   }, [patientId, canResolvePatient, usuarioLogado]);
+
+  useEffect(() => {
+    if (!patientId) return undefined;
+
+    return subscribeToPatientAppState(patientId, (nextAppState) => {
+      if (nextAppState) {
+        setAppState(nextAppState);
+      }
+    });
+  }, [patientId]);
 
   useEffect(() => {
     if (!mealEntryFromIA || !mealIARefreshToken) {

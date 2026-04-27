@@ -1,4 +1,4 @@
-import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import {
@@ -24,9 +25,14 @@ import {
 import {
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
+  removeCachedGlucoseReading,
   replaceCachedGlucoseReadings,
   subscribeToGlucoseReadings,
 } from '../../servicos/centralGlicose';
+import {
+  replaceCachedPatientAppState,
+  subscribeToPatientAppState,
+} from '../../servicos/centralAppState';
 
 const historyTabs = [
   { key: 'glucose', label: 'Glicemia' },
@@ -181,6 +187,14 @@ function sortByDateTime(items) {
   });
 }
 
+function appendUniqueHiddenId(array, id) {
+  if (!id) {
+    return Array.isArray(array) ? array : [];
+  }
+
+  return [...new Set([id, ...(Array.isArray(array) ? array : [])])];
+}
+
 function parseMedicationLabel(label) {
   const parts = String(label || '')
     .split(' - ')
@@ -279,7 +293,40 @@ export default function PacienteHistoricoRegistrosScreen({
   const [objectiveText, setObjectiveText] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
   const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [pendingHiddenGlucoseIds, setPendingHiddenGlucoseIds] = useState([]);
+  const [pendingHiddenMedicationIds, setPendingHiddenMedicationIds] = useState([]);
+  const [pendingHiddenMealIds, setPendingHiddenMealIds] = useState([]);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
+  const loadHistoryExperience = useCallback(async () => {
+    if (!canResolvePatient) {
+      setPatient(null);
+      setObjectiveText('');
+      setAppState(createDefaultAppState());
+      setGlucoseReadings([]);
+      return;
+    }
+
+    const experience = await fetchPatientExperience(patientId, {
+      patientContext: usuarioLogado,
+    });
+    const mergedReadings = mergeCachedGlucoseReadings(
+      experience.glucoseReadings,
+      getCachedGlucoseReadings(experience.patient?.id_paciente_uuid || patientId)
+    );
+
+    setPatient(experience.patient);
+    setObjectiveText(experience.clinicalObjective);
+    setAppState(experience.appState);
+    replaceCachedPatientAppState(
+      experience.patient?.id_paciente_uuid || patientId,
+      experience.appState
+    );
+    setGlucoseReadings(mergedReadings);
+    replaceCachedGlucoseReadings(
+      experience.patient?.id_paciente_uuid || patientId,
+      mergedReadings
+    );
+  }, [canResolvePatient, patientId, usuarioLogado]);
 
   useEffect(() => {
     let active = true;
@@ -287,34 +334,9 @@ export default function PacienteHistoricoRegistrosScreen({
     async function load() {
       try {
         setLoading(true);
-        if (!canResolvePatient) {
-          if (!active) return;
-          setPatient(null);
-          setObjectiveText('');
-          setAppState(createDefaultAppState());
-          setGlucoseReadings([]);
-          return;
-        }
-        const experience = await fetchPatientExperience(patientId, {
-          patientContext: usuarioLogado,
-        });
-
-        if (!active) return;
-
-        const mergedReadings = mergeCachedGlucoseReadings(
-          experience.glucoseReadings,
-          getCachedGlucoseReadings(experience.patient?.id_paciente_uuid || patientId)
-        );
-
-        setPatient(experience.patient);
-        setObjectiveText(experience.clinicalObjective);
-        setAppState(experience.appState);
-        setGlucoseReadings(mergedReadings);
-        replaceCachedGlucoseReadings(
-          experience.patient?.id_paciente_uuid || patientId,
-          mergedReadings
-        );
+        await loadHistoryExperience();
       } catch (error) {
+        if (!active) return;
         console.log('Erro ao carregar historico:', error);
         Alert.alert('Erro', 'Não foi possível carregar o histórico agora.');
       } finally {
@@ -327,7 +349,17 @@ export default function PacienteHistoricoRegistrosScreen({
     return () => {
       active = false;
     };
-  }, [patientId, usuarioLogado, canResolvePatient]);
+  }, [loadHistoryExperience]);
+
+  useEffect(() => {
+    if (!activePatientId) return undefined;
+
+    return subscribeToPatientAppState(activePatientId, (nextAppState) => {
+      if (nextAppState) {
+        setAppState(nextAppState);
+      }
+    });
+  }, [activePatientId]);
 
   useEffect(() => {
     if (!activePatientId) return undefined;
@@ -336,6 +368,31 @@ export default function PacienteHistoricoRegistrosScreen({
       setGlucoseReadings(nextReadings);
     });
   }, [activePatientId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      async function refreshOnFocus() {
+        try {
+          if (!canResolvePatient) {
+            return;
+          }
+
+          await loadHistoryExperience();
+        } catch (error) {
+          if (!active) return;
+          console.log('Erro ao recarregar historico no foco:', error);
+        }
+      }
+
+      refreshOnFocus();
+
+      return () => {
+        active = false;
+      };
+    }, [canResolvePatient, loadHistoryExperience])
+  );
 
   useEffect(() => {
     if (initialTab && historyTabs.some((tab) => tab.key === initialTab)) {
@@ -349,7 +406,7 @@ export default function PacienteHistoricoRegistrosScreen({
         (appState.medicationEntries || [])
           .filter(
             (item) =>
-              !(appState.hiddenMedicationEntryIds || []).includes(
+              ![...(appState.hiddenMedicationEntryIds || []), ...pendingHiddenMedicationIds].includes(
                 item.databaseId || item.legacyId || item.id
               )
           )
@@ -359,26 +416,36 @@ export default function PacienteHistoricoRegistrosScreen({
             time: item.time || '00:00',
           }))
       ),
-    [appState.hiddenMedicationEntryIds, appState.medicationEntries]
+    [appState.hiddenMedicationEntryIds, appState.medicationEntries, pendingHiddenMedicationIds]
   );
 
   const foodEntries = useMemo(
     () =>
       sortByDateTime(
         (appState.mealEntries || [])
-          .filter((item) => !(appState.hiddenMealEntryIds || []).includes(item.id))
+          .filter(
+            (item) => ![...(appState.hiddenMealEntryIds || []), ...pendingHiddenMealIds].includes(item.id)
+          )
           .map((item) => ({
             ...item,
             date: item.date || new Date().toISOString().slice(0, 10),
             time: item.time || '00:00',
           }))
       ),
-    [appState.hiddenMealEntryIds, appState.mealEntries]
+    [appState.hiddenMealEntryIds, appState.mealEntries, pendingHiddenMealIds]
   );
 
   const sortedGlucoseReadings = useMemo(
-    () => sortByDateTime(glucoseReadings),
-    [glucoseReadings]
+    () =>
+      sortByDateTime(
+        glucoseReadings.filter(
+          (item) =>
+            ![...(appState.hiddenGlucoseReadingIds || []), ...pendingHiddenGlucoseIds].includes(
+              item.id
+            )
+        )
+      ),
+    [appState.hiddenGlucoseReadingIds, glucoseReadings, pendingHiddenGlucoseIds]
   );
 
   const filteredMedicationEntries = useMemo(
@@ -481,12 +548,12 @@ export default function PacienteHistoricoRegistrosScreen({
 
   function confirmDeleteGlucose(reading) {
     Alert.alert(
-      'Excluir registro?',
+      'Ocultar registro?',
       `Deseja excluir a glicemia de ${reading.value} mg/dL em ${formatDate(reading.date)} às ${formatTime(reading.time)}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: 'Excluir',
+          text: 'Ocultar',
           style: 'destructive',
           onPress: () => handleDeleteGlucose(reading),
         },
@@ -495,24 +562,43 @@ export default function PacienteHistoricoRegistrosScreen({
   }
 
   async function handleDeleteGlucose(reading) {
+    const previousAppState = appState;
+    const previousGlucoseReadings = glucoseReadings;
+    const nextAppState = {
+      ...previousAppState,
+      hiddenGlucoseReadingIds: appendUniqueHiddenId(
+        previousAppState?.hiddenGlucoseReadingIds,
+        reading?.id
+      ),
+    };
     try {
       setDeletingId(reading.id);
+      setPendingHiddenGlucoseIds((current) => appendUniqueHiddenId(current, reading?.id));
+      setAppState(nextAppState);
+      replaceCachedPatientAppState(activePatientId, nextAppState);
+      setGlucoseReadings((current) => current.filter((item) => item.id !== reading?.id));
+      removeCachedGlucoseReading(activePatientId, reading?.id);
       const saved = await hideGlucoseReadingForPatient({
         patientId: activePatientId,
         objectiveText,
-        appState,
+        appState: nextAppState,
         reading,
         currentPatient: patient,
         patientContext: usuarioLogado,
       });
-      setGlucoseReadings((current) => current.filter((item) => item.id !== reading.id));
       setPatient(saved.patient || patient);
       setObjectiveText(saved.clinicalObjective || objectiveText);
       setAppState(saved.appState);
     } catch (error) {
+      setPendingHiddenGlucoseIds((current) => current.filter((item) => item !== reading?.id));
+      setAppState(previousAppState);
+      replaceCachedPatientAppState(activePatientId, previousAppState);
+      setGlucoseReadings(previousGlucoseReadings);
+      replaceCachedGlucoseReadings(activePatientId, previousGlucoseReadings);
       console.log('Erro ao excluir glicemia:', error);
       Alert.alert('Erro', 'Não foi possível excluir a glicemia agora.');
     } finally {
+      setPendingHiddenGlucoseIds((current) => current.filter((item) => item !== reading?.id));
       setDeletingId(null);
     }
   }
@@ -521,12 +607,12 @@ export default function PacienteHistoricoRegistrosScreen({
     const medicationDisplay = getMedicationDisplay(entry);
 
     Alert.alert(
-      'Excluir registro?',
+      'Ocultar registro?',
       `Deseja excluir "${medicationDisplay.title}" de ${formatDate(entry.date)} às ${formatTime(entry.time)}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: 'Excluir',
+          text: 'Ocultar',
           style: 'destructive',
           onPress: () => handleDeleteMedication(entry),
         },
@@ -535,21 +621,29 @@ export default function PacienteHistoricoRegistrosScreen({
   }
 
   async function handleDeleteMedication(entry) {
+    const previousAppState = appState;
+    const hiddenId = entry?.databaseId || entry?.legacyId || entry?.id;
+    const nextAppState = {
+      ...previousAppState,
+      medicationEntries: (previousAppState?.medicationEntries || []).filter(
+        (item) => (item?.databaseId || item?.legacyId || item?.id) !== hiddenId
+      ),
+      hiddenMedicationEntryIds: appendUniqueHiddenId(
+        previousAppState?.hiddenMedicationEntryIds,
+        hiddenId
+      ),
+    };
+
     try {
       setDeletingId(entry.id);
-      const nextState = {
-        ...appState,
-        medicationEntries: (appState.medicationEntries || []).filter(
-          (item) => item.id !== entry.id
-        ),
-      };
-
-      setAppState(nextState);
+      setPendingHiddenMedicationIds((current) => appendUniqueHiddenId(current, hiddenId));
+      setAppState(nextAppState);
+      replaceCachedPatientAppState(activePatientId, nextAppState);
 
       const saved = await hideMedicationEntryForPatient({
         patientId: activePatientId,
         objectiveText,
-        appState,
+        appState: nextAppState,
         entry,
         currentPatient: patient,
         patientContext: usuarioLogado,
@@ -559,22 +653,25 @@ export default function PacienteHistoricoRegistrosScreen({
       setObjectiveText(saved.clinicalObjective || objectiveText);
       setAppState(saved.appState);
     } catch (error) {
-      setAppState(appState);
+      setPendingHiddenMedicationIds((current) => current.filter((item) => item !== hiddenId));
+      setAppState(previousAppState);
+      replaceCachedPatientAppState(activePatientId, previousAppState);
       console.log('Erro ao excluir medicacao:', error);
       Alert.alert('Erro', 'Não foi possível excluir a medicação agora.');
     } finally {
+      setPendingHiddenMedicationIds((current) => current.filter((item) => item !== hiddenId));
       setDeletingId(null);
     }
   }
 
   function confirmDeleteMeal(entry) {
     Alert.alert(
-      'Excluir registro?',
+      'Ocultar registro?',
       `Deseja excluir "${entry.title || 'Alimentação'}" de ${formatDate(entry.date)} às ${formatTime(entry.time)}?`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
-          text: 'Excluir',
+          text: 'Ocultar',
           style: 'destructive',
           onPress: () => handleDeleteMeal(entry),
         },
@@ -583,19 +680,23 @@ export default function PacienteHistoricoRegistrosScreen({
   }
 
   async function handleDeleteMeal(entry) {
+    const previousAppState = appState;
+    const nextAppState = {
+      ...previousAppState,
+      mealEntries: (previousAppState?.mealEntries || []).filter((item) => item?.id !== entry?.id),
+      hiddenMealEntryIds: appendUniqueHiddenId(previousAppState?.hiddenMealEntryIds, entry?.id),
+    };
+
     try {
       setDeletingId(entry.id);
-      const nextState = {
-        ...appState,
-        mealEntries: (appState.mealEntries || []).filter((item) => item.id !== entry.id),
-      };
-
-      setAppState(nextState);
+      setPendingHiddenMealIds((current) => appendUniqueHiddenId(current, entry?.id));
+      setAppState(nextAppState);
+      replaceCachedPatientAppState(activePatientId, nextAppState);
 
       const saved = await hideMealEntryForPatient({
         patientId: activePatientId,
         objectiveText,
-        appState,
+        appState: nextAppState,
         entry,
         currentPatient: patient,
         patientContext: usuarioLogado,
@@ -605,10 +706,13 @@ export default function PacienteHistoricoRegistrosScreen({
       setObjectiveText(saved.clinicalObjective || objectiveText);
       setAppState(saved.appState);
     } catch (error) {
-      setAppState(appState);
+      setAppState(previousAppState);
+      replaceCachedPatientAppState(activePatientId, previousAppState);
+      setPendingHiddenMealIds((current) => current.filter((item) => item !== entry?.id));
       console.log('Erro ao excluir alimentacao:', error);
       Alert.alert('Erro', 'NÃ£o foi possÃ­vel excluir a alimentação agora.');
     } finally {
+      setPendingHiddenMealIds((current) => current.filter((item) => item !== entry?.id));
       setDeletingId(null);
     }
   }
@@ -734,7 +838,7 @@ export default function PacienteHistoricoRegistrosScreen({
               </View>
               <TouchableOpacity
                 style={styles.deleteButton}
-                onPress={() => confirmDeleteGlucose(reading)}
+                onPress={() => handleDeleteGlucose(reading)}
                 disabled={deletingId === reading.id}
               >
                 {deletingId === reading.id ? (
@@ -781,7 +885,7 @@ export default function PacienteHistoricoRegistrosScreen({
                 </View>
                 <TouchableOpacity
                   style={styles.deleteButton}
-                  onPress={() => confirmDeleteMedication(entry)}
+                  onPress={() => handleDeleteMedication(entry)}
                   disabled={deletingId === entry.id}
                 >
                   {deletingId === entry.id ? (
@@ -815,7 +919,7 @@ export default function PacienteHistoricoRegistrosScreen({
               </View>
               <TouchableOpacity
                 style={styles.deleteButton}
-                onPress={() => confirmDeleteMeal(entry)}
+                onPress={() => handleDeleteMeal(entry)}
                 disabled={deletingId === entry.id}
               >
                 {deletingId === entry.id ? (
