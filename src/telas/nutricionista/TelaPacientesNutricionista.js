@@ -641,9 +641,15 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
           </SectionCard>
         ) : (
           pacientes.map((paciente) => (
-            <SectionCard
+            <TouchableOpacity
               key={getPacienteId(paciente) || paciente.email_pac || paciente.cpf_paciente}
-              style={styles.patientCard}
+              style={[styles.sectionCard, styles.patientCard]}
+              activeOpacity={0.86}
+              onPress={() => abrirModalPerfil(paciente)}
+              accessibilityRole="button"
+              accessibilityLabel={`Abrir perfil de ${
+                paciente.nome_completo || 'paciente'
+              }`}
             >
               <View style={styles.patientHeader}>
                 <View style={styles.patientAvatar}>
@@ -753,7 +759,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                   )}
                 </TouchableOpacity>
               </View>
-            </SectionCard>
+            </TouchableOpacity>
           ))
         )}
       </ScrollView>
