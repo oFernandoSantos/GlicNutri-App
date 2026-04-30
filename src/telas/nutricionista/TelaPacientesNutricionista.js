@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -59,6 +59,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [pacientePerfil, setPacientePerfil] = useState(null);
   const [perfilVisao, setPerfilVisao] = useState('patient');
   const [feedbackEdicao, setFeedbackEdicao] = useState(null);
+  const [termoBusca, setTermoBusca] = useState('');
 
   const [editandoId, setEditandoId] = useState(null);
   const [nome, setNome] = useState('');
@@ -501,6 +502,36 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     usuarioLogado?.nome_nutri ||
     'Nutricionista';
 
+  const normalizarBusca = (valor) =>
+    String(valor || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .trim();
+
+  const pacientesFiltrados = useMemo(() => {
+    const busca = normalizarBusca(termoBusca);
+
+    if (!busca) {
+      return pacientes;
+    }
+
+    return pacientes.filter((paciente) => {
+      const camposBusca = [
+        paciente.nome_completo,
+        paciente.email_pac,
+        paciente.cpf_paciente,
+        paciente.telefone,
+        paciente.cidade,
+        paciente.uf,
+      ];
+
+      return camposBusca
+        .map((campo) => normalizarBusca(campo))
+        .some((campo) => campo.includes(busca));
+    });
+  }, [pacientes, termoBusca]);
+
   const totalPacientes = pacientes.length;
   const totalCidades = new Set(
     pacientes
@@ -627,6 +658,30 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
           <Text style={styles.sectionHelper}>Atualize a lista sempre que precisar.</Text>
         </View>
 
+        <View style={styles.searchContainer}>
+          <Ionicons name="search-outline" size={20} color={patientTheme.colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            value={termoBusca}
+            onChangeText={setTermoBusca}
+            placeholder="Pesquisar paciente"
+            placeholderTextColor={patientTheme.colors.textMuted}
+            autoCapitalize="none"
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {termoBusca ? (
+            <TouchableOpacity
+              style={styles.clearSearchButton}
+              onPress={() => setTermoBusca('')}
+              accessibilityRole="button"
+              accessibilityLabel="Limpar pesquisa"
+            >
+              <Ionicons name="close" size={18} color={patientTheme.colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
         {loading ? (
           <SectionCard style={styles.loadingCard}>
             <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
@@ -637,6 +692,13 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
             <Text style={styles.emptyTitle}>Nenhum paciente cadastrado</Text>
             <Text style={styles.emptyText}>
               Cadastre um paciente na tela de cadastro para ele aparecer aqui.
+            </Text>
+          </SectionCard>
+        ) : pacientesFiltrados.length === 0 ? (
+          <SectionCard style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Nenhum paciente encontrado</Text>
+            <Text style={styles.emptyText}>
+              Tente buscar por nome, CPF, e-mail, telefone ou cidade.
             </Text>
           </SectionCard>
         ) : (
@@ -1244,6 +1306,31 @@ const styles = StyleSheet.create({
     marginTop: 6,
     fontSize: 13,
     color: patientTheme.colors.textMuted,
+  },
+  searchContainer: {
+    minHeight: 50,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    marginBottom: 14,
+    ...patientShadow,
+  },
+  searchInput: {
+    flex: 1,
+    minHeight: 50,
+    paddingHorizontal: 10,
+    color: patientTheme.colors.text,
+    fontSize: 15,
+  },
+  clearSearchButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.backgroundSoft,
   },
   loadingCard: {
     alignItems: 'center',
