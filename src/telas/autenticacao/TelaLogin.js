@@ -28,6 +28,7 @@ import {
   salvarSessaoAdmin,
   sanitizeAdminUser,
 } from '../../servicos/servicoAdmin';
+import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
@@ -287,7 +288,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
         if (data?.session?.user && !googleSessionHandledRef.current) {
           googleSessionHandledRef.current = true;
-          await finalizarLoginGoogleComUsuario(data.session.user);
+          await finalizarLoginGoogleComUsuario(data.session.user, { auditLogin: false });
         }
       } catch (error) {
         console.log('Erro ao verificar sessao atual =>', error);
@@ -306,7 +307,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
     if (!googleSessionHandledRef.current) {
       googleSessionHandledRef.current = true;
-      finalizarLoginGoogleComUsuario(session.user).catch((error) => {
+      finalizarLoginGoogleComUsuario(session.user, { auditLogin: false }).catch((error) => {
         console.log('Erro ao sincronizar sessao Google =>', error);
         googleSessionHandledRef.current = false;
       });
@@ -343,6 +344,19 @@ export default function TelaLogin({ navigation, route, session }) {
       }
 
       if (!usuario) {
+        registrarLogAuditoria({
+          actor: null,
+          actorType: role === 'Nutricionista' ? 'nutricionista' : 'paciente',
+          action: 'login_falha_credencial',
+          entity: 'sessao',
+          entityId: null,
+          origin: 'login',
+          status: 'falha',
+          details: {
+            motivo: motivo || 'credencial_invalida',
+            perfilSelecionado: role,
+          },
+        });
         setFieldErrors({
           identificador:
             motivo === 'senha_incorreta'
@@ -365,6 +379,17 @@ export default function TelaLogin({ navigation, route, session }) {
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
 
+        registrarLogAuditoria({
+          actor: adminUser,
+          actorType: 'admin',
+          action: 'login_sucesso_admin',
+          entity: 'sessao',
+          entityId: adminUser?.id_admin_uuid || null,
+          origin: 'login',
+          status: 'sucesso',
+          details: { metodo: 'email_senha' },
+        });
+
         if (route?.params?.onAdminLogin) {
           route.params.onAdminLogin(adminUser);
         }
@@ -382,6 +407,16 @@ export default function TelaLogin({ navigation, route, session }) {
       }
 
       if (role === 'Paciente' && usuario.excluido) {
+        registrarLogAuditoria({
+          actor: usuario,
+          actorType: 'paciente',
+          action: 'login_falha_paciente_excluido',
+          entity: 'sessao',
+          entityId: usuario?.id_paciente_uuid || null,
+          origin: 'login',
+          status: 'falha',
+          details: { motivo: 'paciente_excluido' },
+        });
         setFieldErrors({
           identificador: 'Este paciente foi excluido e nao pode mais acessar a plataforma.',
           senha: '',
@@ -392,6 +427,25 @@ export default function TelaLogin({ navigation, route, session }) {
         );
         return;
       }
+
+      const actorTipo = role === 'Paciente' ? 'paciente' : 'nutricionista';
+      const loginOkAction =
+        role === 'Paciente' ? 'login_sucesso_paciente' : 'login_sucesso_nutricionista';
+      const sessaoEntityId =
+        role === 'Paciente'
+          ? usuario?.id_paciente_uuid || null
+          : usuario?.id_nutricionista_uuid || null;
+
+      registrarLogAuditoria({
+        actor: usuario,
+        actorType: actorTipo,
+        action: loginOkAction,
+        entity: 'sessao',
+        entityId: sessaoEntityId,
+        origin: 'login',
+        status: 'sucesso',
+        details: { metodo: 'email_senha' },
+      });
 
       const rotaDestino =
         role === 'Paciente' && !(await hasPatientOnboardingSeen(usuario))
@@ -411,6 +465,19 @@ export default function TelaLogin({ navigation, route, session }) {
       });
     } catch (error) {
       console.log('Erro login comum =>', error);
+      registrarLogAuditoria({
+        actor: null,
+        actorType: 'anonimo',
+        action: 'login_falha_erro',
+        entity: 'sessao',
+        entityId: null,
+        origin: 'login',
+        status: 'falha',
+        details: {
+          codigo: 'erro_inesperado',
+          perfilSelecionado: role,
+        },
+      });
       setErrorMessage('Ocorreu um erro inesperado ao validar seu acesso.');
       Alert.alert('Erro', 'Ocorreu um erro inesperado ao validar seu acesso.');
     } finally {
@@ -427,12 +494,25 @@ export default function TelaLogin({ navigation, route, session }) {
     }
   }
 
-  async function finalizarLoginGoogleComUsuario(user) {
+  async function finalizarLoginGoogleComUsuario(user, auditOptions = {}) {
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
     const usuarioPaciente = pacienteGoogle || user;
     const rotaDestino = (await hasPatientOnboardingSeen(usuarioPaciente))
       ? 'HomePaciente'
       : 'PacienteOnboarding';
+
+    if (auditOptions.auditLogin === true) {
+      registrarLogAuditoria({
+        actor: usuarioPaciente,
+        actorType: 'paciente',
+        action: 'login_sucesso_google',
+        entity: 'sessao',
+        entityId: usuarioPaciente?.id_paciente_uuid || null,
+        origin: 'login_google',
+        status: 'sucesso',
+        details: { metodo: 'oauth_google', provedor: 'google' },
+      });
+    }
 
     navigation.reset({
       index: 0,
@@ -468,16 +548,36 @@ export default function TelaLogin({ navigation, route, session }) {
 
       if (finalSession?.user) {
         googleSessionHandledRef.current = true;
-        await finalizarLoginGoogleComUsuario(finalSession.user);
+        await finalizarLoginGoogleComUsuario(finalSession.user, { auditLogin: true });
         return;
       }
 
+      registrarLogAuditoria({
+        actor: null,
+        actorType: 'paciente',
+        action: 'login_falha_google_sessao',
+        entity: 'sessao',
+        entityId: null,
+        origin: 'login_google',
+        status: 'falha',
+        details: { motivo: 'sessao_supabase_ausente' },
+      });
       Alert.alert(
         'Atencao',
         'O Google voltou para o app, mas o Supabase nao criou a sessao.'
       );
     } catch (error) {
       console.log('Erro login Google =>', error);
+      registrarLogAuditoria({
+        actor: null,
+        actorType: 'paciente',
+        action: 'login_falha_google',
+        entity: 'sessao',
+        entityId: null,
+        origin: 'login_google',
+        status: 'falha',
+        details: { motivo: 'excecao', codigo: 'oauth_erro' },
+      });
       googleSessionHandledRef.current = false;
       Alert.alert('Erro', error?.message || 'Falha ao entrar com Google.');
     } finally {

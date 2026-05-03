@@ -13,13 +13,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
-import { listarEventosAuditoria } from '../../servicos/servicoAuditoria';
+import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 
 const actorFilters = [
   { key: '', label: 'Todos' },
   { key: 'paciente', label: 'Pacientes' },
   { key: 'nutricionista', label: 'Nutris' },
+  { key: 'admin', label: 'Admins' },
   { key: 'medico', label: 'Medicos' },
   { key: 'sistema', label: 'Sistema' },
 ];
@@ -49,6 +50,7 @@ function buildSummary(events) {
     total: events.length,
     pacientes: events.filter((item) => item.actorType === 'paciente').length,
     nutricionistas: events.filter((item) => item.actorType === 'nutricionista').length,
+    administradores: events.filter((item) => item.actorType === 'admin').length,
     falhas: events.filter((item) => item.status === 'falha').length,
   };
 }
@@ -81,6 +83,22 @@ export default function TelaAuditoriaAdmin({ navigation, route, usuarioLogado })
       });
 
       setEvents(data);
+
+      if (isAdminUser(adminUser)) {
+        await registrarLogAuditoria({
+          actor: adminUser,
+          actorType: 'admin',
+          action: 'admin_consulta_auditoria',
+          entity: 'painel_auditoria',
+          entityId: adminUser?.id_admin_uuid || null,
+          origin: 'admin_auditoria',
+          status: 'sucesso',
+          details: {
+            filtro_actor: actorType || 'todos',
+            resultado_eventos: data.length,
+          },
+        });
+      }
     } finally {
       setRefreshing(false);
       setLoading(false);
@@ -151,6 +169,10 @@ export default function TelaAuditoriaAdmin({ navigation, route, usuarioLogado })
           <SectionCard style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Nutris</Text>
             <Text style={styles.summaryValue}>{summary.nutricionistas}</Text>
+          </SectionCard>
+          <SectionCard style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Admins</Text>
+            <Text style={styles.summaryValue}>{summary.administradores}</Text>
           </SectionCard>
           <SectionCard style={styles.summaryCard}>
             <Text style={styles.summaryLabel}>Falhas</Text>
