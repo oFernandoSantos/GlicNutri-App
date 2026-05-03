@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
 import { listarLogsSistema } from '../../servicos/servicoLogSistema';
+import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 
 const levelFilters = [
@@ -70,6 +71,22 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado 
       });
 
       setLogs(data);
+
+      if (isAdminUser(adminUser)) {
+        await registrarLogAuditoria({
+          actor: adminUser,
+          actorType: 'admin',
+          action: 'admin_consulta_logs_sistema',
+          entity: 'painel_logs',
+          entityId: adminUser?.id_admin_uuid || null,
+          origin: 'admin_logs',
+          status: 'sucesso',
+          details: {
+            filtro_nivel: level || 'todos',
+            resultado_logs: data.length,
+          },
+        });
+      }
     } finally {
       setRefreshing(false);
       setLoading(false);

@@ -13,7 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
 import { isAdminUser } from '../../servicos/servicoAdmin';
-import { listarEventosAuditoria } from '../../servicos/servicoAuditoria';
+import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { listarLogsSistema } from '../../servicos/servicoLogSistema';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
 
@@ -149,6 +149,18 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
   const [dashboard, setDashboard] = useState(initialDashboardState);
 
   async function handleLogout() {
+    if (adminUser) {
+      await registrarLogAuditoria({
+        actor: adminUser,
+        actorType: 'admin',
+        action: 'logout_admin',
+        entity: 'sessao',
+        entityId: adminUser?.id_admin_uuid || null,
+        origin: 'admin_home',
+        status: 'sucesso',
+        details: {},
+      });
+    }
     await onAdminLogout?.();
     navigation.reset({
       index: 0,
@@ -180,28 +192,30 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
             .from('paciente')
             .select('*', { count: 'exact', head: true })
             .or('excluido.is.null,excluido.eq.false')
-        ),
+        ).catch(() => 0),
         fetchCount(
           supabase
             .from('paciente')
             .select('*', { count: 'exact', head: true })
             .eq('excluido', true)
+        ).catch(() => 0),
+        fetchCount(supabase.from('nutricionista').select('*', { count: 'exact', head: true })).catch(
+          () => 0
         ),
-        fetchCount(supabase.from('nutricionista').select('*', { count: 'exact', head: true })),
         fetchCount(
           supabase
             .from('medico')
             .select('*', { count: 'exact', head: true })
             .eq('ativo', true)
-        ),
+        ).catch(() => 0),
         fetchCount(
           supabase
             .from('administrador')
             .select('*', { count: 'exact', head: true })
             .eq('ativo', true)
-        ),
-        listarEventosAuditoria({ days: 7, limit: 80 }),
-        listarLogsSistema({ days: 2, limit: 80 }),
+        ).catch(() => 0),
+        listarEventosAuditoria({ days: 14, limit: 80 }).catch(() => []),
+        listarLogsSistema({ days: 2, limit: 80 }).catch(() => []),
       ]);
 
       const auditEventsToday = auditEvents.filter((item) => {

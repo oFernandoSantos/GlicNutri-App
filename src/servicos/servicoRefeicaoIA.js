@@ -1,6 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
+import { registrarLogAuditoria } from './servicoAuditoria';
 
 export const REFEICAO_IA_BUCKET = 'refeicoes-ia';
 
@@ -367,8 +368,44 @@ export async function salvarRefeicaoIA({
     .maybeSingle();
 
   if (error) {
+    registrarLogAuditoria({
+      actor: { id_paciente_uuid: patientId },
+      actorType: 'paciente',
+      targetPatientId: patientId,
+      action: 'refeicao_ia_falha_persistencia',
+      entity: 'refeicao_ia',
+      entityId: null,
+      origin: 'refeicao_ia',
+      status: 'falha',
+      details: {
+        paciente_id: patientId,
+        confirmado,
+      },
+    });
     throw error;
   }
+
+  const recordId = data?.id != null ? String(data.id) : null;
+
+  registrarLogAuditoria({
+    actor: { id_paciente_uuid: patientId },
+    actorType: 'paciente',
+    targetPatientId: patientId,
+    action: 'refeicao_ia_registrada',
+    entity: 'refeicao_ia',
+    entityId: recordId,
+    origin: 'refeicao_ia',
+    status: 'sucesso',
+    details: {
+      paciente_id: patientId,
+      tipoAcao: 'create',
+      confirmado,
+      quantidadeAlimentos: normalizedFoods.length,
+      possuiFoto: Boolean(fotoUrl),
+      carboidratosTotal: totais.carboidratos_total,
+      caloriasTotal: totais.calorias_total,
+    },
+  });
 
   return {
     record: data || payload,

@@ -26,6 +26,7 @@ import {
   getPasswordValidationMessage,
   passwordRequirements,
 } from '../../utilitarios/requisitosSenha';
+import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -74,6 +75,10 @@ export default function ForgotPassword({ navigation }) {
 
   function validarEmail(valor) {
     return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(valor.trim().toLowerCase());
+  }
+
+  function tipoPerfilAuditoria(perfil) {
+    return perfil === 'Nutricionista' ? 'nutricionista' : 'paciente';
   }
 
   function focarCampoRecuperacao(campo) {
@@ -223,6 +228,17 @@ export default function ForgotPassword({ navigation }) {
         email: emailLimpo,
       });
 
+      registrarLogAuditoria({
+        actor: null,
+        actorType: tipoPerfilAuditoria(role),
+        action: reenviar ? 'recuperacao_senha_codigo_reenviado' : 'recuperacao_senha_codigo_solicitado',
+        entity: 'autenticacao',
+        entityId: null,
+        origin: 'recuperacao_senha',
+        status: 'sucesso',
+        details: { perfil: role, etapa: 'solicitar_codigo' },
+      });
+
       setCodigo('');
       setModalCodigoVisible(true);
 
@@ -232,6 +248,21 @@ export default function ForgotPassword({ navigation }) {
     } catch (err) {
       console.error('Erro ao enviar codigo de recuperacao:', err);
       const mensagemErro = err.message || 'Nao foi possivel enviar o codigo.';
+
+      registrarLogAuditoria({
+        actor: null,
+        actorType: tipoPerfilAuditoria(role),
+        action: 'recuperacao_senha_codigo_solicitado',
+        entity: 'autenticacao',
+        entityId: null,
+        origin: 'recuperacao_senha',
+        status: 'falha',
+        details: {
+          perfil: role,
+          etapa: 'solicitar_codigo',
+          motivo: 'falha_servico',
+        },
+      });
 
       if (
         mensagemErro.toLowerCase().includes('e-mail') ||
@@ -268,6 +299,17 @@ export default function ForgotPassword({ navigation }) {
         newPassword: novaSenha,
       });
 
+      registrarLogAuditoria({
+        actor: null,
+        actorType: tipoPerfilAuditoria(role),
+        action: 'recuperacao_senha_redefinicao_ok',
+        entity: 'autenticacao',
+        entityId: null,
+        origin: 'recuperacao_senha',
+        status: 'sucesso',
+        details: { perfil: role, etapa: 'confirmar_codigo' },
+      });
+
       setModalCodigoVisible(true);
       setEmail('');
       setNovaSenha('');
@@ -279,6 +321,23 @@ export default function ForgotPassword({ navigation }) {
       console.error('Erro ao confirmar codigo de recuperacao:', err);
       const mensagemErro =
         err.message || 'Codigo invalido. Confira o codigo enviado por e-mail.';
+
+      registrarLogAuditoria({
+        actor: null,
+        actorType: tipoPerfilAuditoria(role),
+        action: 'recuperacao_senha_confirmacao_falha',
+        entity: 'autenticacao',
+        entityId: null,
+        origin: 'recuperacao_senha',
+        status: 'falha',
+        details: {
+          perfil: role,
+          etapa: 'confirmar_codigo',
+          motivo: mensagemErro.toLowerCase().includes('senha')
+            ? 'validacao_senha'
+            : 'codigo_ou_servico',
+        },
+      });
 
       if (mensagemErro.toLowerCase().includes('senha')) {
         setModalCodigoVisible(false);
