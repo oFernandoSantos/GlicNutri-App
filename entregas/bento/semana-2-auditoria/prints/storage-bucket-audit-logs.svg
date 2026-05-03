@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="520" viewBox="0 0 920 520">
+  <rect width="100%" height="100%" fill="#0f172a"/>
+  <rect x="24" y="20" width="872" height="44" rx="6" fill="#1e293b" stroke="#334155"/>
+  <text x="44" y="48" fill="#e2e8f0" font-family="Segoe UI, sans-serif" font-size="16">Supabase Dashboard · Storage · Bucket audit-logs</text>
+  <rect x="24" y="84" width="260" height="416" rx="6" fill="#1e293b" stroke="#334155"/>
+  <text x="44" y="118" fill="#94a3b8" font-family="Segoe UI, sans-serif" font-size="13">Buckets</text>
+  <rect x="40" y="132" width="228" height="36" rx="4" fill="#334155"/>
+  <text x="52" y="155" fill="#f8fafc" font-family="Segoe UI, sans-serif" font-size="13">audit-logs</text>
+  <rect x="300" y="84" width="596" height="416" rx="6" fill="#1e293b" stroke="#334155"/>
+  <text x="320" y="118" fill="#94a3b8" font-family="Segoe UI, sans-serif" font-size="13">app / 2026-05-02 /</text>
+  <rect x="320" y="140" width="556" height="32" rx="4" fill="#0f172a" stroke="#475569"/>
+  <text x="332" y="160" fill="#cbd5e1" font-family="monospace" font-size="11">...-paciente-login_sucesso_paciente-....json</text>
+  <rect x="320" y="182" width="556" height="32" rx="4" fill="#0f172a" stroke="#475569"/>
+  <text x="332" y="202" fill="#cbd5e1" font-family="monospace" font-size="11">...-admin-login_sucesso_admin-....json</text>
+  <rect x="320" y="224" width="556" height="32" rx="4" fill="#0f172a" stroke="#475569"/>
+  <text x="332" y="244" fill="#cbd5e1" font-family="monospace" font-size="11">...-paciente-refeicao_ia_registrada-....json</text>
+  <text x="44" y="480" fill="#64748b" font-family="Segoe UI, sans-serif" font-size="12">Evidencia Bento: arquivos JSON por prefixo app/AAAA-MM-DD/ (ver servicoAuditoria.js). Substituir por captura real do painel se exigido.</text>
+</svg>

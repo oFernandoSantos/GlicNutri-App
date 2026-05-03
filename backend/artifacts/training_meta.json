@@ -1,0 +1,14 @@
+{
+  "feature_columns": [
+    "n_leituras_glicemia",
+    "carbs_sum_g",
+    "kcal_sum",
+    "protein_sum_g",
+    "fat_sum_g",
+    "n_refeicoes_ia",
+    "n_eventos_medicacao"
+  ],
+  "target_classification": "target_glucose_high (1 se glucose_mean_mg_dl >= 150)",
+  "target_regression": "glucose_mean_mg_dl",
+  "csv_source": "c:\\Users\\flima\\OneDrive\\Área de Trabalho\\GlicNutri-App\\ml\\data\\sample_glicnutri_patient_day.csv"
+}
