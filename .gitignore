@@ -48,3 +48,8 @@ supabase/.temp/
 # generated native folders
 /ios
 /android
+
+# Python cache
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
