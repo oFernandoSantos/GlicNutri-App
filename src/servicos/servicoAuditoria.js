@@ -3,6 +3,8 @@ import { supabase, supabaseUrl, supabaseAnonKey } from './configSupabase';
 const AUDIT_BUCKET = 'audit-logs';
 const AUDIT_PREFIX = 'app';
 const MAX_EVENT_FILE_SIZE = 1024 * 1024;
+const AUDIT_DOWNLOAD_CONCURRENCY = 16;
+const auditEventCache = new Map();
 
 function inferActorType(actor) {
   if (!actor || typeof actor !== 'object') {
@@ -266,19 +268,38 @@ async function collectAuditJsonPaths(prefix, options = {}) {
 
   visited.add(prefix);
 
-  const { data, error } = await supabase.storage.from(AUDIT_BUCKET).list(prefix, {
-    limit: maxItems,
-    offset: 0,
-  });
+  const pageSize = Math.min(maxItems, 1000);
+  const listedItems = [];
+  let offset = 0;
 
-  if (error) {
-    console.log('Erro ao listar arquivos de auditoria:', error);
-    return [];
+  while (listedItems.length < maxItems) {
+    const { data, error } = await supabase.storage.from(AUDIT_BUCKET).list(prefix, {
+      limit: pageSize,
+      offset,
+    });
+
+    if (error) {
+      console.log('Erro ao listar arquivos de auditoria:', error);
+      return [];
+    }
+
+    const batch = data || [];
+    listedItems.push(...batch);
+
+    if (batch.length < pageSize) {
+      break;
+    }
+
+    offset += pageSize;
   }
 
   const filePaths = [];
 
-  for (const item of data || []) {
+  const sortedItems = listedItems.slice(0, maxItems).sort((left, right) =>
+    String(right?.name || '').localeCompare(String(left?.name || ''))
+  );
+
+  for (const item of sortedItems) {
     if (!item?.name) {
       continue;
     }
@@ -314,11 +335,52 @@ async function collectAuditJsonPaths(prefix, options = {}) {
   return filePaths;
 }
 
+export async function contarEventosAuditoriaTotal({ maxItems = 50000 } = {}) {
+  const paths = await collectAuditJsonPaths(AUDIT_PREFIX, {
+    maxItems,
+    maxDepth: 4,
+  });
+
+  return paths.length;
+}
+
+async function processInBatches(items, worker, batchSize = AUDIT_DOWNLOAD_CONCURRENCY) {
+  const normalizedBatchSize = Math.max(Number(batchSize) || 1, 1);
+
+  for (let index = 0; index < items.length; index += normalizedBatchSize) {
+    const batch = items.slice(index, index + normalizedBatchSize);
+    await Promise.all(batch.map((item) => worker(item)));
+  }
+}
+
+function buildProgressiveWindows(days, targetSize) {
+  const maxDays = Math.max(Number(days) || 1, 1);
+  const windows = [];
+  const presets = targetSize <= 20 ? [7, 30, 90, 365] : [30, 90, 365, 1095];
+
+  for (const value of presets) {
+    if (value < maxDays) {
+      windows.push(value);
+    }
+  }
+
+  windows.push(maxDays);
+  return [...new Set(windows)];
+}
+
+function shouldUseRootListing(filters = {}) {
+  const hasDateRange = Boolean(String(filters.dateRange || '').trim());
+  const hasTextSearch = Boolean(String(filters.search || '').trim());
+
+  return !hasDateRange && !hasTextSearch;
+}
+
 function matchesFilter(event, filters = {}) {
   const actorType = String(filters.actorType || '').trim();
   const action = String(filters.action || '').trim().toLowerCase();
   const status = String(filters.status || '').trim().toLowerCase();
   const search = String(filters.search || '').trim().toLowerCase();
+  const dateRange = String(filters.dateRange || '').trim();
 
   if (actorType && event.actorType !== actorType) {
     return false;
@@ -330,6 +392,60 @@ function matchesFilter(event, filters = {}) {
 
   if (status && String(event.status || '').toLowerCase() !== status) {
     return false;
+  }
+
+  if (dateRange) {
+    const createdAt = new Date(event?.createdAt || 0);
+
+    if (Number.isNaN(createdAt.getTime())) {
+      return false;
+    }
+
+    const normalizedRange = dateRange
+      .replace(/\s+/g, ' ')
+      .replace(/\./g, '/')
+      .replace(/-/g, '/')
+      .trim();
+    const [startText = '', endText = ''] = normalizedRange.split(' até ');
+    const startParts = startText.split('/');
+    const endParts = endText.split('/');
+
+    if (startParts.length !== 3 || endParts.length !== 3) {
+      return false;
+    }
+
+    const [startDay, startMonth, startYear] = startParts;
+    const [endDay, endMonth, endYear] = endParts;
+    const startDate = new Date(
+      Number(startYear),
+      Math.max(Number(startMonth) - 1, 0),
+      Number(startDay),
+      0,
+      0,
+      0,
+      0
+    );
+    const endDate = new Date(
+      Number(endYear),
+      Math.max(Number(endMonth) - 1, 0),
+      Number(endDay),
+      23,
+      59,
+      59,
+      999
+    );
+
+    if (
+      Number.isNaN(startDate.getTime()) ||
+      Number.isNaN(endDate.getTime()) ||
+      startDate > endDate
+    ) {
+      return false;
+    }
+
+    if (createdAt < startDate || createdAt > endDate) {
+      return false;
+    }
   }
 
   if (!search) {
@@ -350,13 +466,6 @@ function matchesFilter(event, filters = {}) {
     .toLowerCase();
 
   return searchableParts.includes(search);
-}
-
-function buildStorageUploadBody(jsonString) {
-  if (typeof Blob !== 'undefined') {
-    return new Blob([jsonString], { type: 'application/json' });
-  }
-  return jsonString;
 }
 
 async function downloadAuditObjectViaRest(fullPath) {
@@ -380,7 +489,7 @@ async function downloadAuditObjectViaRest(fullPath) {
   return { ok: true, text };
 }
 
-async function uploadAuditLogViaStorageRest(path, bodyString) {
+async function uploadAuditLogViaStorageRest(path, bodyData) {
   const { data: sessionData } = await supabase.auth.getSession();
   const bearer = sessionData?.session?.access_token || supabaseAnonKey;
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
@@ -393,7 +502,7 @@ async function uploadAuditLogViaStorageRest(path, bodyString) {
       apikey: supabaseAnonKey,
       'Content-Type': 'application/json',
     },
-    body: bodyString,
+    body: bodyData,
   });
 
   let payloadText = '';
@@ -444,29 +553,7 @@ export async function registrarLogAuditoria(config = {}) {
   console.log('AUDITORIA CHAMADA', payload);
 
   try {
-    const uploadBody = buildStorageUploadBody(body);
-    const uploadResult = await supabase.storage
-      .from(AUDIT_BUCKET)
-      .upload(path, uploadBody, {
-        contentType: 'application/json',
-        upsert: false,
-      });
-
-    console.log('UPLOAD RESULT', uploadResult);
-
-    if (!uploadResult.error) {
-      return {
-        ...payload,
-        path,
-      };
-    }
-
-    console.error('ERRO AUDITORIA', uploadResult.error);
-    console.log('AUDITORIA tentativa REST apos falha do SDK', {
-      sdkMessage: uploadResult.error?.message || '',
-    });
-
-    const restResult = await uploadAuditLogViaStorageRest(path, body);
+    const restResult = await uploadAuditLogViaStorageRest(path, binaryBody);
     console.log('UPLOAD RESULT REST', restResult);
 
     if (restResult.ok) {
@@ -477,22 +564,48 @@ export async function registrarLogAuditoria(config = {}) {
     }
 
     console.error('ERRO AUDITORIA', restResult.error);
+    console.log('AUDITORIA tentativa SDK apos falha do REST', {
+      restMessage: restResult.error?.message || '',
+    });
+
+    const uploadResult = await supabase.storage
+      .from(AUDIT_BUCKET)
+      .upload(path, binaryBody, {
+        contentType: 'application/json',
+        upsert: false,
+      });
+
+    console.log('UPLOAD RESULT SDK', uploadResult);
+
+    if (!uploadResult.error) {
+      return {
+        ...payload,
+        path,
+      };
+    }
+
+    console.error('ERRO AUDITORIA', uploadResult.error);
     return null;
   } catch (error) {
     console.error('ERRO AUDITORIA', error);
 
     try {
-      const restResult = await uploadAuditLogViaStorageRest(path, body);
-      console.log('UPLOAD RESULT REST', restResult);
-      if (restResult.ok) {
+      const uploadResult = await supabase.storage
+        .from(AUDIT_BUCKET)
+        .upload(path, binaryBody, {
+          contentType: 'application/json',
+          upsert: false,
+        });
+      console.log('UPLOAD RESULT SDK', uploadResult);
+      if (!uploadResult.error) {
         return {
           ...payload,
           path,
         };
       }
-      console.error('ERRO AUDITORIA', restResult.error);
-    } catch (restError) {
-      console.error('ERRO AUDITORIA', restError);
+      console.error('ERRO AUDITORIA', uploadResult.error);
+    } catch (sdkError) {
+      console.error('ERRO AUDITORIA', sdkError);
     }
 
     return null;
@@ -502,14 +615,18 @@ export async function registrarLogAuditoria(config = {}) {
 export async function listarEventosAuditoria({
   days = 7,
   limit = 60,
+  offset = 0,
   actorType = '',
   action = '',
   status = '',
   search = '',
+  dateRange = '',
 } = {}) {
-  const prefixes = buildRecentDatePrefixes(days);
   const parsedEvents = [];
   const attemptedPaths = new Set();
+  const maxWindowSize = Math.max((Number(offset) || 0) + (Number(limit) || 1), 1);
+  const shouldStopAfterWindow = maxWindowSize <= 200;
+  const effectiveSliceEnd = Math.max((Number(offset) || 0) + (Number(limit) || 1), 1);
 
   async function processAuditPath(fullPath) {
     if (!fullPath || attemptedPaths.has(fullPath)) {
@@ -517,20 +634,39 @@ export async function listarEventosAuditoria({
     }
 
     attemptedPaths.add(fullPath);
+    const cachedEvent = auditEventCache.get(fullPath);
 
-    const { data: downloadData, error: downloadError } = await supabase.storage
-      .from(AUDIT_BUCKET)
-      .download(fullPath);
+    if (cachedEvent) {
+      if (
+        isEventWithinDays(cachedEvent, days) &&
+        matchesFilter(cachedEvent, { actorType, action, status, search, dateRange })
+      ) {
+        parsedEvents.push(cachedEvent);
+      }
+      return;
+    }
+
+    if (shouldStopAfterWindow && parsedEvents.length >= maxWindowSize) {
+      return;
+    }
 
     let fileText = '';
-    if (!downloadError && downloadData) {
-      fileText = await readDownloadedText(downloadData);
+    let downloadError = null;
+
+    const restDl = await downloadAuditObjectViaRest(fullPath);
+    if (restDl.ok && restDl.text) {
+      fileText = restDl.text;
     }
 
     if (!fileText || !String(fileText).trim()) {
-      const restDl = await downloadAuditObjectViaRest(fullPath);
-      if (restDl.ok && restDl.text) {
-        fileText = restDl.text;
+      const downloadResult = await supabase.storage
+        .from(AUDIT_BUCKET)
+        .download(fullPath);
+
+      downloadError = downloadResult.error;
+
+      if (!downloadResult.error && downloadResult.data) {
+        fileText = await readDownloadedText(downloadResult.data);
       }
     }
 
@@ -543,39 +679,88 @@ export async function listarEventosAuditoria({
     }
 
     const parsed = parseAuditEvent(fileText, fullPath);
+    if (parsed) {
+      auditEventCache.set(fullPath, parsed);
+    }
 
     if (
       parsed &&
       isEventWithinDays(parsed, days) &&
-      matchesFilter(parsed, { actorType, action, status, search })
+      matchesFilter(parsed, { actorType, action, status, search, dateRange })
     ) {
       parsedEvents.push(parsed);
     }
   }
 
-  for (const prefix of prefixes) {
-    const auditPaths = await collectAuditJsonPaths(prefix, {
-      maxItems: Math.max(limit * 2, 50),
-      maxDepth: 2,
+  async function processPathsAndMaybeStop(paths) {
+    await processInBatches(paths, processAuditPath);
+    return shouldStopAfterWindow && parsedEvents.length >= maxWindowSize;
+  }
+
+  if (shouldUseRootListing({ search, dateRange })) {
+    const rootMaxItems = Math.max(effectiveSliceEnd * 3, 30);
+    const rootPaths = await collectAuditJsonPaths(AUDIT_PREFIX, {
+      maxItems: rootMaxItems,
+      maxDepth: 4,
     });
 
-    for (const fullPath of auditPaths) {
-      await processAuditPath(fullPath);
+    if (rootPaths.length === 0) {
+      return [];
+    }
+
+    const shouldStop = await processPathsAndMaybeStop(rootPaths);
+    if (shouldStop) {
+      return parsedEvents
+        .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+        .slice(Math.max(Number(offset) || 0, 0), effectiveSliceEnd);
+    }
+
+    if (rootPaths.length < rootMaxItems) {
+      return parsedEvents
+        .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+        .slice(Math.max(Number(offset) || 0, 0), effectiveSliceEnd);
+    }
+  }
+
+  const progressiveWindows = buildProgressiveWindows(days, maxWindowSize);
+  const visitedPrefixes = new Set();
+
+  for (const windowDays of progressiveWindows) {
+    const prefixes = buildRecentDatePrefixes(windowDays);
+
+    for (const prefix of prefixes) {
+      if (visitedPrefixes.has(prefix)) {
+        continue;
+      }
+
+      visitedPrefixes.add(prefix);
+
+      const auditPaths = await collectAuditJsonPaths(prefix, {
+        maxItems: Math.max(maxWindowSize * 2, 30),
+        maxDepth: 2,
+      });
+
+      const shouldStop = await processPathsAndMaybeStop(auditPaths);
+      if (shouldStop) {
+        break;
+      }
+    }
+
+    if (shouldStopAfterWindow && parsedEvents.length >= maxWindowSize) {
+      break;
     }
   }
 
   if (parsedEvents.length === 0) {
     const fallbackPaths = await collectAuditJsonPaths(AUDIT_PREFIX, {
-      maxItems: Math.max(limit * 4, 120),
+      maxItems: Math.max(maxWindowSize * 3, 60),
       maxDepth: 4,
     });
 
-    for (const fullPath of fallbackPaths) {
-      await processAuditPath(fullPath);
-    }
+    await processInBatches(fallbackPaths, processAuditPath);
   }
 
   return parsedEvents
     .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
-    .slice(0, Math.max(Number(limit) || 1, 1));
+    .slice(Math.max(Number(offset) || 0, 0), Math.max((Number(offset) || 0) + (Number(limit) || 1), 1));
 }
