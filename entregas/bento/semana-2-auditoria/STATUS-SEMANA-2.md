@@ -1,21 +1,17 @@
-# Semana 2 — evidências de auditoria (GlicNutri)
+# Status — Semana 2
 
-**Data de referência:** maio/2026  
-**Estado:** **PARCIAL** — implementação e texto de evidências alinhados à execução real; **falta versionar no Git** os sete PNG referenciados em [`evidencias-auditoria.md`](evidencias-auditoria.md) para fechar a evidência visual no repositório.
+## Situação geral
 
-## O que está nesta pasta
+COMPLETO (validação realizada com evidência visual em ambiente real)
 
-| Ficheiro | Conteúdo |
-|----------|----------|
-| [`checklist-auditoria.md`](checklist-auditoria.md) | Cobertura `registrarLogAuditoria` ↔ telas/serviços |
-| [`evidencias-auditoria.md`](evidencias-auditoria.md) | Execução real (metadados) + referências `./prints/*.png` |
-| [`roteiro-testes.md`](roteiro-testes.md) | Passos executáveis + resultados contra código |
-| [`prints/`](prints/) | **Alvo:** 7 PNG (`login_tela`, `login_sucesso`, `glicemia_input`, `glicemia_salva`, `auditoria_app`, `storage_lista`, `storage_log`). Até lá podem existir SVG antigos. |
+## Observações
 
-## Para “fechar” a evidência académica no repo
+- Fluxo de autenticação validado
+- Registro de dados (glicemia) funcionando
+- Auditoria implementada e exibida no app
+- Logs persistidos no Supabase Storage
+- Evidências documentadas com capturas reais (PNG)
 
-1. Copiar para `prints/` os PNG capturados no app e no Supabase (nomes acima).
-2. Opcional: remover SVG legados após confirmar pré-visualização do Markdown.
-3. Opcional: vídeo curto do fluxo Nutricionista → Paciente ou Admin → Auditoria.
+## Nota
 
-Ver também [`ml/EXPORT_CSV.md`](../../../ml/EXPORT_CSV.md) para o export CSV reprodutível (Semana 2 ML).
+A parte global da Semana 2 (Machine Learning / export CSV real) permanece PARCIAL conforme planejamento.

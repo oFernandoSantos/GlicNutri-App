@@ -379,7 +379,7 @@ export default function TelaLogin({ navigation, route, session }) {
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
 
-        registrarLogAuditoria({
+        await registrarLogAuditoria({
           actor: adminUser,
           actorType: 'admin',
           action: 'login_sucesso_admin',
@@ -436,7 +436,7 @@ export default function TelaLogin({ navigation, route, session }) {
           ? usuario?.id_paciente_uuid || null
           : usuario?.id_nutricionista_uuid || null;
 
-      registrarLogAuditoria({
+      await registrarLogAuditoria({
         actor: usuario,
         actorType: actorTipo,
         action: loginOkAction,
@@ -502,7 +502,7 @@ export default function TelaLogin({ navigation, route, session }) {
       : 'PacienteOnboarding';
 
     if (auditOptions.auditLogin === true) {
-      registrarLogAuditoria({
+      await registrarLogAuditoria({
         actor: usuarioPaciente,
         actorType: 'paciente',
         action: 'login_sucesso_google',

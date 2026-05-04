@@ -12,6 +12,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import BarraAbasAdmin, {
+  ADMIN_TAB_BAR_HEIGHT,
+  ADMIN_TAB_BAR_SPACE,
+} from '../../componentes/admin/BarraAbasAdmin';
+import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
 import { listarLogsSistema } from '../../servicos/servicoLogSistema';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
@@ -47,13 +52,41 @@ function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
 }
 
-export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado }) {
+export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
   const adminUser = usuarioLogado || route?.params?.usuarioLogado || null;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [logs, setLogs] = useState([]);
   const [search, setSearch] = useState('');
   const [level, setLevel] = useState('');
+  const [menuVisible, setMenuVisible] = useState(false);
+
+  async function handleLogout() {
+    setMenuVisible(false);
+
+    if (adminUser) {
+      await registrarLogAuditoria({
+        actor: adminUser,
+        actorType: 'admin',
+        action: 'logout_admin',
+        entity: 'sessao',
+        entityId: adminUser?.id_admin_uuid || null,
+        origin: 'admin_logs',
+        status: 'sucesso',
+        details: {},
+      });
+    }
+
+    await onAdminLogout?.();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: 'Login' }],
+    });
+  }
+
+  function handleNavigate(routeName) {
+    navigation.navigate(routeName, { usuarioLogado: adminUser });
+  }
 
   async function carregarLogs({ isRefresh = false } = {}) {
     try {
@@ -97,6 +130,14 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado 
     carregarLogs();
   }, [level]);
 
+  useEffect(() => {
+    navigation.setOptions({
+      readerOnMenuPress: isAdminUser(adminUser) ? () => setMenuVisible(true) : undefined,
+      readerMenuDisabled: !isAdminUser(adminUser),
+      readerMenuLoading: false,
+    });
+  }, [navigation, adminUser]);
+
   const summary = useMemo(() => buildSummary(logs), [logs]);
 
   if (!isAdminUser(adminUser)) {
@@ -124,6 +165,18 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado 
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="light-content" backgroundColor={adminTheme.colors.background} />
+
+      {menuVisible ? (
+        <MenuAdmin
+          visible={menuVisible}
+          onClose={() => setMenuVisible(false)}
+          onNavigate={handleNavigate}
+          onLogout={handleLogout}
+          currentRoute={route?.name || 'AdminLogsSistema'}
+          userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
+          userSubtitle="Observabilidade do sistema"
+        />
+      ) : null}
 
       <ScrollView
         style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
@@ -264,6 +317,12 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado 
           ))
         )}
       </ScrollView>
+
+      <BarraAbasAdmin
+        navigation={navigation}
+        rotaAtual={route?.name || 'AdminLogsSistema'}
+        usuarioLogado={adminUser}
+      />
     </View>
   );
 }
@@ -288,8 +347,9 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     flexGrow: 1,
-    padding: adminTheme.spacing.screen,
-    paddingBottom: 40,
+    paddingHorizontal: adminTheme.spacing.screen,
+    paddingTop: 6,
+    paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 26,
   },
   webScrollContent: {
     flexGrow: 0,
@@ -302,7 +362,7 @@ const styles = StyleSheet.create({
     ...adminShadow,
   },
   heroCard: {
-    marginTop: 6,
+    marginTop: 0,
     backgroundColor: adminTheme.colors.panelStrong,
     borderWidth: 1.5,
   },
@@ -329,7 +389,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginTop: 16,
+    marginTop: 6,
   },
   summaryCard: {
     borderColor: adminTheme.colors.primary,
@@ -356,7 +416,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   searchInput: {
-    backgroundColor: adminTheme.colors.panelMuted,
+    backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.primary,
     borderRadius: adminTheme.radius.lg,
     borderWidth: 1.4,
@@ -408,7 +468,7 @@ const styles = StyleSheet.create({
     fontSize: 20,
     fontWeight: '800',
     marginBottom: 12,
-    marginTop: 24,
+    marginTop: 12,
   },
   stateCard: {
     alignItems: 'center',
