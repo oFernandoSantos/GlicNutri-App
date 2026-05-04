@@ -1,0 +1,117 @@
+/* Estilos apenas para exportação PDF — não altera o .md */
+@page {
+  margin: 18mm 16mm;
+  size: A4;
+}
+
+body {
+  font-family: "Segoe UI", Calibri, Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+h1 {
+  font-size: 18pt;
+  font-weight: 700;
+  margin: 0 0 0.75em 0;
+  page-break-after: avoid;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0.35em;
+}
+
+h1:not(:first-child) {
+  page-break-before: always;
+  margin-top: 0;
+  padding-top: 0.5em;
+}
+
+h2 {
+  font-size: 14pt;
+  font-weight: 600;
+  margin: 1.35em 0 0.65em 0;
+  page-break-after: avoid;
+}
+
+h3 {
+  font-size: 12pt;
+  font-weight: 600;
+  margin: 1.1em 0 0.5em 0;
+  page-break-after: avoid;
+}
+
+p {
+  margin: 0.5em 0;
+}
+
+ul,
+ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+li {
+  margin: 0.25em 0;
+}
+
+hr {
+  margin: 1.25em 0;
+  border: none;
+  border-top: 1px solid #ccc;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 8.5pt;
+  line-height: 1.35;
+  margin: 1em 0;
+  page-break-inside: auto;
+}
+
+thead {
+  display: table-header-group;
+}
+
+tr {
+  page-break-inside: avoid;
+  page-break-after: auto;
+}
+
+th,
+td {
+  border: 1px solid #bbb;
+  padding: 6px 7px;
+  text-align: left;
+  vertical-align: top;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+th {
+  background: #f2f2f2;
+  font-weight: 600;
+}
+
+code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.9em;
+  background: #f5f5f5;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+a {
+  color: #0b57d0;
+  text-decoration: none;
+}
+
+blockquote {
+  margin: 0.75em 0;
+  padding-left: 1em;
+  border-left: 3px solid #ddd;
+}
+
+strong {
+  font-weight: 600;
+}

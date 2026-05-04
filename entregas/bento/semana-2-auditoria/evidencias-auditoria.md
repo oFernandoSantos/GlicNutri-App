@@ -81,15 +81,24 @@ Formato de armazenamento:
 audit-logs/app/AAAA-MM-DD/<timestamp>-<actorType>-<action>-<id>.json
 ```
 
-Implementação: [`GlicNutri/src/servicos/servicoAuditoria.js`](../../../GlicNutri/src/servicos/servicoAuditoria.js).
+Implementação: [`GlicNutri/src/servicos/servicoAuditoria.js`](../../../src/servicos/servicoAuditoria.js).
 
 ---
 
-## 4. Sincronização da pasta `prints/`
+## 4. Observação sobre evidências visuais
 
-A secção 2 referencia **sete** ficheiros PNG (`login_tela.png`, `login_sucesso.png`, `glicemia_input.png`, `glicemia_salva.png`, `auditoria_app.png`, `storage_lista.png`, `storage_log.png`). Enquanto não estiverem versionados em `prints/`, as imagens não aparecem no Markdown no Git e a **evidência visual da Semana 2 não está fechada no repositório**.
+As evidências apresentadas neste documento foram obtidas a partir da execução real do sistema.
 
-Ficheiros SVG antigos (`admin-tela-auditoria.svg`, `storage-bucket-audit-logs.svg`) podem ser removidos ou mantidos como arquivo até todos os PNG estarem presentes.
+Os arquivos PNG localizados na pasta `./prints/` representam:
+
+- Fluxo de autenticação (login)
+- Registro de glicemia
+- Visualização de auditoria no app
+- Persistência de logs no Supabase Storage
+
+Essas evidências substituem versões anteriores baseadas em diagramas (SVG), garantindo validação prática do sistema.
+
+Caso os arquivos SVG sejam mantidos, eles servem apenas como referência complementar e não como evidência principal.
 
 ---
 

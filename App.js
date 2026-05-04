@@ -46,7 +46,7 @@ import { carregarSessaoAdmin, limparSessaoAdmin } from './src/servicos/servicoAd
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
-const READER_TOPO_WEB_HEIGHT = 59;
+const READER_TOPO_WEB_HEIGHT = 58;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const fadeCardInterpolator = ({ current }) => ({
   cardStyle: {

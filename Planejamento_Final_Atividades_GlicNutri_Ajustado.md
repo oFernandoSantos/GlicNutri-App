@@ -67,24 +67,22 @@ Esta subsecção amarra **requisito → evidência no código** conforme o estad
 | API `POST /predict` | FastAPI + contrato JSON | `backend/app/main.py`, dependências em `backend/requirements.txt` |
 | Auditoria e logs (implementação no app) | **Completo** no código: gravação Storage, painel admin, recuperação de senha sem dados sensíveis nos detalhes | `servicoAuditoria.js`, `TelaHomeAdmin.js`, `TelaAuditoriaAdmin.js`, `TelaLogsSistemaAdmin.js`, `TelaRecuperarSenha.js` |
 | Logs persistidos via Supabase Storage (bucket `audit-logs`) | **Completo** no código (fluxo implementado) | Idem + migrations/policies conforme projeto |
-| Evidências visuais Semana 2 (capturas PNG) | **Parcial** no repositório: [`evidencias-auditoria.md`](../entregas/bento/semana-2-auditoria/evidencias-auditoria.md) referencia sete PNG; **ficheiros ainda não versionados** em [`prints/`](../entregas/bento/semana-2-auditoria/prints/) (só SVG legados na última validação) | Versionar `login_tela.png`, `login_sucesso.png`, `glicemia_input.png`, `glicemia_salva.png`, `auditoria_app.png`, `storage_lista.png`, `storage_log.png` |
-| Autenticação (evidência visual Semana 2) | **Parcial** até os PNG de login existirem em `prints/` | Idem |
-| Fluxo paciente — glicemia (evidência visual Semana 2) | **Parcial** até os PNG `glicemia_*.png` existirem em `prints/` | Idem |
+| Semana 2 — Bento / auditoria (evidências visuais em `prints/`) | **COMPLETO** (evidência validada no repositório) | [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md); capturas em [`prints/`](entregas/bento/semana-2-auditoria/prints/) |
 | Export CSV Supabase (dados reais) | **Parcial** | `ml/scripts/export_supabase_csv.py`, `ml/EXPORT_CSV.md`; execução com `DATABASE_URL` real ainda não evidenciada no repo |
 | ML referência GlucoBench | **Parcial / em andamento** | `Diabetes_pipeline_ml (3).ipynb` + `Diabetes_pipeline_ml_legacy_pima_anexo.ipynb`; sem treino/pipeline final obrigatório nesta linha |
 | Entregas acadêmicas (ZIP, slides, vídeo, Word único) | Fora do escopo do Git / pendente de grupo | Processo manual |
 
 **Nota sobre CRUD / exclusão:** exclusão física de glicemia/medicação não é exposta por design; histórico usa ocultação no app + auditoria de eventos; exclusão de paciente pelo nutricionista é lógica (`excluido`).
 
-**Semana 2 (entrega prevista 10/05) — situação real:** **PARCIAL no conjunto do planejamento.** A parte **Bento / auditoria** está **fechada em código** e **documentada** para execução real em [`evidencias-auditoria.md`](../entregas/bento/semana-2-auditoria/evidencias-auditoria.md), [`checklist-auditoria.md`](../entregas/bento/semana-2-auditoria/checklist-auditoria.md) e [`STATUS-SEMANA-2.md`](../entregas/bento/semana-2-auditoria/STATUS-SEMANA-2.md); a **evidência fotográfica** no Git continua **parcial** até os PNG referenciados existirem em `prints/`. A parte **Thayse** continua **parcial**: export CSV com credenciais reais e narrativa ML completa com dados GlicNutri (ver `ml/EXPORT_CSV.md` e `ml/notebooks/glicnutri_ml_pipeline.ipynb`).
+**Semana 2 (entrega prevista 10/05) — situação real:** **PARCIAL no conjunto do planejamento** (parte **Thayse**). A parte **Bento / auditoria** da Semana 2 está **COMPLETA**: código, checklist/STATUS e **evidência visual validada com capturas reais no repositório** ([`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), [`prints/`](entregas/bento/semana-2-auditoria/prints/)). A parte **Thayse** permanece **parcial**: export CSV com credenciais reais e ML com dados GlicNutri (ver `ml/EXPORT_CSV.md` e `ml/notebooks/glicnutri_ml_pipeline.ipynb`).
 
 ### 3.5 Requisito → evidência → artefacto (resumo)
 
 | Foco | Estado | Onde comprovar |
 |------|--------|----------------|
-| Bento — autenticação, fluxos, CRUD | Parcial (evid. visual S2 até PNG versionados) | Código: `src/telas/autenticacao/`, `App.js`, `servicoDadosPaciente.js`; pasta [`../entregas/bento/semana-2-auditoria/`](../entregas/bento/semana-2-auditoria/) (`evidencias-auditoria.md`, `checklist-auditoria.md`, `STATUS-SEMANA-2.md`, `roteiro-testes.md`, [`prints/`](../entregas/bento/semana-2-auditoria/prints/)) |
+| Bento — autenticação, fluxos, CRUD | Parcial (requisito global); Semana 2: evidência visual **COMPLETA** | Código: `src/telas/autenticacao/`, `App.js`, `servicoDadosPaciente.js`; pasta [`entregas/bento/semana-2-auditoria/`](entregas/bento/semana-2-auditoria/) — **Evidência visual validada com capturas reais no repositório** |
 | Bento — auditoria (código) | Completo | `servicoAuditoria.js`, telas admin e fluxos em `checklist-auditoria.md` |
-| Bento — auditoria (evidência visual Git) | Parcial | [`evidencias-auditoria.md`](../entregas/bento/semana-2-auditoria/evidencias-auditoria.md) + PNG em `prints/` (pendentes) |
+| Bento — auditoria (evidência visual Git, Semana 2) | **Completo** | [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md) + [`prints/`](entregas/bento/semana-2-auditoria/prints/) |
 | Thayse — CSV reprodutível | Parcial | `ml/scripts/export_supabase_csv.py`, `ml/EXPORT_CSV.md` |
 | Thayse — ML GlicNutri (paciente-dia) | Parcial | `ml/notebooks/glicnutri_ml_pipeline.ipynb` |
 | Thayse — ML referência GlucoBench | Parcial / em andamento | `Diabetes_pipeline_ml (3).ipynb` (legado Pima: `Diabetes_pipeline_ml_legacy_pima_anexo.ipynb`) |
@@ -102,12 +100,12 @@ Os requisitos do professor Bento foram organizados com base no documento `Requis
 |---|---|---|---|---|---|---|
 | 1 | Documentação Inicial | Documento Word padronizado, definição de tecnologias e levantamento de requisitos | Parcial (repo) | `Planejamento_Final_Atividades_GlicNutri_Ajustado.md`, pasta `entregas/` | Consolidar documento Word final com tecnologias, requisitos e descrição do sistema | Semana 1 e Semana 5 |
 | 2 | Banco de Dados | Estrutura de tabelas, campos adequados, chaves primárias, estrangeiras e relacionamentos | Parcial | `GlicNutri/supabase/migrations/` | Documentar ER/tabelas no documento final acadêmico | Semana 1 |
-| 3 | Autenticação | Login de usuários, validação de credenciais e recuperação de senha | Parcial | Código: `TelaLogin.js`, `TelaRecuperarSenha.js`, `App.js`, RPCs; evidência visual Semana 2: [`evidencias-auditoria.md`](../entregas/bento/semana-2-auditoria/evidencias-auditoria.md) (PNG `login_*.png` referenciados — versionar em `prints/`) | Recuperação de senha: evidência específica se o professor exigir; completar PNG no repo | Semana 2 |
+| 3 | Autenticação | Login de usuários, validação de credenciais e recuperação de senha | Parcial | Código: `TelaLogin.js`, `TelaRecuperarSenha.js`, `App.js`, RPCs; Semana 2: **Evidência visual validada com capturas reais no repositório** ([`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), `login_*.png` em [`prints/`](entregas/bento/semana-2-auditoria/prints/)) | Recuperação de senha: evidência específica se o professor exigir | Semana 2 |
 | 4 | CRUD Completo | Cadastro, consulta, edição e exclusão lógica | Parcial | Cadastro/gestão: `TelaCadastro.js`, `TelaPacientesNutricionista.js`, `servicoDadosPaciente.js` | Documentar decisão: exclusão clínica por ocultação + auditoria (sem DELETE físico glicemia/medicação) | Semana 2 |
 | 5 | Validações de Dados | Validação de campos obrigatórios, CPF, CEP, email e outros dados necessários | Parcial | Formulários em `TelaCadastro.js`, `TelaPacientesNutricionista.js`, login | Auditoria de cobertura por tela + evidências | Semana 2 |
-| 6 | Fluxo do Sistema | Navegação entre telas, fluxo funcional completo e persistência no banco | Parcial | `App.js`, fluxos paciente/nutri/admin; Semana 2: capturas login + glicemia em [`evidencias-auditoria.md`](../entregas/bento/semana-2-auditoria/evidencias-auditoria.md) (PNG pendentes em `prints/`) | Roteiro/demo gravado global; versionar PNG para evidência Git | Semana 2 e Semana 4 |
+| 6 | Fluxo do Sistema | Navegação entre telas, fluxo funcional completo e persistência no banco | Parcial | `App.js`, fluxos paciente/nutri/admin; Semana 2: **Evidência visual validada com capturas reais no repositório** (login + glicemia em [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md) / [`prints/`](entregas/bento/semana-2-auditoria/prints/)) | Roteiro/demo gravado global (entrega ampliada) | Semana 2 e Semana 4 |
 | 7 | Usabilidade | Interface funcional, facilidade de uso e navegação intuitiva | Parcial | UI RN em `src/telas/` | Revisão heurística + prints | Semana 4 |
-| 8 | Auditoria | Registro de ações de cadastro, movimentações e logs de operações | Parcial | Código completo; pasta [`../entregas/bento/semana-2-auditoria/`](../entregas/bento/semana-2-auditoria/) (`checklist-auditoria.md`, `evidencias-auditoria.md`, `STATUS-SEMANA-2.md`) | Versionar PNG (`auditoria_app`, `storage_*`) em `prints/`; texto LGPD no documento Word final | Semana 4 |
+| 8 | Auditoria | Registro de ações de cadastro, movimentações e logs de operações | Parcial | Código completo; Semana 2: **Evidência visual validada com capturas reais no repositório** ([`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), [`prints/`](entregas/bento/semana-2-auditoria/prints/), checklist/STATUS) | Texto LGPD no documento Word final (entrega académica global) | Semana 4 |
 | 9 | Relatórios e Gráficos | Relatórios de dados, visualizações gráficas e informações gerenciais | Parcial | Painel admin, curvas/monitoramento paciente | Consolidar entregável + prints disciplina | Semana 4 |
 | 10 | Organização do Código | Estrutura organizada, código limpo e separação de responsabilidades | Parcial | `src/` serviços, telas, componentes | Descrever estrutura no documento final | Semana 5 |
 | 11 | Atualização da Documentação | Documento atualizado, corrigido conforme feedback e coerente com o sistema | Em andamento | Este planejamento (secção 3.4), entregas md | Sincronizar Word final com sistema real | Semana 5 |
@@ -158,7 +156,7 @@ O cronograma abaixo organiza as entregas semanais necessárias para finalizar o 
 | Semana 4 | 18/05 a 24/05 | Criar backend Python organizado; implementar persistência; criar API FastAPI `POST /predict`; testar localmente; consolidar auditoria, logs, usabilidade, relatórios e gráficos | Integrante 3 + Integrante 4 | 16 a 20h | API funcional + contrato JSON + evidências de auditoria, logs, relatórios e gráficos | 24/05, 30 a 45 min |
 | Semana 5 | 25/05 a 31/05 | Fazer integração mínima app com API ou simulação controlada; finalizar documentação do Bento e da Thayse; preparar ZIP, slides, vídeo, evidências e ensaio final | Todos | 18 a 24h | Pacote final: documento, slides, vídeo, ZIP, evidências e checklist final | 31/05, 60 min |
 
-**Situação real — Semana 2 (maio/2026):** **PARCIAL (global).** A parte **Bento — auditoria** está **validada em código** e o texto em `entregas/bento/semana-2-auditoria/` descreve **execução real** com referências PNG; **completar** no Git exige **versionar** os ficheiros em `prints/`. A parte **Thayse** permanece **parcial**: export CSV com `DATABASE_URL` real e ML com dados reais, conforme secção 3.4.
+**Situação real — Semana 2 (maio/2026):** **PARCIAL (global)** — parte **Thayse** (CSV/ML) conforme secção 3.4. Parte **Bento / auditoria** da Semana 2: **COMPLETA** — **Evidência visual validada com capturas reais no repositório** (`entregas/bento/semana-2-auditoria/`).
 
 ---
 
@@ -221,8 +219,8 @@ Com a execução deste plano, o grupo terá maior controle sobre as pendências,
 | Persistir artefatos: modelo, padronização e variáveis | [x] `backend/artifacts/*.joblib`, `training_meta.json` |
 | Criar backend Python organizado e reproduzível | [x] pasta `backend/` + `requirements.txt` |
 | Implementar API FastAPI com `POST /predict` e testar com exemplos | [x] `backend/app/main.py` |
-| Consolidar evidências do app: login, CRUD, exclusão lógica e processos | [ ] parcial — Semana 2: md + checklist em `entregas/bento/semana-2-auditoria/`; **PNG referenciados ainda não no repo** |
-| Consolidar auditoria/logs no repositório (evidências Semana 2) | [x] `evidencias-auditoria.md`, `checklist-auditoria.md`, `STATUS-SEMANA-2.md` (execução real descrita); **pendente:** versionar 7 PNG em `prints/` |
+| Consolidar evidências do app: login, CRUD, exclusão lógica e processos | [x] Semana 2 Bento: `entregas/bento/semana-2-auditoria/` com PNG em `prints/` e docs alinhados |
+| Consolidar auditoria/logs no repositório (evidências Semana 2) | [x] `evidencias-auditoria.md`, `checklist-auditoria.md`, `STATUS-SEMANA-2.md`; **Evidência visual validada com capturas reais no repositório** |
 | Consolidar texto LGPD no documento Word final | [ ] |
 | Consolidar relatórios e gráficos para apresentação | [ ] |
 | Preparar slides e roteiro de demonstração | [ ] |

@@ -11,6 +11,11 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import BarraAbasAdmin, {
+  ADMIN_TAB_BAR_HEIGHT,
+  ADMIN_TAB_BAR_SPACE,
+} from '../../componentes/admin/BarraAbasAdmin';
+import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { supabase } from '../../servicos/configSupabase';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
@@ -68,6 +73,10 @@ function formatDateTime(value) {
     dateStyle: 'short',
     timeStyle: 'short',
   });
+}
+
+function normalizeAuditStatus(value) {
+  return String(value || '').trim().toLowerCase();
 }
 
 function prettifyAction(value) {
@@ -147,8 +156,11 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState(initialDashboardState);
+  const [menuVisible, setMenuVisible] = useState(false);
 
   async function handleLogout() {
+    setMenuVisible(false);
+
     if (adminUser) {
       await registrarLogAuditoria({
         actor: adminUser,
@@ -222,7 +234,9 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
         const createdAt = new Date(item.createdAt || 0);
         return !Number.isNaN(createdAt.getTime()) && createdAt >= todayStart;
       });
-      const failedAuditEvents = auditEvents.filter((item) => item.status === 'falha');
+      const failedAuditEvents = auditEvents.filter(
+        (item) => normalizeAuditStatus(item.status) === 'falha'
+      );
       const systemErrorsToday = systemLogs.filter((item) => {
         const createdAt = new Date(item.createdAt || 0);
         return item.level === 'error' && !Number.isNaN(createdAt.getTime()) && createdAt >= todayStart;
@@ -258,6 +272,10 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     }
   }
 
+  function handleNavigate(routeName) {
+    navigation.navigate(routeName, { usuarioLogado: adminUser });
+  }
+
   useEffect(() => {
     if (!isAdminUser(adminUser)) {
       return;
@@ -265,6 +283,21 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
 
     carregarDashboard();
   }, [adminUser]);
+
+  useEffect(() => {
+    navigation.setOptions({
+      readerOnMenuPress: isAdminUser(adminUser) ? () => setMenuVisible(true) : undefined,
+      readerMenuDisabled: !isAdminUser(adminUser),
+      readerMenuLoading: false,
+      readerRightAction: isAdminUser(adminUser)
+        ? () => carregarDashboard({ isRefresh: true })
+        : undefined,
+      readerRightIcon: 'refresh-outline',
+      readerRightAccessibilityLabel: 'Atualizar painel',
+      readerRightDisabled: refreshing || loading,
+      readerRightLoading: refreshing,
+    });
+  }, [navigation, adminUser, refreshing, loading]);
 
   const alerts = useMemo(() => buildAlertItems(dashboard), [dashboard]);
   const openAlertsCount = useMemo(
@@ -333,6 +366,29 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     ],
     [dashboard]
   );
+  const overviewCards = useMemo(
+    () => [
+      {
+        key: 'usuarios',
+        icon: 'people-outline',
+        title: `${userBaseCount} usuarios`,
+        text: 'ecossistema monitorado',
+      },
+      {
+        key: 'alertas',
+        icon: 'alert-circle-outline',
+        title: `${openAlertsCount} alertas`,
+        text: 'prioridades abertas agora',
+      },
+      {
+        key: 'atualizacao',
+        icon: 'time-outline',
+        title: formatDateTime(dashboard.lastUpdatedAt),
+        text: 'ultima atualizacao do painel',
+      },
+    ],
+    [dashboard.lastUpdatedAt, openAlertsCount, userBaseCount]
+  );
 
   if (!isAdminUser(adminUser)) {
     return (
@@ -362,6 +418,18 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="light-content" backgroundColor={adminTheme.colors.background} />
 
+      {menuVisible ? (
+        <MenuAdmin
+          visible={menuVisible}
+          onClose={() => setMenuVisible(false)}
+          onNavigate={handleNavigate}
+          onLogout={handleLogout}
+          currentRoute={route?.name || 'AdminHome'}
+          userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
+          userSubtitle="Console administrativo"
+        />
+      ) : null}
+
       <ScrollView
         style={styles.scroll}
         contentContainerStyle={styles.scrollContent}
@@ -375,55 +443,6 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
           />
         }
       >
-        <View style={styles.heroShell}>
-          <View style={styles.heroBackdrop} />
-          <DashboardCard style={styles.heroCard}>
-            <View style={styles.heroTopRow}>
-              <View style={styles.heroIdentityBlock}>
-                <Text style={styles.heroEyebrow}>Console Administrativo</Text>
-                <Text style={styles.heroTitle}>Visao executiva da plataforma</Text>
-                <Text style={styles.heroDescription}>
-                  Monitore crescimento, governanca e estabilidade do app em um painel unico.
-                </Text>
-                <Text style={styles.heroIdentity}>
-                  {adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-                </Text>
-              </View>
-
-              <View style={styles.heroActionColumn}>
-                <TouchableOpacity
-                  style={styles.secondaryButton}
-                  onPress={() => carregarDashboard({ isRefresh: true })}
-                >
-                  <Ionicons name="refresh-outline" size={16} color={adminTheme.colors.primaryStrong} />
-                  <Text style={styles.secondaryButtonText}>Atualizar</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.ghostButton} onPress={handleLogout}>
-                  <Ionicons name="log-out-outline" size={16} color={adminTheme.colors.textOnDark} />
-                  <Text style={styles.ghostButtonText}>Sair</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.heroStatsRow}>
-              <View style={styles.heroStatPill}>
-                <Ionicons name="people-outline" size={15} color={adminTheme.colors.primaryStrong} />
-                <Text style={styles.heroStatText}>{userBaseCount} usuario(s) monitorados</Text>
-              </View>
-              <View style={styles.heroStatPill}>
-                <Ionicons name="alert-circle-outline" size={15} color={adminTheme.colors.primaryStrong} />
-                <Text style={styles.heroStatText}>{openAlertsCount} alerta(s) abertos</Text>
-              </View>
-              <View style={styles.heroStatPill}>
-                <Ionicons name="time-outline" size={15} color={adminTheme.colors.primaryStrong} />
-                <Text style={styles.heroStatText}>
-                  Atualizado em {formatDateTime(dashboard.lastUpdatedAt)}
-                </Text>
-              </View>
-            </View>
-          </DashboardCard>
-        </View>
-
         {loading ? (
           <DashboardCard style={styles.loadingCard}>
             <ActivityIndicator color={adminTheme.colors.primary} />
@@ -431,6 +450,47 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
           </DashboardCard>
         ) : (
           <>
+            <Text style={styles.sectionTitle}>Visao geral</Text>
+            <View style={styles.overviewGrid}>
+              {overviewCards.map((item) => (
+                <DashboardCard key={item.key} style={styles.overviewCard}>
+                  <View style={styles.overviewIcon}>
+                    <Ionicons name={item.icon} size={18} color={adminTheme.colors.primary} />
+                  </View>
+                  <View style={styles.overviewContent}>
+                    <Text style={styles.overviewTitle}>{item.title}</Text>
+                    <Text style={styles.overviewText}>{item.text}</Text>
+                  </View>
+                </DashboardCard>
+              ))}
+            </View>
+
+            <Text style={styles.sectionTitle}>Centros administrativos</Text>
+            <View style={styles.moduleGrid}>
+              {modules.map((item) => {
+                const metric =
+                  item.key === 'auditoria'
+                    ? `${dashboard.auditEventsToday} evento(s) hoje`
+                    : `${dashboard.systemErrorsToday} erro(s) hoje`;
+
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={styles.moduleCard}
+                    onPress={() => navigation.navigate(item.route)}
+                  >
+                    <View style={styles.moduleBadge}>
+                      <Ionicons name={item.icon} size={20} color={adminTheme.colors.accent} />
+                    </View>
+                    <Text style={styles.moduleTitle}>{item.title}</Text>
+                    <Text style={styles.moduleSubtitle}>{item.subtitle}</Text>
+                    <Text style={styles.moduleHelper}>{item.helper}</Text>
+                    <Text style={styles.moduleMetric}>{metric}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
             <Text style={styles.sectionTitle}>Base operacional</Text>
             <View style={styles.kpiGrid}>
               {kpis.map((item) => (
@@ -463,31 +523,6 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
                 ))}
               </View>
 
-              <View style={styles.splitColumnSmall}>
-                <Text style={styles.sectionTitle}>Atalhos</Text>
-                {modules.map((item) => {
-                  const metric =
-                    item.key === 'auditoria'
-                      ? `${dashboard.auditEventsToday} evento(s) hoje`
-                      : `${dashboard.systemErrorsToday} erro(s) hoje`;
-
-                  return (
-                    <TouchableOpacity
-                      key={item.key}
-                      style={styles.moduleCard}
-                      onPress={() => navigation.navigate(item.route)}
-                    >
-                      <View style={styles.moduleBadge}>
-                        <Ionicons name={item.icon} size={20} color={adminTheme.colors.accent} />
-                      </View>
-                      <Text style={styles.moduleTitle}>{item.title}</Text>
-                      <Text style={styles.moduleSubtitle}>{item.subtitle}</Text>
-                      <Text style={styles.moduleHelper}>{item.helper}</Text>
-                      <Text style={styles.moduleMetric}>{metric}</Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
             </View>
 
             <View style={styles.splitSection}>
@@ -557,6 +592,12 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
           </>
         )}
       </ScrollView>
+
+      <BarraAbasAdmin
+        navigation={navigation}
+        rotaAtual={route?.name || 'AdminHome'}
+        usuarioLogado={adminUser}
+      />
     </View>
   );
 }
@@ -574,75 +615,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scrollContent: {
-    padding: adminTheme.spacing.screen,
-    paddingBottom: 42,
+    paddingHorizontal: adminTheme.spacing.screen,
+    paddingTop: 6,
+    paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 28,
   },
   card: {
     backgroundColor: adminTheme.colors.panel,
     borderRadius: adminTheme.radius.lg,
     padding: adminTheme.spacing.card,
     ...adminShadow,
-  },
-  heroShell: {
-    marginTop: 6,
-    position: 'relative',
-  },
-  heroBackdrop: {
-    backgroundColor: adminTheme.colors.backgroundAccent,
-    borderRadius: adminTheme.radius.xl,
-    bottom: 12,
-    left: 10,
-    opacity: 1,
-    position: 'absolute',
-    right: 10,
-    top: 12,
-  },
-  heroCard: {
-    backgroundColor: adminTheme.colors.panelStrong,
-    borderColor: adminTheme.colors.panelBorder,
-    borderWidth: 1.5,
-    padding: 22,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 16,
-    justifyContent: 'space-between',
-  },
-  heroIdentityBlock: {
-    flex: 1,
-    minWidth: 240,
-  },
-  heroEyebrow: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 1,
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
-    color: adminTheme.colors.textOnDark,
-    fontSize: 30,
-    fontWeight: '800',
-    lineHeight: 36,
-    marginTop: 10,
-  },
-  heroDescription: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 22,
-    marginTop: 10,
-    maxWidth: 620,
-  },
-  heroIdentity: {
-    color: adminTheme.colors.primary,
-    fontSize: 13,
-    fontWeight: '700',
-    marginTop: 16,
-  },
-  heroActionColumn: {
-    gap: 10,
-    minWidth: 170,
   },
   primaryButton: {
     alignItems: 'center',
@@ -657,67 +638,53 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '800',
   },
-  secondaryButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.primarySoft,
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1.5,
-    borderRadius: adminTheme.radius.pill,
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: 16,
-  },
-  secondaryButtonText: {
-    color: adminTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  ghostButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.panelMuted,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.pill,
-    borderWidth: 1.2,
-    flexDirection: 'row',
-    gap: 8,
-    justifyContent: 'center',
-    minHeight: 44,
-    paddingHorizontal: 16,
-  },
-  ghostButtonText: {
-    color: adminTheme.colors.textOnDark,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  heroStatsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 18,
-  },
-  heroStatPill: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.panelMuted,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  heroStatText: {
-    color: adminTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
   loadingCard: {
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: adminTheme.spacing.section,
     minHeight: 120,
+  },
+  overviewGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  overviewCard: {
+    alignItems: 'center',
+    borderColor: adminTheme.colors.panelBorder,
+    borderWidth: 1.1,
+    flexDirection: 'row',
+    gap: 12,
+    minHeight: 78,
+    minWidth: 180,
+    width: '24%',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+  },
+  overviewIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: adminTheme.colors.primarySoft,
+    borderWidth: 1,
+    borderColor: adminTheme.colors.primary,
+  },
+  overviewContent: {
+    flex: 1,
+    minWidth: 0,
+  },
+  overviewTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  overviewText: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
   },
   loadingText: {
     color: adminTheme.colors.textMuted,
@@ -729,9 +696,14 @@ const styles = StyleSheet.create({
     fontSize: 21,
     fontWeight: '800',
     marginBottom: 12,
-    marginTop: adminTheme.spacing.section,
+    marginTop: 12,
   },
   kpiGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  moduleGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
@@ -740,7 +712,8 @@ const styles = StyleSheet.create({
     borderColor: adminTheme.colors.primary,
     borderWidth: 1.2,
     minHeight: 136,
-    width: '48%',
+    minWidth: 220,
+    width: '23.8%',
   },
   kpiLabel: {
     color: adminTheme.colors.textMuted,
@@ -780,7 +753,8 @@ const styles = StyleSheet.create({
     borderColor: adminTheme.colors.primary,
     borderWidth: 1.2,
     minHeight: 104,
-    width: '48%',
+    minWidth: 220,
+    width: '23.8%',
   },
   stripLabel: {
     color: adminTheme.colors.textMuted,
@@ -829,8 +803,8 @@ const styles = StyleSheet.create({
     borderColor: adminTheme.colors.primary,
     borderRadius: adminTheme.radius.lg,
     borderWidth: 1.3,
-    marginBottom: 12,
     padding: adminTheme.spacing.card,
+    width: '48%',
   },
   moduleBadge: {
     alignItems: 'center',

@@ -99,6 +99,11 @@ export default function ReaderTopo({ navigation, route, options }) {
   const notificationCount = Number(options?.readerNotificationCount || 0);
   const notificationAction = options?.readerOnNotificationPress;
   const notificationDisabled = options?.readerNotificationDisabled;
+  const rightAction = options?.readerRightAction;
+  const rightActionIcon = options?.readerRightIcon || 'refresh-outline';
+  const rightActionDisabled = options?.readerRightDisabled;
+  const rightActionLoading = options?.readerRightLoading;
+  const rightActionLabel = options?.readerRightAccessibilityLabel || 'Acao';
   const extraContent = options?.readerExtraContent;
   const hasNotifications = notificationCount > 0;
 
@@ -137,13 +142,13 @@ export default function ReaderTopo({ navigation, route, options }) {
     >
       <View style={{ height: topSpacing }} />
 
-      <View style={styles.bar}>
-        <View style={[styles.side, isLogin && styles.brandSide]}>
+      <View style={[styles.bar, isAdminContext && styles.barAdmin]}>
+        <View style={[styles.side, isAdminContext && styles.sideAdmin, isLogin && styles.brandSide]}>
           {isLogin ? (
             <Text style={[styles.brandText, isAdminContext && styles.brandTextAdmin]} numberOfLines={1}>
               GlicNutri
             </Text>
-          ) : isPatientHome ? (
+          ) : isPatientHome || (isAdminContext && menuAction) ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel="Abrir menu"
@@ -191,8 +196,34 @@ export default function ReaderTopo({ navigation, route, options }) {
           </View>
         ) : null}
 
-        <View style={[styles.side, styles.sideRight]}>
-          {isPatientHome ? (
+        <View style={[styles.side, isAdminContext && styles.sideAdmin, styles.sideRight]}>
+          {rightAction ? (
+            <TouchableOpacity
+              activeOpacity={0.78}
+              accessibilityLabel={rightActionLabel}
+              accessibilityRole="button"
+              disabled={rightActionDisabled || rightActionLoading}
+              onPress={rightAction}
+              style={[
+                styles.readerButton,
+                isAdminContext && styles.readerButtonAdmin,
+                (rightActionDisabled || rightActionLoading) && styles.readerButtonDisabled,
+              ]}
+            >
+              {rightActionLoading ? (
+                <ActivityIndicator
+                  size="small"
+                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+                />
+              ) : (
+                <Ionicons
+                  name={rightActionIcon}
+                  size={21}
+                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+                />
+              )}
+            </TouchableOpacity>
+          ) : isPatientHome ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel={
@@ -269,6 +300,11 @@ const styles = StyleSheet.create({
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.background,
     borderBottomColor: adminTheme.colors.background,
+    borderWidth: 0,
+    borderBottomWidth: 0,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    elevation: 0,
   },
   readerWebFixed: {
     left: 0,
@@ -285,10 +321,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     position: 'relative',
   },
+  barAdmin: {
+    height: 58,
+    paddingHorizontal: 12,
+  },
   side: {
     alignItems: 'flex-start',
     justifyContent: 'center',
     width: 56,
+  },
+  sideAdmin: {
+    width: 48,
   },
   sideRight: {
     alignItems: 'flex-end',
