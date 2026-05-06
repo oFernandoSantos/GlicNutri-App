@@ -4,6 +4,7 @@
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
+    "ml:export-csv": "python machine-learning/scripts/export_supabase_csv.py --output machine-learning/data/glicnutri_patient_day_export.csv --manifest machine-learning/data/export_manifest.json --days 90",
     "start": "expo start",
     "android": "expo run:android",
     "ios": "expo run:ios",

@@ -5,6 +5,7 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
@@ -14,6 +15,7 @@ import {
   fetchPatientExperience,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import { fetchActiveMealPlanForPatient } from '../../servicos/servicoPlanoAlimentar';
 
 export default function PacientePlanoScreen({
   navigation,
@@ -39,6 +41,7 @@ export default function PacientePlanoScreen({
   const [patient, setPatient] = useState(null);
   const [objectiveText, setObjectiveText] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
+  const [mealPlan, setMealPlan] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -62,6 +65,15 @@ export default function PacientePlanoScreen({
         setPatient(experience.patient);
         setObjectiveText(experience.clinicalObjective);
         setAppState(experience.appState);
+
+        const effectiveId = experience?.patient?.id_paciente_uuid || patientId;
+        if (effectiveId) {
+          const activePlan = await fetchActiveMealPlanForPatient(effectiveId);
+          if (!active) return;
+          setMealPlan(activePlan || null);
+        } else {
+          setMealPlan(null);
+        }
       } catch (error) {
         console.log('Erro ao carregar plano:', error);
       } finally {
@@ -77,6 +89,7 @@ export default function PacientePlanoScreen({
   }, [patientId, canResolvePatient]);
 
   const planSections = appState.planSections || [];
+  const metasText = mealPlan?.metas ? JSON.stringify(mealPlan.metas, null, 2) : '';
 
   return (
     <PatientScreenLayout
@@ -88,6 +101,43 @@ export default function PacientePlanoScreen({
         <View style={styles.loadingCard}>
           <ActivityIndicator color={patientTheme.colors.primaryDark} />
           <Text style={styles.loadingText}>Carregando plano do Supabase...</Text>
+        </View>
+      ) : null}
+
+      {mealPlan ? (
+        <View style={styles.planCard}>
+          <View style={styles.planHeader}>
+            <View>
+              <Text style={styles.planTitle}>{mealPlan.titulo || 'Plano alimentar'}</Text>
+              <Text style={styles.planTime}>
+                Atualizado em{' '}
+                {mealPlan.updated_at
+                  ? new Date(mealPlan.updated_at).toLocaleString('pt-BR', {
+                      dateStyle: 'short',
+                      timeStyle: 'short',
+                    })
+                  : '--'}
+              </Text>
+            </View>
+            <View style={styles.planObjectivePill}>
+              <Text style={styles.planObjectiveText}>Publicado pelo nutricionista</Text>
+            </View>
+          </View>
+
+          {mealPlan.descricao ? (
+            <Text style={styles.planDescription}>{mealPlan.descricao}</Text>
+          ) : (
+            <Text style={styles.planDescriptionMuted}>
+              Seu nutricionista ainda nao descreveu um texto para este plano.
+            </Text>
+          )}
+
+          {metasText ? (
+            <View style={styles.metasBox}>
+              <Text style={styles.metasTitle}>Metas</Text>
+              <Text style={styles.metasText}>{metasText}</Text>
+            </View>
+          ) : null}
         </View>
       ) : null}
 
@@ -173,6 +223,38 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontSize: 12,
     fontWeight: '700',
+  },
+  planDescription: {
+    color: patientTheme.colors.text,
+    lineHeight: 21,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  planDescriptionMuted: {
+    color: patientTheme.colors.textMuted,
+    lineHeight: 21,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  metasBox: {
+    marginTop: 14,
+    borderRadius: 16,
+    backgroundColor: '#f7fafc',
+    padding: 14,
+  },
+  metasTitle: {
+    fontSize: 12,
+    fontWeight: '900',
+    color: patientTheme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.6,
+  },
+  metasText: {
+    marginTop: 10,
+    fontFamily: Platform.OS === 'web' ? 'monospace' : undefined,
+    color: patientTheme.colors.textMuted,
+    lineHeight: 19,
+    fontSize: 12,
   },
   foodBlock: {
     marginTop: 8,

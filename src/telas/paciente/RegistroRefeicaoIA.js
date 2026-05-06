@@ -455,25 +455,30 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setLoadingAction('save');
 
     try {
+      const effectiveDate =
+        mealTimingMode === 'previous' && normalizedMealTimingDate
+          ? normalizedMealTimingDate
+          : buildLocalDateString();
+      const effectiveTime =
+        mealTimingMode === 'previous' && normalizedMealTimingTime
+          ? normalizedMealTimingTime
+          : buildLocalTimeString();
+      const createdAt = `${effectiveDate}T${effectiveTime}:00`;
+
       const saved = await salvarRefeicaoIA({
         patientId,
         fotoUrl: uploadedImage?.storagePath || null,
         alimentos,
         confirmado: true,
+        createdAt,
       });
 
       const timelineEntry = {
         ...buildMealTimelineEntryFromAI({
           alimentos: saved.foods,
           totais: saved.totals,
-          date:
-            mealTimingMode === 'previous' && normalizedMealTimingDate
-              ? normalizedMealTimingDate
-              : buildLocalDateString(),
-          time:
-            mealTimingMode === 'previous' && normalizedMealTimingTime
-              ? normalizedMealTimingTime
-              : buildLocalTimeString(),
+          date: effectiveDate,
+          time: effectiveTime,
           title: mealType || 'Refeição Registrada',
         }),
         id: `meal-ia-${saved.record?.id || Date.now()}`,

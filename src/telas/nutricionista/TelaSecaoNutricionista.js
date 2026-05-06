@@ -6,10 +6,10 @@ import {
   StyleSheet,
   ScrollView,
   Platform,
-  StatusBar,
 } from 'react-native';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { nutritionistSectionContent } from '../../dados/dadosPainelNutricionista';
+import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -33,19 +33,14 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
   );
 
   return (
-    <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
-      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
-
-      <ScrollView
-        style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
-        contentContainerStyle={[
-          styles.scrollContent,
-          Platform.OS === 'web' && styles.webScrollContent,
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
-      >
+    <LayoutNutricionista
+      navigation={navigation}
+      route={route}
+      usuarioLogado={usuarioLogado}
+      title={conteudo.title}
+      subtitle={conteudo.subtitle}
+      showTabBar={false}
+    >
         <ScrollView
           horizontal
           showsHorizontalScrollIndicator={false}
@@ -86,38 +81,11 @@ export default function NutricionistaSectionScreen({ route, navigation }) {
         </SectionCard>
 
         <View style={styles.listFooter} />
-      </ScrollView>
-    </View>
+    </LayoutNutricionista>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: patientTheme.colors.background,
-  },
-  containerWeb: {
-    minHeight: '100%',
-    overflow: 'visible',
-  },
-  scroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: patientTheme.spacing.screen,
-    paddingBottom: 32,
-  },
-  webScroll: {
-    overflowY: 'visible',
-    overflowX: 'hidden',
-  },
-  webScrollContent: {
-    flexGrow: 1,
-    minHeight: '100%',
-  },
   menuPills: {
     paddingVertical: 18,
     gap: 10,

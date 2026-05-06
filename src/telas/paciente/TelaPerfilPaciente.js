@@ -1983,6 +1983,8 @@ function buildEditableClinicalForm(patient) {
     bolus_insulin_notes: String(
       bolusProfile?.notes || (legacyCategory === 'prandial' ? legacyBaseProfile.notes : '')
     ).trim(),
+    basal_insulin_schedules: Array.isArray(basalProfile?.schedules) ? basalProfile.schedules : [],
+    bolus_insulin_schedules: Array.isArray(bolusProfile?.schedules) ? bolusProfile.schedules : [],
     nivel_atividade_fisica_atual: patient?.nivel_atividade_fisica_atual || '',
     qualidade_sono_media: patient?.qualidade_sono_media || '',
     altura_cm: altura,
@@ -2063,6 +2065,7 @@ function buildClinicalPatch(form, patient) {
         usage: form.basal_insulin_usage.trim() || null,
         dose: form.basal_insulin_dose.trim() || null,
         notes: form.basal_insulin_notes.trim() || null,
+        schedules: Array.isArray(form.basal_insulin_schedules) ? form.basal_insulin_schedules : [],
       },
       bolus: {
         category: 'prandial',
@@ -2070,6 +2073,7 @@ function buildClinicalPatch(form, patient) {
         usage: form.bolus_insulin_usage.trim() || null,
         dose: form.bolus_insulin_dose.trim() || null,
         notes: form.bolus_insulin_notes.trim() || null,
+        schedules: Array.isArray(form.bolus_insulin_schedules) ? form.bolus_insulin_schedules : [],
       },
     },
     insulin_category_default: null,
@@ -4948,6 +4952,96 @@ export default function PacientePerfilScreen({
                   </View>
 
                   <View style={styles.editField}>
+                    <Text style={styles.infoLabel}>Horários e doses fixas</Text>
+                    <Text style={styles.sectionHelper}>
+                      Configure seus horários padrão. Isso aparece como sugestão quando você for registrar a insulina no dia a dia.
+                    </Text>
+
+                    {(activeInsulinProfileKey === 'basal'
+                      ? clinicalForm.basal_insulin_schedules
+                      : clinicalForm.bolus_insulin_schedules
+                    ).map((row, index) => (
+                      <View key={`${activeInsulinProfileKey}-schedule-${index}`} style={styles.inlineScheduleRow}>
+                        <TextInput
+                          value={String(row?.horario || '')}
+                          onChangeText={(value) => {
+                            const normalized = String(value || '').replace(/[^\d:]/g, '').slice(0, 5);
+                            const key =
+                              activeInsulinProfileKey === 'basal'
+                                ? 'basal_insulin_schedules'
+                                : 'bolus_insulin_schedules';
+                            setClinicalForm((current) => {
+                              const next = Array.isArray(current[key]) ? [...current[key]] : [];
+                              next[index] = { ...(next[index] || {}), horario: normalized };
+                              return { ...current, [key]: next };
+                            });
+                          }}
+                          placeholder="Hora (HH:MM)"
+                          placeholderTextColor={patientTheme.colors.textMuted}
+                          keyboardType="numeric"
+                          style={[styles.profileInput, styles.inlineScheduleField]}
+                        />
+                        <TextInput
+                          value={String(row?.dose ?? '')}
+                          onChangeText={(value) => {
+                            const normalized = String(value || '').replace(/\D/g, '').slice(0, 4);
+                            const key =
+                              activeInsulinProfileKey === 'basal'
+                                ? 'basal_insulin_schedules'
+                                : 'bolus_insulin_schedules';
+                            setClinicalForm((current) => {
+                              const next = Array.isArray(current[key]) ? [...current[key]] : [];
+                              next[index] = { ...(next[index] || {}), dose: normalized ? Number(normalized) : null };
+                              return { ...current, [key]: next };
+                            });
+                          }}
+                          placeholder="Dose (UI)"
+                          placeholderTextColor={patientTheme.colors.textMuted}
+                          keyboardType="numeric"
+                          style={[styles.profileInput, styles.inlineScheduleField]}
+                        />
+                        <TouchableOpacity
+                          activeOpacity={0.78}
+                          onPress={() => {
+                            const key =
+                              activeInsulinProfileKey === 'basal'
+                                ? 'basal_insulin_schedules'
+                                : 'bolus_insulin_schedules';
+                            setClinicalForm((current) => {
+                              const next = (Array.isArray(current[key]) ? current[key] : []).filter(
+                                (_item, idx) => idx !== index
+                              );
+                              return { ...current, [key]: next };
+                            });
+                          }}
+                          style={styles.inlineScheduleRemove}
+                        >
+                          <Ionicons name="trash-outline" size={18} color="#b75c5c" />
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+
+                    <TouchableOpacity
+                      activeOpacity={0.82}
+                      onPress={() => {
+                        const key =
+                          activeInsulinProfileKey === 'basal'
+                            ? 'basal_insulin_schedules'
+                            : 'bolus_insulin_schedules';
+                        setClinicalForm((current) => {
+                          const next = Array.isArray(current[key]) ? [...current[key]] : [];
+                          next.push({ horario: '', dose: null });
+                          return { ...current, [key]: next };
+                        });
+                      }}
+                      style={styles.inlineScheduleAdd}
+                    >
+                      <Ionicons name="add-circle-outline" size={18} color={patientTheme.colors.primaryDark} />
+                      <Text style={styles.inlineScheduleAddText}>Adicionar horário</Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.editField}>
                     <Text style={styles.infoLabel}>Perfil configurado</Text>
                     <View style={styles.measurementChoiceList}>
                       <TouchableOpacity
@@ -5699,6 +5793,44 @@ const styles = StyleSheet.create({
   },
   editField: {
     gap: 6,
+  },
+  inlineScheduleRow: {
+    flexDirection: 'row',
+    gap: 10,
+    alignItems: 'center',
+    marginTop: 10,
+  },
+  inlineScheduleField: {
+    flex: 1,
+    minWidth: 0,
+  },
+  inlineScheduleRemove: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#fff4f4',
+    borderColor: '#f0d2d2',
+    borderWidth: 1,
+  },
+  inlineScheduleAdd: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 18,
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primarySoft,
+    borderWidth: 1,
+  },
+  inlineScheduleAddText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '800',
+    fontSize: 12,
   },
   profileInput: {
     backgroundColor: patientTheme.colors.backgroundSoft,

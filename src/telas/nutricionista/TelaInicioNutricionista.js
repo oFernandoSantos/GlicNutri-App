@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Alert,
   Platform,
   StatusBar,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
@@ -17,7 +18,7 @@ import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
 } from '../../componentes/nutricionista/BarraAbasNutricionista';
-import { nutritionistDashboardData } from '../../dados/dadosPainelNutricionista';
+import { fetchNutriDashboard } from '../../servicos/servicoDashboardNutri';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -49,6 +50,14 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
   const showTabBar = route?.name === 'HomeNutricionista';
   const [menuVisible, setMenuVisible] = useState(false);
   const [loadingLogout, setLoadingLogout] = useState(false);
+  const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [dashboard, setDashboard] = useState({
+    patientsCount: 0,
+    consultsTodayCount: 0,
+    upcomingConsults: [],
+    recentPatients: [],
+    lastUpdatedAt: null,
+  });
 
   const nomeNutri =
     usuarioLogado?.nome_completo_nutri ||
@@ -95,6 +104,24 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     navigation.navigate(routeName, { usuarioLogado });
   }
 
+  const loadDashboard = useCallback(async () => {
+    try {
+      setLoadingDashboard(true);
+      const data = await fetchNutriDashboard(usuarioLogado);
+      setDashboard({
+        patientsCount: data.patientsCount || 0,
+        consultsTodayCount: data.consultsTodayCount || 0,
+        upcomingConsults: data.upcomingConsults || [],
+        recentPatients: data.recentPatients || [],
+        lastUpdatedAt: data.lastUpdatedAt || new Date().toISOString(),
+      });
+    } catch (error) {
+      console.log('Erro ao carregar dashboard nutri:', error);
+    } finally {
+      setLoadingDashboard(false);
+    }
+  }, [usuarioLogado]);
+
   useEffect(() => {
     navigation.setOptions({
       readerOnMenuPress: () => setMenuVisible(true),
@@ -103,7 +130,11 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     });
   }, [navigation, loadingLogout]);
 
-  const priorityTone = getRiskTone(nutritionistDashboardData.priorityPatient.risk);
+  useEffect(() => {
+    loadDashboard();
+    const unsubscribe = navigation.addListener('focus', () => loadDashboard());
+    return unsubscribe;
+  }, [navigation, loadDashboard]);
 
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
@@ -162,35 +193,50 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
         </ScrollView>
 
         <View style={styles.indicatorsGrid}>
-          {nutritionistDashboardData.indicators.map((item) => (
-            <SectionCard key={item.id} style={styles.indicatorCard}>
-              <View style={styles.indicatorIconWrap}>
-                <Ionicons
-                  name={item.icon}
-                  size={18}
-                  color={patientTheme.colors.primaryDark}
-                />
-              </View>
-              <Text style={styles.indicatorLabel}>{item.label}</Text>
-              <Text style={styles.indicatorValue}>{item.value}</Text>
-            </SectionCard>
-          ))}
+          <SectionCard style={styles.indicatorCard}>
+            <View style={styles.indicatorIconWrap}>
+              <Ionicons name="people-outline" size={18} color={patientTheme.colors.primaryDark} />
+            </View>
+            <Text style={styles.indicatorLabel}>Total pacientes</Text>
+            <Text style={styles.indicatorValue}>{dashboard.patientsCount}</Text>
+          </SectionCard>
+
+          <SectionCard style={styles.indicatorCard}>
+            <View style={styles.indicatorIconWrap}>
+              <Ionicons name="calendar-outline" size={18} color={patientTheme.colors.primaryDark} />
+            </View>
+            <Text style={styles.indicatorLabel}>Consultas hoje</Text>
+            <Text style={styles.indicatorValue}>{dashboard.consultsTodayCount}</Text>
+          </SectionCard>
         </View>
 
-        <Text style={styles.sectionTitle}>Atalhos de gestao</Text>
+        <Text style={styles.sectionTitle}>Atalhos</Text>
         <View style={styles.shortcutsGrid}>
-          {nutritionistDashboardData.shortcuts.map((item) => (
+          {[
+            {
+              id: 'agenda',
+              title: 'Agenda',
+              subtitle: `${dashboard.consultsTodayCount} consulta(s) hoje`,
+              helper: 'Gerencie slots e atendimentos',
+              icon: 'calendar-outline',
+              route: 'NutricionistaAgenda',
+            },
+            {
+              id: 'pacientes',
+              title: 'Pacientes',
+              subtitle: `${dashboard.patientsCount} na carteira`,
+              helper: 'Acesse prontuários rapidamente',
+              icon: 'people-outline',
+              route: 'GerenciarPacientes',
+            },
+          ].map((item) => (
             <TouchableOpacity
               key={item.id}
               style={styles.shortcutCard}
               onPress={() => handleNavigate(item.route)}
             >
               <View style={styles.shortcutIconWrap}>
-                <Ionicons
-                  name={item.icon}
-                  size={22}
-                  color={patientTheme.colors.primaryDark}
-                />
+                <Ionicons name={item.icon} size={22} color={patientTheme.colors.primaryDark} />
               </View>
               <Text style={styles.shortcutTitle}>{item.title}</Text>
               <Text style={styles.shortcutSubtitle}>{item.subtitle}</Text>
@@ -199,89 +245,111 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
           ))}
         </View>
 
-        <Text style={styles.sectionTitle}>Pacientes prioritarios</Text>
-        <View style={[styles.priorityCard, { backgroundColor: '#fff6f6' }]}>
-          <View style={styles.priorityHeader}>
-            <View>
-              <Text style={styles.priorityName}>
-                {nutritionistDashboardData.priorityPatient.name}
-              </Text>
-              <View
-                style={[
-                  styles.riskBadge,
-                  { backgroundColor: priorityTone.backgroundColor },
-                ]}
-              >
-                <Text style={[styles.riskBadgeText, { color: priorityTone.textColor }]}>
-                  {nutritionistDashboardData.priorityPatient.risk}
-                </Text>
-              </View>
-            </View>
-
-            <TouchableOpacity
-              style={styles.priorityAction}
-              onPress={() => handleNavigate('GerenciarPacientes')}
-            >
-              <Ionicons name="arrow-forward" size={18} color={patientTheme.colors.text} />
-            </TouchableOpacity>
-          </View>
-
-          <View style={styles.priorityMetrics}>
-            <View style={styles.priorityMetricPill}>
-              <Text style={styles.priorityMetricLabel}>Alertas ativos</Text>
-              <Text style={styles.priorityMetricValue}>
-                {nutritionistDashboardData.priorityPatient.alerts}
-              </Text>
-            </View>
-
-            <View style={styles.priorityMetricPill}>
-              <Text style={styles.priorityMetricLabel}>Adesao</Text>
-              <Text style={styles.priorityMetricValue}>
-                {nutritionistDashboardData.priorityPatient.adherence}
-              </Text>
-            </View>
-          </View>
-
-          <Text style={styles.priorityUpdate}>
-            Ultima atualizacao: {nutritionistDashboardData.priorityPatient.updatedAt}
-          </Text>
+        <View style={styles.sectionHeader}>
+          <Text style={styles.sectionTitle}>Próximas consultas</Text>
+          <TouchableOpacity onPress={() => handleNavigate('NutricionistaAgenda')}>
+            <Text style={styles.sectionAction}>Ver agenda</Text>
+          </TouchableOpacity>
         </View>
 
+        {loadingDashboard ? (
+          <SectionCard style={styles.loadingCard}>
+            <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+            <Text style={styles.loadingText}>Carregando consultas...</Text>
+          </SectionCard>
+        ) : dashboard.upcomingConsults.length ? (
+          dashboard.upcomingConsults.map((item) => (
+            <TouchableOpacity
+              key={item.id}
+              style={styles.updateCard}
+              onPress={() =>
+                navigation.navigate('NutriConsultaNutri', {
+                  usuarioLogado,
+                  consultaId: item.id,
+                  pacienteId: item.paciente_id,
+                  scheduledAt: item.scheduled_at,
+                })
+              }
+            >
+              <View style={styles.updateTopRow}>
+                <Text style={styles.updateName}>
+                  {item?.paciente?.nome_completo || 'Paciente'}
+                </Text>
+                <Text style={styles.updateTime}>
+                  {item.scheduled_at
+                    ? new Date(item.scheduled_at).toLocaleString('pt-BR', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })
+                    : '--'}
+                </Text>
+              </View>
+              <View style={styles.updateMetaRow}>
+                <View style={[styles.riskBadge, { backgroundColor: '#eefaf4' }]}>
+                  <Text style={[styles.riskBadgeText, { color: '#3c9a67' }]}>
+                    {String(item.status || 'scheduled')}
+                  </Text>
+                </View>
+                {item.motivo ? (
+                  <Text style={styles.updateInlineText}>{item.motivo}</Text>
+                ) : null}
+              </View>
+            </TouchableOpacity>
+          ))
+        ) : (
+          <SectionCard style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Sem consultas próximas</Text>
+            <Text style={styles.emptyText}>Assim que pacientes agendarem, aparecem aqui.</Text>
+          </SectionCard>
+        )}
+
         <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Atualizacoes recentes</Text>
+          <Text style={styles.sectionTitle}>Pacientes recentes</Text>
           <TouchableOpacity onPress={() => handleNavigate('GerenciarPacientes')}>
             <Text style={styles.sectionAction}>Ver Todos</Text>
           </TouchableOpacity>
         </View>
 
-        {nutritionistDashboardData.recentUpdates.map((item) => {
-          const tone = getRiskTone(item.risk);
-
-          return (
+        {loadingDashboard ? (
+          <SectionCard style={styles.loadingCard}>
+            <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+            <Text style={styles.loadingText}>Carregando pacientes...</Text>
+          </SectionCard>
+        ) : dashboard.recentPatients.length ? (
+          dashboard.recentPatients.map((p) => (
             <TouchableOpacity
-              key={item.id}
+              key={p.id_paciente_uuid}
               style={styles.updateCard}
-              onPress={() => handleNavigate('GerenciarPacientes')}
+              onPress={() =>
+                navigation.navigate('NutriProntuarioPaciente', {
+                  usuarioLogado,
+                  pacienteId: p.id_paciente_uuid,
+                  paciente: p,
+                })
+              }
             >
               <View style={styles.updateTopRow}>
-                <Text style={styles.updateName}>{item.name}</Text>
-                <Text style={styles.updateTime}>{item.updatedAt}</Text>
+                <Text style={styles.updateName}>{p.nome_completo || 'Paciente'}</Text>
+                <Text style={styles.updateTime}>
+                  {p.data_hora_ultima_atualizacao
+                    ? new Date(p.data_hora_ultima_atualizacao).toLocaleString('pt-BR', {
+                        dateStyle: 'short',
+                        timeStyle: 'short',
+                      })
+                    : '--'}
+                </Text>
               </View>
-
               <View style={styles.updateMetaRow}>
-                <View style={[styles.riskBadge, { backgroundColor: tone.backgroundColor }]}>
-                  <Text style={[styles.riskBadgeText, { color: tone.textColor }]}>
-                    {item.risk}
-                  </Text>
-                </View>
-
-                <Text style={styles.updateInlineText}>{`${item.alerts} alertas`}</Text>
-                <Text style={styles.updateInlineText}>{`${item.age} anos`}</Text>
-                <Text style={styles.updateInlineText}>{`Adesao ${item.adherence}`}</Text>
+                <Text style={styles.updateInlineText}>{p.email_pac || ''}</Text>
               </View>
             </TouchableOpacity>
-          );
-        })}
+          ))
+        ) : (
+          <SectionCard style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Sem pacientes</Text>
+            <Text style={styles.emptyText}>Cadastre pacientes para aparecerem aqui.</Text>
+          </SectionCard>
+        )}
 
         <View style={styles.listFooter} />
       </ScrollView>

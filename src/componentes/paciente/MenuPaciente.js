@@ -19,6 +19,7 @@ const menuItems = [
   { label: 'Glicose', route: 'PacienteMonitoramento', icon: 'pulse-outline', library: 'ion' },
   { label: 'Bem-estar', route: 'PacienteBemEstar', icon: 'body-outline', library: 'ion' },
   { label: 'Meu plano', route: 'PacientePlano', icon: 'food-apple-outline', library: 'material' },
+  { label: 'Previsão (IA)', route: 'PacientePrevisaoML', icon: 'analytics-outline', library: 'ion' },
   {
     label: 'Ver Histórico de Registros',
     route: 'PacienteHistoricoRegistros',
