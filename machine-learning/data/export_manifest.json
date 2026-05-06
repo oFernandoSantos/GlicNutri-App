@@ -1,0 +1,22 @@
+{
+  "exported_at": "2026-05-06T14:18:47.575974+00:00",
+  "since_ts": "2026-03-07T14:18:47.249190+00:00",
+  "until_ts": "2026-05-06T14:18:47.249196+00:00",
+  "output_path": "C:\\Users\\flima\\OneDrive\\Área de Trabalho\\GlicNutri-App\\GlicNutri\\machine-learning\\data\\glicnutri_patient_day_export.csv",
+  "row_count": 130,
+  "columns": [
+    "patient_id",
+    "dia",
+    "glucose_mean_mg_dl",
+    "glucose_min_mg_dl",
+    "glucose_max_mg_dl",
+    "n_leituras_glicemia",
+    "carbs_sum_g",
+    "kcal_sum",
+    "protein_sum_g",
+    "fat_sum_g",
+    "n_refeicoes_ia",
+    "n_eventos_medicacao"
+  ],
+  "csv_sha256": "9eca7bae76652b82761cccb0bad343c39df7b0f9a650c3406f40cb1c7c4ceaf4"
+}

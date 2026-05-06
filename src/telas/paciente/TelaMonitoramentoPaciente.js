@@ -407,6 +407,7 @@ function getPatientInsulinDefaults(patient) {
       usage: String(profiles?.basal?.usage || (legacyCategory === 'basal' ? legacyProfile.usage : '')).trim(),
       dose: String(profiles?.basal?.dose || (legacyCategory === 'basal' ? legacyProfile.dose : '')).trim(),
       notes: String(profiles?.basal?.notes || (legacyCategory === 'basal' ? legacyProfile.notes : '')).trim(),
+      schedules: Array.isArray(profiles?.basal?.schedules) ? profiles.basal.schedules : [],
     },
     prandial: {
       category: 'prandial',
@@ -414,6 +415,7 @@ function getPatientInsulinDefaults(patient) {
       usage: String(profiles?.bolus?.usage || (legacyCategory === 'prandial' ? legacyProfile.usage : '')).trim(),
       dose: String(profiles?.bolus?.dose || (legacyCategory === 'prandial' ? legacyProfile.dose : '')).trim(),
       notes: String(profiles?.bolus?.notes || (legacyCategory === 'prandial' ? legacyProfile.notes : '')).trim(),
+      schedules: Array.isArray(profiles?.bolus?.schedules) ? profiles.bolus.schedules : [],
     },
   };
 }
@@ -895,6 +897,7 @@ export default function PacienteMonitoramentoScreen({
   const [insulinType, setInsulinType] = useState('');
   const [insulinUsage, setInsulinUsage] = useState('');
   const [insulinDose, setInsulinDose] = useState('');
+  const [insulinMeasurementType, setInsulinMeasurementType] = useState('current');
   const [insulinDate, setInsulinDate] = useState('');
   const [insulinTime, setInsulinTime] = useState('');
   const [insulinNotes, setInsulinNotes] = useState('');
@@ -1159,14 +1162,17 @@ export default function PacienteMonitoramentoScreen({
     isValidManualDate(medicineDate) &&
     isValidManualTime(medicineTime) &&
     (medicineContinuousUse || Boolean(String(medicineDays || '').trim()));
+  const isPreviousInsulinEntry = insulinMeasurementType === 'previous';
+  const hasValidInsulinDate = !isPreviousInsulinEntry || isValidManualDate(insulinDate);
+  const hasValidInsulinTime = !isPreviousInsulinEntry || isValidManualTime(insulinTime);
   const canSubmitInsulin =
     medicationKind === 'insulin' &&
     Boolean(insulinCategory) &&
     Boolean(insulinType) &&
     Boolean(String(insulinDose || '').trim()) &&
     Number(insulinDose) > 0 &&
-    isValidManualDate(insulinDate) &&
-    isValidManualTime(insulinTime) &&
+    hasValidInsulinDate &&
+    hasValidInsulinTime &&
     (insulinCategory === 'basal' ? Boolean(insulinDevice) : Boolean(insulinUsage));
   const selectedMedicineUnitMeta = medicationUnitMeta[medicineUnit] || {
     quantityLabel: 'Quantidade',
@@ -1186,6 +1192,31 @@ export default function PacienteMonitoramentoScreen({
   const selectedInsulinUsageOptions = insulinUsageOptions[insulinCategory] || [];
   const selectedInsulinCategoryMeta =
     insulinCategoryOptions.find((option) => option.id === insulinCategory) || null;
+  const configuredScheduleOptions = useMemo(() => {
+    const schedules =
+      insulinCategory === 'basal'
+        ? insulinDefaults?.basal?.schedules || []
+        : insulinDefaults?.prandial?.schedules || [];
+
+    return (Array.isArray(schedules) ? schedules : [])
+      .map((item, index) => {
+        const horario = String(item?.horario || '').slice(0, 5);
+        const dose = item?.dose ?? null;
+        const refeicao = String(item?.refeicao || '').trim();
+        const tipoDose = String(item?.tipo_dose || '').trim();
+        const diaSemana = String(item?.dia_semana || '').trim();
+
+        return {
+          key: `${insulinCategory}-schedule-${index}`,
+          horario,
+          dose: dose === null || typeof dose === 'undefined' ? '' : String(dose),
+          refeicao,
+          tipoDose,
+          diaSemana,
+        };
+      })
+      .filter((item) => item.horario || item.dose || item.refeicao || item.tipoDose || item.diaSemana);
+  }, [insulinCategory, insulinDefaults?.basal?.schedules, insulinDefaults?.prandial?.schedules]);
   const timeInRange = metrics.tir === '--' ? 0 : metrics.tir;
   const manualModalLift =
     !glucoseTypeDropdownVisible && focusedManualField === 'glucose'
@@ -1266,6 +1297,7 @@ export default function PacienteMonitoramentoScreen({
     setInsulinType('');
     setInsulinUsage('');
     setInsulinDose('');
+    setInsulinMeasurementType('current');
     setInsulinDate('');
     setInsulinTime('');
     setInsulinNotes('');
@@ -1288,6 +1320,7 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
     setInsulinDose(defaults.dose || '');
     setInsulinNotes(defaults.notes || '');
     setInsulinDevice(defaults.category === 'basal' ? defaults.device || '' : '');
+    setInsulinMeasurementType('current');
     setInsulinDate(formatDateForDisplay(buildLocalDateString()));
     setInsulinTime(formatManualTimeInput(buildLocalTimeString()));
     setInsulinTypeVisible(false);
@@ -1712,18 +1745,23 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
           return;
         }
 
-        if (!isValidManualDate(insulinDate)) {
-          Alert.alert('Atenção', 'Informe uma data válida no formato DD/MM/AAAA.');
-          return;
-        }
+        if (isPreviousInsulinEntry) {
+          if (!isValidManualDate(insulinDate)) {
+            Alert.alert('Atenção', 'Informe uma data válida no formato DD/MM/AAAA.');
+            return;
+          }
 
-        if (!isValidManualTime(insulinTime)) {
-          Alert.alert('Atenção', 'Informe uma hora válida no formato HH:MM.');
-          return;
-        }
+          if (!isValidManualTime(insulinTime)) {
+            Alert.alert('Atenção', 'Informe uma hora válida no formato HH:MM.');
+            return;
+          }
 
-        entryDate = normalizedDate;
-        entryTime = normalizedTime.slice(0, 5);
+          entryDate = normalizedDate;
+          entryTime = normalizedTime.slice(0, 5);
+        } else {
+          entryDate = buildLocalDateString();
+          entryTime = buildLocalTimeString().slice(0, 5);
+        }
         label =
           insulinCategory === 'basal'
             ? [
@@ -2869,6 +2907,88 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                   >
+                    <View style={[styles.formField, styles.currentFirstFormField]}>
+                      <Text style={styles.fieldLabel}>Quando foi?</Text>
+                      <View style={styles.inlineChoiceRow}>
+                        <TouchableOpacity
+                          style={[
+                            styles.inlineChoiceButton,
+                            insulinMeasurementType === 'current' && styles.inlineChoiceButtonActive,
+                          ]}
+                          onPress={() => setInsulinMeasurementType('current')}
+                          activeOpacity={0.85}
+                        >
+                          <Text
+                            style={[
+                              styles.inlineChoiceText,
+                              insulinMeasurementType === 'current' && styles.inlineChoiceTextActive,
+                            ]}
+                          >
+                            Agora
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          style={[
+                            styles.inlineChoiceButton,
+                            insulinMeasurementType === 'previous' && styles.inlineChoiceButtonActive,
+                          ]}
+                          onPress={() => setInsulinMeasurementType('previous')}
+                          activeOpacity={0.85}
+                        >
+                          <Text
+                            style={[
+                              styles.inlineChoiceText,
+                              insulinMeasurementType === 'previous' && styles.inlineChoiceTextActive,
+                            ]}
+                          >
+                            Registro anterior
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                      <Text style={styles.fieldHelperText}>
+                        {insulinMeasurementType === 'current'
+                          ? 'Vamos usar a data e hora de agora.'
+                          : 'Informe a data e hora reais do uso.'}
+                      </Text>
+                    </View>
+
+                    {configuredScheduleOptions.length ? (
+                      <View style={[styles.formField, styles.stackedFormField]}>
+                        <Text style={styles.fieldLabel}>Sugestões do seu perfil</Text>
+                        <Text style={styles.fieldHelperText}>
+                          Toque para preencher dose e hora com base no que você configurou no perfil.
+                        </Text>
+                        <View style={styles.schedulePillRow}>
+                          {configuredScheduleOptions.slice(0, 6).map((item) => (
+                            <TouchableOpacity
+                              key={item.key}
+                              style={styles.schedulePill}
+                              activeOpacity={0.85}
+                              onPress={() => {
+                                if (item.horario) {
+                                  setInsulinMeasurementType('previous');
+                                  setInsulinTime(formatManualTimeInput(item.horario));
+                                  setInsulinDate(formatDateForDisplay(buildLocalDateString()));
+                                }
+                                if (item.dose) {
+                                  setInsulinDose(String(item.dose));
+                                }
+                                if (item.refeicao) {
+                                  setInsulinUsage(item.refeicao);
+                                }
+                              }}
+                            >
+                              <Text style={styles.schedulePillText}>
+                                {item.horario ? item.horario : '--:--'}
+                                {item.dose ? ` • ${item.dose} UI` : ''}
+                                {item.refeicao ? ` • ${item.refeicao}` : ''}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      </View>
+                    ) : null}
+
                     <View style={[styles.formField, styles.firstLabeledFormField]}>
                       <Text style={styles.fieldLabel}>
                         {insulinCategory === 'basal' ? 'Insulina basal' : 'Categoria clínica'}
@@ -3058,10 +3178,12 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                           styles.manualModalInput,
                           styles.labeledInput,
                           focusedManualField === 'insulinTime' && styles.inputFocused,
+                          insulinMeasurementType === 'current' && styles.inputDisabled,
                         ]}
                         placeholder="Ex: 07:30"
                         placeholderTextColor="#8a9095"
                         keyboardType="numeric"
+                        editable={insulinMeasurementType !== 'current'}
                         value={insulinTime}
                         onChangeText={(value) => setInsulinTime(formatManualTimeInput(value))}
                         onFocus={() => setFocusedManualField('insulinTime')}
@@ -3077,10 +3199,12 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                           styles.manualModalInput,
                           styles.labeledInput,
                           focusedManualField === 'insulinDate' && styles.inputFocused,
+                          insulinMeasurementType === 'current' && styles.inputDisabled,
                         ]}
                         placeholder="Ex: 21/04/2026"
                         placeholderTextColor="#8a9095"
                         keyboardType="numeric"
+                        editable={insulinMeasurementType !== 'current'}
                         value={insulinDate}
                         onChangeText={(value) => setInsulinDate(formatManualDateInput(value))}
                         onFocus={() => setFocusedManualField('insulinDate')}
@@ -3983,6 +4107,52 @@ const styles = StyleSheet.create({
   },
   inputDisabled: {
     opacity: 0.55,
+  },
+  inlineChoiceRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 10,
+  },
+  inlineChoiceButton: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+  },
+  inlineChoiceButtonActive: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  inlineChoiceText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '800',
+    fontSize: 12,
+  },
+  inlineChoiceTextActive: {
+    color: patientTheme.colors.primaryDark,
+  },
+  schedulePillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  schedulePill: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  schedulePillText: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '800',
   },
   medicineFormScroll: {
     marginTop: 10,

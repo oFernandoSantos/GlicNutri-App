@@ -1,5 +1,6 @@
-import React from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
+  ActivityIndicator,
   ScrollView,
   StyleSheet,
   Text,
@@ -9,45 +10,10 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
-
-const PROFESSIONALS = [
-  {
-    id: 'ana-paula',
-    name: 'Dra. Ana Paula Martins',
-    specialty: 'Nutricionista clinica',
-    crn: 'CRN 12345',
-    focus: 'Diabetes tipo 2, reeducacao alimentar e controle glicemico.',
-    nextAvailable: 'Hoje',
-    slots: ['09:30', '11:00', '14:30', '16:00'],
-  },
-  {
-    id: 'rafael-lima',
-    name: 'Dr. Rafael Lima',
-    specialty: 'Endocrinologista',
-    crn: 'CRM 45678',
-    focus: 'Ajustes metabolicos, insulinoterapia e acompanhamento de exames.',
-    nextAvailable: 'Amanha',
-    slots: ['08:00', '10:30', '13:00', '17:30'],
-  },
-  {
-    id: 'marina-costa',
-    name: 'Dra. Marina Costa',
-    specialty: 'Nutricionista esportiva',
-    crn: 'CRN 98765',
-    focus: 'Rotina alimentar, atividade fisica e perda de peso sustentavel.',
-    nextAvailable: 'Quinta-feira',
-    slots: ['07:30', '12:00', '15:30', '18:00'],
-  },
-  {
-    id: 'bianca-rocha',
-    name: 'Dra. Bianca Rocha',
-    specialty: 'Educadora em diabetes',
-    crn: 'COREN 24680',
-    focus: 'Contagem de carboidratos, hipoglicemia e organizacao da rotina.',
-    nextAvailable: 'Sexta-feira',
-    slots: ['09:00', '10:00', '14:00', '15:00'],
-  },
-];
+import { getPatientId } from '../../servicos/servicoDadosPaciente';
+import { listNutritionists } from '../../servicos/servicoNutricionistas';
+import { listNutriAvailability, generateSlotsForNextDays } from '../../servicos/servicoAgendaNutri';
+import { createConsulta, listConsultasByPaciente, formatConsultaDateTime } from '../../servicos/servicoConsultas';
 
 function getInitials(name) {
   return String(name || 'P')
@@ -64,6 +30,97 @@ export default function PacienteAgendamentosScreen({
   usuarioLogado: usuarioProp,
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
+  const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+  const [loading, setLoading] = useState(true);
+  const [loadingSlots, setLoadingSlots] = useState(false);
+  const [loadingAgendar, setLoadingAgendar] = useState(false);
+  const [nutricionistas, setNutricionistas] = useState([]);
+  const [selectedNutri, setSelectedNutri] = useState(null);
+  const [slots, setSlots] = useState([]);
+  const [consultas, setConsultas] = useState([]);
+
+  const loadBase = useCallback(async () => {
+    try {
+      setLoading(true);
+      const [nutris, cons] = await Promise.all([
+        listNutritionists({ limit: 80 }),
+        listConsultasByPaciente(patientId, { limit: 120 }),
+      ]);
+      setNutricionistas(nutris || []);
+      setConsultas(cons || []);
+      if (!selectedNutri && (nutris || []).length) {
+        setSelectedNutri(nutris[0]);
+      }
+    } catch (error) {
+      console.log('Erro ao carregar consultas/pacientes:', error);
+    } finally {
+      setLoading(false);
+    }
+  }, [patientId, selectedNutri]);
+
+  const loadSlots = useCallback(async () => {
+    try {
+      if (!selectedNutri?.id_nutricionista_uuid) {
+        setSlots([]);
+        return;
+      }
+      setLoadingSlots(true);
+      const avail = await listNutriAvailability(selectedNutri.id_nutricionista_uuid);
+      const generated = generateSlotsForNextDays(avail, { days: 14 });
+      setSlots(generated);
+    } catch (error) {
+      console.log('Erro ao carregar slots:', error);
+      setSlots([]);
+    } finally {
+      setLoadingSlots(false);
+    }
+  }, [selectedNutri]);
+
+  useEffect(() => {
+    loadBase();
+    const unsubscribe = navigation.addListener('focus', () => loadBase());
+    return unsubscribe;
+  }, [navigation, loadBase]);
+
+  useEffect(() => {
+    loadSlots();
+  }, [loadSlots]);
+
+  const consultasProximas = useMemo(() => {
+    const now = Date.now();
+    return (consultas || [])
+      .slice()
+      .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)))
+      .filter((item) => {
+        const dt = new Date(item.scheduled_at || 0);
+        return !Number.isNaN(dt.getTime()) && dt.getTime() >= now && item.status !== 'cancelled';
+      })
+      .slice(0, 12);
+  }, [consultas]);
+
+  async function handleAgendar(slot) {
+    try {
+      if (!patientId) {
+        return;
+      }
+      if (!selectedNutri?.id_nutricionista_uuid) {
+        return;
+      }
+      setLoadingAgendar(true);
+      await createConsulta({
+        nutricionistaId: selectedNutri.id_nutricionista_uuid,
+        pacienteId: patientId,
+        scheduledAt: slot.scheduledAt,
+        motivo: '',
+        actor: usuarioLogado,
+      });
+      await loadBase();
+    } catch (error) {
+      console.log('Erro ao agendar:', error);
+    } finally {
+      setLoadingAgendar(false);
+    }
+  }
 
   return (
     <PatientScreenLayout
@@ -74,58 +131,112 @@ export default function PacienteAgendamentosScreen({
       <View style={styles.summaryRow}>
         <View style={styles.summaryPill}>
           <Ionicons name="people-outline" size={18} color={patientTheme.colors.primaryDark} />
-          <Text style={styles.summaryText}>{PROFESSIONALS.length} profissionais</Text>
+          <Text style={styles.summaryText}>{nutricionistas.length} nutricionistas</Text>
         </View>
         <View style={styles.summaryPill}>
           <Ionicons name="calendar-outline" size={18} color={patientTheme.colors.primaryDark} />
-          <Text style={styles.summaryText}>Horarios proximos</Text>
+          <Text style={styles.summaryText}>Agendar por slots</Text>
         </View>
       </View>
 
-      <View style={styles.professionalList}>
-        {PROFESSIONALS.map((professional) => (
-          <View key={professional.id} style={styles.professionalCard}>
-            <View style={styles.professionalHeader}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{getInitials(professional.name)}</Text>
-              </View>
+      {loading ? (
+        <View style={styles.loadingCard}>
+          <ActivityIndicator color={patientTheme.colors.primaryDark} />
+          <Text style={styles.loadingText}>Carregando agenda...</Text>
+        </View>
+      ) : null}
 
-              <View style={styles.professionalInfo}>
-                <Text style={styles.professionalName} numberOfLines={1}>
-                  {professional.name}
+      <View style={styles.nutriSelectorRow}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nutriSelectorScroll}>
+          {nutricionistas.map((nutri) => {
+            const active = selectedNutri?.id_nutricionista_uuid === nutri.id_nutricionista_uuid;
+            return (
+              <TouchableOpacity
+                key={nutri.id_nutricionista_uuid}
+                style={[styles.nutriPill, active && styles.nutriPillActive]}
+                onPress={() => setSelectedNutri(nutri)}
+              >
+                <Text style={[styles.nutriPillText, active && styles.nutriPillTextActive]}>
+                  {nutri.nome_completo_nutri || 'Nutricionista'}
                 </Text>
-                <Text style={styles.professionalSpecialty}>{professional.specialty}</Text>
-                <Text style={styles.professionalCrn}>{professional.crn}</Text>
-              </View>
-            </View>
-
-            <Text style={styles.focusText}>{professional.focus}</Text>
-
-            <View style={styles.availabilityHeader}>
-              <Ionicons name="time-outline" size={18} color={patientTheme.colors.primaryDark} />
-              <Text style={styles.availabilityTitle}>
-                Proxima disponibilidade: {professional.nextAvailable}
-              </Text>
-            </View>
-
-            <ScrollView
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.slotList}
-            >
-              {professional.slots.map((slot) => (
-                <TouchableOpacity
-                  key={`${professional.id}-${slot}`}
-                  activeOpacity={0.78}
-                  style={styles.slotButton}
-                >
-                  <Text style={styles.slotText}>{slot}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
-          </View>
-        ))}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
       </View>
+
+      <View style={styles.professionalCard}>
+        <View style={styles.professionalHeader}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{getInitials(selectedNutri?.nome_completo_nutri)}</Text>
+          </View>
+          <View style={styles.professionalInfo}>
+            <Text style={styles.professionalName} numberOfLines={1}>
+              {selectedNutri?.nome_completo_nutri || 'Selecione um nutricionista'}
+            </Text>
+            <Text style={styles.professionalCrn}>
+              {selectedNutri?.crm_numero ? `CRN ${selectedNutri.crm_numero}` : 'CRN não informado'}
+            </Text>
+          </View>
+          <TouchableOpacity style={styles.refreshSlots} onPress={loadSlots} disabled={loadingSlots}>
+            <Ionicons name="refresh-outline" size={18} color={patientTheme.colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        <View style={styles.availabilityHeader}>
+          <Ionicons name="time-outline" size={18} color={patientTheme.colors.primaryDark} />
+          <Text style={styles.availabilityTitle}>Slots disponíveis (próximos 14 dias)</Text>
+        </View>
+
+        {loadingSlots ? (
+          <View style={styles.inlineLoading}>
+            <ActivityIndicator color={patientTheme.colors.primaryDark} />
+            <Text style={styles.loadingText}>Carregando slots...</Text>
+          </View>
+        ) : slots.length ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.slotList}
+          >
+            {slots.slice(0, 30).map((slot) => (
+              <TouchableOpacity
+                key={slot.scheduledAt}
+                activeOpacity={0.78}
+                style={styles.slotButton}
+                onPress={() => handleAgendar(slot)}
+                disabled={loadingAgendar}
+              >
+                <Text style={styles.slotText}>{slot.localLabel}</Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+        ) : (
+          <Text style={styles.focusText}>
+            Este nutricionista ainda nao cadastrou disponibilidade.
+          </Text>
+        )}
+      </View>
+
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>Minhas consultas</Text>
+        <TouchableOpacity style={styles.smallIcon} onPress={loadBase} disabled={loading}>
+          <Ionicons name="refresh-outline" size={18} color={patientTheme.colors.text} />
+        </TouchableOpacity>
+      </View>
+
+      {consultasProximas.length ? (
+        consultasProximas.map((item) => (
+          <View key={item.id} style={styles.consultaCard}>
+            <Text style={styles.consultaTitle}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+            <Text style={styles.consultaMeta}>Status: {String(item.status || '')}</Text>
+          </View>
+        ))
+      ) : (
+        <View style={styles.consultaEmpty}>
+          <Text style={styles.focusText}>Nenhuma consulta agendada.</Text>
+        </View>
+      )}
     </PatientScreenLayout>
   );
 }
@@ -155,6 +266,19 @@ const styles = StyleSheet.create({
   professionalList: {
     gap: 14,
     marginTop: 16,
+  },
+  loadingCard: {
+    marginTop: 14,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: 16,
+    alignItems: 'center',
+    gap: 10,
+    ...patientShadow,
+  },
+  loadingText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
   },
   professionalCard: {
     backgroundColor: patientTheme.colors.surface,
@@ -218,6 +342,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '800',
   },
+  nutriSelectorRow: {
+    marginTop: 12,
+  },
+  nutriSelectorScroll: {
+    gap: 8,
+    paddingVertical: 6,
+  },
+  nutriPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.surface,
+    ...patientShadow,
+  },
+  nutriPillActive: {
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  nutriPillText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  nutriPillTextActive: {
+    color: patientTheme.colors.onPrimary,
+  },
+  refreshSlots: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  inlineLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 10,
+  },
   slotList: {
     gap: 8,
     paddingTop: 10,
@@ -236,5 +399,45 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '900',
     textAlign: 'center',
+  },
+  sectionHeader: {
+    marginTop: 18,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  sectionTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  smallIcon: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: patientTheme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...patientShadow,
+  },
+  consultaCard: {
+    marginTop: 10,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: 14,
+    ...patientShadow,
+  },
+  consultaTitle: {
+    color: patientTheme.colors.text,
+    fontWeight: '900',
+  },
+  consultaMeta: {
+    marginTop: 8,
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+  },
+  consultaEmpty: {
+    marginTop: 12,
+    alignItems: 'center',
   },
 });

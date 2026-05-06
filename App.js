@@ -22,6 +22,9 @@ import HomePaciente from './src/telas/paciente/TelaInicioPaciente';
 import HomeNutricionista from './src/telas/nutricionista/TelaInicioNutricionista';
 import GerenciarPacientesScreen from './src/telas/nutricionista/TelaPacientesNutricionista';
 import NutricionistaSectionScreen from './src/telas/nutricionista/TelaSecaoNutricionista';
+import NutricionistaAgendaScreen from './src/telas/nutricionista/TelaAgendaNutricionista';
+import NutriProntuarioPacienteScreen from './src/telas/nutricionista/TelaProntuarioPacienteNutri';
+import NutriConsultaScreen from './src/telas/nutricionista/TelaConsultaNutri';
 import TelaAuditoriaAdmin from './src/telas/admin/TelaAuditoriaAdmin';
 import TelaHomeAdmin from './src/telas/admin/TelaHomeAdmin';
 import TelaLogsSistemaAdmin from './src/telas/admin/TelaLogsSistemaAdmin';
@@ -34,6 +37,7 @@ import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
 import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
+import TelaPrevisaoMl from './src/telas/paciente/TelaPrevisaoMl';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
 import SwipeBackContainer from './src/componentes/comum/SwipeBackContainer';
 import { supabase } from './src/servicos/configSupabase';
@@ -399,7 +403,8 @@ export default function App() {
                 initialRouteName={initialRouteName}
                 screenOptions={{
                   animationEnabled: true,
-                  cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
+                  cardStyle:
+                    Platform.OS === 'web' && !useFullBleedIntro ? styles.webStackCard : undefined,
                   cardStyleInterpolator: fadeCardInterpolator,
                   gestureEnabled: Platform.OS !== 'web',
                   gestureDirection: 'horizontal',
@@ -507,6 +512,10 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
+              <Stack.Screen name="PacientePrevisaoML" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <TelaPrevisaoMl {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
               <Stack.Screen
                 name="RegistroRefeicaoIA"
                 options={readerScreenOptions}
@@ -532,7 +541,23 @@ export default function App() {
                 name="NutricionistaAgenda"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaSectionScreen {...props} />)}
+                {(props) => withSwipeBack(props, <NutricionistaAgendaScreen {...props} />)}
+              </Stack.Screen>
+
+              <Stack.Screen
+                name="NutriProntuarioPaciente"
+                options={readerScreenOptions}
+              >
+                {(props) =>
+                  withSwipeBack(props, <NutriProntuarioPacienteScreen {...props} />)
+                }
+              </Stack.Screen>
+
+              <Stack.Screen
+                name="NutriConsultaNutri"
+                options={readerScreenOptions}
+              >
+                {(props) => withSwipeBack(props, <NutriConsultaScreen {...props} />)}
               </Stack.Screen>
 
               <Stack.Screen

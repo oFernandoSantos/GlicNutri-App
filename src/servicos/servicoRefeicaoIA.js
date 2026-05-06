@@ -336,6 +336,7 @@ export async function salvarRefeicaoIA({
   fotoUrl,
   alimentos,
   confirmado = true,
+  createdAt,
 }) {
   if (!patientId) {
     throw new Error('Paciente sem identificador para salvar a refeicao.');
@@ -359,6 +360,7 @@ export async function salvarRefeicaoIA({
     proteinas_total: totais.proteinas_total,
     gorduras_total: totais.gorduras_total,
     confirmado,
+    ...(createdAt ? { created_at: createdAt } : {}),
   };
 
   const { data, error } = await supabase

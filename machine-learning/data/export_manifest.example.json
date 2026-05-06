@@ -1,0 +1,23 @@
+{
+  "example_note": "Substituir pelo manifest real após: cd GlicNutri && python machine-learning/scripts/export_supabase_csv.py --output machine-learning/data/glicnutri_patient_day_export.csv --manifest machine-learning/data/export_manifest.json",
+  "exported_at": "2026-05-01T12:00:00+00:00",
+  "since_ts": "2026-02-01T00:00:00+00:00",
+  "until_ts": "2026-05-01T12:00:00+00:00",
+  "output_path": "machine-learning/data/glicnutri_patient_day_export.csv",
+  "row_count": 9,
+  "columns": [
+    "patient_id",
+    "dia",
+    "glucose_mean_mg_dl",
+    "glucose_min_mg_dl",
+    "glucose_max_mg_dl",
+    "n_leituras_glicemia",
+    "carbs_sum_g",
+    "kcal_sum",
+    "protein_sum_g",
+    "fat_sum_g",
+    "n_refeicoes_ia",
+    "n_eventos_medicacao"
+  ],
+  "csv_sha256_sample_reference": "353a4691fdeb02569aee0b8193662cf756beb1b91f6530b4009d8f4e6802594d"
+}

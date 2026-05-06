@@ -371,6 +371,84 @@ function mergeMedicationEntries(databaseEntries, legacyEntries) {
   });
 }
 
+function normalizeMealEntryFromDatabase(row, index = 0) {
+  const createdAt = String(row?.created_at || row?.createdAt || '').trim();
+  const date = createdAt ? createdAt.slice(0, 10) : buildTodayDateString();
+  const time = createdAt ? createdAt.slice(11, 16) : buildCurrentTimeString().slice(0, 5);
+  const recordId = String(row?.id || '').trim();
+  const foods = Array.isArray(row?.alimentos) ? row.alimentos : [];
+  const description = foods
+    .map((item) => {
+      const nome = String(item?.nome || '').trim();
+      const gramas = item?.quantidade_gramas ?? null;
+      if (!nome) return '';
+      if (gramas === null || typeof gramas === 'undefined' || Number.isNaN(Number(gramas))) {
+        return nome;
+      }
+      return `${nome} (${Math.round(Number(gramas))} g)`;
+    })
+    .filter(Boolean)
+    .join(', ');
+  const carbs = Number(row?.carboidratos_total) || 0;
+  const calories = Number(row?.calorias_total) || 0;
+  const protein = Number(row?.proteinas_total) || 0;
+  const fat = Number(row?.gorduras_total) || 0;
+
+  return {
+    id: recordId ? `meal-ia-${recordId}` : `meal-db-${date}-${time}-${index}`,
+    kind: 'meal',
+    mode: row?.foto_url ? 'photo' : 'manual',
+    date,
+    time,
+    title: 'Refeição Registrada',
+    description: description || 'Refeição registrada.',
+    glucoseNote: 'Macros salvos no banco',
+    glucoseDelta: `${Math.round(carbs)} g carbos`,
+    aiNote: `Totais: ${Math.round(calories)} kcal, ${Math.round(protein)} g proteinas, ${Math.round(fat)} g gorduras.`,
+    storageOrigin: 'database',
+    databaseId: recordId || null,
+  };
+}
+
+function mergeMealEntries(databaseEntries, legacyEntries) {
+  const merged = [];
+  const seenIds = new Set();
+
+  [...ensureArray(databaseEntries), ...ensureArray(legacyEntries)].forEach((entry, index) => {
+    const normalized =
+      entry?.storageOrigin === 'database' || entry?.databaseId
+        ? entry
+        : {
+            ...entry,
+            storageOrigin: entry?.storageOrigin || 'legacy',
+          };
+    const databaseId = String(normalized?.databaseId || '').trim();
+    const id = String(normalized?.id || '').trim();
+
+    if (databaseId && seenIds.has(databaseId)) {
+      return;
+    }
+
+    if (databaseId) {
+      seenIds.add(databaseId);
+    }
+
+    merged.push({
+      ...normalized,
+      id: id || (databaseId ? `meal-ia-${databaseId}` : `meal-${Date.now()}-${index}`),
+      date: normalized?.date || buildTodayDateString(),
+      time: normalized?.time || buildCurrentTimeString().slice(0, 5),
+      kind: normalized?.kind || 'meal',
+    });
+  });
+
+  return merged.sort((left, right) => {
+    const leftStamp = `${left.date || '1970-01-01'}T${left.time || '00:00:00'}`;
+    const rightStamp = `${right.date || '1970-01-01'}T${right.time || '00:00:00'}`;
+    return rightStamp.localeCompare(leftStamp);
+  });
+}
+
 function buildMedicationEntryFromPayload(payload) {
   return normalizeMedicationEntry(payload, 'database');
 }
@@ -553,9 +631,10 @@ export async function fetchPatientExperience(patientId, options = {}) {
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
   const normalizedAppState = normalizeAppState(parsed.appState);
-  const [glucoseReadings, databaseMedicationEntries] = await Promise.all([
+  const [glucoseReadings, databaseMedicationEntries, databaseMealEntries] = await Promise.all([
     fetchGlucoseReadings(effectivePatientId),
     fetchMedicationEntries(effectivePatientId),
+    fetchMealEntries(effectivePatientId),
   ]);
   const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
     (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
@@ -564,10 +643,12 @@ export async function fetchPatientExperience(patientId, options = {}) {
     databaseMedicationEntries,
     legacyMedicationEntries
   );
+  const legacyMealEntries = ensureArray(normalizedAppState.mealEntries);
+  const mealEntries = mergeMealEntries(databaseMealEntries, legacyMealEntries);
   const includeHidden = Boolean(options.includeHidden);
   const visibleMealEntries = includeHidden
-    ? normalizedAppState.mealEntries
-    : normalizedAppState.mealEntries.filter(
+    ? mealEntries
+    : mealEntries.filter(
         (entry) => !normalizedAppState.hiddenMealEntryIds.includes(entry?.id)
       );
   const visibleMedicationEntries = includeHidden
@@ -867,6 +948,26 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
     (data || []).map((item, index) => normalizeMedicationEntry(item, 'database', index)),
     rpcEntries
   ).slice(0, limit);
+}
+
+export async function fetchMealEntries(patientId, limit = 120) {
+  if (!patientId) {
+    return [];
+  }
+
+  const { data, error } = await supabase
+    .from('refeicao_ia')
+    .select('id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, confirmado, created_at')
+    .eq('paciente_id', patientId)
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.log('Erro ao buscar refeicoes IA:', error.message);
+    return [];
+  }
+
+  return (data || []).map((row, index) => normalizeMealEntryFromDatabase(row, index));
 }
 
 export async function addGlucoseReading(patientId, value, options = {}) {

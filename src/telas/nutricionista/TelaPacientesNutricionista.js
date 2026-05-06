@@ -791,6 +791,29 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                 </TouchableOpacity>
 
                 <TouchableOpacity
+                  style={styles.prontuarioInlineButton}
+                  onPress={() => {
+                    const pacienteId = getPacienteId(paciente);
+                    if (!pacienteId) {
+                      Alert.alert('Atenção', 'Paciente sem identificador para abrir prontuário.');
+                      return;
+                    }
+                    navigation.navigate('NutriProntuarioPaciente', {
+                      usuarioLogado,
+                      pacienteId,
+                      paciente,
+                    });
+                  }}
+                >
+                  <Ionicons
+                    name="reader-outline"
+                    size={18}
+                    color={patientTheme.colors.onPrimary}
+                  />
+                  <Text style={styles.prontuarioInlineButtonText}>Prontuário</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
                   style={styles.editButton}
                   onPress={() => abrirModalEdicao(paciente)}
                 >
@@ -841,6 +864,29 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                 <Ionicons name="close" size={20} color={patientTheme.colors.text} />
               </TouchableOpacity>
             </View>
+
+            <TouchableOpacity
+              style={styles.prontuarioButton}
+              onPress={() => {
+                if (!pacientePerfil?.id_paciente_uuid) {
+                  Alert.alert('Atenção', 'Paciente sem identificador para abrir prontuário.');
+                  return;
+                }
+                fecharModalPerfil();
+                navigation.navigate('NutriProntuarioPaciente', {
+                  usuarioLogado,
+                  pacienteId: pacientePerfil.id_paciente_uuid,
+                  paciente: pacientePerfil,
+                });
+              }}
+            >
+              <Ionicons
+                name="document-text-outline"
+                size={18}
+                color={patientTheme.colors.onPrimary}
+              />
+              <Text style={styles.prontuarioButtonText}>Abrir prontuário</Text>
+            </TouchableOpacity>
 
             <View style={styles.profileTabRow}>
               <TouchableOpacity
@@ -1457,6 +1503,20 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontWeight: '700',
   },
+  prontuarioInlineButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  prontuarioInlineButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '900',
+  },
   editButton: {
     flex: 1,
     minHeight: 48,
@@ -1535,6 +1595,21 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     ...patientShadow,
+  },
+  prontuarioButton: {
+    marginTop: 10,
+    marginBottom: 14,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  prontuarioButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '900',
   },
   profileTabRow: {
     backgroundColor: patientTheme.colors.backgroundSoft,
