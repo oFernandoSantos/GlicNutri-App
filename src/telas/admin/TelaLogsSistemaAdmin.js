@@ -41,7 +41,7 @@ const historicoOptions = [
 const LOG_LOOKBACK_DAYS = 3650;
 const SYSTEM_LOG_LOOKBACK_DAYS = 30;
 const LOG_SYSTEM_LIMIT = 500;
-const LOG_AUDIT_LIMIT = 1000;
+const LOG_AUDIT_LIMIT = 120;
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -173,7 +173,7 @@ function mapAuditEventToLogUsuario(event) {
   const details = event?.details || {};
   const text = `${action} ${entity} ${origin}`;
 
-  if (!event || event.actorType === 'anonimo' || action === 'admin_consulta_logs_sistema') {
+  if (!event || action === 'admin_consulta_logs_sistema') {
     return null;
   }
 
@@ -412,7 +412,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
             days: LOG_LOOKBACK_DAYS,
             limit: LOG_AUDIT_LIMIT,
           }).catch(() => []),
-          15000,
+          30000,
           []
         ),
       ]);
