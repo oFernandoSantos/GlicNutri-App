@@ -25,7 +25,11 @@ import {
   TIPOS_HISTORICO_LOG,
   listarLogsSistema,
 } from '../../servicos/servicoLogSistema';
-import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import {
+  listarEventosAuditoria,
+  listarEventosAuditoriaRecentesDireto,
+  registrarLogAuditoria,
+} from '../../servicos/servicoAuditoria';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 
 const historicoOptions = [
@@ -408,10 +412,18 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
           []
         ),
         withTimeout(
-          listarEventosAuditoria({
-            days: LOG_LOOKBACK_DAYS,
+          listarEventosAuditoriaRecentesDireto({
+            days: SYSTEM_LOG_LOOKBACK_DAYS,
             limit: LOG_AUDIT_LIMIT,
-          }).catch(() => []),
+          })
+            .then((eventos) => {
+              if (eventos.length) return eventos;
+              return listarEventosAuditoria({
+                days: LOG_LOOKBACK_DAYS,
+                limit: LOG_AUDIT_LIMIT,
+              });
+            })
+            .catch(() => []),
           30000,
           []
         ),

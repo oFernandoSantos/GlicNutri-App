@@ -764,3 +764,92 @@ export async function listarEventosAuditoria({
     .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
     .slice(Math.max(Number(offset) || 0, 0), Math.max((Number(offset) || 0) + (Number(limit) || 1), 1));
 }
+
+export async function listarEventosAuditoriaRecentesDireto({
+  days = 30,
+  limit = 120,
+  actorType = '',
+  action = '',
+  status = '',
+  search = '',
+  dateRange = '',
+} = {}) {
+  const parsedEvents = [];
+  const attemptedPaths = new Set();
+  const maxItems = Math.max(Number(limit) || 1, 1);
+  const prefixes = buildRecentDatePrefixes(days);
+
+  async function processPath(fullPath) {
+    if (!fullPath || attemptedPaths.has(fullPath) || parsedEvents.length >= maxItems) {
+      return;
+    }
+
+    attemptedPaths.add(fullPath);
+
+    let fileText = '';
+    const cachedEvent = auditEventCache.get(fullPath);
+
+    if (cachedEvent) {
+      if (
+        isEventWithinDays(cachedEvent, days) &&
+        matchesFilter(cachedEvent, { actorType, action, status, search, dateRange })
+      ) {
+        parsedEvents.push(cachedEvent);
+      }
+      return;
+    }
+
+    const restDl = await downloadAuditObjectViaRest(fullPath);
+    if (restDl.ok && restDl.text) {
+      fileText = restDl.text;
+    }
+
+    if (!fileText || !String(fileText).trim()) {
+      const downloadResult = await supabase.storage
+        .from(AUDIT_BUCKET)
+        .download(fullPath);
+
+      if (!downloadResult.error && downloadResult.data) {
+        fileText = await readDownloadedText(downloadResult.data);
+      }
+    }
+
+    if (!fileText || !String(fileText).trim()) {
+      return;
+    }
+
+    const parsed = parseAuditEvent(fileText, fullPath);
+    if (parsed) {
+      auditEventCache.set(fullPath, parsed);
+    }
+
+    if (
+      parsed &&
+      isEventWithinDays(parsed, days) &&
+      matchesFilter(parsed, { actorType, action, status, search, dateRange })
+    ) {
+      parsedEvents.push(parsed);
+    }
+  }
+
+  for (const prefix of prefixes) {
+    if (parsedEvents.length >= maxItems) {
+      break;
+    }
+
+    const paths = await collectAuditJsonPaths(prefix, {
+      maxItems: Math.max(maxItems - parsedEvents.length, 20),
+      maxDepth: 2,
+    });
+
+    const sortedPaths = paths
+      .filter(Boolean)
+      .sort((left, right) => String(right).localeCompare(String(left)));
+
+    await processInBatches(sortedPaths, processPath);
+  }
+
+  return parsedEvents
+    .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
+    .slice(0, maxItems);
+}
