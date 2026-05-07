@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   RefreshControl,
   ScrollView,
@@ -18,38 +19,261 @@ import BarraAbasAdmin, {
 } from '../../componentes/admin/BarraAbasAdmin';
 import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
-import { listarLogsSistema } from '../../servicos/servicoLogSistema';
-import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import {
+  AppLogger,
+  MODULOS_LOG_SISTEMA,
+  TIPOS_HISTORICO_LOG,
+  listarLogsSistema,
+} from '../../servicos/servicoLogSistema';
+import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 
-const levelFilters = [
-  { key: '', label: 'Todos' },
-  { key: 'log', label: 'Logs' },
-  { key: 'warn', label: 'Warnings' },
-  { key: 'error', label: 'Erros' },
+const historicoOptions = [
+  '',
+  TIPOS_HISTORICO_LOG.CADASTRO,
+  TIPOS_HISTORICO_LOG.ALTERACAO,
+  TIPOS_HISTORICO_LOG.EXCLUSAO,
+  TIPOS_HISTORICO_LOG.LOGIN,
+  TIPOS_HISTORICO_LOG.ERRO,
+  TIPOS_HISTORICO_LOG.SINCRONIZACAO,
+  TIPOS_HISTORICO_LOG.ALERTA,
 ];
-
-function formatDateTime(value) {
-  if (!value) return '--';
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleString('pt-BR', {
-    dateStyle: 'short',
-    timeStyle: 'short',
-  });
-}
-
-function buildSummary(logs) {
-  return {
-    total: logs.length,
-    logs: logs.filter((item) => item.level === 'log').length,
-    warnings: logs.filter((item) => item.level === 'warn').length,
-    errors: logs.filter((item) => item.level === 'error').length,
-  };
-}
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
+}
+
+function buildComplementoComDispositivo(item) {
+  const complemento = String(item?.complemento || '');
+  const dispositivo = String(item?.dispositivoResumo || '').trim();
+
+  if (!dispositivo) {
+    return complemento;
+  }
+
+  return complemento ? `${complemento} | Dispositivo: ${dispositivo}` : `Dispositivo: ${dispositivo}`;
+}
+
+function buildExportPreview(logs) {
+  const header = 'SEQ;Usuário;Programa;Descrição;Ação;Data/Hora;Complemento';
+  const rows = logs.map((item) =>
+    [
+      item.seq,
+      item.usuario,
+      item.programa,
+      item.descricao,
+      item.historico,
+      item.dataHoraFormatada,
+      buildComplementoComDispositivo(item),
+    ]
+      .map((value) => `"${String(value || '').replace(/"/g, '""')}"`)
+      .join(';')
+  );
+
+  return [header, ...rows].join('\n');
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function parseFilterDate(value, endOfDay = false) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  let date = null;
+
+  if (isoMatch) {
+    const [, year, month, day] = isoMatch;
+    date = new Date(Number(year), Number(month) - 1, Number(day));
+  } else if (brMatch) {
+    const [, day, month, year] = brMatch;
+    date = new Date(Number(year), Number(month) - 1, Number(day));
+  }
+
+  if (!date || Number.isNaN(date.getTime())) return null;
+  date.setHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
+  return date;
+}
+
+function formatDateTime(value) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return String(value);
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function mapAuditEventToLog(event) {
+  const action = String(event?.action || '').toLowerCase();
+  const isGoogle = action.includes('google') || event?.details?.provedor === 'google';
+
+  return {
+    id: `audit-${event.id}`,
+    seq: '',
+    programa: MODULOS_LOG_SISTEMA.LOGIN,
+    descricao: 'Tela de autenticação',
+    usuario: event.actorName || event.actorPatientId || event.actorNutritionistId || event.actorAdminId || 'Usuário',
+    historico: action.includes('falha') ? TIPOS_HISTORICO_LOG.ERRO : TIPOS_HISTORICO_LOG.LOGIN,
+    dataHora: event.createdAt,
+    createdAt: event.createdAt,
+    dataHoraFormatada: formatDateTime(event.createdAt),
+    complemento: action.includes('falha')
+      ? `Falha de login${event.details?.motivo ? ` | Motivo: ${event.details.motivo}` : ''}`
+      : isGoogle
+        ? 'Login efetuado com sucesso via Google'
+        : 'Login efetuado com sucesso',
+    origem: 'auditoria_login',
+  };
+}
+
+function mapAuditEventToLogUsuario(event) {
+  const action = String(event?.action || '').toLowerCase();
+  const entity = String(event?.entity || '').toLowerCase();
+  const origin = String(event?.origin || '').toLowerCase();
+  const details = event?.details || {};
+  const text = `${action} ${entity} ${origin}`;
+
+  if (!event || event.actorType === 'anonimo' || action === 'admin_consulta_logs_sistema') {
+    return null;
+  }
+
+  if (
+    !action.includes('login') &&
+    !action.includes('glicemia') &&
+    !action.includes('refeicao') &&
+    !action.includes('plano') &&
+    !action.includes('consulta') &&
+    !action.includes('medic') &&
+    !action.includes('agenda')
+  ) {
+    return null;
+  }
+
+  const programa = text.includes('login') || text.includes('sessao')
+    ? MODULOS_LOG_SISTEMA.LOGIN
+    : text.includes('glic')
+      ? MODULOS_LOG_SISTEMA.GLICEMIA
+      : text.includes('refeicao') || text.includes('aliment')
+        ? MODULOS_LOG_SISTEMA.ALIMENTACAO
+        : text.includes('plano')
+          ? MODULOS_LOG_SISTEMA.PLANO_ALIMENTAR
+          : text.includes('consulta')
+            ? MODULOS_LOG_SISTEMA.CONSULTA
+            : text.includes('nutri')
+              ? MODULOS_LOG_SISTEMA.NUTRICIONISTA
+              : MODULOS_LOG_SISTEMA.PACIENTE;
+
+  const historico = String(event?.status || '').toLowerCase() === 'falha' || action.includes('falha') || action.includes('erro')
+    ? TIPOS_HISTORICO_LOG.ERRO
+    : action.includes('login')
+      ? TIPOS_HISTORICO_LOG.LOGIN
+      : action.includes('exclu') || action.includes('ocult')
+        ? TIPOS_HISTORICO_LOG.EXCLUSAO
+        : action.includes('sync') || action.includes('sincron')
+          ? TIPOS_HISTORICO_LOG.SINCRONIZACAO
+          : action.includes('alert')
+            ? TIPOS_HISTORICO_LOG.ALERTA
+            : action.includes('cadastro') || action.includes('cadastrad') || action.includes('registr')
+              ? TIPOS_HISTORICO_LOG.CADASTRO
+              : TIPOS_HISTORICO_LOG.ALTERACAO;
+
+  const descricao = action.includes('login')
+    ? 'Tela de autenticação'
+    : action.includes('glic')
+      ? 'Registro de glicemia'
+      : action.includes('refeicao')
+        ? 'Registro de alimentação'
+        : action.includes('plano')
+          ? 'Plano alimentar do paciente'
+          : event?.entity || 'Ação do usuário';
+
+  let complemento = `${event?.action || 'ação'} | ${event?.status || 'status não informado'}`;
+
+  if (action.includes('login')) {
+    const isGoogle = action.includes('google') || details.provedor === 'google';
+    complemento = action.includes('falha')
+      ? `Falha de login${details.motivo ? ` | Motivo: ${details.motivo}` : ''}`
+      : isGoogle
+        ? 'Login efetuado com sucesso via Google'
+        : 'Login efetuado com sucesso';
+  }
+
+  if (action.includes('glicemia')) {
+    const partes = [];
+    if (action.includes('ocult')) partes.push('Registro de glicemia excluído da visão do paciente');
+    if (action.includes('cadastrad')) partes.push('Registro de glicemia incluído');
+    if (details.valorMgDl != null) partes.push(`Valor: ${details.valorMgDl} mg/dL`);
+    if (details.data) partes.push(`Data: ${details.data}`);
+    if (details.hora) partes.push(`Hora: ${details.hora}`);
+    if (details.tipoGlicemia) partes.push(`Tipo: ${details.tipoGlicemia}`);
+    complemento = partes.join(' | ') || complemento;
+  }
+
+  return {
+    id: `audit-${event.id}`,
+    seq: '',
+    programa,
+    descricao,
+    usuario: event.actorName || event.actorPatientId || event.actorNutritionistId || event.actorAdminId || 'Usuário',
+    historico,
+    dataHora: event.createdAt,
+    createdAt: event.createdAt,
+    dataHoraFormatada: formatDateTime(event.createdAt),
+    complemento,
+    origem: 'auditoria',
+  };
+}
+
+function matchesTelaFilters(item, filters) {
+  const dataInicial = parseFilterDate(filters.dataInicial);
+  const dataFinal = parseFilterDate(filters.dataFinal, true);
+  const dataHora = new Date(item.dataHora || item.createdAt || 0);
+  const usuario = normalizeSearchText(filters.usuario);
+  const historico = normalizeSearchText(filters.historico);
+  const complemento = normalizeSearchText(filters.complemento);
+
+  if (dataInicial && (!dataHora || dataHora < dataInicial)) return false;
+  if (dataFinal && (!dataHora || dataHora > dataFinal)) return false;
+  if (usuario && !normalizeSearchText(item.usuario).includes(usuario)) return false;
+  if (historico && !normalizeSearchText(item.historico).includes(historico)) return false;
+
+  if (complemento) {
+    const searchable = normalizeSearchText([
+      item.programa,
+      item.descricao,
+      item.historico,
+      item.complemento,
+      item.usuario,
+    ].filter(Boolean).join(' '));
+    if (!searchable.includes(complemento)) return false;
+  }
+
+  return true;
+}
+
+function prepararResultadoTabela(items) {
+  return Array.from(
+    new Map(items.filter(Boolean).map((item) => [item.id || `${item.dataHora}-${item.usuario}-${item.historico}`, item])).values()
+  )
+    .sort((left, right) => String(right.dataHora || right.createdAt || '').localeCompare(String(left.dataHora || left.createdAt || '')))
+    .map((item, index) => ({
+      ...item,
+      seq: String(index + 1).padStart(3, '0'),
+      dataHoraFormatada: item.dataHoraFormatada || formatDateTime(item.dataHora || item.createdAt),
+    }));
 }
 
 export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
@@ -57,9 +281,34 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [logs, setLogs] = useState([]);
-  const [search, setSearch] = useState('');
-  const [level, setLevel] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
+  const [detalharLog, setDetalharLog] = useState(true);
+  const [exportText, setExportText] = useState('');
+  const [filters, setFilters] = useState({
+    dataInicial: '',
+    dataFinal: '',
+    usuario: '',
+    historico: '',
+    complemento: '',
+  });
+
+  const totalErros = useMemo(
+    () => logs.filter((item) => item.historico === TIPOS_HISTORICO_LOG.ERRO).length,
+    [logs]
+  );
+
+  function updateFilter(field, value, options = {}) {
+    const nextFilters = {
+      ...filters,
+      [field]: value,
+    };
+
+    setFilters(nextFilters);
+
+    if (options.searchAfterChange) {
+      carregarLogs({ filtersOverride: nextFilters });
+    }
+  }
 
   async function handleLogout() {
     setMenuVisible(false);
@@ -75,6 +324,14 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
         status: 'sucesso',
         details: {},
       });
+
+      await AppLogger.registrar({
+        programa: MODULOS_LOG_SISTEMA.ADMIN,
+        descricao: 'Consulta Log do Sistema',
+        usuario: adminUser,
+        historico: TIPOS_HISTORICO_LOG.LOGIN,
+        complemento: 'Administrador saiu da consulta de logs',
+      });
     }
 
     await onAdminLogout?.();
@@ -88,7 +345,9 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     navigation.navigate(routeName, { usuarioLogado: adminUser });
   }
 
-  async function carregarLogs({ isRefresh = false } = {}) {
+  async function carregarLogs({ isRefresh = false, filtersOverride = null } = {}) {
+    const filtrosConsulta = filtersOverride || filters;
+
     try {
       if (isRefresh) {
         setRefreshing(true);
@@ -96,12 +355,27 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
         setLoading(true);
       }
 
-      const data = await listarLogsSistema({
-        days: 7,
-        limit: 80,
-        level,
-        search,
-      });
+      const [logsSistema, eventosAuditoria] = await Promise.all([
+        listarLogsSistema({
+          days: 30,
+          limit: 160,
+          dataInicial: filtrosConsulta.dataInicial,
+          dataFinal: filtrosConsulta.dataFinal,
+          usuario: filtrosConsulta.usuario,
+          historico: filtrosConsulta.historico,
+          complemento: filtrosConsulta.complemento,
+          incluirExemplos: true,
+        }),
+        listarEventosAuditoria({
+          days: 30,
+          limit: 240,
+        }).catch(() => []),
+      ]);
+
+      const logsAuditoria = eventosAuditoria
+        .map(mapAuditEventToLogUsuario)
+        .filter((item) => matchesTelaFilters(item, filtrosConsulta));
+      const data = prepararResultadoTabela([...logsSistema, ...logsAuditoria]);
 
       setLogs(data);
 
@@ -115,20 +389,36 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
           origin: 'admin_logs',
           status: 'sucesso',
           details: {
-            filtro_nivel: level || 'todos',
+            filtros: filtrosConsulta,
             resultado_logs: data.length,
           },
         });
       }
+    } catch (error) {
+      await AppLogger.erro(MODULOS_LOG_SISTEMA.ADMIN, 'Erro ao consultar logs do sistema', error, {
+        usuario: adminUser,
+        complemento: error?.message || 'Falha ao carregar consulta de logs',
+      });
+      Alert.alert('Erro', 'Nao foi possivel consultar os logs agora.');
     } finally {
       setRefreshing(false);
       setLoading(false);
     }
   }
 
+  function handleExportar() {
+    const csvText = buildExportPreview(logs);
+    setExportText(csvText);
+
+  }
+
+  function handleVoltar() {
+    navigation.navigate('AdminHome', { usuarioLogado: adminUser });
+  }
+
   useEffect(() => {
     carregarLogs();
-  }, [level]);
+  }, []);
 
   useEffect(() => {
     navigation.setOptions({
@@ -138,16 +428,14 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     });
   }, [navigation, adminUser]);
 
-  const summary = useMemo(() => buildSummary(logs), [logs]);
-
   if (!isAdminUser(adminUser)) {
     return (
       <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
-        <SectionCard style={styles.heroCard}>
-          <Text style={styles.heroTitle}>Acesso negado</Text>
-          <Text style={styles.heroText}>Entre com um perfil administrador para consultar os logs do sistema.</Text>
+        <SectionCard style={styles.accessCard}>
+          <Text style={styles.accessTitle}>Acesso negado</Text>
+          <Text style={styles.accessText}>Entre com um perfil administrador para consultar os logs do sistema.</Text>
           <TouchableOpacity
-            style={styles.searchButton}
+            style={styles.primaryButton}
             onPress={() =>
               navigation.reset({
                 index: 0,
@@ -155,7 +443,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
               })
             }
           >
-            <Text style={styles.searchButtonText}>Ir para login admin</Text>
+            <Text style={styles.primaryButtonText}>Ir para login admin</Text>
           </TouchableOpacity>
         </SectionCard>
       </View>
@@ -174,7 +462,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
           onLogout={handleLogout}
           currentRoute={route?.name || 'AdminLogsSistema'}
           userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-          userSubtitle="Observabilidade do sistema"
+          userSubtitle="Consulta e rastreamento de logs"
         />
       ) : null}
 
@@ -190,132 +478,183 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <SectionCard style={styles.heroCard}>
-          <Text style={styles.eyebrow}>Painel administrativo</Text>
-          <Text style={styles.heroTitle}>Logs do sistema</Text>
-          <Text style={styles.heroText}>
-            Monitore eventos tecnicos, erros, warnings e mensagens operacionais capturadas do app inteiro.
-          </Text>
-        </SectionCard>
+        <View style={styles.headerBar}>
+          <View style={styles.headerTitleWrap}>
+            <Text style={styles.headerTitle}>Consulta Log do Sistema</Text>
+            <Text style={styles.headerSubtitle}>Consulta administrativa para auditoria e rastreamento operacional</Text>
+          </View>
 
-        <View style={styles.summaryGrid}>
-          <SectionCard style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Total</Text>
-            <Text style={styles.summaryValue}>{summary.total}</Text>
-          </SectionCard>
-          <SectionCard style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Logs</Text>
-            <Text style={styles.summaryValue}>{summary.logs}</Text>
-          </SectionCard>
-          <SectionCard style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Warnings</Text>
-            <Text style={styles.summaryValue}>{summary.warnings}</Text>
-          </SectionCard>
-          <SectionCard style={styles.summaryCard}>
-            <Text style={styles.summaryLabel}>Erros</Text>
-            <Text style={styles.summaryValue}>{summary.errors}</Text>
-          </SectionCard>
+          <View style={styles.headerActions}>
+            <TouchableOpacity style={styles.actionButton} onPress={() => carregarLogs()}>
+              <Ionicons name="search-outline" size={17} color={adminTheme.colors.onPrimary} />
+              <Text style={styles.actionButtonText}>Pesquisar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryActionButton} onPress={handleExportar}>
+              <Ionicons name="print-outline" size={17} color={adminTheme.colors.text} />
+              <Text style={styles.secondaryActionButtonText}>Imprimir/Exportar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.exitButton} onPress={handleVoltar}>
+              <Ionicons name="arrow-back-outline" size={17} color={adminTheme.colors.danger} />
+              <Text style={styles.exitButtonText}>Sair/Voltar</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
         <SectionCard style={styles.filterCard}>
-          <Text style={styles.filterTitle}>Consulta tecnica</Text>
-          <TextInput
-            style={styles.searchInput}
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Buscar por mensagem, source ou stack"
-            placeholderTextColor={adminTheme.colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-          />
-          <TouchableOpacity style={styles.searchButton} onPress={() => carregarLogs()}>
-            <Ionicons name="search-outline" size={18} color={adminTheme.colors.onPrimary} />
-            <Text style={styles.searchButtonText}>Atualizar consulta</Text>
-          </TouchableOpacity>
+          <View style={styles.cardHeaderRow}>
+            <Text style={styles.cardTitle}>Filtros</Text>
+            <TouchableOpacity
+              style={styles.checkboxRow}
+              onPress={() => setDetalharLog((current) => !current)}
+            >
+              <View style={[styles.checkbox, detalharLog && styles.checkboxChecked]}>
+                {detalharLog ? (
+                  <Ionicons name="checkmark" size={14} color={adminTheme.colors.onPrimary} />
+                ) : null}
+              </View>
+              <Text style={styles.checkboxText}>Detalhar LOG</Text>
+            </TouchableOpacity>
+          </View>
 
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterTabs}>
-            {levelFilters.map((item) => {
-              const active = level === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key || 'todos'}
-                  style={[styles.filterTab, active && styles.filterTabActive]}
-                  onPress={() => setLevel(item.key)}
-                >
-                  <Text style={[styles.filterTabText, active && styles.filterTabTextActive]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
+          <View style={styles.filterGrid}>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Data inicial</Text>
+              <TextInput
+                style={styles.input}
+                value={filters.dataInicial}
+                onChangeText={(value) => updateFilter('dataInicial', value)}
+                placeholder="DD/MM/AAAA"
+                placeholderTextColor={adminTheme.colors.textMuted}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Data final</Text>
+              <TextInput
+                style={styles.input}
+                value={filters.dataFinal}
+                onChangeText={(value) => updateFilter('dataFinal', value)}
+                placeholder="DD/MM/AAAA"
+                placeholderTextColor={adminTheme.colors.textMuted}
+              />
+            </View>
+            <View style={styles.field}>
+              <Text style={styles.fieldLabel}>Usuário</Text>
+              <TextInput
+                style={styles.input}
+                value={filters.usuario}
+                onChangeText={(value) => updateFilter('usuario', value)}
+                placeholder="email ou nome"
+                placeholderTextColor={adminTheme.colors.textMuted}
+                autoCapitalize="none"
+              />
+            </View>
+            <View style={styles.fieldWide}>
+              <Text style={styles.fieldLabel}>Tipo de acao / Historico</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
+                {historicoOptions.map((item) => {
+                  const active = filters.historico === item;
+                  return (
+                    <TouchableOpacity
+                      key={item || 'todos-historicos'}
+                      style={[styles.optionButton, active && styles.optionButtonActive]}
+                      onPress={() => updateFilter('historico', item, { searchAfterChange: true })}
+                    >
+                      <Text style={[styles.optionButtonText, active && styles.optionButtonTextActive]}>
+                        {item || 'TODOS'}
+                      </Text>
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </View>
+            <View style={styles.fieldWide}>
+              <Text style={styles.fieldLabel}>Complemento</Text>
+              <TextInput
+                style={styles.input}
+                value={filters.complemento}
+                onChangeText={(value) => updateFilter('complemento', value)}
+                placeholder="texto livre, descricao ou detalhe do log"
+                placeholderTextColor={adminTheme.colors.textMuted}
+              />
+            </View>
+          </View>
+        </SectionCard>
+
+        <View style={styles.resultHeader}>
+          <Text style={styles.resultTitle}>Resultado</Text>
+          <Text style={styles.resultMeta}>
+            {logs.length} registro(s) encontrado(s) - {totalErros} erro(s)
+          </Text>
+        </View>
+
+        <SectionCard style={styles.tableCard}>
+          <ScrollView horizontal showsHorizontalScrollIndicator>
+            <View style={styles.table}>
+              <View style={[styles.tableRow, styles.tableHeaderRow]}>
+                <Text style={[styles.cell, styles.seqCell, styles.tableHeaderText]}>SEQ</Text>
+                <Text style={[styles.cell, styles.userCell, styles.tableHeaderText]}>Usuário</Text>
+                <Text style={[styles.cell, styles.programCell, styles.tableHeaderText]}>Programa</Text>
+                <Text style={[styles.cell, styles.descriptionCell, styles.tableHeaderText]}>Descrição</Text>
+                <Text style={[styles.cell, styles.historyCell, styles.tableHeaderText]}>Ação</Text>
+                <Text style={[styles.cell, styles.dateCell, styles.tableHeaderText]}>Data/Hora</Text>
+                <Text style={[styles.cell, styles.complementCell, styles.tableHeaderText]}>Complemento</Text>
+              </View>
+
+              {loading ? (
+                <View style={styles.loadingRow}>
+                  <ActivityIndicator color={adminTheme.colors.primary} />
+                  <Text style={styles.loadingText}>Carregando logs...</Text>
+                </View>
+              ) : logs.length === 0 ? (
+                <View style={styles.loadingRow}>
+                  <Text style={styles.loadingText}>Nenhum log encontrado para os filtros atuais.</Text>
+                </View>
+              ) : (
+                logs.map((item, index) => (
+                  <View
+                    key={item.path || item.id || `${item.seq}-${index}`}
+                    style={[
+                      styles.tableRow,
+                      index % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd,
+                      item.historico === TIPOS_HISTORICO_LOG.ERRO && styles.tableRowError,
+                    ]}
+                  >
+                    <Text style={[styles.cell, styles.seqCell]}>{item.seq}</Text>
+                    <Text style={[styles.cell, styles.userCell]} numberOfLines={detalharLog ? 3 : 1}>
+                      {item.usuario}
+                    </Text>
+                    <Text style={[styles.cell, styles.programCell]}>{item.programa || item.modulo}</Text>
+                    <Text style={[styles.cell, styles.descriptionCell]}>{item.descricao}</Text>
+                    <Text style={[styles.cell, styles.historyCell]}>{item.historico || item.acao}</Text>
+                    <Text style={[styles.cell, styles.dateCell]}>{item.dataHoraFormatada}</Text>
+                    <Text style={[styles.cell, styles.complementCell]} numberOfLines={detalharLog ? 5 : 1}>
+                      {buildComplementoComDispositivo(item) || '-'}
+                    </Text>
+                  </View>
+                ))
+              )}
+            </View>
           </ScrollView>
         </SectionCard>
 
-        <Text style={styles.sectionTitle}>Ocorrencias recentes</Text>
-
-        {loading ? (
-          <SectionCard style={styles.stateCard}>
-            <ActivityIndicator color={adminTheme.colors.primary} />
-            <Text style={styles.stateText}>Carregando logs do sistema...</Text>
+        {exportText ? (
+          <SectionCard style={styles.exportCard}>
+            <View style={styles.exportHeader}>
+              <Text style={styles.exportTitle}>Bloco de texto para exportacao</Text>
+              <TouchableOpacity style={styles.clearExportButton} onPress={() => setExportText('')}>
+                <Ionicons name="close-outline" size={18} color={adminTheme.colors.danger} />
+                <Text style={styles.clearExportButtonText}>Fechar</Text>
+              </TouchableOpacity>
+            </View>
+            <TextInput
+              style={styles.exportTextArea}
+              value={exportText}
+              multiline
+              editable={false}
+              selectTextOnFocus
+            />
           </SectionCard>
-        ) : logs.length === 0 ? (
-          <SectionCard style={styles.stateCard}>
-            <Text style={styles.stateText}>Nenhum log encontrado para os filtros atuais.</Text>
-          </SectionCard>
-        ) : (
-          logs.map((item) => (
-            <SectionCard key={item.path || item.id} style={styles.eventCard}>
-              <View style={styles.eventTopRow}>
-                <Text style={styles.eventAction}>{item.source || 'sistema'}</Text>
-                <View
-                  style={[
-                    styles.statusPill,
-                    item.level === 'error'
-                      ? styles.statusPillError
-                      : item.level === 'warn'
-                        ? styles.statusPillWarn
-                        : styles.statusPillSuccess,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.statusPillText,
-                      item.level === 'error'
-                        ? styles.statusPillTextError
-                        : item.level === 'warn'
-                          ? styles.statusPillTextWarn
-                          : styles.statusPillTextSuccess,
-                    ]}
-                  >
-                    {String(item.level || 'log').toUpperCase()}
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.eventMeta}>{formatDateTime(item.createdAt)} • {item.platform || Platform.OS}</Text>
-              <Text style={styles.eventMessage}>{item.message || 'Mensagem nao informada.'}</Text>
-              <Text style={styles.eventPath}>{item.path || 'arquivo nao informado'}</Text>
-
-              {item.context ? (
-                <View style={styles.detailsBox}>
-                  <Text style={styles.detailsTitle}>Contexto</Text>
-                  <Text style={styles.detailsText}>
-                    {typeof item.context === 'string'
-                      ? item.context
-                      : JSON.stringify(item.context, null, 2)}
-                  </Text>
-                </View>
-              ) : null}
-
-              {item.stack ? (
-                <View style={styles.detailsBox}>
-                  <Text style={styles.detailsTitle}>Stack</Text>
-                  <Text style={styles.detailsText}>{item.stack}</Text>
-                </View>
-              ) : null}
-            </SectionCard>
-          ))
-        )}
+        ) : null}
       </ScrollView>
 
       <BarraAbasAdmin
@@ -357,209 +696,324 @@ const styles = StyleSheet.create({
   },
   sectionCard: {
     backgroundColor: adminTheme.colors.panel,
-    borderRadius: adminTheme.radius.xl,
+    borderRadius: 8,
     padding: adminTheme.spacing.card,
     ...adminShadow,
   },
-  heroCard: {
-    marginTop: 0,
-    backgroundColor: adminTheme.colors.panelStrong,
-    borderWidth: 1.5,
+  accessCard: {
+    margin: 18,
   },
-  eyebrow: {
+  accessTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 24,
+    fontWeight: '800',
+  },
+  accessText: {
+    color: adminTheme.colors.textMuted,
+    marginTop: 8,
+  },
+  headerBar: {
+    backgroundColor: adminTheme.colors.panelStrong,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 16,
+  },
+  headerTitleWrap: {
+    marginBottom: 14,
+  },
+  headerTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  headerSubtitle: {
     color: adminTheme.colors.textMuted,
     fontSize: 13,
-    fontWeight: '700',
-    letterSpacing: 0.6,
-    textTransform: 'uppercase',
+    marginTop: 5,
   },
-  heroTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 30,
-    fontWeight: '800',
-    marginTop: 10,
-  },
-  heroText: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 21,
-    marginTop: 10,
-  },
-  summaryGrid: {
+  headerActions: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 6,
+    gap: 10,
   },
-  summaryCard: {
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1.1,
-    minHeight: 110,
-    width: '48%',
-  },
-  summaryLabel: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-  },
-  summaryValue: {
-    color: adminTheme.colors.text,
-    fontSize: 28,
-    fontWeight: '800',
-    marginTop: 10,
-  },
-  filterCard: {
-    marginTop: 18,
-  },
-  filterTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  searchInput: {
-    backgroundColor: adminTheme.colors.background,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.lg,
-    borderWidth: 1.4,
-    color: adminTheme.colors.text,
-    marginTop: 14,
-    minHeight: 48,
-    paddingHorizontal: 14,
-  },
-  searchButton: {
+  actionButton: {
     alignItems: 'center',
     backgroundColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.pill,
+    borderRadius: 8,
     flexDirection: 'row',
-    justifyContent: 'center',
-    marginTop: 12,
-    minHeight: 46,
+    minHeight: 42,
+    paddingHorizontal: 14,
   },
-  searchButtonText: {
+  actionButtonText: {
     color: adminTheme.colors.onPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-    marginLeft: 8,
+    fontSize: 13,
+    fontWeight: '900',
+    marginLeft: 7,
   },
-  filterTabs: {
-    gap: 10,
-    marginTop: 14,
-    paddingRight: 10,
-  },
-  filterTab: {
+  secondaryActionButton: {
+    alignItems: 'center',
     backgroundColor: adminTheme.colors.panelMuted,
     borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.pill,
+    borderRadius: 8,
     borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 42,
     paddingHorizontal: 14,
-    paddingVertical: 10,
   },
-  filterTabActive: {
-    backgroundColor: adminTheme.colors.primary,
-  },
-  filterTabText: {
+  secondaryActionButtonText: {
     color: adminTheme.colors.text,
-    fontWeight: '700',
-  },
-  filterTabTextActive: {
-    color: adminTheme.colors.onPrimary,
-  },
-  sectionTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 20,
+    fontSize: 13,
     fontWeight: '800',
-    marginBottom: 12,
-    marginTop: 12,
+    marginLeft: 7,
   },
-  stateCard: {
+  exitButton: {
     alignItems: 'center',
-    minHeight: 120,
-    justifyContent: 'center',
+    backgroundColor: adminTheme.colors.dangerSoft,
+    borderColor: adminTheme.colors.danger,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 42,
+    paddingHorizontal: 14,
   },
-  stateText: {
-    color: adminTheme.colors.textMuted,
-    marginTop: 12,
-    textAlign: 'center',
+  exitButtonText: {
+    color: adminTheme.colors.danger,
+    fontSize: 13,
+    fontWeight: '900',
+    marginLeft: 7,
   },
-  eventCard: {
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1.1,
+  filterCard: {
     marginBottom: 12,
   },
-  eventTopRow: {
+  cardHeaderRow: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
   },
-  eventAction: {
+  cardTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  checkboxRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    minHeight: 36,
+  },
+  checkbox: {
+    alignItems: 'center',
+    borderColor: adminTheme.colors.primary,
+    borderRadius: 4,
+    borderWidth: 1.5,
+    height: 22,
+    justifyContent: 'center',
+    marginRight: 8,
+    width: 22,
+  },
+  checkboxChecked: {
+    backgroundColor: adminTheme.colors.primary,
+  },
+  checkboxText: {
+    color: adminTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  filterGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 14,
+  },
+  field: {
+    minWidth: 180,
+    flexGrow: 1,
+    flexBasis: '30%',
+  },
+  fieldWide: {
+    flexBasis: '100%',
+    flexGrow: 1,
+  },
+  fieldLabel: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '900',
+    marginBottom: 6,
+    textTransform: 'uppercase',
+  },
+  input: {
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    color: adminTheme.colors.text,
+    minHeight: 42,
+    paddingHorizontal: 12,
+  },
+  optionRow: {
+    gap: 8,
+    paddingRight: 8,
+  },
+  optionButton: {
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 38,
+    paddingHorizontal: 10,
+  },
+  optionButtonActive: {
+    backgroundColor: adminTheme.colors.primary,
+  },
+  optionButtonText: {
+    color: adminTheme.colors.text,
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  optionButtonTextActive: {
+    color: adminTheme.colors.onPrimary,
+  },
+  resultHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  resultTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  resultMeta: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  tableCard: {
+    padding: 0,
+    overflow: 'hidden',
+  },
+  table: {
+    minWidth: 1160,
+  },
+  tableRow: {
+    flexDirection: 'row',
+    minHeight: 46,
+  },
+  tableHeaderRow: {
+    backgroundColor: '#0B1A17',
+  },
+  tableRowEven: {
+    backgroundColor: adminTheme.colors.panel,
+  },
+  tableRowOdd: {
+    backgroundColor: adminTheme.colors.panelMuted,
+  },
+  tableRowError: {
+    borderLeftColor: adminTheme.colors.danger,
+    borderLeftWidth: 4,
+  },
+  cell: {
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRightWidth: 1,
+    color: adminTheme.colors.text,
+    fontSize: 12,
+    lineHeight: 17,
+    paddingHorizontal: 9,
+    paddingVertical: 10,
+  },
+  tableHeaderText: {
+    color: '#FFFFFF',
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  seqCell: {
+    width: 58,
+  },
+  programCell: {
+    width: 150,
+  },
+  descriptionCell: {
+    width: 190,
+  },
+  userCell: {
+    width: 190,
+  },
+  historyCell: {
+    width: 130,
+  },
+  dateCell: {
+    width: 150,
+  },
+  complementCell: {
+    width: 292,
+  },
+  loadingRow: {
+    alignItems: 'center',
+    minHeight: 110,
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  loadingText: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  exportCard: {
+    marginTop: 12,
+  },
+  exportHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  exportTitle: {
     color: adminTheme.colors.text,
     flex: 1,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '900',
   },
-  statusPill: {
-    borderRadius: adminTheme.radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+  clearExportButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    minHeight: 34,
   },
-  statusPillSuccess: {
-    backgroundColor: adminTheme.colors.infoSoft,
-  },
-  statusPillWarn: {
-    backgroundColor: adminTheme.colors.warningSoft,
-  },
-  statusPillError: {
-    backgroundColor: adminTheme.colors.dangerSoft,
-  },
-  statusPillText: {
-    fontSize: 11,
-    fontWeight: '800',
-  },
-  statusPillTextSuccess: {
-    color: adminTheme.colors.info,
-  },
-  statusPillTextWarn: {
-    color: adminTheme.colors.warning,
-  },
-  statusPillTextError: {
+  clearExportButtonText: {
     color: adminTheme.colors.danger,
-  },
-  eventMeta: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-  },
-  eventMessage: {
-    color: adminTheme.colors.text,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 10,
-  },
-  eventPath: {
-    color: adminTheme.colors.info,
     fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
+    fontWeight: '900',
+    marginLeft: 4,
   },
-  detailsBox: {
-    backgroundColor: adminTheme.colors.panelMuted,
+  exportTextArea: {
+    backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.lg,
+    borderRadius: 8,
     borderWidth: 1,
-    marginTop: 12,
-    padding: 12,
-  },
-  detailsTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-    marginBottom: 8,
-  },
-  detailsText: {
     color: adminTheme.colors.text,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 16,
+    minHeight: 220,
+    padding: 12,
+    textAlignVertical: 'top',
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.primary,
+    borderRadius: 8,
+    justifyContent: 'center',
+    marginTop: 14,
+    minHeight: 44,
+  },
+  primaryButtonText: {
+    color: adminTheme.colors.onPrimary,
+    fontWeight: '900',
   },
 });

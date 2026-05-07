@@ -2,6 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
+import { AppLogger, MODULOS_LOG_SISTEMA } from './servicoLogSistema';
 
 export const REFEICAO_IA_BUCKET = 'refeicoes-ia';
 
@@ -244,6 +245,10 @@ export async function uploadImagemRefeicaoIA({ asset, patientId }) {
     });
 
   if (error) {
+    AppLogger.erro(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Upload de imagem da refeicao', error, {
+      usuario: patientId,
+      complemento: 'Falha ao enviar imagem para o Storage',
+    });
     throw new Error(normalizeErrorMessage(error));
   }
 
@@ -263,10 +268,18 @@ export async function analisarImagemRefeicaoIA(payload) {
 
   if (error) {
     const detailedMessage = await extractFunctionErrorMessage('analisar-refeicao-ia', payload);
+    AppLogger.erro(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Analise de refeicao por IA', error, {
+      usuario: 'paciente',
+      complemento: detailedMessage || error?.message || 'Falha na analise da refeicao',
+    });
     throw new Error(normalizeErrorMessage(detailedMessage || error));
   }
 
   if (!data?.ok) {
+    AppLogger.alerta(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Analise de refeicao por IA', {
+      usuario: 'paciente',
+      complemento: data?.message || 'IA nao retornou resultado valido',
+    });
     throw new Error(normalizeErrorMessage(data?.message || 'Nao foi possivel analisar a refeicao agora.'));
   }
 
@@ -370,6 +383,10 @@ export async function salvarRefeicaoIA({
     .maybeSingle();
 
   if (error) {
+    AppLogger.erro(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Cadastro de refeicao', error, {
+      usuario: patientId,
+      complemento: 'Falha ao cadastrar refeicao IA',
+    });
     registrarLogAuditoria({
       actor: { id_paciente_uuid: patientId },
       actorType: 'paciente',
@@ -406,6 +423,15 @@ export async function salvarRefeicaoIA({
       possuiFoto: Boolean(fotoUrl),
       carboidratosTotal: totais.carboidratos_total,
       caloriasTotal: totais.calorias_total,
+    },
+  });
+
+  AppLogger.cadastro(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Cadastro de refeicao', {
+    usuario: patientId,
+    complemento: `Refeicao cadastrada | Alimentos: ${normalizedFoods.length} | Carboidratos: ${totais.carboidratos_total} g`,
+    detalhes: {
+      recordId,
+      totais,
     },
   });
 

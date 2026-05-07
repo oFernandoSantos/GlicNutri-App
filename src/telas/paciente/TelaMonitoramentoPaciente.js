@@ -41,6 +41,11 @@ import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
+import {
+  AppLogger,
+  MODULOS_LOG_SISTEMA,
+  TIPOS_HISTORICO_LOG,
+} from '../../servicos/servicoLogSistema';
 
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
 
@@ -1563,6 +1568,34 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
         currentPatient: patient,
         patientContext: usuarioLogado,
       });
+      AppLogger.registrar({
+        programa: MODULOS_LOG_SISTEMA.GLICEMIA,
+        descricao: 'Registro de glicemia',
+        usuario: patient || usuarioLogado,
+        historico: isPreviousGlucoseEntry
+          ? TIPOS_HISTORICO_LOG.CADASTRO
+          : TIPOS_HISTORICO_LOG.ALTERACAO,
+        complemento: `Valor novo: ${parsedValue} mg/dL | Tipo: ${manualGlucoseType || 'Nao informado'}`,
+        detalhes: {
+          patientId: activePatientId,
+          data: savedReading.date,
+          hora: savedReading.time,
+        },
+      });
+
+      if (parsedValue > 180 || parsedValue < 70) {
+        AppLogger.alerta(MODULOS_LOG_SISTEMA.GLICEMIA, 'Registro de glicemia', {
+          usuario: patient || usuarioLogado,
+          complemento:
+            parsedValue > 180
+              ? `Valor elevado detectado: ${parsedValue} mg/dL`
+              : `Valor baixo detectado: ${parsedValue} mg/dL`,
+          detalhes: {
+            patientId: activePatientId,
+            valor: parsedValue,
+          },
+        });
+      }
       setNewGlucoseValue('');
       setManualMeasurementDate('');
       setManualMeasurementTime('');
@@ -1584,6 +1617,10 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
         removeCachedGlucoseReading(activePatientId, optimisticReading.id);
       }
       console.log('Erro ao salvar glicemia:', error);
+      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Registro de glicemia', error, {
+        usuario: patient || usuarioLogado,
+        complemento: `Falha ao salvar glicemia | Valor informado: ${parsedValue || 'n/a'} mg/dL`,
+      });
       Alert.alert(
         'Erro ao salvar glicemia',
         error?.message || 'Nao foi possivel salvar a glicemia agora.'
@@ -1649,6 +1686,14 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       setAppState(updatedReadings.appState);
       setGlucoseReadings(mergedReadings);
       replaceCachedGlucoseReadings(activePatientId, mergedReadings);
+      AppLogger.sincronizacao(MODULOS_LOG_SISTEMA.GLICEMIA, 'Sincronizacao LibreView', {
+        usuario: patient || usuarioLogado,
+        complemento: `${newReadings.length} leitura(s) importada(s) para a glicose`,
+        detalhes: {
+          leiturasRecebidas: libreReadings.length,
+          leiturasNovas: newReadings.length,
+        },
+      });
 
       Alert.alert(
         'LibreView sincronizado',
@@ -1658,6 +1703,10 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       );
     } catch (error) {
       console.log('Erro ao sincronizar LibreView:', error);
+      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Sincronizacao LibreView', error, {
+        usuario: patient || usuarioLogado,
+        complemento: 'Falha ao sincronizar leituras do LibreView',
+      });
       Alert.alert('Erro', 'Não foi possível sincronizar o LibreView agora.');
     } finally {
       setSyncingLibreView(false);
