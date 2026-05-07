@@ -39,6 +39,7 @@ const historicoOptions = [
   TIPOS_HISTORICO_LOG.ALERTA,
 ];
 const LOG_LOOKBACK_DAYS = 3650;
+const SYSTEM_LOG_LOOKBACK_DAYS = 30;
 const LOG_SYSTEM_LIMIT = 500;
 const LOG_AUDIT_LIMIT = 1000;
 
@@ -302,6 +303,15 @@ function prepararResultadoTabela(items) {
     }));
 }
 
+function withTimeout(promise, timeoutMs, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      setTimeout(() => resolve(fallbackValue), timeoutMs);
+    }),
+  ]);
+}
+
 export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
   const adminUser = usuarioLogado || route?.params?.usuarioLogado || null;
   const [loading, setLoading] = useState(true);
@@ -383,20 +393,28 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
       }
 
       const [logsSistema, eventosAuditoria] = await Promise.all([
-        listarLogsSistema({
-          days: LOG_LOOKBACK_DAYS,
-          limit: LOG_SYSTEM_LIMIT,
-          dataInicial: filtrosConsulta.dataInicial,
-          dataFinal: filtrosConsulta.dataFinal,
-          usuario: filtrosConsulta.usuario,
-          historico: filtrosConsulta.historico,
-          complemento: filtrosConsulta.complemento,
-          incluirExemplos: false,
-        }),
-        listarEventosAuditoria({
-          days: LOG_LOOKBACK_DAYS,
-          limit: LOG_AUDIT_LIMIT,
-        }).catch(() => []),
+        withTimeout(
+          listarLogsSistema({
+            days: SYSTEM_LOG_LOOKBACK_DAYS,
+            limit: LOG_SYSTEM_LIMIT,
+            dataInicial: filtrosConsulta.dataInicial,
+            dataFinal: filtrosConsulta.dataFinal,
+            usuario: filtrosConsulta.usuario,
+            historico: filtrosConsulta.historico,
+            complemento: filtrosConsulta.complemento,
+            incluirExemplos: false,
+          }).catch(() => []),
+          8000,
+          []
+        ),
+        withTimeout(
+          listarEventosAuditoria({
+            days: LOG_LOOKBACK_DAYS,
+            limit: LOG_AUDIT_LIMIT,
+          }).catch(() => []),
+          15000,
+          []
+        ),
       ]);
 
       const logsAuditoria = eventosAuditoria
