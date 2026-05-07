@@ -25,7 +25,11 @@ import {
   TIPOS_HISTORICO_LOG,
   listarLogsSistema,
 } from '../../servicos/servicoLogSistema';
-import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import {
+  listarEventosAuditoria,
+  listarEventosAuditoriaRecentesDireto,
+  registrarLogAuditoria,
+} from '../../servicos/servicoAuditoria';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 
 const historicoOptions = [
@@ -38,6 +42,10 @@ const historicoOptions = [
   TIPOS_HISTORICO_LOG.SINCRONIZACAO,
   TIPOS_HISTORICO_LOG.ALERTA,
 ];
+const LOG_LOOKBACK_DAYS = 3650;
+const SYSTEM_LOG_LOOKBACK_DAYS = 30;
+const LOG_SYSTEM_LIMIT = 500;
+const LOG_AUDIT_LIMIT = 120;
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -146,19 +154,7 @@ function mapAuditEventToLogUsuario(event) {
   const details = event?.details || {};
   const text = `${action} ${entity} ${origin}`;
 
-  if (!event || event.actorType === 'anonimo' || action === 'admin_consulta_logs_sistema') {
-    return null;
-  }
-
-  if (
-    !action.includes('login') &&
-    !action.includes('glicemia') &&
-    !action.includes('refeicao') &&
-    !action.includes('plano') &&
-    !action.includes('consulta') &&
-    !action.includes('medic') &&
-    !action.includes('agenda')
-  ) {
+  if (!event || action === 'admin_consulta_logs_sistema') {
     return null;
   }
 
@@ -174,19 +170,21 @@ function mapAuditEventToLogUsuario(event) {
             ? MODULOS_LOG_SISTEMA.CONSULTA
             : text.includes('nutri')
               ? MODULOS_LOG_SISTEMA.NUTRICIONISTA
-              : MODULOS_LOG_SISTEMA.PACIENTE;
+              : text.includes('admin')
+                ? MODULOS_LOG_SISTEMA.ADMIN
+                : MODULOS_LOG_SISTEMA.PACIENTE;
 
   const historico = String(event?.status || '').toLowerCase() === 'falha' || action.includes('falha') || action.includes('erro')
     ? TIPOS_HISTORICO_LOG.ERRO
     : action.includes('login')
       ? TIPOS_HISTORICO_LOG.LOGIN
-      : action.includes('exclu') || action.includes('ocult')
+      : action.includes('delete') || action.includes('exclu') || action.includes('remov') || action.includes('ocult')
         ? TIPOS_HISTORICO_LOG.EXCLUSAO
         : action.includes('sync') || action.includes('sincron')
           ? TIPOS_HISTORICO_LOG.SINCRONIZACAO
           : action.includes('alert')
             ? TIPOS_HISTORICO_LOG.ALERTA
-            : action.includes('cadastro') || action.includes('cadastrad') || action.includes('registr')
+            : action.includes('create') || action.includes('insert') || action.includes('cadastro') || action.includes('cadastrad') || action.includes('registr')
               ? TIPOS_HISTORICO_LOG.CADASTRO
               : TIPOS_HISTORICO_LOG.ALTERACAO;
 
@@ -233,6 +231,12 @@ function mapAuditEventToLogUsuario(event) {
     createdAt: event.createdAt,
     dataHoraFormatada: formatDateTime(event.createdAt),
     complemento,
+    detalhes: details,
+    path: event.path,
+    atorTipo: event.actorType,
+    entidade: event.entity,
+    entidadeId: event.entityId,
+    status: event.status,
     origem: 'auditoria',
   };
 }
@@ -257,6 +261,10 @@ function matchesTelaFilters(item, filters) {
       item.historico,
       item.complemento,
       item.usuario,
+      item.entidade,
+      item.entidadeId,
+      item.status,
+      JSON.stringify(item.detalhes || {}),
     ].filter(Boolean).join(' '));
     if (!searchable.includes(complemento)) return false;
   }
@@ -274,6 +282,15 @@ function prepararResultadoTabela(items) {
       seq: String(index + 1).padStart(3, '0'),
       dataHoraFormatada: item.dataHoraFormatada || formatDateTime(item.dataHora || item.createdAt),
     }));
+}
+
+function withTimeout(promise, timeoutMs, fallbackValue) {
+  return Promise.race([
+    promise,
+    new Promise((resolve) => {
+      setTimeout(() => resolve(fallbackValue), timeoutMs);
+    }),
+  ]);
 }
 
 export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
@@ -356,31 +373,50 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
       }
 
       const [logsSistema, eventosAuditoria] = await Promise.all([
-        listarLogsSistema({
-          days: 30,
-          limit: 160,
-          dataInicial: filtrosConsulta.dataInicial,
-          dataFinal: filtrosConsulta.dataFinal,
-          usuario: filtrosConsulta.usuario,
-          historico: filtrosConsulta.historico,
-          complemento: filtrosConsulta.complemento,
-          incluirExemplos: true,
-        }),
-        listarEventosAuditoria({
-          days: 30,
-          limit: 240,
-        }).catch(() => []),
+        withTimeout(
+          listarLogsSistema({
+            days: SYSTEM_LOG_LOOKBACK_DAYS,
+            limit: LOG_SYSTEM_LIMIT,
+            dataInicial: filtrosConsulta.dataInicial,
+            dataFinal: filtrosConsulta.dataFinal,
+            usuario: filtrosConsulta.usuario,
+            historico: filtrosConsulta.historico,
+            complemento: filtrosConsulta.complemento,
+            incluirExemplos: false,
+          }).catch(() => []),
+          8000,
+          []
+        ),
+        withTimeout(
+          listarEventosAuditoriaRecentesDireto({
+            days: SYSTEM_LOG_LOOKBACK_DAYS,
+            limit: LOG_AUDIT_LIMIT,
+          })
+            .then((eventos) => {
+              if (eventos.length) return eventos;
+              return listarEventosAuditoria({
+                days: LOG_LOOKBACK_DAYS,
+                limit: LOG_AUDIT_LIMIT,
+              });
+            })
+            .catch(() => []),
+          30000,
+          []
+        ),
       ]);
 
       const logsAuditoria = eventosAuditoria
         .map(mapAuditEventToLogUsuario)
+        .filter(Boolean)
         .filter((item) => matchesTelaFilters(item, filtrosConsulta));
       const data = prepararResultadoTabela([...logsSistema, ...logsAuditoria]);
 
       setLogs(data);
+      setRefreshing(false);
+      setLoading(false);
 
       if (isAdminUser(adminUser)) {
-        await registrarLogAuditoria({
+        registrarLogAuditoria({
           actor: adminUser,
           actorType: 'admin',
           action: 'admin_consulta_logs_sistema',
@@ -392,7 +428,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
             filtros: filtrosConsulta,
             resultado_logs: data.length,
           },
-        });
+        }).catch(() => {});
       }
     } catch (error) {
       await AppLogger.erro(MODULOS_LOG_SISTEMA.ADMIN, 'Erro ao consultar logs do sistema', error, {
@@ -410,6 +446,13 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     const csvText = buildExportPreview(logs);
     setExportText(csvText);
 
+  }
+
+  function handleSelecionarLog(item) {
+    navigation.navigate('AdminDetalheLogSistema', {
+      usuarioLogado: adminUser,
+      log: item,
+    });
   }
 
   function handleVoltar() {
@@ -611,13 +654,15 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
                 </View>
               ) : (
                 logs.map((item, index) => (
-                  <View
+                  <TouchableOpacity
                     key={item.path || item.id || `${item.seq}-${index}`}
                     style={[
                       styles.tableRow,
                       index % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd,
                       item.historico === TIPOS_HISTORICO_LOG.ERRO && styles.tableRowError,
                     ]}
+                    activeOpacity={0.82}
+                    onPress={() => handleSelecionarLog(item)}
                   >
                     <Text style={[styles.cell, styles.seqCell]}>{item.seq}</Text>
                     <Text style={[styles.cell, styles.userCell]} numberOfLines={detalharLog ? 3 : 1}>
@@ -630,7 +675,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
                     <Text style={[styles.cell, styles.complementCell]} numberOfLines={detalharLog ? 5 : 1}>
                       {buildComplementoComDispositivo(item) || '-'}
                     </Text>
-                  </View>
+                  </TouchableOpacity>
                 ))
               )}
             </View>

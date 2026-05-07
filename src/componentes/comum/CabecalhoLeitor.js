@@ -27,6 +27,7 @@ const NUTRITIONIST_ROUTES = new Set([
 const ADMIN_ROUTES = new Set([
   'AdminAuditoria',
   'AdminLogsSistema',
+  'AdminDetalheLogSistema',
 ]);
 
 const routeTitles = {
@@ -47,6 +48,7 @@ const routeTitles = {
   AdminHome: 'Admin',
   AdminAuditoria: 'Auditoria',
   AdminLogsSistema: 'Logs do Sistema',
+  AdminDetalheLogSistema: 'Detalhe do Log',
   GerenciarPacientes: 'Pacientes',
   NutricionistaAgenda: 'Agenda',
   NutricionistaMensagens: 'Mensagens',
