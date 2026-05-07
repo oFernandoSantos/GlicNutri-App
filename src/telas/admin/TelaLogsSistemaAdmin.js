@@ -431,6 +431,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
 
       const logsAuditoria = eventosAuditoria
         .map(mapAuditEventToLogUsuario)
+        .filter(Boolean)
         .filter((item) => matchesTelaFilters(item, filtrosConsulta));
       const data = prepararResultadoTabela([...logsSistema, ...logsAuditoria]);
 
