@@ -29,6 +29,11 @@ import {
   sanitizeAdminUser,
 } from '../../servicos/servicoAdmin';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import {
+  AppLogger,
+  MODULOS_LOG_SISTEMA,
+  TIPOS_HISTORICO_LOG,
+} from '../../servicos/servicoLogSistema';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
@@ -344,6 +349,13 @@ export default function TelaLogin({ navigation, route, session }) {
       }
 
       if (!usuario) {
+        AppLogger.registrar({
+          programa: MODULOS_LOG_SISTEMA.LOGIN,
+          descricao: 'Tela de autenticacao',
+          usuario: identificador,
+          historico: TIPOS_HISTORICO_LOG.ERRO,
+          complemento: `Falha de login | Motivo: ${motivo || 'credencial_invalida'} | Perfil: ${role}`,
+        });
         registrarLogAuditoria({
           actor: null,
           actorType: role === 'Nutricionista' ? 'nutricionista' : 'paciente',
@@ -378,6 +390,11 @@ export default function TelaLogin({ navigation, route, session }) {
 
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
+
+        AppLogger.login(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao', {
+          usuario: adminUser,
+          complemento: 'Login efetuado com sucesso | Perfil: admin',
+        });
 
         await registrarLogAuditoria({
           actor: adminUser,
@@ -447,6 +464,11 @@ export default function TelaLogin({ navigation, route, session }) {
         details: { metodo: 'email_senha' },
       });
 
+      AppLogger.login(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao', {
+        usuario,
+        complemento: `Login efetuado com sucesso | Perfil: ${actorTipo}`,
+      });
+
       const rotaDestino =
         role === 'Paciente' && !(await hasPatientOnboardingSeen(usuario))
           ? 'PacienteOnboarding'
@@ -465,6 +487,10 @@ export default function TelaLogin({ navigation, route, session }) {
       });
     } catch (error) {
       console.log('Erro login comum =>', error);
+      AppLogger.erro(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao', error, {
+        usuario: identificador || 'nao_informado',
+        complemento: `Erro inesperado no login | Perfil: ${role}`,
+      });
       registrarLogAuditoria({
         actor: null,
         actorType: 'anonimo',
@@ -502,6 +528,11 @@ export default function TelaLogin({ navigation, route, session }) {
       : 'PacienteOnboarding';
 
     if (auditOptions.auditLogin === true) {
+      await AppLogger.login(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao Google', {
+        usuario: usuarioPaciente,
+        complemento: 'Login efetuado com sucesso via Google',
+      });
+
       await registrarLogAuditoria({
         actor: usuarioPaciente,
         actorType: 'paciente',
@@ -562,12 +593,20 @@ export default function TelaLogin({ navigation, route, session }) {
         status: 'falha',
         details: { motivo: 'sessao_supabase_ausente' },
       });
+      AppLogger.erro(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao', null, {
+        usuario: 'paciente_google',
+        complemento: 'Google retornou para o app sem sessao Supabase',
+      });
       Alert.alert(
         'Atencao',
         'O Google voltou para o app, mas o Supabase nao criou a sessao.'
       );
     } catch (error) {
       console.log('Erro login Google =>', error);
+      AppLogger.erro(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao Google', error, {
+        usuario: 'paciente_google',
+        complemento: 'Falha ao entrar com Google',
+      });
       registrarLogAuditoria({
         actor: null,
         actorType: 'paciente',
