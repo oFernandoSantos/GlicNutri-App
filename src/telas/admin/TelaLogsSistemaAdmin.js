@@ -81,29 +81,6 @@ function buildExportPreview(logs) {
   return [header, ...rows].join('\n');
 }
 
-function formatDetailValue(value) {
-  if (value == null || value === '') return '-';
-  if (typeof value === 'object') {
-    try {
-      return JSON.stringify(value, null, 2);
-    } catch (_error) {
-      return String(value);
-    }
-  }
-  return String(value);
-}
-
-function DetailItem({ label, value, mono = false }) {
-  return (
-    <View style={styles.detailItem}>
-      <Text style={styles.detailLabel}>{label}</Text>
-      <Text style={[styles.detailValue, mono && styles.detailValueMono]} selectable>
-        {formatDetailValue(value)}
-      </Text>
-    </View>
-  );
-}
-
 function normalizeSearchText(value) {
   return String(value || '')
     .normalize('NFD')
@@ -324,7 +301,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   const [menuVisible, setMenuVisible] = useState(false);
   const [detalharLog, setDetalharLog] = useState(true);
   const [exportText, setExportText] = useState('');
-  const [selectedLog, setSelectedLog] = useState(null);
   const [filters, setFilters] = useState({
     dataInicial: '',
     dataFinal: '',
@@ -436,10 +412,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
       const data = prepararResultadoTabela([...logsSistema, ...logsAuditoria]);
 
       setLogs(data);
-      setSelectedLog((current) => {
-        if (!current) return null;
-        return data.find((item) => item.id === current.id || item.path === current.path) || null;
-      });
       setRefreshing(false);
       setLoading(false);
 
@@ -477,16 +449,10 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   }
 
   function handleSelecionarLog(item) {
-    setSelectedLog((current) => {
-      const currentKey = current?.path || current?.id;
-      const nextKey = item?.path || item?.id;
-      return currentKey === nextKey ? null : item;
+    navigation.navigate('AdminDetalheLogSistema', {
+      usuarioLogado: adminUser,
+      log: item,
     });
-  }
-
-  function handleExportarRegistro(item) {
-    setExportText(buildExportPreview([item]));
-    setSelectedLog(item);
   }
 
   function handleVoltar() {
@@ -694,7 +660,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
                       styles.tableRow,
                       index % 2 === 0 ? styles.tableRowEven : styles.tableRowOdd,
                       item.historico === TIPOS_HISTORICO_LOG.ERRO && styles.tableRowError,
-                      (selectedLog?.path || selectedLog?.id) === (item.path || item.id) && styles.tableRowSelected,
                     ]}
                     activeOpacity={0.82}
                     onPress={() => handleSelecionarLog(item)}
@@ -716,44 +681,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
             </View>
           </ScrollView>
         </SectionCard>
-
-        {selectedLog ? (
-          <SectionCard style={styles.detailCard}>
-            <View style={styles.detailHeader}>
-              <View style={styles.detailTitleWrap}>
-                <Text style={styles.detailTitle}>Detalhes do registro {selectedLog.seq}</Text>
-                <Text style={styles.detailSubtitle}>
-                  {(selectedLog.historico || selectedLog.acao || 'Acao')} em {selectedLog.dataHoraFormatada || '-'}
-                </Text>
-              </View>
-              <View style={styles.detailActions}>
-                <TouchableOpacity style={styles.secondaryActionButton} onPress={() => handleExportarRegistro(selectedLog)}>
-                  <Ionicons name="download-outline" size={17} color={adminTheme.colors.text} />
-                  <Text style={styles.secondaryActionButtonText}>Exportar registro</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={styles.clearExportButton} onPress={() => setSelectedLog(null)}>
-                  <Ionicons name="close-outline" size={18} color={adminTheme.colors.danger} />
-                  <Text style={styles.clearExportButtonText}>Fechar</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-
-            <View style={styles.detailGrid}>
-              <DetailItem label="Usuario" value={selectedLog.usuario} />
-              <DetailItem label="Programa" value={selectedLog.programa || selectedLog.modulo} />
-              <DetailItem label="Descricao" value={selectedLog.descricao} />
-              <DetailItem label="Historico / Acao" value={selectedLog.historico || selectedLog.acao} />
-              <DetailItem label="Data e hora" value={selectedLog.dataHoraFormatada || selectedLog.dataHora || selectedLog.createdAt} />
-              <DetailItem label="Origem" value={selectedLog.origem} />
-              <DetailItem label="Status" value={selectedLog.status} />
-              <DetailItem label="Entidade" value={selectedLog.entidade || selectedLog.entity} />
-              <DetailItem label="Complemento" value={buildComplementoComDispositivo(selectedLog)} />
-              <DetailItem label="Caminho do arquivo" value={selectedLog.path} mono />
-              <DetailItem label="Detalhes tecnicos" value={selectedLog.detalhes} mono />
-              <DetailItem label="Stack / erro" value={selectedLog.stack} mono />
-            </View>
-          </SectionCard>
-        ) : null}
 
         {exportText ? (
           <SectionCard style={styles.exportCard}>
@@ -1035,10 +962,6 @@ const styles = StyleSheet.create({
     borderLeftColor: adminTheme.colors.danger,
     borderLeftWidth: 4,
   },
-  tableRowSelected: {
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1,
-  },
   cell: {
     borderColor: 'rgba(255,255,255,0.08)',
     borderRightWidth: 1,
@@ -1085,72 +1008,6 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.textMuted,
     fontSize: 13,
     fontWeight: '700',
-  },
-  detailCard: {
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1,
-    marginTop: 12,
-  },
-  detailHeader: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    justifyContent: 'space-between',
-  },
-  detailTitleWrap: {
-    flex: 1,
-    minWidth: 220,
-  },
-  detailTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 18,
-    fontWeight: '900',
-  },
-  detailSubtitle: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 4,
-  },
-  detailActions: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  detailGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-    marginTop: 14,
-  },
-  detailItem: {
-    backgroundColor: adminTheme.colors.background,
-    borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8,
-    borderWidth: 1,
-    flexBasis: '48%',
-    flexGrow: 1,
-    minWidth: 220,
-    padding: 12,
-  },
-  detailLabel: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 11,
-    fontWeight: '900',
-    marginBottom: 6,
-    textTransform: 'uppercase',
-  },
-  detailValue: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  detailValueMono: {
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
   },
   exportCard: {
     marginTop: 12,
