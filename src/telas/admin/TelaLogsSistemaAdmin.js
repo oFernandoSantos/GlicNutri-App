@@ -38,6 +38,9 @@ const historicoOptions = [
   TIPOS_HISTORICO_LOG.SINCRONIZACAO,
   TIPOS_HISTORICO_LOG.ALERTA,
 ];
+const LOG_LOOKBACK_DAYS = 3650;
+const LOG_SYSTEM_LIMIT = 500;
+const LOG_AUDIT_LIMIT = 1000;
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -173,18 +176,6 @@ function mapAuditEventToLogUsuario(event) {
     return null;
   }
 
-  if (
-    !action.includes('login') &&
-    !action.includes('glicemia') &&
-    !action.includes('refeicao') &&
-    !action.includes('plano') &&
-    !action.includes('consulta') &&
-    !action.includes('medic') &&
-    !action.includes('agenda')
-  ) {
-    return null;
-  }
-
   const programa = text.includes('login') || text.includes('sessao')
     ? MODULOS_LOG_SISTEMA.LOGIN
     : text.includes('glic')
@@ -197,19 +188,21 @@ function mapAuditEventToLogUsuario(event) {
             ? MODULOS_LOG_SISTEMA.CONSULTA
             : text.includes('nutri')
               ? MODULOS_LOG_SISTEMA.NUTRICIONISTA
-              : MODULOS_LOG_SISTEMA.PACIENTE;
+              : text.includes('admin')
+                ? MODULOS_LOG_SISTEMA.ADMIN
+                : MODULOS_LOG_SISTEMA.PACIENTE;
 
   const historico = String(event?.status || '').toLowerCase() === 'falha' || action.includes('falha') || action.includes('erro')
     ? TIPOS_HISTORICO_LOG.ERRO
     : action.includes('login')
       ? TIPOS_HISTORICO_LOG.LOGIN
-      : action.includes('exclu') || action.includes('ocult')
+      : action.includes('delete') || action.includes('exclu') || action.includes('remov') || action.includes('ocult')
         ? TIPOS_HISTORICO_LOG.EXCLUSAO
         : action.includes('sync') || action.includes('sincron')
           ? TIPOS_HISTORICO_LOG.SINCRONIZACAO
           : action.includes('alert')
             ? TIPOS_HISTORICO_LOG.ALERTA
-            : action.includes('cadastro') || action.includes('cadastrad') || action.includes('registr')
+            : action.includes('create') || action.includes('insert') || action.includes('cadastro') || action.includes('cadastrad') || action.includes('registr')
               ? TIPOS_HISTORICO_LOG.CADASTRO
               : TIPOS_HISTORICO_LOG.ALTERACAO;
 
@@ -256,6 +249,12 @@ function mapAuditEventToLogUsuario(event) {
     createdAt: event.createdAt,
     dataHoraFormatada: formatDateTime(event.createdAt),
     complemento,
+    detalhes: details,
+    path: event.path,
+    atorTipo: event.actorType,
+    entidade: event.entity,
+    entidadeId: event.entityId,
+    status: event.status,
     origem: 'auditoria',
   };
 }
@@ -280,6 +279,10 @@ function matchesTelaFilters(item, filters) {
       item.historico,
       item.complemento,
       item.usuario,
+      item.entidade,
+      item.entidadeId,
+      item.status,
+      JSON.stringify(item.detalhes || {}),
     ].filter(Boolean).join(' '));
     if (!searchable.includes(complemento)) return false;
   }
@@ -381,18 +384,18 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
 
       const [logsSistema, eventosAuditoria] = await Promise.all([
         listarLogsSistema({
-          days: 30,
-          limit: 160,
+          days: LOG_LOOKBACK_DAYS,
+          limit: LOG_SYSTEM_LIMIT,
           dataInicial: filtrosConsulta.dataInicial,
           dataFinal: filtrosConsulta.dataFinal,
           usuario: filtrosConsulta.usuario,
           historico: filtrosConsulta.historico,
           complemento: filtrosConsulta.complemento,
-          incluirExemplos: true,
+          incluirExemplos: false,
         }),
         listarEventosAuditoria({
-          days: 30,
-          limit: 240,
+          days: LOG_LOOKBACK_DAYS,
+          limit: LOG_AUDIT_LIMIT,
         }).catch(() => []),
       ]);
 
@@ -709,6 +712,8 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
               <DetailItem label="Historico / Acao" value={selectedLog.historico || selectedLog.acao} />
               <DetailItem label="Data e hora" value={selectedLog.dataHoraFormatada || selectedLog.dataHora || selectedLog.createdAt} />
               <DetailItem label="Origem" value={selectedLog.origem} />
+              <DetailItem label="Status" value={selectedLog.status} />
+              <DetailItem label="Entidade" value={selectedLog.entidade || selectedLog.entity} />
               <DetailItem label="Complemento" value={buildComplementoComDispositivo(selectedLog)} />
               <DetailItem label="Caminho do arquivo" value={selectedLog.path} mono />
               <DetailItem label="Detalhes tecnicos" value={selectedLog.detalhes} mono />
