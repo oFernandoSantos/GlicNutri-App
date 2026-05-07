@@ -427,9 +427,11 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
         if (!current) return null;
         return data.find((item) => item.id === current.id || item.path === current.path) || null;
       });
+      setRefreshing(false);
+      setLoading(false);
 
       if (isAdminUser(adminUser)) {
-        await registrarLogAuditoria({
+        registrarLogAuditoria({
           actor: adminUser,
           actorType: 'admin',
           action: 'admin_consulta_logs_sistema',
@@ -441,7 +443,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
             filtros: filtrosConsulta,
             resultado_logs: data.length,
           },
-        });
+        }).catch(() => {});
       }
     } catch (error) {
       await AppLogger.erro(MODULOS_LOG_SISTEMA.ADMIN, 'Erro ao consultar logs do sistema', error, {
