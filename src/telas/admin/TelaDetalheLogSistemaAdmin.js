@@ -62,6 +62,86 @@ function buildExportPreview(item) {
   return [header, row].join('\n');
 }
 
+function buildLogTxtCompleto(item) {
+  const linhas = [
+    'GlicNutri - Log completo',
+    '========================',
+    '',
+    `SEQ: ${formatDetailValue(item?.seq)}`,
+    `Usuario: ${formatDetailValue(item?.usuario)}`,
+    `Programa: ${formatDetailValue(item?.programa || item?.modulo)}`,
+    `Descricao: ${formatDetailValue(item?.descricao)}`,
+    `Historico / Acao: ${formatDetailValue(item?.historico || item?.acao)}`,
+    `Data/Hora: ${formatDetailValue(item?.dataHoraFormatada || item?.dataHora || item?.createdAt)}`,
+    `Origem: ${formatDetailValue(item?.origem)}`,
+    `Status: ${formatDetailValue(item?.status)}`,
+    `Entidade: ${formatDetailValue(item?.entidade || item?.entity)}`,
+    `ID da entidade: ${formatDetailValue(item?.entidadeId || item?.entityId)}`,
+    '',
+    'Complemento',
+    '-----------',
+    formatDetailValue(buildComplementoComDispositivo(item)),
+    '',
+    'Arquivo',
+    '-------',
+    formatDetailValue(item?.path),
+    '',
+    'Detalhes tecnicos',
+    '-----------------',
+    formatDetailValue(item?.detalhes || item?.details),
+    '',
+    'Dispositivo',
+    '-----------',
+    formatDetailValue(item?.dispositivo || item?.dispositivoResumo),
+    '',
+    'Stack / erro',
+    '------------',
+    formatDetailValue(item?.stack),
+    '',
+    'Payload completo',
+    '----------------',
+    formatDetailValue(item),
+  ];
+
+  return linhas.join('\n');
+}
+
+function buildTxtFileName(item) {
+  const base = [
+    'glicnutri-log',
+    item?.seq,
+    item?.programa || item?.modulo,
+    item?.historico || item?.acao,
+  ]
+    .filter(Boolean)
+    .join('-')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9_-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase();
+
+  return `${base || 'glicnutri-log'}.txt`;
+}
+
+function baixarTxtNoWeb(fileName, content) {
+  if (Platform.OS !== 'web' || typeof document === 'undefined' || typeof Blob === 'undefined') {
+    return false;
+  }
+
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+  return true;
+}
+
 function DetailItem({ label, value, mono = false, wide = false }) {
   return (
     <View style={[styles.detailItem, wide && styles.detailItemWide]}>
@@ -95,6 +175,16 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
   function handleExportarRegistro() {
     if (!log) return;
     setExportText(buildExportPreview(log));
+  }
+
+  function handleExportarTxt() {
+    if (!log) return;
+    const txt = buildLogTxtCompleto(log);
+    const fileName = buildTxtFileName(log);
+
+    if (!baixarTxtNoWeb(fileName, txt)) {
+      setExportText(txt);
+    }
   }
 
   if (!isAdminUser(adminUser)) {
@@ -137,7 +227,11 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.actionButton} onPress={handleExportarRegistro} disabled={!log}>
               <Ionicons name="download-outline" size={17} color={adminTheme.colors.onPrimary} />
-              <Text style={styles.actionButtonText}>Exportar registro</Text>
+              <Text style={styles.actionButtonText}>Exportar CSV</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryActionButton} onPress={handleExportarTxt} disabled={!log}>
+              <Ionicons name="document-text-outline" size={17} color={adminTheme.colors.text} />
+              <Text style={styles.secondaryActionButtonText}>Baixar .txt</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -311,6 +405,22 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.onPrimary,
     fontSize: 13,
     fontWeight: '900',
+    marginLeft: 7,
+  },
+  secondaryActionButton: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.panelMuted,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: 8,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 42,
+    paddingHorizontal: 14,
+  },
+  secondaryActionButtonText: {
+    color: adminTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
     marginLeft: 7,
   },
   stateCard: {

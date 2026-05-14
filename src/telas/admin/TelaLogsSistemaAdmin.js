@@ -300,7 +300,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   const [logs, setLogs] = useState([]);
   const [menuVisible, setMenuVisible] = useState(false);
   const [detalharLog, setDetalharLog] = useState(true);
-  const [exportText, setExportText] = useState('');
   const [filters, setFilters] = useState({
     dataInicial: '',
     dataFinal: '',
@@ -442,12 +441,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     }
   }
 
-  function handleExportar() {
-    const csvText = buildExportPreview(logs);
-    setExportText(csvText);
-
-  }
-
   function handleSelecionarLog(item) {
     navigation.navigate('AdminDetalheLogSistema', {
       usuarioLogado: adminUser,
@@ -531,10 +524,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
             <TouchableOpacity style={styles.actionButton} onPress={() => carregarLogs()}>
               <Ionicons name="search-outline" size={17} color={adminTheme.colors.onPrimary} />
               <Text style={styles.actionButtonText}>Pesquisar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryActionButton} onPress={handleExportar}>
-              <Ionicons name="print-outline" size={17} color={adminTheme.colors.text} />
-              <Text style={styles.secondaryActionButtonText}>Imprimir/Exportar</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.exitButton} onPress={handleVoltar}>
               <Ionicons name="arrow-back-outline" size={17} color={adminTheme.colors.danger} />
@@ -682,24 +671,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
           </ScrollView>
         </SectionCard>
 
-        {exportText ? (
-          <SectionCard style={styles.exportCard}>
-            <View style={styles.exportHeader}>
-              <Text style={styles.exportTitle}>Bloco de texto para exportacao</Text>
-              <TouchableOpacity style={styles.clearExportButton} onPress={() => setExportText('')}>
-                <Ionicons name="close-outline" size={18} color={adminTheme.colors.danger} />
-                <Text style={styles.clearExportButtonText}>Fechar</Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={styles.exportTextArea}
-              value={exportText}
-              multiline
-              editable={false}
-              selectTextOnFocus
-            />
-          </SectionCard>
-        ) : null}
       </ScrollView>
 
       <BarraAbasAdmin
@@ -795,22 +766,6 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.onPrimary,
     fontSize: 13,
     fontWeight: '900',
-    marginLeft: 7,
-  },
-  secondaryActionButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.panelMuted,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: 'row',
-    minHeight: 42,
-    paddingHorizontal: 14,
-  },
-  secondaryActionButtonText: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '800',
     marginLeft: 7,
   },
   exitButton: {
@@ -1008,46 +963,6 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.textMuted,
     fontSize: 13,
     fontWeight: '700',
-  },
-  exportCard: {
-    marginTop: 12,
-  },
-  exportHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 10,
-  },
-  exportTitle: {
-    color: adminTheme.colors.text,
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  clearExportButton: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    minHeight: 34,
-  },
-  clearExportButtonText: {
-    color: adminTheme.colors.danger,
-    fontSize: 12,
-    fontWeight: '900',
-    marginLeft: 4,
-  },
-  exportTextArea: {
-    backgroundColor: adminTheme.colors.background,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    color: adminTheme.colors.text,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
-    minHeight: 220,
-    padding: 12,
-    textAlignVertical: 'top',
   },
   primaryButton: {
     alignItems: 'center',
