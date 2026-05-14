@@ -1,16 +1,28 @@
 import { Platform } from 'react-native';
 
+function readMlApiBaseFromEnv() {
+  const raw = String(globalThis?.process?.env?.EXPO_PUBLIC_ML_API_URL || '').trim();
+  if (!raw) return null;
+  return raw.replace(/\/+$/, '');
+}
+
 function getDefaultHost() {
-  // Android emulator uses 10.0.2.2 to reach host machine (localhost).
   if (Platform.OS === 'android') {
     return '10.0.2.2';
   }
-
-  // iOS simulator / web / desktop environments
   return '127.0.0.1';
 }
 
+/**
+ * Base da API FastAPI de ML.
+ * - Producao: defina EXPO_PUBLIC_ML_API_URL (ex.: https://api-ml.seudominio.com)
+ * - Dev: vazio => http://HOST:8001 (emulador Android usa 10.0.2.2)
+ */
 export function getMlApiBaseUrl({ host, port } = {}) {
+  const fromEnv = readMlApiBaseFromEnv();
+  if (fromEnv) {
+    return fromEnv;
+  }
   const safeHost = host || getDefaultHost();
   const safePort = port || 8001;
   return `http://${safeHost}:${safePort}`;
@@ -56,4 +68,3 @@ export async function mlPredict(payload, options = {}) {
     throw new Error(`Resposta inválida da API de ML: ${text}`);
   }
 }
-

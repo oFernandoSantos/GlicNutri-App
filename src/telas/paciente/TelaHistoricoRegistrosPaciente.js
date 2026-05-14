@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -13,6 +14,8 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
@@ -247,7 +250,7 @@ function getMedicationDisplay(entry) {
   };
 }
 
-function EmptyState({ activeTab }) {
+function EmptyState({ activeTab, navigation, usuarioLogado, canResolvePatient }) {
   const text =
     activeTab === 'glucose'
       ? 'Nenhum registro glicêmico encontrado.'
@@ -255,10 +258,55 @@ function EmptyState({ activeTab }) {
         ? 'Nenhum registro de medicação encontrado.'
         : 'Nenhum registro alimentar encontrado.';
 
+  function irParaMonitoramento(extra = {}) {
+    if (!canResolvePatient) return;
+    navigation.navigate('PacienteMonitoramento', { usuarioLogado, ...extra });
+  }
+
+  function irParaDiario() {
+    if (!canResolvePatient) return;
+    navigation.navigate('PacienteDiario', { usuarioLogado });
+  }
+
+  function irParaRefeicao() {
+    if (!canResolvePatient) return;
+    navigation.navigate('RegistroRefeicaoIA', {
+      usuarioLogado,
+      openMealTimingChoice: true,
+    });
+  }
+
   return (
     <View style={styles.emptyCard}>
       <Ionicons name="document-text-outline" size={24} color={patientTheme.colors.textMuted} />
       <Text style={styles.emptyText}>{text}</Text>
+      {canResolvePatient ? (
+        <View style={styles.emptyActions}>
+          {activeTab === 'glucose' ? (
+            <TouchableOpacity style={styles.emptyPrimaryButton} onPress={() => irParaMonitoramento()}>
+              <Text style={styles.emptyPrimaryButtonText}>Registrar glicose</Text>
+            </TouchableOpacity>
+          ) : null}
+          {activeTab === 'medication' ? (
+            <TouchableOpacity
+              style={styles.emptyPrimaryButton}
+              onPress={() => irParaMonitoramento({ openMedication: true })}
+            >
+              <Text style={styles.emptyPrimaryButtonText}>Registrar medicação</Text>
+            </TouchableOpacity>
+          ) : null}
+          {activeTab === 'food' ? (
+            <>
+              <TouchableOpacity style={styles.emptyPrimaryButton} onPress={irParaRefeicao}>
+                <Text style={styles.emptyPrimaryButtonText}>Registrar refeição</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.emptySecondaryButton} onPress={irParaDiario}>
+                <Text style={styles.emptySecondaryButtonText}>Abrir diário alimentar</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
+        </View>
+      ) : null}
     </View>
   );
 }
@@ -296,6 +344,9 @@ export default function PacienteHistoricoRegistrosScreen({
   const [pendingHiddenGlucoseIds, setPendingHiddenGlucoseIds] = useState([]);
   const [pendingHiddenMedicationIds, setPendingHiddenMedicationIds] = useState([]);
   const [pendingHiddenMealIds, setPendingHiddenMealIds] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [bannerOperacao, setBannerOperacao] = useState(null);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
   const loadHistoryExperience = useCallback(async () => {
     if (!canResolvePatient) {
@@ -328,17 +379,25 @@ export default function PacienteHistoricoRegistrosScreen({
     );
   }, [canResolvePatient, patientId, usuarioLogado]);
 
+  const fetchHistoricoComErro = useCallback(async () => {
+    try {
+      setLoadError(null);
+      await loadHistoryExperience();
+    } catch (error) {
+      console.log('Erro ao carregar historico:', error);
+      setLoadError(
+        'Não foi possível carregar o histórico. Verifique sua conexão com a internet e tente novamente.'
+      );
+    }
+  }, [loadHistoryExperience]);
+
   useEffect(() => {
     let active = true;
 
     async function load() {
       try {
         setLoading(true);
-        await loadHistoryExperience();
-      } catch (error) {
-        if (!active) return;
-        console.log('Erro ao carregar historico:', error);
-        Alert.alert('Erro', 'Não foi possível carregar o histórico agora.');
+        await fetchHistoricoComErro();
       } finally {
         if (active) setLoading(false);
       }
@@ -349,7 +408,13 @@ export default function PacienteHistoricoRegistrosScreen({
     return () => {
       active = false;
     };
-  }, [loadHistoryExperience]);
+  }, [fetchHistoricoComErro]);
+
+  const onRefreshHistorico = useCallback(async () => {
+    setRefreshing(true);
+    await fetchHistoricoComErro();
+    setRefreshing(false);
+  }, [fetchHistoricoComErro]);
 
   useEffect(() => {
     if (!activePatientId) return undefined;
@@ -379,7 +444,7 @@ export default function PacienteHistoricoRegistrosScreen({
             return;
           }
 
-          await loadHistoryExperience();
+          await fetchHistoricoComErro();
         } catch (error) {
           if (!active) return;
           console.log('Erro ao recarregar historico no foco:', error);
@@ -391,7 +456,7 @@ export default function PacienteHistoricoRegistrosScreen({
       return () => {
         active = false;
       };
-    }, [canResolvePatient, loadHistoryExperience])
+    }, [canResolvePatient, fetchHistoricoComErro])
   );
 
   useEffect(() => {
@@ -596,7 +661,7 @@ export default function PacienteHistoricoRegistrosScreen({
       setGlucoseReadings(previousGlucoseReadings);
       replaceCachedGlucoseReadings(activePatientId, previousGlucoseReadings);
       console.log('Erro ao excluir glicemia:', error);
-      Alert.alert('Erro', 'Não foi possível excluir a glicemia agora.');
+      setBannerOperacao('Não foi possível excluir a glicemia. Verifique a conexão e tente novamente.');
     } finally {
       setPendingHiddenGlucoseIds((current) => current.filter((item) => item !== reading?.id));
       setDeletingId(null);
@@ -657,7 +722,9 @@ export default function PacienteHistoricoRegistrosScreen({
       setAppState(previousAppState);
       replaceCachedPatientAppState(activePatientId, previousAppState);
       console.log('Erro ao excluir medicacao:', error);
-      Alert.alert('Erro', 'Não foi possível excluir a medicação agora.');
+      setBannerOperacao(
+        'Não foi possível excluir a medicação. Verifique a conexão e tente novamente.'
+      );
     } finally {
       setPendingHiddenMedicationIds((current) => current.filter((item) => item !== hiddenId));
       setDeletingId(null);
@@ -710,7 +777,9 @@ export default function PacienteHistoricoRegistrosScreen({
       replaceCachedPatientAppState(activePatientId, previousAppState);
       setPendingHiddenMealIds((current) => current.filter((item) => item !== entry?.id));
       console.log('Erro ao excluir alimentacao:', error);
-      Alert.alert('Erro', 'NÃ£o foi possÃ­vel excluir a alimentação agora.');
+      setBannerOperacao(
+        'Não foi possível excluir a alimentação. Verifique a conexão e tente novamente.'
+      );
     } finally {
       setPendingHiddenMealIds((current) => current.filter((item) => item !== entry?.id));
       setDeletingId(null);
@@ -813,13 +882,36 @@ export default function PacienteHistoricoRegistrosScreen({
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefreshHistorico} />
+        }
       >
+      {bannerOperacao ? (
+        <MensagemInline
+          tipo="erro"
+          texto={bannerOperacao}
+          onFechar={() => setBannerOperacao(null)}
+        />
+      ) : null}
       {loading ? (
         <View style={styles.loadingCard}>
           <ActivityIndicator color={patientTheme.colors.primaryDark} />
         </View>
+      ) : loadError ? (
+        <EstadoErroCarregamento
+          loading={loading}
+          onTentarNovamente={() => {
+            setLoading(true);
+            fetchHistoricoComErro().finally(() => setLoading(false));
+          }}
+        />
       ) : listIsEmpty ? (
-        <EmptyState activeTab={activeTab} />
+        <EmptyState
+          activeTab={activeTab}
+          navigation={navigation}
+          usuarioLogado={usuarioLogado}
+          canResolvePatient={canResolvePatient}
+        />
       ) : activeTab === 'glucose' ? (
         <View style={styles.list}>
           {filteredGlucoseReadings.map((reading) => (
@@ -1092,6 +1184,37 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  emptyActions: {
+    marginTop: 12,
+    gap: 10,
+    width: '100%',
+    alignItems: 'stretch',
+  },
+  emptyPrimaryButton: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  emptyPrimaryButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '800',
+    fontSize: 15,
+  },
+  emptySecondaryButton: {
+    alignItems: 'center',
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: patientTheme.colors.primaryDark,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+  },
+  emptySecondaryButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '800',
+    fontSize: 15,
   },
   list: {
     gap: 10,

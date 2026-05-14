@@ -46,6 +46,9 @@ def main() -> int:
 """
     html_path = PROJECT_ROOT / "_planejamento_temp_print.html"
     html_path.write_text(html, encoding="utf-8")
+    # Cópia de referência no repositório (opcional; útil para diff/revisão sem PDF)
+    build_html = PROJECT_ROOT / "Planejamento_Final_Atividades_GlicNutri_Ajustado.build.html"
+    build_html.write_text(html, encoding="utf-8")
     pdf_abs = PDF_PATH.resolve()
     html_uri = html_path.resolve().as_uri()
     cmd = [
@@ -76,6 +79,7 @@ def main() -> int:
         html_path.unlink()
     except OSError:
         pass
+    # Mantém Planejamento_Final_Atividades_GlicNutri_Ajustado.build.html atualizado
     print(str(PDF_PATH))
     return 0
 

@@ -24,6 +24,17 @@ ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ARTIFACTS = os.path.join(ROOT, "artifacts")
 
 
+def _cors_allow_origins() -> list[str]:
+    """
+    Lista separada por vírgulas em ML_CORS_ORIGINS (ex.: https://app.exemplo.com,http://localhost:8081).
+    Vazio => * (apenas desenvolvimento).
+    """
+    raw = os.environ.get("ML_CORS_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 def _load_json(path: str) -> dict[str, Any]:
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -35,11 +46,10 @@ def _artifact_path(name: str) -> str:
 
 app = FastAPI(title="GlicNutri ML API", version="0.1.0")
 
-# CORS (dev): necessário para chamadas do app web (Expo) e testes locais no browser.
-# Em produção, restrinja `allow_origins` para o(s) domínio(s) do front-end.
+# CORS: em produção defina ML_CORS_ORIGINS (origens do Expo Web / front-end).
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_allow_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

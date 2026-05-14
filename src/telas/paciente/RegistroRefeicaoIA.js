@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Image,
   KeyboardAvoidingView,
   Modal,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   appendNewestEntry,
@@ -42,9 +42,93 @@ const mealTypeOptions = [
   'Outro Momento',
 ];
 
+const FOOD_CORE_FIELDS = [
+  { key: 'quantidade_gramas', label: 'Gramas', unit: 'g' },
+  { key: 'calorias', label: 'Calorias', unit: 'kcal' },
+];
+
+const FOOD_MACRO_FIELDS = [
+  { key: 'carboidratos', label: 'Carboidratos', unit: 'g' },
+  { key: 'proteinas', label: 'Proteínas', unit: 'g' },
+  { key: 'gorduras', label: 'Gorduras', unit: 'g' },
+  { key: 'fibras', label: 'Fibras', unit: 'g' },
+  { key: 'acucares', label: 'Açúcares', unit: 'g' },
+  { key: 'gorduras_saturadas', label: 'Gordura saturada', unit: 'g' },
+];
+
+const FOOD_MICRO_FIELDS = [
+  { key: 'sodio', label: 'Sódio', unit: 'mg' },
+  { key: 'potassio', label: 'Potássio', unit: 'mg' },
+  { key: 'calcio', label: 'Cálcio', unit: 'mg' },
+  { key: 'ferro', label: 'Ferro', unit: 'mg' },
+  { key: 'magnesio', label: 'Magnésio', unit: 'mg' },
+  { key: 'zinco', label: 'Zinco', unit: 'mg' },
+  { key: 'vitamina_a', label: 'Vitamina A', unit: 'mcg' },
+  { key: 'vitamina_c', label: 'Vitamina C', unit: 'mg' },
+  { key: 'vitamina_d', label: 'Vitamina D', unit: 'mcg' },
+  { key: 'vitamina_b12', label: 'Vitamina B12', unit: 'mcg' },
+  { key: 'folato', label: 'Folato', unit: 'mcg' },
+];
+
+const TOTAL_MACRO_FIELDS = [
+  { key: 'carboidratos_total', label: 'Carboidratos', unit: 'g' },
+  { key: 'calorias_total', label: 'Calorias', unit: 'kcal' },
+  { key: 'proteinas_total', label: 'Proteínas', unit: 'g' },
+  { key: 'gorduras_total', label: 'Gorduras', unit: 'g' },
+  { key: 'fibras_total', label: 'Fibras', unit: 'g' },
+  { key: 'acucares_total', label: 'Açúcares', unit: 'g' },
+  { key: 'gorduras_saturadas_total', label: 'Gordura saturada', unit: 'g' },
+];
+
+const TOTAL_MICRO_FIELDS = [
+  { key: 'sodio_total', label: 'Sódio', unit: 'mg' },
+  { key: 'potassio_total', label: 'Potássio', unit: 'mg' },
+  { key: 'calcio_total', label: 'Cálcio', unit: 'mg' },
+  { key: 'ferro_total', label: 'Ferro', unit: 'mg' },
+  { key: 'magnesio_total', label: 'Magnésio', unit: 'mg' },
+  { key: 'zinco_total', label: 'Zinco', unit: 'mg' },
+  { key: 'vitamina_a_total', label: 'Vitamina A', unit: 'mcg' },
+  { key: 'vitamina_c_total', label: 'Vitamina C', unit: 'mg' },
+  { key: 'vitamina_d_total', label: 'Vitamina D', unit: 'mcg' },
+  { key: 'vitamina_b12_total', label: 'Vitamina B12', unit: 'mcg' },
+  { key: 'folato_total', label: 'Folato', unit: 'mcg' },
+];
+
+const TOTAL_TARGETS = {
+  carboidratos_total: 225,
+  calorias_total: 1800,
+  proteinas_total: 90,
+  gorduras_total: 60,
+  fibras_total: 25,
+  acucares_total: 50,
+  gorduras_saturadas_total: 20,
+  sodio_total: 2000,
+  potassio_total: 2600,
+  calcio_total: 1000,
+  ferro_total: 18,
+  magnesio_total: 320,
+  zinco_total: 8,
+  vitamina_a_total: 700,
+  vitamina_c_total: 75,
+  vitamina_d_total: 15,
+  vitamina_b12_total: 2.4,
+  folato_total: 400,
+};
+
 function formatNutrient(value, suffix = '') {
   const normalized = Math.round((Number(value) || 0) * 10) / 10;
   return `${normalized.toFixed(1).replace('.0', '')}${suffix}`;
+}
+
+function getProgressPercent(value, target) {
+  const numericValue = Number(value) || 0;
+  const numericTarget = Number(target) || 0;
+  if (numericTarget <= 0) return 0;
+  return Math.max(0, Math.min(100, Math.round((numericValue / numericTarget) * 100)));
+}
+
+function getMealTimingLabel(mode) {
+  return mode === 'current' ? 'Refeição atual' : 'Refeição anterior';
 }
 
 function buildFallbackFoodItem() {
@@ -188,6 +272,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   const [erroAnalise, setErroAnalise] = useState('');
   const [loadingAction, setLoadingAction] = useState('');
   const [analysisMeta, setAnalysisMeta] = useState(null);
+  const [mensagemTopo, setMensagemTopo] = useState(null);
 
   const totais = useMemo(() => calcularTotaisRefeicaoIA(alimentos), [alimentos]);
   const hasFoods = alimentos.length > 0;
@@ -195,10 +280,11 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   const hasSelectedImage = Boolean(selectedImage?.uri);
   const normalizedMealTimingDate = normalizeManualDateInput(mealTimingDate);
   const normalizedMealTimingTime = normalizeManualTimeInput(mealTimingTime);
+  const mealContextLabel = `${mealType || 'Tipo não definido'} • ${getMealTimingLabel(mealTimingMode)}`;
   const canConfirmMealTiming =
     Boolean(mealType) &&
-    (mealTimingMode === 'current' ||
-      (isValidManualDate(mealTimingDate) && isValidManualTime(mealTimingTime)));
+    isValidManualDate(mealTimingDate) &&
+    isValidManualTime(mealTimingTime);
 
   useEffect(() => {
     if (!route?.params?.openMealTimingChoice) {
@@ -226,7 +312,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       setAnalysisMeta(null);
       setErroAnalise('');
     } catch (error) {
-      Alert.alert('Permissao necessaria', error?.message || 'Nao foi possivel abrir a galeria.');
+      setMensagemTopo({
+        tipo: 'aviso',
+        texto: error?.message || 'Não foi possível abrir a galeria. Verifique as permissões.',
+      });
     }
   }
 
@@ -244,18 +333,24 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       setAnalysisMeta(null);
       setErroAnalise('');
     } catch (error) {
-      Alert.alert('Permissao necessaria', error?.message || 'Nao foi possivel abrir a camera.');
+      setMensagemTopo({
+        tipo: 'aviso',
+        texto: error?.message || 'Não foi possível abrir a câmera. Verifique as permissões.',
+      });
     }
   }
 
   async function analisarImagem() {
     if (!selectedImage?.uri) {
-      Alert.alert('Atencao', 'Selecione uma imagem antes de analisar.');
+      setMensagemTopo({ tipo: 'aviso', texto: 'Selecione uma imagem antes de analisar.' });
       return;
     }
 
     if (!patientId) {
-      Alert.alert('Atencao', 'Paciente sem identificador para registrar a refeicao.');
+      setMensagemTopo({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para registrar a refeição.',
+      });
       return;
     }
 
@@ -392,12 +487,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
   function handleConfirmMealTiming() {
     if (!canConfirmMealTiming) {
-      Alert.alert(
-        'Aten\u00e7\u00e3o',
-        mealTimingMode === 'current'
-          ? 'Selecione o tipo da refei\u00e7\u00e3o para continuar.'
-          : 'Selecione o tipo da refei\u00e7\u00e3o e informe uma data e hora v\u00e1lidas.'
-      );
+      setMensagemTopo({
+        tipo: 'aviso',
+        texto:
+          mealTimingMode === 'current'
+            ? 'Selecione o tipo da refeição para continuar.'
+            : 'Selecione o tipo da refeição e informe uma data e hora válidas.',
+      });
       return;
     }
 
@@ -443,12 +539,18 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
   async function confirmarSalvar() {
     if (!hasFoods) {
-      Alert.alert('Atencao', 'Confirme ao menos um alimento antes de salvar.');
+      setMensagemTopo({
+        tipo: 'aviso',
+        texto: 'Confirme ao menos um alimento antes de salvar.',
+      });
       return;
     }
 
     if (!patientId) {
-      Alert.alert('Atencao', 'Paciente sem identificador para salvar a refeicao.');
+      setMensagemTopo({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para salvar a refeição.',
+      });
       return;
     }
 
@@ -491,11 +593,14 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         mealEntryIA: timelineEntry,
         mealIARefreshToken: Date.now(),
       });
-
-      Alert.alert('Registro salvo', 'A refeicao foi confirmada e salva com sucesso.');
     } catch (error) {
       console.log('Erro ao salvar refeicao IA:', error);
-      Alert.alert('Erro', error?.message || 'Nao foi possivel salvar a refeicao agora.');
+      setMensagemTopo({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível salvar a refeição. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setLoadingAction('');
     }
@@ -507,7 +612,28 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       route={route}
       usuarioLogado={usuarioLogado}
       showTabBar={false}
+      contentContainerStyle={styles.screenContent}
+      footerOverlay={
+        <TouchableOpacity
+          style={[styles.saveButton, (!hasFoods || isBusy) && styles.buttonDisabled]}
+          onPress={confirmarSalvar}
+          disabled={!hasFoods || isBusy}
+        >
+          {loadingAction === 'save' ? (
+            <ActivityIndicator color={patientTheme.colors.onPrimary} />
+          ) : (
+            <Text style={styles.saveButtonText}>Salvar refeicao confirmada</Text>
+          )}
+        </TouchableOpacity>
+      }
     >
+      {mensagemTopo?.texto ? (
+        <MensagemInline
+          tipo={mensagemTopo.tipo || 'aviso'}
+          texto={mensagemTopo.texto}
+          onFechar={() => setMensagemTopo(null)}
+        />
+      ) : null}
       <Modal
         visible={mealTimingChoiceVisible}
         transparent
@@ -621,7 +747,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
               <Text style={styles.modalText}>
                 {mealTimingMode === 'current'
-                  ? 'Informe o tipo da refei\u00e7\u00e3o. Ao salvar, ela entra na sua evolu\u00e7\u00e3o.'
+                  ? 'Informe o tipo, a data e a hora da refei\u00e7\u00e3o. Ao salvar, ela entra na sua evolu\u00e7\u00e3o.'
                   : 'Informe o tipo, a data e a hora da refei\u00e7\u00e3o.'}
               </Text>
 
@@ -685,27 +811,23 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   </View>
                 ) : null}
 
-                {mealTimingMode === 'previous' ? (
-                  <>
-                    <Text style={styles.modalFieldLabel}>Data</Text>
-                    <TextInput
-                      style={[styles.input, styles.manualModalInput, styles.modalInput]}
-                      placeholder="Ex: dd/mm/aaaa"
-                      placeholderTextColor="#8a9095"
-                      value={mealTimingDate}
-                      onChangeText={(value) => setMealTimingDate(formatManualDateInput(value))}
-                    />
+                <Text style={styles.modalFieldLabel}>Data</Text>
+                <TextInput
+                  style={[styles.input, styles.manualModalInput, styles.modalInput]}
+                  placeholder="Ex: dd/mm/aaaa"
+                  placeholderTextColor="#8a9095"
+                  value={mealTimingDate}
+                  onChangeText={(value) => setMealTimingDate(formatManualDateInput(value))}
+                />
 
-                    <Text style={styles.modalFieldLabel}>Hora do uso</Text>
-                    <TextInput
-                      style={[styles.input, styles.manualModalInput, styles.modalInput]}
-                      placeholder="Ex: 15:48"
-                      placeholderTextColor="#8a9095"
-                      value={mealTimingTime}
-                      onChangeText={(value) => setMealTimingTime(formatManualTimeInput(value))}
-                    />
-                  </>
-                ) : null}
+                <Text style={styles.modalFieldLabel}>Hora</Text>
+                <TextInput
+                  style={[styles.input, styles.manualModalInput, styles.modalInput]}
+                  placeholder="Ex: 15:48"
+                  placeholderTextColor="#8a9095"
+                  value={mealTimingTime}
+                  onChangeText={(value) => setMealTimingTime(formatManualTimeInput(value))}
+                />
               </View>
 
               <TouchableOpacity
@@ -724,15 +846,39 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </View>
       </Modal>
 
-      <View style={styles.tipCard}>
-        <View style={styles.tipIconWrap}>
-          <Ionicons name="bulb-outline" size={18} color={patientTheme.colors.primaryDark} />
+      <View style={styles.contextCard}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={styles.cardTitle}>Resumo da refeição</Text>
+            <Text style={styles.cardText}>Defina o contexto antes de enviar foto ou editar alimentos.</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.contextEditButton}
+            onPress={() => openMealTimingBefore(null)}
+            disabled={isBusy}
+          >
+            <Ionicons name="create-outline" size={16} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.contextEditButtonText}>Editar</Text>
+          </TouchableOpacity>
         </View>
-        <View style={styles.tipContent}>
-          <Text style={styles.tipTitle}>Para a IA acertar mais</Text>
-          <Text style={styles.tipText}>
-            Prefira fotos com boa luz, o prato inteiro visível e o celular acima da refeição.
-          </Text>
+
+        <View style={styles.contextPanel}>
+          <View style={styles.contextPill}>
+            <Text style={styles.contextPillLabel}>Tipo</Text>
+            <Text style={styles.contextPillValue}>{mealType || 'Selecione a refeição'}</Text>
+          </View>
+          <View style={styles.contextPill}>
+            <Text style={styles.contextPillLabel}>Momento</Text>
+            <Text style={styles.contextPillValue}>{getMealTimingLabel(mealTimingMode)}</Text>
+          </View>
+          <View style={styles.contextPill}>
+            <Text style={styles.contextPillLabel}>Data</Text>
+            <Text style={styles.contextPillValue}>{mealTimingDate || '--/--/----'}</Text>
+          </View>
+          <View style={styles.contextPill}>
+            <Text style={styles.contextPillLabel}>Hora</Text>
+            <Text style={styles.contextPillValue}>{mealTimingTime || '--:--'}</Text>
+          </View>
         </View>
       </View>
 
@@ -759,6 +905,15 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           >
             <Ionicons name="image-outline" size={18} color={patientTheme.colors.text} />
             <Text style={styles.secondaryButtonText}>Galeria</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={styles.secondaryButton}
+            onPress={() => openMealTimingBefore('manual')}
+            disabled={isBusy}
+          >
+            <Ionicons name="create-outline" size={18} color={patientTheme.colors.text} />
+            <Text style={styles.secondaryButtonText}>Manual</Text>
           </TouchableOpacity>
         </View>
 
@@ -793,7 +948,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           ]}
           onPress={() => {
             if (!hasSelectedImage) {
-              Alert.alert('Atencao', 'Escolha uma foto antes de continuar sem IA.');
+              setMensagemTopo({
+                tipo: 'aviso',
+                texto: 'Escolha uma foto antes de continuar sem IA.',
+              });
               return;
             }
 
@@ -844,7 +1002,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
         <TouchableOpacity
           style={[styles.addFoodPrimaryButton, isBusy && styles.buttonDisabled]}
-          onPress={() => openMealTimingBefore('manual')}
+          onPress={adicionarItemManual}
           disabled={isBusy}
         >
           <Ionicons name="add-circle-outline" size={18} color={patientTheme.colors.onPrimary} />
@@ -880,57 +1038,62 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   placeholderTextColor="#8a9095"
                 />
 
-                <View style={styles.gridRow}>
-                  <View style={styles.gridItem}>
-                    <Text style={styles.inputLabel}>Gramas</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={String(item.quantidade_gramas)}
-                      onChangeText={(value) => atualizarCampo(index, 'quantidade_gramas', value)}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-
-                  <View style={styles.gridItem}>
-                    <Text style={styles.inputLabel}>Calorias</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={String(item.calorias)}
-                      onChangeText={(value) => atualizarCampo(index, 'calorias', value)}
-                      keyboardType="decimal-pad"
-                    />
+                <View style={styles.nutritionPanel}>
+                  <Text style={styles.nutritionPanelTitle}>Dados básicos</Text>
+                  <View style={styles.nutritionGrid}>
+                    {FOOD_CORE_FIELDS.map((field) => (
+                      <View key={`${item.id}-${field.key}`} style={styles.nutritionGridItem}>
+                        <Text style={styles.inputLabel}>
+                          {field.label} {field.unit ? `(${field.unit})` : ''}
+                        </Text>
+                        <TextInput
+                          style={[styles.input, styles.nutrientInput]}
+                          value={String(item[field.key] ?? 0)}
+                          onChangeText={(value) => atualizarCampo(index, field.key, value)}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    ))}
                   </View>
                 </View>
 
-                <View style={styles.gridRow}>
-                  <View style={styles.gridItem}>
-                    <Text style={styles.inputLabel}>Carboidratos</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={String(item.carboidratos)}
-                      onChangeText={(value) => atualizarCampo(index, 'carboidratos', value)}
-                      keyboardType="decimal-pad"
-                    />
-                  </View>
-
-                  <View style={styles.gridItem}>
-                    <Text style={styles.inputLabel}>Proteinas</Text>
-                    <TextInput
-                      style={styles.input}
-                      value={String(item.proteinas)}
-                      onChangeText={(value) => atualizarCampo(index, 'proteinas', value)}
-                      keyboardType="decimal-pad"
-                    />
+                <View style={styles.nutritionPanel}>
+                  <Text style={styles.nutritionPanelTitle}>Macronutrientes</Text>
+                  <View style={styles.nutritionGrid}>
+                    {FOOD_MACRO_FIELDS.map((field) => (
+                      <View key={`${item.id}-${field.key}`} style={styles.nutritionGridItem}>
+                        <Text style={styles.inputLabel}>
+                          {field.label} {field.unit ? `(${field.unit})` : ''}
+                        </Text>
+                        <TextInput
+                          style={[styles.input, styles.nutrientInput]}
+                          value={String(item[field.key] ?? 0)}
+                          onChangeText={(value) => atualizarCampo(index, field.key, value)}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    ))}
                   </View>
                 </View>
 
-                <Text style={styles.inputLabel}>Gorduras</Text>
-                <TextInput
-                  style={styles.input}
-                  value={String(item.gorduras)}
-                  onChangeText={(value) => atualizarCampo(index, 'gorduras', value)}
-                  keyboardType="decimal-pad"
-                />
+                <View style={styles.nutritionPanel}>
+                  <Text style={styles.nutritionPanelTitle}>Micronutrientes</Text>
+                  <View style={styles.nutritionGrid}>
+                    {FOOD_MICRO_FIELDS.map((field) => (
+                      <View key={`${item.id}-${field.key}`} style={styles.nutritionGridItem}>
+                        <Text style={styles.inputLabel}>
+                          {field.label} {field.unit ? `(${field.unit})` : ''}
+                        </Text>
+                        <TextInput
+                          style={[styles.input, styles.nutrientInput]}
+                          value={String(item[field.key] ?? 0)}
+                          onChangeText={(value) => atualizarCampo(index, field.key, value)}
+                          keyboardType="decimal-pad"
+                        />
+                      </View>
+                    ))}
+                  </View>
+                </View>
               </View>
             ))}
 
@@ -947,44 +1110,83 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
       <View style={styles.summaryCard}>
         <Text style={styles.summaryTitle}>Totais confirmados</Text>
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryPill}>
-            <Text style={styles.summaryPillLabel}>Carboidratos</Text>
-            <Text style={styles.summaryPillValue}>{formatNutrient(totais.carboidratos_total, ' g')}</Text>
-          </View>
-          <View style={styles.summaryPill}>
-            <Text style={styles.summaryPillLabel}>Calorias</Text>
-            <Text style={styles.summaryPillValue}>{formatNutrient(totais.calorias_total, ' kcal')}</Text>
+        <Text style={styles.summarySectionTitle}>Resumo da refeição</Text>
+        <Text style={styles.summaryContextText}>{mealContextLabel}</Text>
+        <Text style={styles.summaryContextText}>
+          {mealTimingDate || '--/--/----'} às {mealTimingTime || '--:--'}
+        </Text>
+
+        <View style={styles.summarySection}>
+          <Text style={styles.summarySectionTitle}>Macronutrientes</Text>
+          <View style={styles.summaryMetricList}>
+            {TOTAL_MACRO_FIELDS.map((field) => {
+              const target = TOTAL_TARGETS[field.key];
+              const progress = getProgressPercent(totais[field.key], target);
+              return (
+                <View key={field.key} style={styles.summaryMetricItem}>
+                  <View style={styles.summaryMetricHeader}>
+                    <Text style={styles.summaryMetricLabel}>{field.label}</Text>
+                    <Text style={styles.summaryMetricValue}>
+                      {formatNutrient(totais[field.key], field.unit ? ` ${field.unit}` : '')}
+                    </Text>
+                  </View>
+                  <View style={styles.summaryMetricBarTrack}>
+                    <View
+                      style={[
+                        styles.summaryMetricBarFill,
+                        { width: `${progress}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.summaryMetricMeta}>
+                    {progress}% da referência • meta {formatNutrient(target, field.unit ? ` ${field.unit}` : '')}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
         </View>
-        <View style={styles.summaryRow}>
-          <View style={styles.summaryPill}>
-            <Text style={styles.summaryPillLabel}>Proteinas</Text>
-            <Text style={styles.summaryPillValue}>{formatNutrient(totais.proteinas_total, ' g')}</Text>
-          </View>
-          <View style={styles.summaryPill}>
-            <Text style={styles.summaryPillLabel}>Gorduras</Text>
-            <Text style={styles.summaryPillValue}>{formatNutrient(totais.gorduras_total, ' g')}</Text>
+
+        <View style={styles.summarySection}>
+          <Text style={styles.summarySectionTitle}>Micronutrientes</Text>
+          <View style={styles.summaryMetricList}>
+            {TOTAL_MICRO_FIELDS.map((field) => {
+              const target = TOTAL_TARGETS[field.key];
+              const progress = getProgressPercent(totais[field.key], target);
+              return (
+                <View key={field.key} style={styles.summaryMetricItem}>
+                  <View style={styles.summaryMetricHeader}>
+                    <Text style={styles.summaryMetricLabel}>{field.label}</Text>
+                    <Text style={styles.summaryMetricValue}>
+                      {formatNutrient(totais[field.key], field.unit ? ` ${field.unit}` : '')}
+                    </Text>
+                  </View>
+                  <View style={styles.summaryMetricBarTrack}>
+                    <View
+                      style={[
+                        styles.summaryMetricBarFill,
+                        { width: `${progress}%` },
+                      ]}
+                    />
+                  </View>
+                  <Text style={styles.summaryMetricMeta}>
+                    {progress}% da referência • meta {formatNutrient(target, field.unit ? ` ${field.unit}` : '')}
+                  </Text>
+                </View>
+              );
+            })}
           </View>
         </View>
       </View>
 
-      <TouchableOpacity
-        style={[styles.saveButton, (!hasFoods || isBusy) && styles.buttonDisabled]}
-        onPress={confirmarSalvar}
-        disabled={!hasFoods || isBusy}
-      >
-        {loadingAction === 'save' ? (
-          <ActivityIndicator color={patientTheme.colors.onPrimary} />
-        ) : (
-          <Text style={styles.saveButtonText}>Salvar refeicao confirmada</Text>
-        )}
-      </TouchableOpacity>
     </PatientScreenLayout>
   );
 }
 
 const styles = StyleSheet.create({
+  screenContent: {
+    paddingBottom: 116,
+  },
   card: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
@@ -993,14 +1195,14 @@ const styles = StyleSheet.create({
     ...patientShadow,
   },
   cardTitle: {
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '700',
     color: patientTheme.colors.text,
   },
   cardText: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 20,
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
     color: patientTheme.colors.textMuted,
   },
   actionRow: {
@@ -1138,6 +1340,60 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
   },
+  contextCard: {
+    marginBottom: 14,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    ...patientShadow,
+  },
+  contextEditButton: {
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.primarySoft,
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
+  },
+  contextEditButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  contextPanel: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  contextPill: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    flexBasis: '47%',
+    flexGrow: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+  },
+  contextPillLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  contextPillValue: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
   sectionHeader: {
     gap: 12,
   },
@@ -1159,6 +1415,29 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     fontWeight: '700',
   },
+  nutritionPanel: {
+    marginTop: 14,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    padding: 12,
+  },
+  nutritionPanelTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+    marginBottom: 4,
+  },
+  nutritionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  nutritionGridItem: {
+    flexBasis: '47%',
+    flexGrow: 1,
+  },
   inputLabel: {
     marginTop: 10,
     marginBottom: 6,
@@ -1177,6 +1456,10 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
+  },
+  nutrientInput: {
+    backgroundColor: '#ffffff',
+    marginTop: 0,
   },
   gridRow: {
     flexDirection: 'row',
@@ -1204,38 +1487,75 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: patientTheme.colors.primarySoft,
     borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
+    padding: 16,
     ...patientShadow,
   },
   summaryTitle: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 18,
+    fontSize: 17,
     fontWeight: '700',
   },
-  summaryRow: {
-    flexDirection: 'row',
-    gap: 10,
+  summarySection: {
     marginTop: 14,
   },
-  summaryPill: {
-    flex: 1,
-    borderRadius: patientTheme.radius.lg,
-    backgroundColor: '#ffffff',
-    padding: 14,
-    borderWidth: 1,
-    borderColor: '#d8efe4',
+  summarySectionTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginTop: 12,
   },
-  summaryPillLabel: {
+  summaryContextText: {
     color: patientTheme.colors.textMuted,
     fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  summaryMetricList: {
+    marginTop: 10,
+    gap: 10,
+  },
+  summaryMetricItem: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  summaryMetricHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  summaryMetricLabel: {
+    color: patientTheme.colors.text,
+    fontSize: 11,
     fontWeight: '700',
     textTransform: 'uppercase',
   },
-  summaryPillValue: {
-    marginTop: 8,
+  summaryMetricValue: {
     color: patientTheme.colors.text,
-    fontSize: 18,
+    fontSize: 14,
     fontWeight: '800',
+  },
+  summaryMetricBarTrack: {
+    marginTop: 8,
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: '#e6f3ed',
+    overflow: 'hidden',
+  },
+  summaryMetricBarFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.primary,
+  },
+  summaryMetricMeta: {
+    marginTop: 6,
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 15,
   },
   saveButton: {
     marginTop: 18,
@@ -1416,4 +1736,3 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
 });
-

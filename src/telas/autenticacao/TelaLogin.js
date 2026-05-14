@@ -5,11 +5,11 @@ import {
   TextInput,
   TouchableOpacity,
   ScrollView,
-  Alert,
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Image,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../servicos/configSupabase';
@@ -33,6 +33,7 @@ import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
+import { getPrivacyPolicyUrl } from '../../constantes/configPublicaApp';
 
 const softGreenBorder = {
   borderWidth: 1.5,
@@ -421,10 +422,7 @@ export default function TelaLogin({ navigation, route, session }) {
           identificador: 'Este paciente foi excluido e nao pode mais acessar a plataforma.',
           senha: '',
         });
-        Alert.alert(
-          'Acesso bloqueado',
-          'Este paciente foi excluido e nao pode mais acessar a plataforma.'
-        );
+        setErrorMessage('Acesso bloqueado: este paciente foi excluído e não pode mais acessar.');
         return;
       }
 
@@ -479,7 +477,6 @@ export default function TelaLogin({ navigation, route, session }) {
         },
       });
       setErrorMessage('Ocorreu um erro inesperado ao validar seu acesso.');
-      Alert.alert('Erro', 'Ocorreu um erro inesperado ao validar seu acesso.');
     } finally {
       setLoading(false);
     }
@@ -532,6 +529,7 @@ export default function TelaLogin({ navigation, route, session }) {
     try {
       googleSessionHandledRef.current = false;
       setGoogleLoading(true);
+      setErrorMessage('');
 
       const { cancelled, redirected, session: googleSession } = await startGoogleOAuth();
 
@@ -562,9 +560,8 @@ export default function TelaLogin({ navigation, route, session }) {
         status: 'falha',
         details: { motivo: 'sessao_supabase_ausente' },
       });
-      Alert.alert(
-        'Atencao',
-        'O Google voltou para o app, mas o Supabase nao criou a sessao.'
+      setErrorMessage(
+        'O Google voltou para o app, mas o Supabase não criou a sessão. Tente novamente.'
       );
     } catch (error) {
       console.log('Erro login Google =>', error);
@@ -579,7 +576,7 @@ export default function TelaLogin({ navigation, route, session }) {
         details: { motivo: 'excecao', codigo: 'oauth_erro' },
       });
       googleSessionHandledRef.current = false;
-      Alert.alert('Erro', error?.message || 'Falha ao entrar com Google.');
+      setErrorMessage(error?.message || 'Falha ao entrar com Google. Verifique a conexão.');
     } finally {
       setGoogleLoading(false);
     }
@@ -976,6 +973,15 @@ export default function TelaLogin({ navigation, route, session }) {
             Nao tem conta? <Text style={boldGreenStyle}>Cadastre-se</Text>
           </Text>
         </TouchableOpacity>
+
+        {getPrivacyPolicyUrl() ? (
+          <TouchableOpacity
+            style={{ marginTop: 18, alignSelf: 'center' }}
+            onPress={() => Linking.openURL(getPrivacyPolicyUrl())}
+          >
+            <Text style={[linkTextStyle, { textAlign: 'center' }]}>Privacidade e dados (LGPD)</Text>
+          </TouchableOpacity>
+        ) : null}
       </View>
         </ScrollView>
       </KeyboardAvoidingView>

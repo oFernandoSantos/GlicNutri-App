@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -7,13 +7,15 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
-  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   addGlucoseReading,
@@ -43,6 +45,27 @@ import {
 } from '../../servicos/centralAppState';
 
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
+
+const bolusMealOptions = ['Café da manhã', 'Almoço', 'Jantar', 'Ceia', 'Lanche'];
+const BOLUS_MEAL_VALUE_TO_LABEL = {
+  cafe_manha: 'Café da manhã',
+  almoco: 'Almoço',
+  jantar: 'Jantar',
+  ceia: 'Ceia',
+  lanche: 'Lanche',
+  correcao: 'Correção',
+  outro: 'Outro',
+};
+const BOLUS_APPLICATION_TYPES = [
+  { id: 'refeicao', label: 'Refeição', usage: 'Antes da refeição' },
+  { id: 'correcao', label: 'Correção', usage: 'Correção' },
+  { id: 'refeicao_correcao', label: 'Refeição + Correção', usage: 'Antes da refeição e correção' },
+];
+
+function mapUsageToBolusApplicationType(usage) {
+  const hit = BOLUS_APPLICATION_TYPES.find((x) => x.usage === String(usage || '').trim());
+  return hit?.id || 'refeicao_correcao';
+}
 
 const glucoseTypeOptions = [
   'Antes do Café da Manhã',
@@ -378,14 +401,94 @@ function normalizeInsulinCategoryDefault(value) {
   return '';
 }
 
+function resolveBasalInsulinOption(rawType) {
+  const normalized = normalizeText(rawType);
+  if (!normalized) return null;
+
+  return (
+    basalInsulinOptions.find((option) => {
+      const label = normalizeText(option.label);
+      const brand = normalizeText(option.brand);
+      return (
+        normalized === label ||
+        normalized === brand ||
+        label.includes(normalized) ||
+        normalized.includes(brand)
+      );
+    }) || null
+  );
+}
+
+function mapTherapyDeviceValueToLabel(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const map = {
+    caneta: 'Caneta',
+    seringa_frasco: 'Seringa + frasco',
+    cartucho_refil: 'Cartucho/refil',
+    inalador: 'Inalador',
+  };
+
+  return map[raw] || raw;
+}
+
+function getActiveBasalTherapyPlan(patient) {
+  const onboarding = parsePatientOnboardingAnswers(patient);
+  const plans = Array.isArray(onboarding?.terapia_farmacologica_insulinas)
+    ? onboarding.terapia_farmacologica_insulinas
+    : [];
+
+  return (
+    plans.find((plan) => {
+      const cat = normalizeText(plan?.categoria_funcional || '');
+      const st = normalizeText(plan?.status || 'ativo');
+      return cat.includes('basal') && !st.includes('inativo');
+    }) || null
+  );
+}
+
+function mergeBasalSchedulesFromPatient(patient) {
+  const onboarding = parsePatientOnboardingAnswers(patient);
+  const fromProfiles = Array.isArray(onboarding?.insulin_profiles?.basal?.schedules)
+    ? onboarding.insulin_profiles.basal.schedules
+    : [];
+  const basalPlan = getActiveBasalTherapyPlan(patient);
+  const fromTherapy = Array.isArray(basalPlan?.tabela_horarios)
+    ? basalPlan.tabela_horarios.map((row) => ({
+        dia_semana: String(row?.dia_semana || '').trim(),
+        horario: String(row?.horario || '').trim(),
+        dose: row?.dose ?? '',
+        observacao: String(row?.observacao || '').trim(),
+      }))
+    : [];
+
+  const merged = [...fromTherapy];
+  for (const row of fromProfiles) {
+    const normalizedRow = {
+      ...row,
+      dia_semana: String(row?.dia_semana || '').trim(),
+      horario: String(row?.horario || '').trim(),
+      observacao: String(row?.observacao || '').trim(),
+    };
+    const dup = merged.some(
+      (item) =>
+        String(item?.dia_semana || '').trim() === normalizedRow.dia_semana &&
+        String(item?.horario || '').slice(0, 5) === normalizedRow.horario.slice(0, 5) &&
+        String(item?.dose ?? '').trim() === String(normalizedRow.dose ?? '').trim()
+    );
+    if (!dup) merged.push(normalizedRow);
+  }
+  return merged;
+}
+
 function getPatientInsulinDefaults(patient) {
   const onboarding = parsePatientOnboardingAnswers(patient);
   const profiles = onboarding?.insulin_profiles || {};
   const legacyCategory = normalizeInsulinCategoryDefault(onboarding?.insulin_category_default);
-  const basalProfileOption = basalInsulinOptions.find(
-    (option) =>
-      option.label === String(profiles?.basal?.type || '').trim() ||
-      option.brand === String(profiles?.basal?.type || '').trim()
+  const basalTherapyPlan = getActiveBasalTherapyPlan(patient);
+  const basalProfileOption = resolveBasalInsulinOption(
+    String(basalTherapyPlan?.marca || profiles?.basal?.type || '').trim()
   );
   const legacyProfile = {
     type: String(onboarding?.insulin_type_default || '').trim(),
@@ -400,14 +503,32 @@ function getPatientInsulinDefaults(patient) {
       category: 'basal',
       type: String(
         basalProfileOption?.label ||
+          basalTherapyPlan?.marca ||
           profiles?.basal?.type ||
           (legacyCategory === 'basal' ? legacyProfile.type : '')
       ).trim(),
-      device: String(profiles?.basal?.device || '').trim(),
-      usage: String(profiles?.basal?.usage || (legacyCategory === 'basal' ? legacyProfile.usage : '')).trim(),
-      dose: String(profiles?.basal?.dose || (legacyCategory === 'basal' ? legacyProfile.dose : '')).trim(),
-      notes: String(profiles?.basal?.notes || (legacyCategory === 'basal' ? legacyProfile.notes : '')).trim(),
-      schedules: Array.isArray(profiles?.basal?.schedules) ? profiles.basal.schedules : [],
+      device: String(
+        mapTherapyDeviceValueToLabel(basalTherapyPlan?.dispositivo) ||
+          profiles?.basal?.device ||
+          ''
+      ).trim(),
+      usage: String(
+        basalTherapyPlan?.tabela_horarios?.[0]?.observacao ||
+          profiles?.basal?.usage ||
+          (legacyCategory === 'basal' ? legacyProfile.usage : '')
+      ).trim(),
+      dose: String(
+        basalTherapyPlan?.dose ||
+          basalTherapyPlan?.tabela_horarios?.[0]?.dose ||
+          profiles?.basal?.dose ||
+          (legacyCategory === 'basal' ? legacyProfile.dose : '')
+      ).trim(),
+      notes: String(
+        basalTherapyPlan?.observacoes ||
+          profiles?.basal?.notes ||
+          (legacyCategory === 'basal' ? legacyProfile.notes : '')
+      ).trim(),
+      schedules: mergeBasalSchedulesFromPatient(patient),
     },
     prandial: {
       category: 'prandial',
@@ -745,6 +866,241 @@ function formatGlucoseInput(value) {
   return String(value || '').replace(/\D/g, '').slice(0, 4);
 }
 
+function parseLooseNumber(value) {
+  const normalized = Number(String(value ?? '').replace(',', '.'));
+  return Number.isFinite(normalized) ? normalized : Number.NaN;
+}
+
+function extractTargetGlucoseFromText(text) {
+  const match = String(text || '').match(/\b(?:alvo|meta|objetivo)\s*[:=]?\s*(\d{2,3})\b/i);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function normalizeRefeicaoLabel(ref) {
+  const s = String(ref ?? '').trim();
+  if (!s) return '';
+  return BOLUS_MEAL_VALUE_TO_LABEL[s] || s;
+}
+
+function refeicaoMatches(rowRefeicao, mealLabel) {
+  const a = normalizeText(normalizeRefeicaoLabel(rowRefeicao));
+  const b = normalizeText(normalizeRefeicaoLabel(mealLabel));
+  return Boolean(a && b && a === b);
+}
+
+function tipoDoseEhCarbo(t) {
+  const x = normalizeText(t);
+  return x.includes('carbo') || x.includes('dose_carboidrato');
+}
+
+function tipoDoseEhFixa(t) {
+  const x = normalizeText(t);
+  return x.includes('fixa') || x.includes('dose_fixa');
+}
+
+function tipoDoseEhCorrecao(t) {
+  const x = normalizeText(t);
+  return x.includes('correcao') || x.includes('correc') || x.includes('dose_correcao');
+}
+
+function firstMealFromSchedules(schedules) {
+  const rows = Array.isArray(schedules) ? schedules : [];
+  for (const row of rows) {
+    const hit = bolusMealOptions.find((m) => refeicaoMatches(row?.refeicao, m));
+    if (hit) return hit;
+  }
+  if (rows[0]?.refeicao) {
+    const lbl = normalizeRefeicaoLabel(rows[0].refeicao);
+    return bolusMealOptions.find((m) => refeicaoMatches(lbl, m)) || lbl;
+  }
+  return 'Almoço';
+}
+
+function mergeBolusSchedulesFromPatient(patient) {
+  const onboarding = parsePatientOnboardingAnswers(patient);
+  const fromProfiles = Array.isArray(onboarding?.insulin_profiles?.bolus?.schedules)
+    ? onboarding.insulin_profiles.bolus.schedules
+    : [];
+
+  const plans = Array.isArray(onboarding?.terapia_farmacologica_insulinas)
+    ? onboarding.terapia_farmacologica_insulinas
+    : [];
+
+  const bolusPlan = plans.find((p) => {
+    const cat = normalizeText(p?.categoria_funcional || '');
+    const st = normalizeText(p?.status || 'ativo');
+    return cat.includes('bolus') && !st.includes('inativo');
+  });
+
+  const fromTherapy = Array.isArray(bolusPlan?.tabela_horarios)
+    ? bolusPlan.tabela_horarios.map((row) => ({
+        refeicao: normalizeRefeicaoLabel(row?.refeicao),
+        horario: String(row?.horario || '').trim(),
+        dose: row?.dose ?? '',
+        tipo_dose: String(row?.tipo_dose ?? '').trim(),
+      }))
+    : [];
+
+  const merged = [...fromTherapy];
+  for (const row of fromProfiles) {
+    const normalizedRow = {
+      ...row,
+      refeicao: normalizeRefeicaoLabel(row?.refeicao),
+      tipo_dose: String(row?.tipo_dose ?? '').trim(),
+      horario: String(row?.horario || '').trim(),
+    };
+    const dup = merged.some(
+      (m) =>
+        refeicaoMatches(m.refeicao, normalizedRow.refeicao) &&
+        normalizeText(String(m.tipo_dose || '')) === normalizeText(String(normalizedRow.tipo_dose || '')) &&
+        String(m.horario || '').slice(0, 5) === String(normalizedRow.horario || '').slice(0, 5)
+    );
+    if (!dup) merged.push(normalizedRow);
+  }
+  return merged;
+}
+
+function parseTimeToMinutes(timeStr) {
+  const t = String(timeStr || '').trim().slice(0, 8);
+  const m = t.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return null;
+  const h = Number(m[1]);
+  const min = Number(m[2]);
+  if (!Number.isFinite(h) || !Number.isFinite(min)) return null;
+  if (h > 23 || min > 59) return null;
+  return h * 60 + min;
+}
+
+function pickBolusSchedule(schedules, mealLabel) {
+  const rows = Array.isArray(schedules) ? schedules : [];
+  const matched = rows.filter((item) => refeicaoMatches(item?.refeicao, mealLabel));
+  if (!matched.length) return { primary: null, correction: null, all: [] };
+
+  const primary =
+    matched.find((r) => tipoDoseEhCarbo(r?.tipo_dose)) ||
+    matched.find((r) => tipoDoseEhFixa(r?.tipo_dose)) ||
+    matched[0];
+  const correction = matched.find((r) => tipoDoseEhCorrecao(r?.tipo_dose)) || null;
+  return { primary, correction, all: matched };
+}
+
+function computeBolusSuggestion(params) {
+  const {
+    applicationType,
+    mealLabel,
+    glucoseMgDl,
+    carbsG,
+    schedules,
+    notesText,
+    manualTarget,
+  } = params;
+
+  const wantsMeal = applicationType === 'refeicao' || applicationType === 'refeicao_correcao';
+  const wantsCorrection = applicationType === 'correcao' || applicationType === 'refeicao_correcao';
+
+  const selectedMeal = wantsMeal ? mealLabel : 'Correção';
+  const mealSchedule = pickBolusSchedule(schedules, selectedMeal);
+  const correctionSchedule = pickBolusSchedule(schedules, 'Correção');
+  const schedulePrimary = applicationType === 'correcao' ? correctionSchedule.primary : mealSchedule.primary;
+  const scheduleCorrection =
+    applicationType === 'correcao'
+      ? correctionSchedule.correction
+      : mealSchedule.correction || correctionSchedule.primary || correctionSchedule.correction;
+
+  const dosePrimary = parseLooseNumber(schedulePrimary?.dose);
+  const doseCorr = parseLooseNumber(scheduleCorrection?.dose);
+
+  const targetFromNotes = extractTargetGlucoseFromText(notesText);
+  const targetFromManual = parseLooseNumber(manualTarget);
+  const target =
+    targetFromNotes != null
+      ? targetFromNotes
+      : Number.isFinite(targetFromManual) && targetFromManual > 0
+        ? targetFromManual
+        : null;
+
+  let doseMeal = 0;
+  let doseCorrection = 0;
+  const warnings = [];
+
+  if (wantsMeal) {
+    if (!schedulePrimary) {
+      warnings.push('Configure o bolus no Perfil (refeição, dose e tipo) para calcular automaticamente.');
+    } else if (tipoDoseEhCarbo(schedulePrimary?.tipo_dose)) {
+      if (!Number.isFinite(dosePrimary) || dosePrimary <= 0) {
+        warnings.push('Relação insulina/carboidrato inválida no perfil.');
+      } else if (!Number.isFinite(carbsG) || carbsG < 0) {
+        warnings.push('Informe os carboidratos (g) para calcular a dose da refeição.');
+      } else {
+        doseMeal = carbsG / dosePrimary;
+      }
+    } else if (tipoDoseEhFixa(schedulePrimary?.tipo_dose)) {
+      if (!Number.isFinite(dosePrimary) || dosePrimary <= 0) {
+        warnings.push('Dose fixa inválida no perfil.');
+      } else {
+        doseMeal = dosePrimary;
+      }
+    } else {
+      warnings.push('Tipo de dose do perfil não permite cálculo automático para refeição.');
+    }
+  }
+
+  if (wantsCorrection) {
+    if (!Number.isFinite(glucoseMgDl) || glucoseMgDl <= 0) {
+      warnings.push('Informe a glicemia atual para calcular correção.');
+    } else if (target == null) {
+      warnings.push('Meta glicêmica não definida. Informe a meta ou coloque no texto do bolus (ex.: \"alvo 100\").');
+    } else {
+      const delta = glucoseMgDl - target;
+      if (delta <= 0) {
+        doseCorrection = 0;
+      } else if (tipoDoseEhCorrecao(scheduleCorrection?.tipo_dose) && Number.isFinite(doseCorr) && doseCorr > 0) {
+        doseCorrection = delta / doseCorr;
+      } else {
+        warnings.push('Para correção automática, configure \"Dose de correção\" na linha \"Correção\" do perfil.');
+      }
+    }
+  }
+
+  const round1 = (v) => (Number.isFinite(v) && v > 0 ? Math.round(v * 10) / 10 : 0);
+  doseMeal = round1(doseMeal);
+  doseCorrection = round1(doseCorrection);
+  const total = round1(doseMeal + doseCorrection);
+
+  const ratioLabel =
+    tipoDoseEhCarbo(schedulePrimary?.tipo_dose) && Number.isFinite(dosePrimary) && dosePrimary > 0
+      ? `1 UI : ${String(dosePrimary).replace('.', ',')} g`
+      : '—';
+  const corrLabel =
+    tipoDoseEhCorrecao(scheduleCorrection?.tipo_dose) && Number.isFinite(doseCorr) && doseCorr > 0
+      ? `${String(doseCorr).replace('.', ',')} mg/dL por 1 UI`
+      : '—';
+
+  const scheduleTime = String(
+    (applicationType === 'correcao' ? correctionSchedule : mealSchedule).primary?.horario || ''
+  ).slice(0, 5);
+
+  return {
+    target,
+    ratioLabel,
+    corrLabel,
+    doseMeal,
+    doseCorrection,
+    doseTotal: total,
+    scheduleTime,
+    warnings,
+  };
+}
+
 function formatMedicineQuantityInput(value, inputType = 'decimal') {
   const rawValue = String(value || '');
 
@@ -762,13 +1118,6 @@ function formatMedicineQuantityInput(value, inputType = 'decimal') {
   }
 
   return safeInteger;
-}
-
-function normalizeText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
 }
 
 function formatManualDateInput(value) {
@@ -884,6 +1233,7 @@ export default function PacienteMonitoramentoScreen({
   const [glucoseConfirmVisible, setGlucoseConfirmVisible] = useState(false);
   const [medicationChoiceVisible, setMedicationChoiceVisible] = useState(false);
   const [insulinChoiceVisible, setInsulinChoiceVisible] = useState(false);
+  const [insulinTimingChoiceVisible, setInsulinTimingChoiceVisible] = useState(false);
   const [medicationModalVisible, setMedicationModalVisible] = useState(false);
   const [medicineFormVisible, setMedicineFormVisible] = useState(false);
   const [medicineSearchVisible, setMedicineSearchVisible] = useState(false);
@@ -905,6 +1255,12 @@ export default function PacienteMonitoramentoScreen({
   const [insulinTypeVisible, setInsulinTypeVisible] = useState(false);
   const [insulinUsageVisible, setInsulinUsageVisible] = useState(false);
   const [insulinDeviceVisible, setInsulinDeviceVisible] = useState(false);
+  const [bolusApplicationType, setBolusApplicationType] = useState('refeicao_correcao');
+  const [bolusMeal, setBolusMeal] = useState('Almoço');
+  const [bolusGlucoseNow, setBolusGlucoseNow] = useState('');
+  const [bolusCarbs, setBolusCarbs] = useState('');
+  const [bolusTargetManual, setBolusTargetManual] = useState('');
+  const [bolusDoseEdited, setBolusDoseEdited] = useState(false);
   const [medicineName, setMedicineName] = useState('');
   const [medicineSearchQuery, setMedicineSearchQuery] = useState('');
   const [medicineUnit, setMedicineUnit] = useState('');
@@ -917,8 +1273,118 @@ export default function PacienteMonitoramentoScreen({
   const [objectiveText, setObjectiveText] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
   const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [avisoUsuario, setAvisoUsuario] = useState(null);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
   const insulinDefaults = useMemo(() => getPatientInsulinDefaults(patient), [patient]);
+  const mergedBolusSchedules = useMemo(() => mergeBolusSchedulesFromPatient(patient), [patient]);
+
+  const bolusSuggestion = useMemo(() => {
+    if (insulinCategory !== 'prandial') return null;
+    return computeBolusSuggestion({
+      applicationType: bolusApplicationType,
+      mealLabel: bolusMeal,
+      glucoseMgDl: parseGlucoseInput(bolusGlucoseNow),
+      carbsG: parseLooseNumber(String(bolusCarbs || '').replace(',', '.')),
+      schedules: mergedBolusSchedules,
+      notesText: `${insulinDefaults.prandial?.notes || ''}`,
+      manualTarget: bolusTargetManual,
+    });
+  }, [
+    insulinCategory,
+    bolusApplicationType,
+    bolusMeal,
+    bolusGlucoseNow,
+    bolusCarbs,
+    bolusTargetManual,
+    mergedBolusSchedules,
+    insulinDefaults.prandial?.notes,
+  ]);
+
+  const bolusOverlapAlerts = useMemo(() => {
+    if (insulinCategory !== 'prandial') return [];
+    const entryDate =
+      insulinMeasurementType === 'current'
+        ? buildLocalDateString()
+        : normalizeManualDateInput(insulinDate);
+    const entryTimeStr =
+      insulinMeasurementType === 'current'
+        ? buildLocalTimeString().slice(0, 5)
+        : normalizeManualTimeInput(insulinTime)?.slice(0, 5);
+    const newMins = parseTimeToMinutes(entryTimeStr);
+    if (!entryDate || newMins == null) return [];
+    const windowMin = 120;
+    const hits = (appState.medicationEntries || []).filter((e) => {
+      if (String(e.insulinCategory || '') !== 'prandial') return false;
+      if (e.date !== entryDate) return false;
+      const em = parseTimeToMinutes(e.time);
+      if (em == null) return false;
+      return Math.abs(em - newMins) <= windowMin && Math.abs(em - newMins) > 0;
+    });
+    return hits.length
+      ? ['Possível sobreposição de bolus: há outro registro de bolus próximo neste horário.']
+      : [];
+  }, [insulinCategory, insulinMeasurementType, insulinDate, insulinTime, appState.medicationEntries]);
+
+  const bolusSafetyAlerts = useMemo(() => {
+    if (insulinCategory !== 'prandial') return [];
+    const alerts = [];
+    const g = parseGlucoseInput(bolusGlucoseNow);
+    if (Number.isFinite(g)) {
+      if (g < 70) alerts.push('Glicemia abaixo de 70 mg/dL: avalie carboidrato antes do bolus.');
+      if (g > 250) alerts.push('Glicemia acima de 250 mg/dL: confira orientação médica.');
+    }
+    const doseNum = parseLooseNumber(insulinDose);
+    if (Number.isFinite(doseNum) && doseNum > 30) {
+      alerts.push('Dose aplicada elevada: confira o valor antes de salvar.');
+    }
+    return alerts;
+  }, [insulinCategory, bolusGlucoseNow, insulinDose]);
+
+  const bolusAllAlerts = useMemo(
+    () => [...(bolusSuggestion?.warnings || []), ...bolusOverlapAlerts, ...bolusSafetyAlerts],
+    [bolusSuggestion, bolusOverlapAlerts, bolusSafetyAlerts]
+  );
+
+  const loadMonitoringData = useCallback(async () => {
+    try {
+      setLoadError(null);
+
+      if (!canResolvePatient) {
+        setAppState(createDefaultAppState());
+        setGlucoseReadings([]);
+        return;
+      }
+
+      const experience = await fetchPatientExperience(patientId, {
+        patientContext: usuarioLogado,
+      });
+
+      const mergedReadings = mergeCachedGlucoseReadings(
+        experience.glucoseReadings,
+        getCachedGlucoseReadings(experience.patient?.id_paciente_uuid || patientId)
+      );
+
+      setPatient(experience.patient);
+      setObjectiveText(experience.clinicalObjective);
+      setAppState(experience.appState);
+      replaceCachedPatientAppState(
+        experience.patient?.id_paciente_uuid || patientId,
+        experience.appState
+      );
+      setGlucoseReadings(mergedReadings);
+      replaceCachedGlucoseReadings(
+        experience.patient?.id_paciente_uuid || patientId,
+        mergedReadings
+      );
+    } catch (error) {
+      console.log('Erro ao carregar monitoramento:', error);
+      setLoadError(
+        'Não foi possível carregar o monitoramento. Verifique sua conexão com a internet e tente novamente.'
+      );
+    }
+  }, [canResolvePatient, patientId, usuarioLogado]);
 
   useEffect(() => {
     let active = true;
@@ -926,39 +1392,7 @@ export default function PacienteMonitoramentoScreen({
     async function load() {
       try {
         setLoading(true);
-
-        if (!canResolvePatient) {
-          if (!active) return;
-          setAppState(createDefaultAppState());
-          setGlucoseReadings([]);
-          return;
-        }
-
-        const experience = await fetchPatientExperience(patientId, {
-          patientContext: usuarioLogado,
-        });
-
-        if (!active) return;
-
-        const mergedReadings = mergeCachedGlucoseReadings(
-          experience.glucoseReadings,
-          getCachedGlucoseReadings(experience.patient?.id_paciente_uuid || patientId)
-        );
-
-        setPatient(experience.patient);
-        setObjectiveText(experience.clinicalObjective);
-        setAppState(experience.appState);
-        replaceCachedPatientAppState(
-          experience.patient?.id_paciente_uuid || patientId,
-          experience.appState
-        );
-        setGlucoseReadings(mergedReadings);
-        replaceCachedGlucoseReadings(
-          experience.patient?.id_paciente_uuid || patientId,
-          mergedReadings
-        );
-      } catch (error) {
-        console.log('Erro ao carregar monitoramento:', error);
+        await loadMonitoringData();
       } finally {
         if (active) setLoading(false);
       }
@@ -969,7 +1403,13 @@ export default function PacienteMonitoramentoScreen({
     return () => {
       active = false;
     };
-  }, [patientId, canResolvePatient]);
+  }, [loadMonitoringData]);
+
+  const onRefreshMonitoramento = useCallback(async () => {
+    setRefreshing(true);
+    await loadMonitoringData();
+    setRefreshing(false);
+  }, [loadMonitoringData]);
 
   useEffect(() => {
     if (!activePatientId) return undefined;
@@ -997,7 +1437,7 @@ export default function PacienteMonitoramentoScreen({
       return;
     }
 
-    const selectedOption = basalInsulinOptions.find((option) => option.label === insulinType);
+    const selectedOption = resolveBasalInsulinOption(insulinType);
     const allowedDevices = selectedOption?.allowedDevices || [];
 
     if (
@@ -1008,6 +1448,20 @@ export default function PacienteMonitoramentoScreen({
       setInsulinDevice('');
     }
   }, [insulinCategory, insulinDevice, insulinType]);
+
+  useEffect(() => {
+    if (insulinCategory !== 'prandial') return;
+    const opt = BOLUS_APPLICATION_TYPES.find((x) => x.id === bolusApplicationType);
+    if (opt) setInsulinUsage(opt.usage);
+  }, [insulinCategory, bolusApplicationType]);
+
+  useEffect(() => {
+    if (insulinCategory !== 'prandial' || bolusDoseEdited) return;
+    const total = bolusSuggestion?.doseTotal;
+    if (Number.isFinite(total) && total > 0) {
+      setInsulinDose(formatMedicineQuantityInput(String(total).replace('.', ','), 'decimal'));
+    }
+  }, [insulinCategory, bolusDoseEdited, bolusSuggestion]);
 
   useEffect(() => {
     const quickRegister = route?.params?.openQuickRegister;
@@ -1165,12 +1619,14 @@ export default function PacienteMonitoramentoScreen({
   const isPreviousInsulinEntry = insulinMeasurementType === 'previous';
   const hasValidInsulinDate = !isPreviousInsulinEntry || isValidManualDate(insulinDate);
   const hasValidInsulinTime = !isPreviousInsulinEntry || isValidManualTime(insulinTime);
+  const parsedInsulinDose = parseLooseNumber(insulinDose);
   const canSubmitInsulin =
     medicationKind === 'insulin' &&
     Boolean(insulinCategory) &&
     Boolean(insulinType) &&
     Boolean(String(insulinDose || '').trim()) &&
-    Number(insulinDose) > 0 &&
+    Number.isFinite(parsedInsulinDose) &&
+    parsedInsulinDose > 0 &&
     hasValidInsulinDate &&
     hasValidInsulinTime &&
     (insulinCategory === 'basal' ? Boolean(insulinDevice) : Boolean(insulinUsage));
@@ -1182,7 +1638,7 @@ export default function PacienteMonitoramentoScreen({
   };
   const selectedBasalInsulinOption =
     insulinCategory === 'basal'
-      ? basalInsulinOptions.find((option) => option.label === insulinType) || null
+      ? resolveBasalInsulinOption(insulinType)
       : null;
   const selectedInsulinTypeOptions =
     insulinCategory === 'basal'
@@ -1196,7 +1652,7 @@ export default function PacienteMonitoramentoScreen({
     const schedules =
       insulinCategory === 'basal'
         ? insulinDefaults?.basal?.schedules || []
-        : insulinDefaults?.prandial?.schedules || [];
+        : mergedBolusSchedules;
 
     return (Array.isArray(schedules) ? schedules : [])
       .map((item, index) => {
@@ -1216,7 +1672,7 @@ export default function PacienteMonitoramentoScreen({
         };
       })
       .filter((item) => item.horario || item.dose || item.refeicao || item.tipoDose || item.diaSemana);
-  }, [insulinCategory, insulinDefaults?.basal?.schedules, insulinDefaults?.prandial?.schedules]);
+  }, [insulinCategory, insulinDefaults?.basal?.schedules, mergedBolusSchedules]);
   const timeInRange = metrics.tir === '--' ? 0 : metrics.tir;
   const manualModalLift =
     !glucoseTypeDropdownVisible && focusedManualField === 'glucose'
@@ -1305,27 +1761,42 @@ export default function PacienteMonitoramentoScreen({
     setInsulinTypeVisible(false);
     setInsulinUsageVisible(false);
     setInsulinDeviceVisible(false);
+    setBolusApplicationType('refeicao_correcao');
+    setBolusMeal('Almoço');
+    setBolusGlucoseNow('');
+    setBolusCarbs('');
+    setBolusTargetManual('');
+    setBolusDoseEdited(false);
   }
 
-function applyInsulinDefaults(defaults = insulinDefaults) {
-  setMedicationKind('insulin');
-  setInsulinCategory(defaults.category || '');
+  function applyInsulinDefaults(defaults, explicitCategory) {
+    const categoryKey = explicitCategory || defaults?.category || '';
+    setMedicationKind('insulin');
+    setInsulinCategory(categoryKey);
     setInsulinType(
-      defaults.category === 'basal' &&
-        !basalInsulinOptions.some((option) => option.label === defaults.type)
+      categoryKey === 'basal' && !basalInsulinOptions.some((option) => option.label === defaults.type)
         ? ''
         : defaults.type || ''
     );
-    setInsulinUsage(defaults.category === 'basal' ? '' : defaults.usage || '');
+    setInsulinUsage(categoryKey === 'basal' ? '' : defaults.usage || '');
     setInsulinDose(defaults.dose || '');
-    setInsulinNotes(defaults.notes || '');
-    setInsulinDevice(defaults.category === 'basal' ? defaults.device || '' : '');
+    setInsulinNotes(categoryKey === 'basal' ? defaults.notes || defaults.usage || '' : defaults.notes || '');
+    setInsulinDevice(categoryKey === 'basal' ? defaults.device || '' : '');
     setInsulinMeasurementType('current');
     setInsulinDate(formatDateForDisplay(buildLocalDateString()));
     setInsulinTime(formatManualTimeInput(buildLocalTimeString()));
     setInsulinTypeVisible(false);
     setInsulinUsageVisible(false);
     setInsulinDeviceVisible(false);
+    if (categoryKey === 'prandial') {
+      setBolusApplicationType(mapUsageToBolusApplicationType(defaults.usage));
+      setBolusMeal(firstMealFromSchedules(defaults.schedules));
+      setBolusGlucoseNow('');
+      setBolusCarbs('');
+      const tNote = extractTargetGlucoseFromText(defaults.notes);
+      setBolusTargetManual(tNote != null ? String(Math.round(tNote)) : '');
+      setBolusDoseEdited(false);
+    }
   }
 
   function handleOpenManualChoice() {
@@ -1350,6 +1821,7 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
   }
 
   function handleCloseMedicationModal() {
+    setInsulinTimingChoiceVisible(false);
     setMedicationModalVisible(false);
     setMedicationKind('');
     setMedicationLabel('');
@@ -1361,6 +1833,7 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
   function handleCloseMedicationFlow() {
     setMedicationChoiceVisible(false);
     setInsulinChoiceVisible(false);
+    setInsulinTimingChoiceVisible(false);
     setMedicationModalVisible(false);
     setMedicineFormVisible(false);
     setMedicationKind('');
@@ -1373,6 +1846,7 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
   function handleOpenMedicationChoice() {
     setMedicationChoiceVisible(true);
     setInsulinChoiceVisible(false);
+    setInsulinTimingChoiceVisible(false);
     setMedicationModalVisible(false);
     setMedicineFormVisible(false);
   }
@@ -1394,14 +1868,28 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
     setMedicineFormVisible(true);
   }
 
+  function handleSelectInsulinTiming(measurementType) {
+    setInsulinMeasurementType(measurementType);
+    setInsulinDate(formatDateForDisplay(buildLocalDateString()));
+    setInsulinTime(formatManualTimeInput(buildLocalTimeString()));
+    setInsulinChoiceVisible(false);
+    setInsulinTimingChoiceVisible(false);
+    setMedicationModalVisible(true);
+  }
+
   function handleSelectInsulinType(label) {
     const profileDefaults = label === 'basal' ? insulinDefaults.basal : insulinDefaults.prandial;
     const shouldUseDefaults = Boolean(
-      profileDefaults?.type || profileDefaults?.usage || profileDefaults?.dose || profileDefaults?.notes
+      profileDefaults?.type ||
+        profileDefaults?.device ||
+        profileDefaults?.usage ||
+        profileDefaults?.dose ||
+        profileDefaults?.notes ||
+        (Array.isArray(profileDefaults?.schedules) && profileDefaults.schedules.length)
     );
 
     if (shouldUseDefaults) {
-      applyInsulinDefaults(profileDefaults);
+      applyInsulinDefaults(profileDefaults, label);
     } else {
       setMedicationKind('insulin');
       setInsulinCategory(label);
@@ -1415,9 +1903,19 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       setInsulinTypeVisible(false);
       setInsulinUsageVisible(false);
       setInsulinDeviceVisible(false);
+      if (label === 'prandial') {
+        const d = insulinDefaults.prandial;
+        setBolusApplicationType(mapUsageToBolusApplicationType(d.usage));
+        setBolusMeal(firstMealFromSchedules(d.schedules));
+        const tNote = extractTargetGlucoseFromText(d.notes);
+        setBolusTargetManual(tNote != null ? String(Math.round(tNote)) : '');
+        setBolusGlucoseNow('');
+        setBolusCarbs('');
+        setBolusDoseEdited(false);
+      }
     }
     setInsulinChoiceVisible(false);
-    setMedicationModalVisible(true);
+    setInsulinTimingChoiceVisible(true);
   }
 
   function handleSelectMedicineName(name) {
@@ -1450,27 +1948,36 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
 
   function handleOpenGlucoseConfirmation() {
     if (!activePatientId) {
-      Alert.alert('Atenção', 'Paciente sem identificador para registrar glicemia.');
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para registrar glicemia.',
+      });
       return;
     }
 
     if (!hasValidNewGlucose) {
-      Alert.alert('Atenção', 'Informe um valor de glicose válido.');
+      setAvisoUsuario({ tipo: 'aviso', texto: 'Informe um valor de glicose válido.' });
       return;
     }
 
     if (isPreviousGlucoseEntry && !hasValidManualDate) {
-      Alert.alert('AtenÃƒÂ§ÃƒÂ£o', 'Informe uma data vÃƒÂ¡lida no formato DD/MM/AAAA.');
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Informe uma data válida no formato DD/MM/AAAA.',
+      });
       return;
     }
 
     if (isPreviousGlucoseEntry && !hasValidManualTime) {
-      Alert.alert('AtenÃƒÂ§ÃƒÂ£o', 'Informe uma hora vÃƒÂ¡lida no formato HH:MM.');
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Informe uma hora válida no formato HH:MM.',
+      });
       return;
     }
 
     if (!hasSelectedGlucoseType) {
-      Alert.alert('Atenção', 'Selecione o tipo da glicemia.');
+      setAvisoUsuario({ tipo: 'aviso', texto: 'Selecione o tipo da glicemia.' });
       return;
     }
 
@@ -1490,22 +1997,28 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
     let optimisticReading = null;
 
     if (!parsedValue || parsedValue <= 0) {
-      Alert.alert('Atencao', 'Informe um valor de glicose valido.');
+      setAvisoUsuario({ tipo: 'aviso', texto: 'Informe um valor de glicose válido.' });
       return;
     }
 
     if (isPreviousGlucoseEntry && !hasValidManualDate) {
-      Alert.alert('Atencao', 'Informe uma data valida no formato DD/MM/AAAA.');
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Informe uma data válida no formato DD/MM/AAAA.',
+      });
       return;
     }
 
     if (isPreviousGlucoseEntry && !hasValidManualTime) {
-      Alert.alert('Atencao', 'Informe uma hora valida no formato HH:MM.');
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Informe uma hora válida no formato HH:MM.',
+      });
       return;
     }
 
     if (!hasSelectedGlucoseType) {
-      Alert.alert('Atencao', 'Selecione o tipo da glicemia.');
+      setAvisoUsuario({ tipo: 'aviso', texto: 'Selecione o tipo da glicemia.' });
       return;
     }
 
@@ -1570,12 +2083,12 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       setGlucoseTypeDropdownVisible(false);
       setFocusedManualField(null);
       setManualMeasurementType('current');
-      Alert.alert(
-        'Glicemia registrada',
-        isPreviousGlucoseEntry
-          ? `Leitura de ${parsedValue} mg/dL salva com sucesso em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}.`
-          : `Leitura de ${parsedValue} mg/dL salva com sucesso.`
-      );
+      setAvisoUsuario({
+        tipo: 'sucesso',
+        texto: isPreviousGlucoseEntry
+          ? `Glicemia registrada: ${parsedValue} mg/dL salva em ${formatDateForDisplay(manualMeasurementDate)} às ${String(manualMeasurementTime || '').slice(0, 5)}.`
+          : `Glicemia registrada: ${parsedValue} mg/dL salva com sucesso.`,
+      });
     } catch (error) {
       if (optimisticReading?.id) {
         setGlucoseReadings((current) =>
@@ -1584,10 +2097,12 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
         removeCachedGlucoseReading(activePatientId, optimisticReading.id);
       }
       console.log('Erro ao salvar glicemia:', error);
-      Alert.alert(
-        'Erro ao salvar glicemia',
-        error?.message || 'Nao foi possivel salvar a glicemia agora.'
-      );
+      setAvisoUsuario({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível salvar a glicemia. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setSavingGlucose(false);
     }
@@ -1604,15 +2119,19 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
 
   async function handleSyncLibreView() {
     if (!activePatientId) {
-      Alert.alert('Atenção', 'Paciente sem identificador para sincronizar o LibreView.');
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para sincronizar o LibreView.',
+      });
       return;
     }
 
     if (!isLibreViewSyncConfigured()) {
-      Alert.alert(
-        'LibreView ainda não configurado',
-        'A tela já está preparada, mas falta configurar a URL segura EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL para buscar as leituras pelo backend.'
-      );
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto:
+          'LibreView não configurado: defina EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL no backend para sincronizar.',
+      });
       return;
     }
 
@@ -1650,15 +2169,19 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       setGlucoseReadings(mergedReadings);
       replaceCachedGlucoseReadings(activePatientId, mergedReadings);
 
-      Alert.alert(
-        'LibreView sincronizado',
-        newReadings.length
-          ? `${newReadings.length} leitura(s) importada(s) para a glicose.`
-          : 'Nenhuma leitura nova encontrada agora.'
-      );
+      setAvisoUsuario({
+        tipo: 'sucesso',
+        texto: newReadings.length
+          ? `LibreView: ${newReadings.length} leitura(s) importada(s).`
+          : 'LibreView sincronizado: nenhuma leitura nova encontrada.',
+      });
     } catch (error) {
       console.log('Erro ao sincronizar LibreView:', error);
-      Alert.alert('Erro', 'Não foi possível sincronizar o LibreView agora.');
+      setAvisoUsuario({
+        tipo: 'erro',
+        texto:
+          'Não foi possível sincronizar o LibreView. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setSyncingLibreView(false);
     }
@@ -1667,7 +2190,10 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
   async function handleRegisterMedication() {
     try {
       if (!activePatientId) {
-        Alert.alert('Atenção', 'Paciente sem identificador para registrar medicação.');
+        setAvisoUsuario({
+          tipo: 'aviso',
+          texto: 'Paciente sem identificador para registrar medicação.',
+        });
         return;
       }
 
@@ -1688,27 +2214,44 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
         const trimmedMedicineUnit = String(medicineUnit || '').trim();
 
         if (!trimmedMedicineName || !trimmedMedicineUnit || !quantity) {
-          Alert.alert('Atenção', 'Informe medicamento, unidade e quantidade.');
+          setSavingMedication(false);
+          setAvisoUsuario({ tipo: 'aviso', texto: 'Informe medicamento, unidade e quantidade.' });
           return;
         }
 
         if (!Number.isFinite(parsedQuantity) || parsedQuantity <= 0) {
-          Alert.alert('Atenção', 'Informe uma quantidade válida e positiva.');
+          setSavingMedication(false);
+          setAvisoUsuario({
+            tipo: 'aviso',
+            texto: 'Informe uma quantidade válida e positiva.',
+          });
           return;
         }
 
         if (!isValidManualDate(medicineDate)) {
-          Alert.alert('Atenção', 'Informe uma data válida no formato DD/MM/AAAA.');
+          setSavingMedication(false);
+          setAvisoUsuario({
+            tipo: 'aviso',
+            texto: 'Informe uma data válida no formato DD/MM/AAAA.',
+          });
           return;
         }
 
         if (!isValidManualTime(medicineTime)) {
-          Alert.alert('Atenção', 'Informe uma hora válida no formato HH:MM.');
+          setSavingMedication(false);
+          setAvisoUsuario({
+            tipo: 'aviso',
+            texto: 'Informe uma hora válida no formato HH:MM.',
+          });
           return;
         }
 
         if (!medicineContinuousUse && !days) {
-          Alert.alert('Atenção', 'Informe o número de dias ou marque uso contínuo.');
+          setSavingMedication(false);
+          setAvisoUsuario({
+            tipo: 'aviso',
+            texto: 'Informe o número de dias ou marque uso contínuo.',
+          });
           return;
         }
 
@@ -1725,34 +2268,46 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
         const normalizedDate = normalizeManualDateInput(insulinDate);
         const normalizedTime = normalizeManualTimeInput(insulinTime);
         const dose = String(insulinDose || '').trim();
+        const parsedDose = parseLooseNumber(dose);
         if (
           !insulinCategory ||
           !insulinType ||
           !dose ||
           (insulinCategory === 'basal' ? !insulinDevice : !insulinUsage)
         ) {
-          Alert.alert(
-            'Atenção',
-            insulinCategory === 'basal'
-              ? 'Informe a marca/tipo da basal, dispositivo e dose em UI.'
-              : 'Informe categoria, tipo, dose em UI e objetivo do uso.'
-          );
+          setSavingMedication(false);
+          setAvisoUsuario({
+            tipo: 'aviso',
+            texto:
+              insulinCategory === 'basal'
+                ? 'Configure tipo e dispositivo da basal no Perfil e informe a dose em UI.'
+                : 'Informe categoria, tipo, dose em UI e objetivo do uso.',
+          });
           return;
         }
 
-        if (Number(dose) <= 0) {
-          Alert.alert('Atenção', 'Informe uma dose positiva em UI.');
+        if (!Number.isFinite(parsedDose) || parsedDose <= 0) {
+          setSavingMedication(false);
+          setAvisoUsuario({ tipo: 'aviso', texto: 'Informe uma dose positiva em UI.' });
           return;
         }
 
         if (isPreviousInsulinEntry) {
           if (!isValidManualDate(insulinDate)) {
-            Alert.alert('Atenção', 'Informe uma data válida no formato DD/MM/AAAA.');
+            setSavingMedication(false);
+            setAvisoUsuario({
+              tipo: 'aviso',
+              texto: 'Informe uma data válida no formato DD/MM/AAAA.',
+            });
             return;
           }
 
           if (!isValidManualTime(insulinTime)) {
-            Alert.alert('Atenção', 'Informe uma hora válida no formato HH:MM.');
+            setSavingMedication(false);
+            setAvisoUsuario({
+              tipo: 'aviso',
+              texto: 'Informe uma hora válida no formato HH:MM.',
+            });
             return;
           }
 
@@ -1777,6 +2332,7 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                 insulinType,
                 `${dose} UI`,
                 insulinUsage,
+                insulinCategory === 'prandial' && bolusMeal ? `Refeição ${bolusMeal}` : '',
                 `Hora ${entryTime}`,
                 trimmedInsulinNotes ? `Obs. ${trimmedInsulinNotes}` : '',
               ]
@@ -1827,7 +2383,21 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                 ]
                   .filter(Boolean)
                   .join(' | ')
-              : insulinNotes
+              : [
+                  insulinCategory === 'prandial' && bolusSuggestion
+                    ? [
+                        `Sug. refeição ${bolusSuggestion.doseMeal} UI`,
+                        `Sug. correção ${bolusSuggestion.doseCorrection} UI`,
+                        `Sug. total ${bolusSuggestion.doseTotal} UI`,
+                        bolusSuggestion.target != null ? `Meta ${bolusSuggestion.target} mg/dL` : '',
+                      ]
+                        .filter(Boolean)
+                        .join(' | ')
+                    : '',
+                  trimmedInsulinNotes || '',
+                ]
+                  .filter(Boolean)
+                  .join(' | ')
             : '',
         storageOrigin: 'database',
         actor: patient || usuarioLogado,
@@ -1887,10 +2457,15 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       setMedicationLabel('');
       setMedicationKind('');
       handleCloseMedicationFlow();
-      Alert.alert('Registro salvo', successMessage);
+      setAvisoUsuario({ tipo: 'sucesso', texto: successMessage });
     } catch (error) {
       console.log('Erro ao salvar medicação:', error);
-      Alert.alert('Erro', error?.message || 'Não foi possível salvar a medicação agora.');
+      setAvisoUsuario({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível salvar a medicação. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setSavingMedication(false);
     }
@@ -1902,6 +2477,9 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       route={route}
       usuarioLogado={usuarioLogado}
       contentContainerStyle={styles.screenContent}
+      refreshControl={
+        <RefreshControl refreshing={refreshing} onRefresh={onRefreshMonitoramento} />
+      }
       footerOverlay={
         <TouchableOpacity
           style={[
@@ -1917,6 +2495,24 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
         </TouchableOpacity>
       }
     >
+      {avisoUsuario?.texto ? (
+        <MensagemInline
+          tipo={avisoUsuario.tipo || 'aviso'}
+          texto={avisoUsuario.texto}
+          onFechar={() => setAvisoUsuario(null)}
+          autoOcultarMs={avisoUsuario.tipo === 'sucesso' ? 4200 : 0}
+        />
+      ) : null}
+      {!loading && loadError ? (
+        <EstadoErroCarregamento
+          onTentarNovamente={async () => {
+            setLoading(true);
+            await loadMonitoringData();
+            setLoading(false);
+          }}
+          loading={loading}
+        />
+      ) : null}
       <View style={[styles.currentCard, { backgroundColor: latestStatus.cardColor }]}>
         <View style={styles.currentHeader}>
           <View>
@@ -2485,6 +3081,59 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
       </Modal>
 
       <Modal
+        visible={insulinTimingChoiceVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseMedicationFlow}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {insulinCategory === 'prandial'
+                  ? 'Registrar Insulina Bolus'
+                  : insulinCategory === 'basal'
+                    ? 'Registrar Insulina Basal'
+                    : 'Registrar Insulina'}
+              </Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={handleCloseMedicationFlow}
+              >
+                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.modalText}>
+              Escolha se este registro de insulina é atual ou se deseja informar uma aplicação anterior.
+            </Text>
+
+            <View style={styles.measurementChoiceList}>
+              <TouchableOpacity
+                style={[
+                  styles.measurementChoiceButton,
+                  styles.measurementChoiceButtonCurrent,
+                ]}
+                onPress={() => handleSelectInsulinTiming('current')}
+              >
+                <Text style={styles.measurementChoiceTextCurrent}>Insulina Atual</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.measurementChoiceButton,
+                  styles.measurementChoiceButtonPrevious,
+                ]}
+                onPress={() => handleSelectInsulinTiming('previous')}
+              >
+                <Text style={styles.measurementChoiceTextPrevious}>Insulina Anterior</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
         visible={medicineFormVisible}
         transparent
         animationType="fade"
@@ -2883,7 +3532,13 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
             >
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
-                  {medicationKind === 'insulin' ? 'Registrar insulina' : 'Registrar medicamento'}
+                  {medicationKind === 'insulin'
+                    ? insulinCategory === 'prandial'
+                      ? 'Registrar Insulina Bolus'
+                      : insulinCategory === 'basal'
+                        ? 'Registrar Insulina Basal'
+                        : 'Registrar Insulina'
+                    : 'Registrar medicamento'}
                 </Text>
                 <TouchableOpacity
                   style={styles.modalCloseButton}
@@ -2895,11 +3550,65 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
 
               {medicationKind === 'insulin' ? (
                 <>
-                  <Text style={styles.modalText}>
-                    {insulinCategory === 'basal'
-                      ? 'Registro estruturado da insulina basal configurada, com marca/tipo, dose em UI, dispositivo, data e hora.'
-                      : 'Registro estruturado de insulina com categoria, tipo, dose em UI, data, hora e objetivo do uso.'}
-                  </Text>
+                  {insulinCategory !== 'basal' && insulinCategory !== 'prandial' ? (
+                    <Text style={styles.modalText}>
+                      Registro estruturado de insulina com categoria, tipo, dose em UI, data, hora e objetivo do uso.
+                    </Text>
+                  ) : null}
+
+                  {insulinCategory === 'basal' ? (
+                    <View style={styles.bolusCalcCard}>
+                      <Text style={styles.bolusCalcTitle}>Configurações do seu Perfil</Text>
+                      <Text style={styles.bolusCalcLine}>Tipo/marca: {insulinType || '—'}</Text>
+                      <Text style={styles.bolusCalcLine}>Dispositivo: {insulinDevice || '—'}</Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Molécula: {selectedBasalInsulinOption?.molecule || '—'}
+                      </Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Classe de ação: {selectedBasalInsulinOption?.actionClass || '—'}
+                      </Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Via sugerida: {selectedBasalInsulinOption?.suggestedRoute || '—'}
+                      </Text>
+                      {!insulinType || !insulinDevice ? (
+                        <View style={{ marginTop: 10 }}>
+                          <Text style={styles.bolusAlertText}>
+                            Configure a basal no Perfil para puxar tipo e dispositivo automaticamente.
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
+                  ) : null}
+
+                  {insulinCategory === 'prandial' ? (
+                    <View style={styles.bolusCalcCard}>
+                      <Text style={styles.bolusCalcTitle}>Configurações do seu Perfil</Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Tipo/marca: {insulinType || '—'}
+                      </Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Modo de uso: {insulinUsage || '—'}
+                      </Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Relação I:C: {bolusSuggestion?.ratioLabel || '—'}
+                      </Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Fator de correção: {bolusSuggestion?.corrLabel || '—'}
+                      </Text>
+                      <Text style={styles.bolusCalcLine}>
+                        Meta glicêmica: {bolusSuggestion?.target != null ? `${bolusSuggestion.target} mg/dL` : '—'}
+                      </Text>
+                      {!!bolusAllAlerts.length && (
+                        <View style={{ marginTop: 10 }}>
+                          {bolusAllAlerts.slice(0, 3).map((w, i) => (
+                            <Text key={`bolus-w-${i}`} style={styles.bolusAlertText}>
+                              {w}
+                            </Text>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                  ) : null}
 
                   <ScrollView
                     style={styles.medicineFormScroll}
@@ -2907,52 +3616,7 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                     keyboardShouldPersistTaps="handled"
                     showsVerticalScrollIndicator={false}
                   >
-                    <View style={[styles.formField, styles.currentFirstFormField]}>
-                      <Text style={styles.fieldLabel}>Quando foi?</Text>
-                      <View style={styles.inlineChoiceRow}>
-                        <TouchableOpacity
-                          style={[
-                            styles.inlineChoiceButton,
-                            insulinMeasurementType === 'current' && styles.inlineChoiceButtonActive,
-                          ]}
-                          onPress={() => setInsulinMeasurementType('current')}
-                          activeOpacity={0.85}
-                        >
-                          <Text
-                            style={[
-                              styles.inlineChoiceText,
-                              insulinMeasurementType === 'current' && styles.inlineChoiceTextActive,
-                            ]}
-                          >
-                            Agora
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          style={[
-                            styles.inlineChoiceButton,
-                            insulinMeasurementType === 'previous' && styles.inlineChoiceButtonActive,
-                          ]}
-                          onPress={() => setInsulinMeasurementType('previous')}
-                          activeOpacity={0.85}
-                        >
-                          <Text
-                            style={[
-                              styles.inlineChoiceText,
-                              insulinMeasurementType === 'previous' && styles.inlineChoiceTextActive,
-                            ]}
-                          >
-                            Registro anterior
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                      <Text style={styles.fieldHelperText}>
-                        {insulinMeasurementType === 'current'
-                          ? 'Vamos usar a data e hora de agora.'
-                          : 'Informe a data e hora reais do uso.'}
-                      </Text>
-                    </View>
-
-                    {configuredScheduleOptions.length ? (
+                    {insulinCategory === 'prandial' && configuredScheduleOptions.length ? (
                       <View style={[styles.formField, styles.stackedFormField]}>
                         <Text style={styles.fieldLabel}>Sugestões do seu perfil</Text>
                         <Text style={styles.fieldHelperText}>
@@ -2972,9 +3636,22 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                                 }
                                 if (item.dose) {
                                   setInsulinDose(String(item.dose));
+                                  if (insulinCategory === 'prandial') {
+                                    setBolusDoseEdited(true);
+                                  }
                                 }
                                 if (item.refeicao) {
-                                  setInsulinUsage(item.refeicao);
+                                  if (insulinCategory === 'prandial') {
+                                    const mealHit = bolusMealOptions.find((m) =>
+                                      refeicaoMatches(item.refeicao, m)
+                                    );
+                                    if (mealHit) {
+                                      setBolusMeal(mealHit);
+                                      setBolusDoseEdited(false);
+                                    }
+                                  } else {
+                                    setInsulinUsage(item.refeicao);
+                                  }
                                 }
                               }}
                             >
@@ -2989,23 +3666,23 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                       </View>
                     ) : null}
 
-                    <View style={[styles.formField, styles.firstLabeledFormField]}>
-                      <Text style={styles.fieldLabel}>
-                        {insulinCategory === 'basal' ? 'Insulina basal' : 'Categoria clínica'}
-                      </Text>
-                      <Text style={styles.fieldHelperText}>
-                        {insulinCategory === 'basal'
-                          ? 'Use esta seção para registrar a insulina basal com cobertura fixa. A via sugerida é sempre subcutânea.'
-                          : selectedInsulinCategoryMeta?.helper ||
-                            'Selecione se o uso foi basal ou bolus.'}
-                      </Text>
-                    </View>
+                    {false ? (
+                      <View style={[styles.formField, styles.firstLabeledFormField]}>
+                        <Text style={styles.fieldLabel}>Insulina basal</Text>
+                        <Text style={styles.fieldHelperText}>
+                          Use esta seção para registrar a insulina basal com cobertura fixa. A via sugerida é sempre subcutânea.
+                        </Text>
+                      </View>
+                    ) : null}
 
-                    <View style={[styles.formField, styles.stackedFormField]}>
+                    {insulinCategory !== 'prandial' && insulinCategory !== 'basal' ? (
+                      <View style={[styles.formField, styles.stackedFormField]}>
                       <Text style={styles.fieldLabel}>
                         {insulinCategory === 'basal'
                           ? 'Marca/Tipo da Basal'
-                          : 'Tipo de insulina'}
+                          : insulinCategory === 'prandial'
+                            ? 'Tipo/marca de insulina rápida'
+                            : 'Tipo de insulina'}
                       </Text>
                       <TouchableOpacity
                         activeOpacity={0.85}
@@ -3015,8 +3692,18 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                           styles.labeledInput,
                           styles.dropdownButton,
                           focusedManualField === 'insulinType' && styles.inputFocused,
+                          ((insulinCategory === 'prandial' && insulinDefaults?.prandial?.type) ||
+                            (insulinCategory === 'basal' && insulinDefaults?.basal?.type))
+                            ? styles.inputDisabled
+                            : null,
                         ]}
                         onPress={() => {
+                          if (
+                            (insulinCategory === 'prandial' && insulinDefaults?.prandial?.type) ||
+                            (insulinCategory === 'basal' && insulinDefaults?.basal?.type)
+                          ) {
+                            return;
+                          }
                           setFocusedManualField('insulinType');
                           setInsulinTypeVisible(true);
                         }}
@@ -3038,9 +3725,10 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                           color={patientTheme.colors.textMuted}
                         />
                       </TouchableOpacity>
-                    </View>
+                      </View>
+                    ) : null}
 
-                    {insulinCategory === 'basal' ? (
+                    {false ? (
                       <>
                         <View style={[styles.formField, styles.stackedFormField]}>
                           <Text style={styles.fieldLabel}>Molécula</Text>
@@ -3070,17 +3758,18 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                               styles.labeledInput,
                               styles.dropdownButton,
                               focusedManualField === 'insulinDevice' && styles.inputFocused,
-                              !selectedBasalInsulinOption && styles.inputDisabled,
+                              (!selectedBasalInsulinOption || insulinDefaults?.basal?.device) &&
+                                styles.inputDisabled,
                             ]}
                             onPress={() => {
-                              if (!selectedBasalInsulinOption) {
+                              if (!selectedBasalInsulinOption || insulinDefaults?.basal?.device) {
                                 return;
                               }
 
                               setFocusedManualField('insulinDevice');
                               setInsulinDeviceVisible(true);
                             }}
-                            disabled={!selectedBasalInsulinOption}
+                            disabled={!selectedBasalInsulinOption || Boolean(insulinDefaults?.basal?.device)}
                           >
                             <Text
                               style={[
@@ -3109,34 +3798,66 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                       </>
                     ) : null}
 
+                    {false ? (
+                      <>
+                        <Text style={styles.bolusCalcTitle}>Configurações do seu Perfil</Text>
+                        <Text style={styles.bolusCalcLine}>
+                          Tipo/marca: {insulinType || '—'}
+                        </Text>
+                        <Text style={styles.bolusCalcLine}>
+                          Modo de uso: {insulinUsage || '—'}
+                        </Text>
+                        <Text style={styles.bolusCalcLine}>
+                          Relação I:C: {bolusSuggestion?.ratioLabel || '—'}
+                        </Text>
+                        <Text style={styles.bolusCalcLine}>
+                          Fator de correção: {bolusSuggestion?.corrLabel || '—'}
+                        </Text>
+                        <Text style={styles.bolusCalcLine}>
+                          Meta glicêmica: {bolusSuggestion?.target != null ? `${bolusSuggestion.target} mg/dL` : '—'}
+                        </Text>
+                        {!!bolusAllAlerts.length && (
+                          <View style={{ marginTop: 10 }}>
+                            {bolusAllAlerts.slice(0, 3).map((w, i) => (
+                              <Text key={`bolus-w-${i}`} style={styles.bolusAlertText}>
+                                {w}
+                              </Text>
+                            ))}
+                          </View>
+                        )}
+                      </>
+                    ) : null}
+
                     <View style={[styles.formField, styles.stackedFormField]}>
                       <Text style={styles.fieldLabel}>Dose (UI)</Text>
-                      <View
+                      <TextInput
                         style={[
                           styles.input,
                           styles.manualModalInput,
-                          styles.glucoseInputWrap,
                           styles.labeledInput,
                           focusedManualField === 'insulinDose' && styles.inputFocused,
                         ]}
-                      >
-                        <TextInput
-                          style={styles.glucoseInput}
-                          placeholder="Ex: 10"
-                          placeholderTextColor="#8a9095"
-                          keyboardType="numeric"
-                          value={insulinDose}
-                          onChangeText={(value) =>
-                            setInsulinDose(formatMedicineQuantityInput(value, 'integer'))
+                        placeholder="Ex: 10"
+                        placeholderTextColor="#8a9095"
+                        keyboardType="numeric"
+                        value={insulinDose}
+                        onChangeText={(value) => {
+                          if (insulinCategory === 'prandial') {
+                            setBolusDoseEdited(true);
                           }
-                          onFocus={() => setFocusedManualField('insulinDose')}
-                          onBlur={() => setFocusedManualField(null)}
-                        />
-                        {insulinDose ? <Text style={styles.inputUnit}>UI</Text> : null}
-                      </View>
+                          setInsulinDose(
+                            formatMedicineQuantityInput(
+                              value,
+                              insulinCategory === 'prandial' ? 'decimal' : 'integer'
+                            )
+                          );
+                        }}
+                        onFocus={() => setFocusedManualField('insulinDose')}
+                        onBlur={() => setFocusedManualField(null)}
+                      />
                     </View>
 
-                    {insulinCategory !== 'basal' ? (
+                    {insulinCategory !== 'basal' && insulinCategory !== 'prandial' ? (
                       <View style={[styles.formField, styles.stackedFormField]}>
                         <Text style={styles.fieldLabel}>Objetivo do uso</Text>
                         <TouchableOpacity
@@ -3178,12 +3899,10 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                           styles.manualModalInput,
                           styles.labeledInput,
                           focusedManualField === 'insulinTime' && styles.inputFocused,
-                          insulinMeasurementType === 'current' && styles.inputDisabled,
                         ]}
                         placeholder="Ex: 07:30"
                         placeholderTextColor="#8a9095"
                         keyboardType="numeric"
-                        editable={insulinMeasurementType !== 'current'}
                         value={insulinTime}
                         onChangeText={(value) => setInsulinTime(formatManualTimeInput(value))}
                         onFocus={() => setFocusedManualField('insulinTime')}
@@ -3199,12 +3918,10 @@ function applyInsulinDefaults(defaults = insulinDefaults) {
                           styles.manualModalInput,
                           styles.labeledInput,
                           focusedManualField === 'insulinDate' && styles.inputFocused,
-                          insulinMeasurementType === 'current' && styles.inputDisabled,
                         ]}
                         placeholder="Ex: 21/04/2026"
                         placeholderTextColor="#8a9095"
                         keyboardType="numeric"
-                        editable={insulinMeasurementType !== 'current'}
                         value={insulinDate}
                         onChangeText={(value) => setInsulinDate(formatManualDateInput(value))}
                         onFocus={() => setFocusedManualField('insulinDate')}
@@ -3571,9 +4288,13 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.primary,
     borderWidth: 1,
+    borderStyle: 'solid',
+    boxShadow: 'none',
+    elevation: 0,
     outlineColor: 'transparent',
     outlineStyle: 'none',
     outlineWidth: 0,
+    outlineOffset: 0,
     paddingHorizontal: 14,
     color: patientTheme.colors.text,
     width: '100%',
@@ -4083,6 +4804,14 @@ const styles = StyleSheet.create({
   },
   inputFocused: {
     borderColor: patientTheme.colors.primaryDark,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    boxShadow: 'none',
+    elevation: 0,
+    outlineColor: 'transparent',
+    outlineStyle: 'none',
+    outlineWidth: 0,
+    outlineOffset: 0,
   },
   inputInvalid: {
     borderColor: '#c74747',
@@ -4153,6 +4882,47 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     fontSize: 12,
     fontWeight: '800',
+  },
+  bolusPillActive: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  bolusPillTextActive: {
+    color: patientTheme.colors.primaryDark,
+  },
+  bolusCalcCard: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderRadius: patientTheme.radius.lg,
+    borderColor: patientTheme.colors.primaryDark,
+    borderWidth: 1,
+    marginTop: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    width: '100%',
+  },
+  bolusCalcTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  bolusCalcLine: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  bolusCalcTotal: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  bolusAlertText: {
+    color: '#b45309',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
   },
   medicineFormScroll: {
     marginTop: 10,

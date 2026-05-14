@@ -1,0 +1,953 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>Planejamento GlicNutri</title>
+<style>
+/* Estilos apenas para exportação PDF — não altera o .md */
+@page {
+  margin: 18mm 16mm;
+  size: A4;
+}
+
+body {
+  font-family: "Segoe UI", Calibri, Arial, sans-serif;
+  font-size: 11pt;
+  line-height: 1.5;
+  color: #1a1a1a;
+}
+
+h1 {
+  font-size: 18pt;
+  font-weight: 700;
+  margin: 0 0 0.75em 0;
+  page-break-after: avoid;
+  border-bottom: 2px solid #333;
+  padding-bottom: 0.35em;
+}
+
+h1:not(:first-child) {
+  page-break-before: always;
+  margin-top: 0;
+  padding-top: 0.5em;
+}
+
+h2 {
+  font-size: 14pt;
+  font-weight: 600;
+  margin: 1.35em 0 0.65em 0;
+  page-break-after: avoid;
+}
+
+h3 {
+  font-size: 12pt;
+  font-weight: 600;
+  margin: 1.1em 0 0.5em 0;
+  page-break-after: avoid;
+}
+
+p {
+  margin: 0.5em 0;
+}
+
+ul,
+ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+li {
+  margin: 0.25em 0;
+}
+
+hr {
+  margin: 1.25em 0;
+  border: none;
+  border-top: 1px solid #ccc;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 8.5pt;
+  line-height: 1.35;
+  margin: 1em 0;
+  page-break-inside: auto;
+}
+
+thead {
+  display: table-header-group;
+}
+
+tr {
+  page-break-inside: avoid;
+  page-break-after: auto;
+}
+
+th,
+td {
+  border: 1px solid #bbb;
+  padding: 6px 7px;
+  text-align: left;
+  vertical-align: top;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+}
+
+th {
+  background: #f2f2f2;
+  font-weight: 600;
+}
+
+code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 0.9em;
+  background: #f5f5f5;
+  padding: 0.1em 0.35em;
+  border-radius: 3px;
+}
+
+a {
+  color: #0b57d0;
+  text-decoration: none;
+}
+
+blockquote {
+  margin: 0.75em 0;
+  padding-left: 1em;
+  border-left: 3px solid #ddd;
+}
+
+strong {
+  font-weight: 600;
+}
+
+</style>
+</head>
+<body>
+<h1>PLANEJAMENTO FINAL DE ATIVIDADES - PROJETO GLICNUTRI</h1>
+<h2>1. Identificação do projeto</h2>
+<ul>
+<li><strong>Nome do projeto:</strong> GlicNutri</li>
+<li><strong>Entrega final:</strong> 31 de maio de 2026</li>
+<li><strong>Última revisão deste planejamento (Markdown/PDF):</strong> 13 de maio de 2026 — consolidação de pacote final, checklists Bento/Thayse, LGPD, ZIP e ensaio (<code>entregas/PACOTE-MONTAGEM.md</code>, secção 11).</li>
+<li><strong>Objetivo geral do planejamento:</strong> organizar, de forma clara e acadêmica, as atividades necessárias para concluir o Projeto GlicNutri dentro do prazo, considerando as exigências das disciplinas do professor Bento e da professora Thayse. O planejamento contempla a consolidação do aplicativo e do banco de dados, com auditoria, logs e cuidados com LGPD, além da adequação da entrega de Machine Learning para utilizar dados reais do GlicNutri no Supabase, incluindo pipeline de ML, persistência de modelos e disponibilização por API.</li>
+</ul>
+<hr />
+<h2>2. Documentos e arquivos analisados</h2>
+<p>Foram considerados, para este planejamento, os seguintes documentos, notebooks e componentes do projeto:</p>
+<ul>
+<li><code>Requisitos_Bento_GlicNutri.pdf</code></li>
+<li><code>Requisitos_Thayse_GlicNutri.pdf</code></li>
+<li><code>Diabetes_pipeline_ml.ipynb</code> (referência histórica no PDF)</li>
+<li><code>machine-learning/notebooks/referencia/glucobench-reference.ipynb</code> (GlucoBench)</li>
+<li><code>Cronograma ADS5 - Projeto de Sistemas V3.pdf</code></li>
+<li>Pastas e arquivos de aulas: <code>AULA1</code> até <code>AULA7</code>, utilizados como materiais de apoio para compreender os requisitos da disciplina da professora Thayse.</li>
+<li>Código do aplicativo GlicNutri, desenvolvido em Expo/React Native e integrado ao Supabase.</li>
+<li>Banco Supabase e migrations, contendo estrutura de dados, funções e componentes relacionados à persistência.</li>
+<li>Checklist Bento (13 requisitos): <code>entregas/bento/checklist-13-requisitos-bento.md</code></li>
+<li>Pacote Bento (BD/CRUD/UX): <code>entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md</code>, <code>entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md</code>, <code>entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md</code></li>
+<li>Resumo/Checklist Thayse (ML): <code>entregas/thayse/RESUMO-ENTREGA-ML.md</code></li>
+<li>Checklist pacote final: <code>entregas/PACOTE-FINAL-CHECKLIST.md</code></li>
+<li>Montagem ZIP + ensaio: <code>entregas/PACOTE-MONTAGEM.md</code>, <code>entregas/ENSAIO-FINAL-CHECKLIST.md</code>, <code>scripts/build-zip-entrega.ps1</code></li>
+<li>LGPD (texto curto): <code>entregas/LGPD-TEXTO-CURTO.md</code></li>
+<li>Roteiro de slides: <code>entregas/slides-roteiro.md</code></li>
+</ul>
+<hr />
+<h2>3. Diagnóstico geral do projeto</h2>
+<h3>3.1 O que já existe no projeto</h3>
+<p>De forma geral, o projeto já possui uma base funcional consistente, incluindo:</p>
+<ul>
+<li>Aplicativo desenvolvido em Expo/React Native, com telas para perfis de usuário, como paciente, nutricionista e administrador.</li>
+<li>Integração com Supabase, utilizada para autenticação e persistência de dados.</li>
+<li>Fluxos de uso relevantes já implementados, como monitoramento e registro de glicemia, registro de medicação/insulina, registro de refeição com apoio de IA e painel administrativo com indicadores, auditoria e logs.</li>
+<li>Banco de dados versionado por migrations, o que facilita documentação, rastreabilidade e reprodução.</li>
+<li>Notebook de Machine Learning no repositório (<code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code>) com pipeline paciente-dia; usar CSV exportado do Supabase (<code>machine-learning/scripts/export_supabase_csv.py</code>) para dados reais ou o CSV de exemplo (<code>machine-learning/data/sample_glicnutri_patient_day.csv</code>) para desenvolvimento local.</li>
+</ul>
+<h3>3.2 O que está incompleto</h3>
+<p>Apesar da base do sistema existir, há pontos que precisam ser finalizados e padronizados para o contexto acadêmico:</p>
+<ul>
+<li>A entrega de Machine Learning precisa estar <strong>organizada como evidência acadêmica</strong> (prints, métricas e explicação), mas <strong>já foi executada com dados reais exportados do Supabase</strong> (CSV + manifest + treino + artefatos).</li>
+<li>Backend Python com FastAPI e endpoint <code>POST /predict</code> existe no repositório (<code>machine-learning/api/app/main.py</code>) e <strong>já foi integrado ao app para teste local</strong> (tela paciente “Previsão (IA)”). Hospedagem em nuvem permanece opcional para a apresentação final.</li>
+<li>As evidências e a documentação acadêmica foram <strong>consolidadas no repositório</strong> (checklists, roteiros, LGPD, pacote, ensaio); falta apenas a <strong>entrega física</strong> (.pptx, vídeo, ZIP gerado, Word final PDF) conforme <code>entregas/PACOTE-MONTAGEM.md</code>.</li>
+<li>Relatórios e gráficos de gestão existem parcialmente, mas devem ser organizados como entregável, com explicação e evidências.</li>
+</ul>
+<h3>3.3 O que ainda falta implementar</h3>
+<ul>
+<li>(Concluído) Executar o export <code>machine-learning/scripts/export_supabase_csv.py</code> com credenciais reais e volume suficiente para treino (evidência: <code>machine-learning/data/export_manifest.json</code> + <code>glicnutri_patient_day_export.csv</code>).</li>
+<li>(Concluído) Apontar o notebook <code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code> para o CSV real e refinar pré-processamento (linhas com <code>glucose_mean_mg_dl</code> nulo são removidas do treino supervisionado).</li>
+<li>(Concluído) Treinar e avaliar os quatro modelos com dados reais (classificação, regressão, clusterização e similaridade) e persistir artefatos.</li>
+<li>(Concluído) Servir o modelo em ambiente de demonstração local (uvicorn) e registrar evidências de chamadas à API (inclui correção de CORS para app web).</li>
+<li>Consolidar documentação final, evidências, prints, roteiros de demonstração e checklist de entrega <strong>(suporte concluído no repositório; ver secção 11 e <code>entregas/PACOTE-MONTAGEM.md</code>)</strong>.</li>
+</ul>
+<h3>3.4 Status real no repositório (sincronização técnica — maio/2026)</h3>
+<p>Esta subsecção amarra <strong>requisito → evidência no código</strong> conforme o estado atual do repositório (não substitui documentos PDF/Word externos nem vínculos acadêmicos que dependem de prints).</p>
+<table>
+<thead>
+<tr>
+<th>Área</th>
+<th>Situação no repo</th>
+<th>Onde evidenciar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>App Expo + Supabase</td>
+<td>Implementado: auth (paciente/nutri/admin/Google), cadastros, monitoramento, refeição IA, painel admin</td>
+<td><code>GlicNutri/src/</code>, <code>GlicNutri/supabase/migrations/</code></td>
+</tr>
+<tr>
+<td>Export CSV reprodutível</td>
+<td>Script Postgres paciente-dia + procedimento documentado + atalhos</td>
+<td><code>machine-learning/scripts/export_supabase_csv.py</code> (<code>DATABASE_URL</code>); <code>machine-learning/EXPORT_CSV.md</code>; <code>npm run ml:export-csv</code>; <code>machine-learning/scripts/exportar_csv_semana2.ps1</code>; manual <a href="entregas/SEMANA-2-PASSO-A-PASSO.md"><code>entregas/SEMANA-2-PASSO-A-PASSO.md</code></a></td>
+</tr>
+<tr>
+<td>Dataset / exemplo</td>
+<td>CSV sintético para notebook sem DB</td>
+<td><code>machine-learning/data/sample_glicnutri_patient_day.csv</code></td>
+</tr>
+<tr>
+<td>Notebook ML (GlicNutri paciente-dia)</td>
+<td>Pipeline (EDA + 4 tarefas + joblib)</td>
+<td><code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code></td>
+</tr>
+<tr>
+<td>Notebook ML (GlucoBench referência)</td>
+<td>Carga/validação GlucoBench</td>
+<td><code>machine-learning/notebooks/referencia/glucobench-reference.ipynb</code></td>
+</tr>
+<tr>
+<td>Artefatos joblib</td>
+<td>Gerados pelo notebook ou <code>machine-learning/api/scripts/fit_demo_models.py</code></td>
+<td><code>machine-learning/api/artifacts/*.joblib</code>, <code>training_meta.json</code></td>
+</tr>
+<tr>
+<td>API <code>POST /predict</code></td>
+<td>FastAPI + contrato JSON</td>
+<td><code>machine-learning/api/app/main.py</code>, dependências em <code>machine-learning/api/requirements.txt</code></td>
+</tr>
+<tr>
+<td>Auditoria e logs (implementação no app)</td>
+<td><strong>Completo</strong> no código: gravação Storage, painel admin, recuperação de senha sem dados sensíveis nos detalhes</td>
+<td><code>servicoAuditoria.js</code>, <code>TelaHomeAdmin.js</code>, <code>TelaAuditoriaAdmin.js</code>, <code>TelaLogsSistemaAdmin.js</code>, <code>TelaRecuperarSenha.js</code></td>
+</tr>
+<tr>
+<td>Logs persistidos via Supabase Storage (bucket <code>audit-logs</code>)</td>
+<td><strong>Completo</strong> no código (fluxo implementado)</td>
+<td>Idem + migrations/policies conforme projeto</td>
+</tr>
+<tr>
+<td>Semana 2 — Bento / auditoria (evidências visuais em <code>prints/</code>)</td>
+<td><strong>COMPLETO</strong> (evidência validada no repositório)</td>
+<td><a href="entregas/bento/semana-2-auditoria/evidencias-auditoria.md"><code>evidencias-auditoria.md</code></a>; capturas em <a href="entregas/bento/semana-2-auditoria/prints/"><code>prints/</code></a></td>
+</tr>
+<tr>
+<td>Bento — checklist 13 requisitos</td>
+<td><strong>Completo (repo)</strong></td>
+<td><code>entregas/bento/checklist-13-requisitos-bento.md</code></td>
+</tr>
+<tr>
+<td>Bento — apoio para fechar “parciais” (BD/CRUD/UX/relatórios)</td>
+<td><strong>Completo (roteiros + texto)</strong></td>
+<td><code>entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md</code>, <code>entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md</code>, <code>entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md</code></td>
+</tr>
+<tr>
+<td>Export CSV Supabase (dados reais)</td>
+<td><strong>COMPLETO (execução local)</strong></td>
+<td>CSV + manifest gerados: <code>machine-learning/data/glicnutri_patient_day_export.csv</code>, <code>machine-learning/data/export_manifest.json</code> (hash + contagem + colunas)</td>
+</tr>
+<tr>
+<td>ML referência GlucoBench</td>
+<td><strong>Parcial / em andamento</strong></td>
+<td><code>machine-learning/notebooks/referencia/glucobench-reference.ipynb</code>; sem treino/pipeline final obrigatório nesta linha</td>
+</tr>
+<tr>
+<td>Thayse — resumo/roteiro ML</td>
+<td><strong>Completo</strong></td>
+<td><code>entregas/thayse/RESUMO-ENTREGA-ML.md</code></td>
+</tr>
+<tr>
+<td>Entregas acadêmicas (ZIP, slides, vídeo, Word único)</td>
+<td><strong>Suporte no repo; ficheiros finais pelo grupo</strong></td>
+<td><code>entregas/PACOTE-MONTAGEM.md</code>, <code>scripts/build-zip-entrega.ps1</code>, <code>entregas/slides-roteiro.md</code>, <code>entregas/ENSAIO-FINAL-CHECKLIST.md</code></td>
+</tr>
+</tbody>
+</table>
+<p><strong>Nota sobre CRUD / exclusão:</strong> exclusão física de glicemia/medicação não é exposta por design; histórico usa ocultação no app + auditoria de eventos; exclusão de paciente pelo nutricionista é lógica (<code>excluido</code>).</p>
+<p><strong>Semana 2 (entrega prevista 10/05) — situação no repositório (atualizado maio/2026):</strong> <strong>COMPLETA</strong> no conjunto <strong>Bento / auditoria</strong> e <strong>Thayse (export + manifest + registo em <code>EXPORT_CSV.md</code> + notebook executado + artefatos + API + integração na app)</strong>. Evidência visual Semana 2: <a href="entregas/bento/semana-2-auditoria/evidencias-auditoria.md"><code>evidencias-auditoria.md</code></a> e <a href="entregas/bento/semana-2-auditoria/prints/"><code>prints/</code></a>. Índice e manual: <a href="entregas/README-ENTREGA-SEMANA-2.md"><code>entregas/README-ENTREGA-SEMANA-2.md</code></a>, <a href="entregas/SEMANA-2-PASSO-A-PASSO.md"><code>entregas/SEMANA-2-PASSO-A-PASSO.md</code></a>; export: <code>npm run ml:export-csv</code> e <a href="machine-learning/scripts/exportar_csv_semana2.ps1"><code>machine-learning/scripts/exportar_csv_semana2.ps1</code></a>. Checklist de fluxos: <a href="entregas/checklist-semana-2-fluxos-app.md"><code>entregas/checklist-semana-2-fluxos-app.md</code></a> (sincronizado com artefatos).</p>
+<h3>3.4.1 Entregáveis no Git — Semana 2 (sincronização maio/2026)</h3>
+<table>
+<thead>
+<tr>
+<th>Entregável</th>
+<th>Estado no repositório</th>
+<th>Onde</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Índice da entrega Semana 2</td>
+<td>Completo</td>
+<td><a href="entregas/README-ENTREGA-SEMANA-2.md"><code>entregas/README-ENTREGA-SEMANA-2.md</code></a></td>
+</tr>
+<tr>
+<td>Manual do grupo (export, notebook, checklist)</td>
+<td>Completo</td>
+<td><a href="entregas/SEMANA-2-PASSO-A-PASSO.md"><code>entregas/SEMANA-2-PASSO-A-PASSO.md</code></a></td>
+</tr>
+<tr>
+<td>Procedimento export + registo</td>
+<td><strong>Completo</strong> (registo preenchido)</td>
+<td><a href="machine-learning/EXPORT_CSV.md"><code>machine-learning/EXPORT_CSV.md</code></a></td>
+</tr>
+<tr>
+<td>Script export Python + atalhos npm/PowerShell</td>
+<td>Completo</td>
+<td><a href="machine-learning/scripts/export_supabase_csv.py"><code>machine-learning/scripts/export_supabase_csv.py</code></a>, <a href="package.json"><code>package.json</code></a> (<code>ml:export-csv</code>), <a href="machine-learning/scripts/exportar_csv_semana2.ps1"><code>machine-learning/scripts/exportar_csv_semana2.ps1</code></a></td>
+</tr>
+<tr>
+<td>Checklist Semana 2</td>
+<td>Completo (R/T alinhados a manifest + notebook; B/C com notas)</td>
+<td><a href="entregas/checklist-semana-2-fluxos-app.md"><code>entregas/checklist-semana-2-fluxos-app.md</code></a></td>
+</tr>
+<tr>
+<td>Demo reunião 10/05</td>
+<td>Roteiro no repo</td>
+<td><a href="entregas/demo-reuniao-semana-2.md"><code>entregas/demo-reuniao-semana-2.md</code></a></td>
+</tr>
+<tr>
+<td>Bento — evidência visual Semana 2</td>
+<td>Completo</td>
+<td><a href="entregas/bento/semana-2-auditoria/"><code>entregas/bento/semana-2-auditoria/</code></a></td>
+</tr>
+<tr>
+<td>Thayse — manifest / registo / notebook com dados reais</td>
+<td><strong>Completo (execução local)</strong></td>
+<td><code>machine-learning/data/export_manifest.json</code>; notebook executado: <code>machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb</code></td>
+</tr>
+</tbody>
+</table>
+<h3>3.5 Requisito → evidência → artefacto (resumo)</h3>
+<table>
+<thead>
+<tr>
+<th>Foco</th>
+<th>Estado</th>
+<th>Onde comprovar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Bento — autenticação, fluxos, CRUD</td>
+<td><strong>Completo (repo + evidências Semana 2 + roteiros)</strong></td>
+<td>Código: <code>src/telas/autenticacao/</code>, <code>App.js</code>, <code>servicoDadosPaciente.js</code>; pasta <a href="entregas/bento/semana-2-auditoria/"><code>entregas/bento/semana-2-auditoria/</code></a> — <strong>Evidência visual validada com capturas reais no repositório</strong></td>
+</tr>
+<tr>
+<td>Bento — auditoria (código)</td>
+<td>Completo</td>
+<td><code>servicoAuditoria.js</code>, telas admin e fluxos em <code>checklist-auditoria.md</code></td>
+</tr>
+<tr>
+<td>Bento — auditoria (evidência visual Git, Semana 2)</td>
+<td><strong>Completo</strong></td>
+<td><a href="entregas/bento/semana-2-auditoria/evidencias-auditoria.md"><code>evidencias-auditoria.md</code></a> + <a href="entregas/bento/semana-2-auditoria/prints/"><code>prints/</code></a></td>
+</tr>
+<tr>
+<td>Thayse — CSV reprodutível</td>
+<td><strong>Completo (manifest + registo + script)</strong></td>
+<td><code>machine-learning/scripts/export_supabase_csv.py</code>, <code>machine-learning/data/export_manifest.json</code>, <code>machine-learning/EXPORT_CSV.md</code></td>
+</tr>
+<tr>
+<td>Thayse — ML GlicNutri (paciente-dia)</td>
+<td><strong>Completo (execução local)</strong></td>
+<td><code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code> + execução <code>machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb</code> + artefatos em <code>machine-learning/api/artifacts/</code></td>
+</tr>
+<tr>
+<td>Thayse — ML referência GlucoBench</td>
+<td>Parcial / em andamento</td>
+<td><code>machine-learning/notebooks/referencia/glucobench-reference.ipynb</code></td>
+</tr>
+<tr>
+<td>Thayse — API</td>
+<td><strong>Completo (local)</strong></td>
+<td><code>machine-learning/api/app/main.py</code> (<code>/health</code>, <code>/predict</code>, CORS habilitado para web)</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>4. Requisitos relacionados ao Bento</h2>
+<p>Os requisitos do professor Bento foram organizados com base no documento <code>Requisitos_Bento_GlicNutri.pdf</code>, referente ao Projeto GlicNutri. Esses requisitos envolvem documentação inicial, banco de dados, autenticação, CRUD, validações, fluxo do sistema, usabilidade, auditoria, relatórios, organização do código, atualização da documentação e entrega final.</p>
+<h3>4.1 Tabela de requisitos do Bento</h3>
+<table>
+<thead>
+<tr>
+<th>Nº</th>
+<th>Requisito do Bento</th>
+<th>O que o requisito pede</th>
+<th>Status atual</th>
+<th>Evidência encontrada no projeto</th>
+<th>O que ainda precisa ser feito</th>
+<th>Semana prevista</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>Documentação Inicial</td>
+<td>Documento Word padronizado, definição de tecnologias e levantamento de requisitos</td>
+<td><strong>Completo (repo + suporte Word)</strong></td>
+<td><code>Planejamento_Final_Atividades_GlicNutri_Ajustado.md</code>, <code>entregas/</code>, <code>WordFinalGlicNutri-ATUALIZADO.docx</code>, <code>entregas/WordFinalGlicNutri-ATUALIZACOES-PARA-COLAR.md</code></td>
+<td>Copiar textos LGPD/resumo para o <strong>Word oficial</strong> do TCC e revisar formatação ABNT</td>
+<td>Semana 5</td>
+</tr>
+<tr>
+<td>2</td>
+<td>Banco de Dados</td>
+<td>Estrutura de tabelas, campos adequados, chaves primárias, estrangeiras e relacionamentos</td>
+<td><strong>Completo (repo)</strong></td>
+<td><code>supabase/migrations/</code>, <code>entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md</code>, <code>entregas/diagrama-glicnutri-a4-vertical.pdf</code></td>
+<td>Print opcional do Supabase no <strong>ZIP</strong> da disciplina</td>
+<td>Semana 5</td>
+</tr>
+<tr>
+<td>3</td>
+<td>Autenticação</td>
+<td>Login de usuários, validação de credenciais e recuperação de senha</td>
+<td><strong>Completo (código + evidência visual)</strong></td>
+<td><code>TelaLogin.js</code>, <code>TelaRecuperarSenha.js</code>, <code>App.js</code>; Semana 2: <a href="entregas/bento/semana-2-auditoria/evidencias-auditoria.md"><code>evidencias-auditoria.md</code></a>, <code>login_*.png</code></td>
+<td>Evidência dedicada de <strong>recuperação de senha</strong> só se o professor exigir</td>
+<td>Semana 2</td>
+</tr>
+<tr>
+<td>4</td>
+<td>CRUD Completo</td>
+<td>Cadastro, consulta, edição e exclusão lógica</td>
+<td><strong>Completo (repo + roteiro)</strong></td>
+<td><code>TelaCadastro.js</code>, <code>TelaPacientesNutricionista.js</code>, <code>servicoDadosPaciente.js</code>; <code>entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md</code></td>
+<td>Prints extra no ZIP se exigido</td>
+<td>Semana 2</td>
+</tr>
+<tr>
+<td>5</td>
+<td>Validações de Dados</td>
+<td>Validação de campos obrigatórios, CPF, CEP, email e outros dados necessários</td>
+<td><strong>Completo (repo + roteiro)</strong></td>
+<td>Formulários + <code>servicoVerificacaoEmail.js</code>; roteiro CRUD</td>
+<td>Prints de erro/sucesso no ZIP se exigido</td>
+<td>Semana 2</td>
+</tr>
+<tr>
+<td>6</td>
+<td>Fluxo do Sistema</td>
+<td>Navegação entre telas, fluxo funcional completo e persistência no banco</td>
+<td><strong>Completo (código + evidência parcial)</strong></td>
+<td><code>App.js</code>, fluxos paciente/nutri/admin; Semana 2 (login + glicemia)</td>
+<td><strong>Vídeo demo</strong> global (pacote final)</td>
+<td>Semana 4–5</td>
+</tr>
+<tr>
+<td>7</td>
+<td>Usabilidade</td>
+<td>Interface funcional, facilidade de uso e navegação intuitiva</td>
+<td><strong>Completo (repo + texto)</strong></td>
+<td>UI RN + <code>entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md</code></td>
+<td>Selecionar 2–3 prints finais para slides/ZIP</td>
+<td>Semana 4–5</td>
+</tr>
+<tr>
+<td>8</td>
+<td>Auditoria</td>
+<td>Registro de ações de cadastro, movimentações e logs de operações</td>
+<td><strong>Completo (código + evidência visual)</strong></td>
+<td><code>servicoAuditoria.js</code>, telas admin; <a href="entregas/bento/semana-2-auditoria/"><code>semana-2-auditoria/</code></a></td>
+<td>—</td>
+<td>Semana 4</td>
+</tr>
+<tr>
+<td>9</td>
+<td>Relatórios e Gráficos</td>
+<td>Relatórios de dados, visualizações gráficas e informações gerenciais</td>
+<td><strong>Completo (repo + texto)</strong></td>
+<td><code>TelaHomeAdmin.js</code>, monitoramento paciente; <code>USABILIDADE-RELATORIOS-PRINTS-TEXTO.md</code></td>
+<td>Prints de painel no ZIP/slides</td>
+<td>Semana 4–5</td>
+</tr>
+<tr>
+<td>10</td>
+<td>Organização do Código</td>
+<td>Estrutura organizada, código limpo e separação de responsabilidades</td>
+<td><strong>Completo (repo)</strong></td>
+<td><code>src/telas/</code>, <code>src/servicos/</code>, <code>src/componentes/</code></td>
+<td>Descrever no Word (secção técnica)</td>
+<td>Semana 5</td>
+</tr>
+<tr>
+<td>11</td>
+<td>Atualização da Documentação</td>
+<td>Documento atualizado, corrigido conforme feedback e coerente com o sistema</td>
+<td><strong>Completo (repo)</strong></td>
+<td>Este planejamento (secção 11), <code>entregas/</code>, checklists</td>
+<td>Sincronizar <strong>PDF/Word</strong> final com o repositório</td>
+<td>Semana 5</td>
+</tr>
+<tr>
+<td>12</td>
+<td>Entrega Final</td>
+<td>Sistema funcional, código em ZIP, slides e vídeo demonstrativo</td>
+<td><strong>Suporte completo no repo; ficheiros finais pelo grupo</strong></td>
+<td><code>scripts/build-zip-entrega.ps1</code>, <code>entregas/PACOTE-MONTAGEM.md</code>, <code>entregas/slides-roteiro.md</code>, <code>entregas/PACOTE-FINAL-CHECKLIST.md</code></td>
+<td>Correr script ZIP, gravar vídeo, exportar <code>.pptx</code></td>
+<td>Semana 5</td>
+</tr>
+<tr>
+<td>13</td>
+<td>Critérios de Avaliação</td>
+<td>Funcionamento do sistema, implementação dos requisitos, organização e qualidade da apresentação</td>
+<td><strong>Checklist preparado</strong></td>
+<td><code>entregas/ENSAIO-FINAL-CHECKLIST.md</code>, <code>checklist-13-requisitos-bento.md</code></td>
+<td><strong>Ensaio real</strong> antes da banca</td>
+<td>Semana 5</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>5. Requisitos relacionados à Thayse (Machine Learning + API + dados reais)</h2>
+<p>O documento <code>Requisitos_Thayse_GlicNutri.pdf</code> descreve um sistema com pipeline de Machine Learning, incluindo pré-processamento, análise exploratória, modelagem e métricas, além de persistência e disponibilização do modelo por meio de uma API REST, utilizando FastAPI ou Flask.</p>
+<h3>5.1 Destaques obrigatórios</h3>
+<p>Para adequação completa aos requisitos, o projeto deverá:</p>
+<ul>
+<li>Refazer ou adaptar o notebook citado nos requisitos (<code>Diabetes_pipeline_ml.ipynb</code> no PDF da disciplina); <strong>no repositório</strong>, o pipeline principal implementado é <code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code>.</li>
+<li>Remover o uso de KaggleHub/Pima Indians Diabetes, pois se trata de dataset externo.</li>
+<li>Usar dados reais do GlicNutri originados do Supabase, via exportação/ETL para CSV ou leitura controlada.</li>
+<li>Implementar um pipeline de ML completo, com validação, EDA, treino e avaliação.</li>
+<li>Implementar persistência dos modelos, incluindo modelo, padronização/normalização e lista de variáveis.</li>
+<li>Implementar uma API FastAPI com endpoint <code>POST /predict</code>.</li>
+</ul>
+<h3>5.2 Tabela de requisitos da Thayse</h3>
+<table>
+<thead>
+<tr>
+<th>Requisito</th>
+<th>Status</th>
+<th>O que precisa ser feito</th>
+<th>Evidência ou arquivo relacionado</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Arquitetura em camadas: ML Python + API REST + integração</td>
+<td><strong>Completo (local)</strong></td>
+<td>(Opcional) hospedar API para demo externa</td>
+<td>API: <code>machine-learning/api/app/main.py</code>; App: tela <code>src/telas/paciente/TelaPrevisaoMl.js</code> + serviço <code>src/servicos/servicoMlLocal.js</code></td>
+</tr>
+<tr>
+<td>Coleta/carregamento de dados em CSV + validação do dataset</td>
+<td><strong>Completo (local)</strong></td>
+<td>(Opcional) aumentar volume para métricas mais robustas</td>
+<td><code>machine-learning/data/glicnutri_patient_day_export.csv</code>, <code>machine-learning/data/export_manifest.json</code></td>
+</tr>
+<tr>
+<td>Pré-processamento: imputação, conversões e padronização</td>
+<td><strong>Completo (baseline)</strong></td>
+<td>(Opcional) ajustar por paciente e séries temporais</td>
+<td>Notebook <code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code></td>
+</tr>
+<tr>
+<td>EDA: histogramas, boxplots, correlação e importância de variáveis</td>
+<td><strong>Completo (baseline)</strong></td>
+<td>(Opcional) expandir plots e narrativa no documento final</td>
+<td>Notebook executado: <code>machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb</code></td>
+</tr>
+<tr>
+<td>Treinamento e avaliação com métricas adequadas</td>
+<td><strong>Completo (baseline)</strong></td>
+<td>(Opcional) calibrar thresholds e métricas por classe</td>
+<td>Notebook + <code>machine-learning/api/artifacts/training_meta.json</code></td>
+</tr>
+<tr>
+<td>Cobertura de 4 problemas: classificação, regressão, clusterização e similaridade/recomendação</td>
+<td><strong>Completo</strong></td>
+<td>(Opcional) ajustar targets clínicos</td>
+<td><code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code></td>
+</tr>
+<tr>
+<td>Persistência: modelo, padronização e lista de variáveis</td>
+<td><strong>Completo</strong></td>
+<td>(Opcional) versionar artefatos por data/seed</td>
+<td><code>machine-learning/api/artifacts/*.joblib</code>, <code>training_meta.json</code></td>
+</tr>
+<tr>
+<td>API REST com endpoint <code>POST /predict</code></td>
+<td><strong>Completo (local + web)</strong></td>
+<td>(Opcional) hospedar no Render</td>
+<td><code>machine-learning/api/app/main.py</code> com CORS habilitado; <code>uvicorn app.main:app</code></td>
+</tr>
+</tbody>
+</table>
+<h3>5.3 Definição oficial do dataset real (para o grupo não divergir)</h3>
+<p>Esta secção fixa <strong>um único “contrato” de dataset</strong> para o projeto, alinhado ao export existente (<code>machine-learning/scripts/export_supabase_csv.py</code>) e ao pipeline (<code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code>).</p>
+<h4>5.3.1 Unidade (granularidade)</h4>
+<ul>
+<li><strong>Uma linha = 1 paciente em 1 dia</strong> (chave: <code>patient_id</code> + <code>dia</code>).</li>
+<li>Fonte: export Supabase → CSV “paciente-dia”.</li>
+</ul>
+<h4>5.3.2 Janela temporal (regra padrão)</h4>
+<ul>
+<li>Export “rolling window” padrão: <strong>últimos 60 dias</strong> (<code>--days 60</code>).</li>
+<li>Para treinos mais robustos, pode-se aumentar para <strong>90–365 dias</strong> mantendo a mesma estrutura.</li>
+<li>Evidência reprodutível obrigatória: <code>machine-learning/data/export_manifest.json</code> (hash + contagem + colunas + janela).</li>
+</ul>
+<h4>5.3.3 Colunas oficiais do CSV (schema)</h4>
+<p>O dataset oficial deve conter (nomenclatura exata do CSV):</p>
+<ul>
+<li>Identificação e tempo:</li>
+<li><code>patient_id</code> (uuid em texto)</li>
+<li><code>dia</code> (YYYY-MM-DD)</li>
+<li>Glicemia agregada no dia:</li>
+<li><code>glucose_mean_mg_dl</code>, <code>glucose_min_mg_dl</code>, <code>glucose_max_mg_dl</code></li>
+<li><code>n_leituras_glicemia</code></li>
+<li>Refeições agregadas no dia:</li>
+<li><code>carbs_sum_g</code>, <code>kcal_sum</code>, <code>protein_sum_g</code>, <code>fat_sum_g</code></li>
+<li><code>n_refeicoes_ia</code></li>
+<li>Medicação agregada no dia:</li>
+<li><code>n_eventos_medicacao</code></li>
+</ul>
+<h4>5.3.4 Features oficiais (entrada do modelo / API)</h4>
+<p>As <strong>features</strong> usadas no treino e no endpoint <code>/predict</code> são:</p>
+<ul>
+<li><code>n_leituras_glicemia</code></li>
+<li><code>carbs_sum_g</code></li>
+<li><code>kcal_sum</code></li>
+<li><code>protein_sum_g</code></li>
+<li><code>fat_sum_g</code></li>
+<li><code>n_refeicoes_ia</code></li>
+<li><code>n_eventos_medicacao</code></li>
+</ul>
+<blockquote>
+<p>Observação: os campos de glicemia (<code>glucose_*</code>) são usados como <strong>alvo</strong> e para EDA; não entram como feature no <code>/predict</code> (para evitar vazamento do alvo).</p>
+</blockquote>
+<h4>5.3.5 Alvos oficiais (o que o modelo aprende a prever)</h4>
+<p>O projeto cobre 4 tarefas (requisito da disciplina), com estes alvos/definições:</p>
+<ul>
+<li><strong>Classificação (alvo)</strong>: <code>target_glucose_high = 1</code> se <code>glucose_mean_mg_dl &gt;= 150</code>, senão <code>0</code>.</li>
+<li><strong>Regressão (alvo)</strong>: prever <code>glucose_mean_mg_dl</code>.</li>
+<li><strong>Clusterização (não supervisionado)</strong>: KMeans no espaço de features.</li>
+<li><strong>Similaridade (não supervisionado)</strong>: NearestNeighbors no espaço de features.</li>
+</ul>
+<h4>5.3.6 Regras de qualidade e limpeza (obrigatórias)</h4>
+<ul>
+<li><strong>Chave única</strong>: não pode haver duplicado de (<code>patient_id</code>, <code>dia</code>). Se houver, o export deve ser corrigido ou agregações revisadas.</li>
+<li><strong>Nulos nas features</strong>: preencher com <strong>0</strong> (<code>fillna(0)</code>) para:</li>
+<li><code>n_leituras_glicemia</code>, <code>carbs_sum_g</code>, <code>kcal_sum</code>, <code>protein_sum_g</code>, <code>fat_sum_g</code>, <code>n_refeicoes_ia</code>, <code>n_eventos_medicacao</code>.</li>
+<li><strong>Nulos no alvo</strong>:</li>
+<li>Linhas com <code>glucose_mean_mg_dl</code> nulo <strong>não entram</strong> nas tarefas supervisionadas (classificação e regressão).</li>
+<li>Essas linhas podem permanecer no CSV para auditoria/EDA, mas são removidas no treino supervisionado.</li>
+<li><strong>Filtro de pacientes</strong>: somente pacientes com <code>paciente.excluido = false</code> (já aplicado no SQL do export).</li>
+</ul>
+<h4>5.3.7 Evidências mínimas que o grupo deve guardar (para entrega)</h4>
+<ul>
+<li><code>machine-learning/data/export_manifest.json</code> (prova reprodutível do export)</li>
+<li><code>machine-learning/data/glicnutri_patient_day_export.csv</code> (anexo no ZIP se exigido)</li>
+<li><code>machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb</code> (ou prints das saídas principais)</li>
+<li><code>machine-learning/api/artifacts/</code> (artefatos joblib + <code>training_meta.json</code>)</li>
+<li>Evidência de chamada <code>/predict</code> (print do app na tela “Previsão (IA)” ou teste em PowerShell/Python)</li>
+</ul>
+<h4>Resumo do modelo aplicado no GlicNutri (explicação simples e completa)</h4>
+<p>O GlicNutri usa um dataset <strong>paciente‑dia</strong> (uma linha por paciente por dia) para transformar registros do dia (glicemia, refeições e medicação) em previsões e padrões úteis. O pipeline de Machine Learning foi implementado no notebook <code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code> e os modelos treinados são persistidos em <code>machine-learning/api/artifacts/</code> para serem usados pela API (<code>POST /predict</code>).</p>
+<p>O que entra no modelo (features):<br />
+- Quantidade de leituras de glicemia no dia (<code>n_leituras_glicemia</code>)<br />
+- Totais nutricionais do dia (<code>carbs_sum_g</code>, <code>kcal_sum</code>, <code>protein_sum_g</code>, <code>fat_sum_g</code>)<br />
+- Quantidade de refeições registradas (<code>n_refeicoes_ia</code>)<br />
+- Quantidade de eventos de medicação (<code>n_eventos_medicacao</code>)</p>
+<p>O que o modelo resolve (4 problemas exigidos pela disciplina):</p>
+<p>1) <strong>Classificação (supervisionado)</strong><br />
+   - <strong>Pergunta</strong>: “Com base nos hábitos/resumos do dia, este dia tende a ter glicemia média elevada?”<br />
+   - <strong>Alvo</strong>: <code>target_glucose_high = 1</code> quando <code>glucose_mean_mg_dl &gt;= 150</code> (senão 0).<br />
+   - <strong>Saída na API</strong>: <code>prob_glucose_elevada</code> (probabilidade) e <code>classe_glucose_elevada</code> (0/1).  </p>
+<p>2) <strong>Regressão (supervisionado)</strong><br />
+   - <strong>Pergunta</strong>: “Qual a glicemia média estimada (mg/dL) para um dia com essas características?”<br />
+   - <strong>Alvo</strong>: <code>glucose_mean_mg_dl</code>.<br />
+   - <strong>Saída na API</strong>: <code>glucose_mean_previsto_mg_dl</code>.  </p>
+<p>3) <strong>Clusterização (não supervisionado)</strong><br />
+   - <strong>Pergunta</strong>: “Quais perfis de dias existem no comportamento alimentar/medicação/leituras?”<br />
+   - <strong>Técnica</strong>: KMeans sobre o mesmo conjunto de features (sem usar o alvo).<br />
+   - <strong>Saída na API</strong>: <code>cluster_id</code> (identificador do grupo).  </p>
+<p>4) <strong>Similaridade (não supervisionado)</strong><br />
+   - <strong>Pergunta</strong>: “Quais dias do histórico são mais parecidos com o dia atual?”<br />
+   - <strong>Técnica</strong>: NearestNeighbors no espaço de features.<br />
+   - <strong>Saída na API</strong>: <code>vizinhos_mais_proximos_indices</code> (índices dos dias mais próximos na base).  </p>
+<p>Regras importantes do pipeline (para evitar erro e manter coerência):<br />
+- Linhas com <code>glucose_mean_mg_dl</code> <strong>nulo</strong> não entram no treino supervisionado (classificação/regressão), pois o alvo é desconhecido.<br />
+- Nulos nas features são preenchidos com <strong>0</strong>, garantindo que o modelo rode mesmo em dias sem refeição/medicação registrada.<br />
+- O export já filtra pacientes com <code>excluido = false</code>.</p>
+<p>Como o paciente vê isso no app (teste local):<br />
+- Foi criada uma tela de teste “<strong>Previsão (Machine Learning)</strong>” (<code>PacientePrevisaoML</code>) onde o usuário preenche os 7 campos e chama o endpoint <code>/predict</code>, visualizando o resultado (probabilidade de glicemia elevada, classe, glicemia média prevista e cluster). Em ambiente web, a API permite CORS para esse teste local.</p>
+<hr />
+<h2>6. Planejamento semanal até 31/05/2026</h2>
+<p>O cronograma abaixo organiza as entregas semanais necessárias para finalizar o projeto até 31/05/2026.</p>
+<table>
+<thead>
+<tr>
+<th>Semana</th>
+<th>Período</th>
+<th>Atividades</th>
+<th>Responsável</th>
+<th style="text-align: right;">Tempo estimado</th>
+<th>Entrega da semana</th>
+<th>Reunião semanal</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Semana 1</td>
+<td>28/04 a 03/05</td>
+<td>Consolidar os requisitos do Bento e da Thayse; mapear o que já existe no app e no Supabase; definir o dataset real de ML; relacionar os 13 requisitos do Bento com evidências iniciais</td>
+<td>Integrante 1 + Integrante 2</td>
+<td style="text-align: right;">12 a 16h</td>
+<td>Checklist de requisitos + especificação do dataset ML</td>
+<td>03/05, 30 a 45 min</td>
+</tr>
+<tr>
+<td>Semana 2</td>
+<td>04/05 a 10/05</td>
+<td>Implementar estratégia reprodutível Supabase para CSV; adaptar notebook para ler CSV real; executar validações e EDA inicial; testar autenticação, CRUD, validações e fluxo principal do sistema</td>
+<td>Integrante 2 + Integrante 4</td>
+<td style="text-align: right;">14 a 18h</td>
+<td>CSV reprodutível + notebook com validação/EDA + evidências dos fluxos principais — índice no Git: <a href="entregas/README-ENTREGA-SEMANA-2.md"><code>entregas/README-ENTREGA-SEMANA-2.md</code></a></td>
+<td>10/05, 30 a 45 min</td>
+</tr>
+<tr>
+<td>Semana 3</td>
+<td>11/05 a 17/05</td>
+<td>Treinar 4 pipelines com dados reais: classificação, regressão, clusterização e similaridade; gerar métricas; salvar figuras; selecionar versão do modelo</td>
+<td>Integrante 2 + Integrante 3</td>
+<td style="text-align: right;">16 a 22h</td>
+<td>Resultados, métricas, figuras e decisão do modelo final</td>
+<td>17/05, 45 a 60 min</td>
+</tr>
+<tr>
+<td>Semana 4</td>
+<td>18/05 a 24/05</td>
+<td>Criar backend Python organizado; implementar persistência; criar API FastAPI <code>POST /predict</code>; testar localmente; consolidar auditoria, logs, usabilidade, relatórios e gráficos</td>
+<td>Integrante 3 + Integrante 4</td>
+<td style="text-align: right;">16 a 20h</td>
+<td>API funcional + contrato JSON + evidências de auditoria, logs, relatórios e gráficos</td>
+<td>24/05, 30 a 45 min</td>
+</tr>
+<tr>
+<td>Semana 5</td>
+<td>25/05 a 31/05</td>
+<td>Fazer integração mínima app com API ou simulação controlada; finalizar documentação do Bento e da Thayse; preparar ZIP, slides, vídeo, evidências e ensaio final</td>
+<td>Todos</td>
+<td style="text-align: right;">18 a 24h</td>
+<td>Pacote final: documento, slides, vídeo, ZIP, evidências e checklist final</td>
+<td>31/05, 60 min</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Situação real — Semana 2 (maio/2026):</strong> <strong>COMPLETA no repositório</strong> — parte <strong>Bento / auditoria</strong> com <strong>evidência visual validada</strong> (<code>entregas/bento/semana-2-auditoria/</code>) e parte <strong>Thayse (CSV/ML/API)</strong> com export real + manifest + notebook executado + artefatos + API + integração no app (ver <code>entregas/thayse/RESUMO-ENTREGA-ML.md</code>).</p>
+<hr />
+<h2>7. Divisão de tarefas entre o grupo</h2>
+<p>Para equilibrar responsabilidades e garantir rastreabilidade, a divisão inicial será:</p>
+<table>
+<thead>
+<tr>
+<th>Integrante</th>
+<th>Foco principal</th>
+<th>Tarefas principais</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Integrante 1</td>
+<td>Documentação e requisitos do Bento</td>
+<td>Documento final acadêmico, slides, rastreabilidade requisito-evidência, texto de LGPD e roteiro de apresentação</td>
+</tr>
+<tr>
+<td>Integrante 2</td>
+<td>Dados e notebook de ML</td>
+<td>Dataset real Supabase para CSV, refatoração do notebook, EDA, treinamento e métricas dos 4 pipelines</td>
+</tr>
+<tr>
+<td>Integrante 3</td>
+<td>Backend Python e API</td>
+<td>Estrutura Python organizada, persistência com joblib, FastAPI <code>POST /predict</code>, testes e documentação de execução</td>
+</tr>
+<tr>
+<td>Integrante 4</td>
+<td>Evidências do app e qualidade</td>
+<td>Evidências das telas e fluxos, CRUD, exclusão lógica, movimentações, auditoria, logs, relatórios e checklist final</td>
+</tr>
+<tr>
+<td>Todos</td>
+<td>Validação final</td>
+<td>Participar das reuniões semanais, revisar entregas, testar o sistema e ensaiar apresentação</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>8. Reuniões semanais</h2>
+<p>O grupo realizará reuniões semanais de acompanhamento para garantir o progresso contínuo e a validação do que será apresentado ao professor. Em cada reunião:</p>
+<ul>
+<li>Cada integrante deverá apresentar sua parte no próprio computador, mostrando evidências e resultados, como telas, relatórios, notebook, API e documentos.</li>
+<li>Pelo menos um integrante deverá estar presente semanalmente para apresentar ao professor o status da semana e demonstrar o que foi produzido.</li>
+<li>Ao final de cada reunião, o grupo deverá atualizar o checklist de acompanhamento e registrar as pendências para a próxima semana.</li>
+</ul>
+<hr />
+<h2>9. Riscos e cuidados</h2>
+<table>
+<thead>
+<tr>
+<th>Risco/Cuidado</th>
+<th>Possível impacto</th>
+<th>Ação de mitigação</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Falta de conferência final dos requisitos do Bento</td>
+<td>Algum requisito pode ficar sem evidência no documento ou na apresentação</td>
+<td>Usar a tabela dos 13 requisitos do Bento como checklist oficial durante as semanas de execução</td>
+</tr>
+<tr>
+<td>Dados reais insuficientes no Supabase</td>
+<td>Modelos de ML pouco confiáveis ou inviáveis</td>
+<td>Definir dataset por agregação, como paciente-dia ou janelas de tempo, e preparar base mínima para demonstração</td>
+</tr>
+<tr>
+<td>Dificuldade de adaptar o notebook</td>
+<td>Atraso no cronograma da Thayse</td>
+<td>Refatorar por etapas: leitura CSV, validação, EDA, modelos e persistência</td>
+</tr>
+<tr>
+<td>Integração API com aplicativo</td>
+<td>Atrasos técnicos na fase final</td>
+<td>Priorizar API funcional primeiro; se necessário, realizar integração mínima ou simulação controlada na Semana 5</td>
+</tr>
+<tr>
+<td>Atrasos do grupo</td>
+<td>Comprometimento da entrega final</td>
+<td>Manter reuniões semanais, divisão clara de tarefas, entregas pequenas por semana e checklist de verificação</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>10. Conclusão</h2>
+<p>Este documento organiza as atividades do Projeto GlicNutri por semana, com divisão de responsabilidades e entregas verificáveis, visando garantir a conclusão até 31 de maio de 2026. O planejamento contempla os requisitos do professor Bento, relacionados à evolução do sistema, banco de dados, autenticação, CRUD, validações, auditoria, relatórios, documentação e entrega final, além dos requisitos da professora Thayse, relacionados à entrega de Machine Learning com dados reais do Supabase, persistência e API de predição.</p>
+<p>Com a execução deste plano, o grupo terá maior controle sobre as pendências, reduzirá riscos de atraso e conseguirá apresentar evidências claras de funcionamento, implementação dos requisitos, organização do projeto e qualidade da apresentação final.</p>
+<hr />
+<h2>11. Checklist final do grupo</h2>
+<table>
+<thead>
+<tr>
+<th>Item</th>
+<th>Status</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Índice e manual Semana 2 no repositório (<code>entregas/README-ENTREGA-SEMANA-2.md</code>, <code>SEMANA-2-PASSO-A-PASSO.md</code>, atalhos export)</td>
+<td>[x]</td>
+</tr>
+<tr>
+<td>Conferir os 13 requisitos do Bento e relacionar cada um com uma evidência do sistema ou da documentação</td>
+<td>[x] <code>entregas/bento/checklist-13-requisitos-bento.md</code></td>
+</tr>
+<tr>
+<td>Consolidar checklist da Thayse e rastrear cada item para um entregável</td>
+<td>[x] <code>entregas/thayse/RESUMO-ENTREGA-ML.md</code></td>
+</tr>
+<tr>
+<td>Definir dataset real do GlicNutri: variáveis, objetivo e regras</td>
+<td>[x] secção 5.3 (dataset oficial paciente-dia)</td>
+</tr>
+<tr>
+<td>Implementar exportação/ETL Supabase para CSV reprodutível</td>
+<td>[x] script <code>machine-learning/scripts/export_supabase_csv.py</code></td>
+</tr>
+<tr>
+<td>Remover/isolar KaggleHub/Pima no notebook legado</td>
+<td>[x] referência <strong>GlicNutri</strong>: <code>machine-learning/notebooks/glicnutri_ml_pipeline.ipynb</code> (paciente-dia). Referência <strong>GlucoBench</strong>: <code>machine-learning/notebooks/referencia/glucobench-reference.ipynb</code>. Pima/Kaggle removidos do fluxo do projeto</td>
+</tr>
+<tr>
+<td>Executar validação do dataset real: tipos, nulos e integridade</td>
+<td>[x] export + manifest (<code>machine-learning/data/export_manifest.json</code>) + validação no notebook</td>
+</tr>
+<tr>
+<td>Refazer EDA com dados reais: histogramas, boxplots, heatmap e importância de variáveis</td>
+<td>[x] baseline no notebook executado (<code>machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb</code>)</td>
+</tr>
+<tr>
+<td>Treinar e avaliar os 4 pipelines com dados reais</td>
+<td>[x] classificação/regressão/cluster/similaridade executados + artefatos gerados</td>
+</tr>
+<tr>
+<td>Persistir artefatos: modelo, padronização e variáveis</td>
+<td>[x] <code>machine-learning/api/artifacts/*.joblib</code>, <code>training_meta.json</code></td>
+</tr>
+<tr>
+<td>Criar backend Python organizado e reproduzível</td>
+<td>[x] pasta <code>machine-learning/api/</code> + <code>requirements.txt</code></td>
+</tr>
+<tr>
+<td>Implementar API FastAPI com <code>POST /predict</code> e testar com exemplos</td>
+<td>[x] <code>machine-learning/api/app/main.py</code> + CORS (web)</td>
+</tr>
+<tr>
+<td>Integração do app com a API local de ML (tela paciente)</td>
+<td>[x] <code>src/telas/paciente/TelaPrevisaoMl.js</code>, <code>src/servicos/servicoMlLocal.js</code>, rota <code>PacientePrevisaoML</code> e menu paciente</td>
+</tr>
+<tr>
+<td>Consolidar evidências do app: login, CRUD, exclusão lógica e processos</td>
+<td>[x] Semana 2 Bento: <code>entregas/bento/semana-2-auditoria/</code> com PNG em <code>prints/</code> e docs alinhados</td>
+</tr>
+<tr>
+<td>Consolidar auditoria/logs no repositório (evidências Semana 2)</td>
+<td>[x] <code>evidencias-auditoria.md</code>, <code>checklist-auditoria.md</code>, <code>STATUS-SEMANA-2.md</code>; <strong>Evidência visual validada com capturas reais no repositório</strong></td>
+</tr>
+<tr>
+<td>Roteiros/texto prontos para fechar parciais do Bento (BD/CRUD/UX/relatórios)</td>
+<td>[x] <code>entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md</code>, <code>entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md</code>, <code>entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md</code></td>
+</tr>
+<tr>
+<td>Consolidar texto LGPD no documento Word final</td>
+<td>[x] texto em <code>entregas/LGPD-TEXTO-CURTO.md</code> + suplemento <code>WordFinalGlicNutri-ATUALIZADO.docx</code> / <code>entregas/WordFinalGlicNutri-ATUALIZACOES-PARA-COLAR.md</code> — <strong>copiar para o Word oficial do TCC</strong></td>
+</tr>
+<tr>
+<td>Consolidar relatórios e gráficos para apresentação</td>
+<td>[x] <code>entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md</code> — <strong>capturas finais no ZIP se a disciplina exigir</strong></td>
+</tr>
+<tr>
+<td>Preparar slides e roteiro de demonstração</td>
+<td>[x] roteiro <code>entregas/slides-roteiro.md</code> — <strong>ficheiro <code>.pptx</code> é manual</strong></td>
+</tr>
+<tr>
+<td>Preparar ZIP do projeto e vídeo demonstrativo</td>
+<td>[x] suporte <code>scripts/build-zip-entrega.ps1</code> + <code>entregas/PACOTE-MONTAGEM.md</code> — <strong>correr script, anexar ZIP e gravar vídeo manualmente</strong></td>
+</tr>
+<tr>
+<td>Ensaiar apresentação final e revisar checklist de entrega</td>
+<td>[x] <code>entregas/ENSAIO-FINAL-CHECKLIST.md</code> + <code>entregas/PACOTE-FINAL-CHECKLIST.md</code> — <strong>executar ensaio na vossa máquina</strong></td>
+</tr>
+</tbody>
+</table>
+<h3>11.1 O que só o grupo executa (fora do Git)</h3>
+<ul>
+<li>Exportar e subir o <strong>.pptx</strong> e o <strong>vídeo</strong> finais.</li>
+<li>Correr <code>build-zip-entrega.ps1</code> e juntar ao pacote <strong>CSV real</strong> / prints extra, se obrigatório.</li>
+<li><strong>Ensaio real</strong> (uvicorn + <code>npm run start</code> + Previsão IA) na semana da entrega.</li>
+</ul>
+<hr />
+<h2>12. Próximos passos imediatos do grupo</h2>
+<ol>
+<li><strong>Pacote e ensaio:</strong> seguir <code>entregas/PACOTE-MONTAGEM.md</code>, <code>entregas/ENSAIO-FINAL-CHECKLIST.md</code> e <code>entregas/PACOTE-FINAL-CHECKLIST.md</code> (ZIP, vídeo, <code>.pptx</code>, ensaio local).</li>
+<li><strong>Semana 2 — Thayse (fechado localmente):</strong> export executado (CSV + <code>export_manifest.json</code>), notebook executado (EDA + treino + artefatos), API local rodando e integrada ao app (tela paciente “Previsão (IA)”). Próximo passo é <strong>capturar evidências</strong> (prints e métricas) para o pacote acadêmico e, se permitido, commitar <code>machine-learning/data/export_manifest.json</code>.</li>
+<li><strong>Reunião 10/05:</strong> seguir <a href="entregas/demo-reuniao-semana-2.md"><code>entregas/demo-reuniao-semana-2.md</code></a>; declarar plano B (sample + limitações) se o volume real ainda for insuficiente.</li>
+<li><strong>Checklist Bento (13):</strong> mantido em <a href="entregas/bento/checklist-13-requisitos-bento.md"><code>entregas/bento/checklist-13-requisitos-bento.md</code></a> com evidências no repositório; atualizar apenas se o professor pedir provas adicionais.</li>
+<li>(Concluído) Dataset oficial do ML definido na secção 5.3 (paciente-dia + features + alvos + regras).</li>
+<li><strong>Semana 3:</strong> reforçar métricas e narrativa (opcional: mais dados, melhor validação, gráficos e explicação clínica) — o baseline já está funcional.</li>
+<li>Estabelecer rotina de reunião semanal e uma entrega mínima por semana, com responsáveis e validação coletiva.</li>
+</ol>
+</body>
+</html>

@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,6 +9,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import { supabase } from '../../servicos/configSupabase';
 import TelaProntuarioPacienteNutri from './TelaProntuarioPacienteNutri';
 import { updateConsultaStatus, formatConsultaDateTime } from '../../servicos/servicoConsultas';
@@ -22,6 +23,8 @@ export default function TelaConsultaNutri({ navigation, route }) {
   const { usuarioLogado, consultaId, pacienteId, scheduledAt } = route.params || {};
   const [loading, setLoading] = useState(true);
   const [consulta, setConsulta] = useState(null);
+  const [loadError, setLoadError] = useState(null);
+  const [mensagemAcao, setMensagemAcao] = useState(null);
 
   const effectivePacienteId = pacienteId || consulta?.paciente_id || null;
 
@@ -39,9 +42,12 @@ export default function TelaConsultaNutri({ navigation, route }) {
         .maybeSingle();
       if (error) throw error;
       setConsulta(data || null);
+      setLoadError(null);
     } catch (error) {
       console.log('Erro carregar consulta:', error);
-      Alert.alert('Erro', 'Nao foi possivel carregar a consulta.');
+      setLoadError(
+        'Não foi possível carregar a consulta. Verifique a conexão e tente novamente.'
+      );
     } finally {
       setLoading(false);
     }
@@ -68,7 +74,10 @@ export default function TelaConsultaNutri({ navigation, route }) {
       });
       await load();
     } catch (error) {
-      Alert.alert('Erro', error?.message || 'Nao foi possivel atualizar a consulta.');
+      setMensagemAcao(
+        error?.message ||
+          'Não foi possível atualizar a consulta. Verifique a conexão e tente novamente.'
+      );
     }
   }
 
@@ -86,12 +95,21 @@ export default function TelaConsultaNutri({ navigation, route }) {
       }
       showTabBar={false}
     >
+        {mensagemAcao ? (
+          <MensagemInline
+            tipo="erro"
+            texto={mensagemAcao}
+            onFechar={() => setMensagemAcao(null)}
+          />
+        ) : null}
 
         {loading ? (
           <SectionCard style={styles.loadingCard}>
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
             <Text style={styles.loadingText}>Carregando consulta...</Text>
           </SectionCard>
+        ) : loadError ? (
+          <EstadoErroCarregamento onTentarNovamente={load} loading={loading} />
         ) : (
           <SectionCard style={styles.statusCard}>
             <Text style={styles.statusTitle}>Status: {status}</Text>

@@ -33,6 +33,9 @@ yarn-error.*
 .DS_Store
 *.pem
 
+# ZIP de entrega gerado localmente (git archive)
+entregas/pacote-zip/*.zip
+
 # local env files
 .env
 .env.*

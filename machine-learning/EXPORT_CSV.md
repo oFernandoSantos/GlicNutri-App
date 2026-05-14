@@ -63,8 +63,8 @@ Defina `GLICNUTRI_CSV_PATH` para forçar um CSV (útil em CI ou caminho absoluto
 
 | Campo | Valor |
 |-------|--------|
-| Data da execução | |
-| Comando usado (sem password) | `python machine-learning/scripts/export_supabase_csv.py --output ... --manifest ...` |
-| Linhas exportadas | (do stdout ou `export_manifest.json`) |
-| SHA-256 do CSV | (do manifest) |
-| Responsável | |
+| Data da execução | 2026-05-06 (UTC, conforme `export_manifest.json`) |
+| Comando usado (sem password) | `python machine-learning/scripts/export_supabase_csv.py --output machine-learning/data/glicnutri_patient_day_export.csv --manifest machine-learning/data/export_manifest.json --days 60` |
+| Linhas exportadas | 130 (`row_count` no manifest) |
+| SHA-256 do CSV | `9eca7bae76652b82761cccb0bad343c39df7b0f9a650c3406f40cb1c7c4ceaf4` |
+| Responsável | Grupo GlicNutri (registo sincronizado com manifest versionado) |

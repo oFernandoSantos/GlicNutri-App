@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Modal,
+  RefreshControl,
   StyleSheet,
   Text,
   TextInput,
@@ -12,6 +13,8 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import { listNutriAvailability, upsertNutriAvailability, deleteNutriAvailability, buildSlotLabel } from '../../servicos/servicoAgendaNutri';
 import { listConsultasByNutricionista, updateConsultaStatus, formatConsultaDateTime } from '../../servicos/servicoConsultas';
 
@@ -48,28 +51,48 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
   const [editRow, setEditRow] = useState(null);
   const [formError, setFormError] = useState('');
   const [formSuccess, setFormSuccess] = useState('');
+  const [loadError, setLoadError] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [bannerFluxo, setBannerFluxo] = useState(null);
 
   const [weekday, setWeekday] = useState(1);
   const [startTime, setStartTime] = useState('08:00');
   const [endTime, setEndTime] = useState('12:00');
   const [slotMinutes, setSlotMinutes] = useState('30');
 
-  const load = useCallback(async () => {
-    try {
-      setLoading(true);
-      const [avail, cons] = await Promise.all([
-        listNutriAvailability(nutricionistaId),
-        listConsultasByNutricionista(nutricionistaId, { limit: 120 }),
-      ]);
-      setAvailability(avail || []);
-      setConsultas(cons || []);
-    } catch (error) {
-      console.log('Erro ao carregar agenda nutri:', error);
-      Alert.alert('Erro', 'Nao foi possivel carregar sua agenda.');
-    } finally {
-      setLoading(false);
-    }
-  }, [nutricionistaId]);
+  const load = useCallback(
+    async (options = {}) => {
+      const { withBlockingSpinner = true } = options;
+      try {
+        if (withBlockingSpinner) {
+          setLoading(true);
+        }
+        setLoadError(null);
+        const [avail, cons] = await Promise.all([
+          listNutriAvailability(nutricionistaId),
+          listConsultasByNutricionista(nutricionistaId, { limit: 120 }),
+        ]);
+        setAvailability(avail || []);
+        setConsultas(cons || []);
+      } catch (error) {
+        console.log('Erro ao carregar agenda nutri:', error);
+        setLoadError(
+          'Não foi possível carregar sua agenda. Verifique a conexão e tente novamente.'
+        );
+      } finally {
+        if (withBlockingSpinner) {
+          setLoading(false);
+        }
+      }
+    },
+    [nutricionistaId]
+  );
+
+  const onRefreshAgenda = useCallback(async () => {
+    setRefreshing(true);
+    await load({ withBlockingSpinner: false });
+    setRefreshing(false);
+  }, [load]);
 
   useEffect(() => {
     load();
@@ -143,7 +166,9 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
             await deleteNutriAvailability({ id: row.id, actor: usuarioLogado });
             await load();
           } catch (error) {
-            Alert.alert('Erro', 'Nao foi possivel excluir.');
+            setBannerFluxo(
+              'Não foi possível excluir. Verifique a conexão e tente novamente.'
+            );
           }
         },
       },
@@ -160,7 +185,10 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
       await load();
     } catch (error) {
       console.log('Erro atualizar consulta:', error);
-      Alert.alert('Erro', error?.message || 'Nao foi possivel atualizar a consulta.');
+      setBannerFluxo(
+        error?.message ||
+          'Não foi possível atualizar a consulta. Verifique a conexão e tente novamente.'
+      );
     }
   }
 
@@ -173,12 +201,22 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
         title="Agenda"
         subtitle="Configure seus slots e acompanhe agendamentos."
         rightAction={
-          <TouchableOpacity style={styles.iconButton} onPress={load} disabled={loading}>
+          <TouchableOpacity style={styles.iconButton} onPress={() => load()} disabled={loading}>
             <Ionicons name="refresh-outline" size={20} color={patientTheme.colors.text} />
           </TouchableOpacity>
         }
         showTabBar={route?.name === 'NutricionistaAgenda'}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefreshAgenda} />
+        }
       >
+        {bannerFluxo ? (
+          <MensagemInline
+            tipo="erro"
+            texto={bannerFluxo}
+            onFechar={() => setBannerFluxo(null)}
+          />
+        ) : null}
 
         {!nutricionistaId ? (
           <SectionCard style={styles.warningCard}>
@@ -195,6 +233,8 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
             <Text style={styles.loadingText}>Carregando agenda...</Text>
           </SectionCard>
+        ) : loadError ? (
+          <EstadoErroCarregamento onTentarNovamente={() => load()} loading={loading} />
         ) : null}
 
         <View style={styles.sectionHeaderRow}>

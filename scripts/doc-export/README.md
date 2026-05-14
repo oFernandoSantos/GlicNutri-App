@@ -1,6 +1,6 @@
 # Exportação PDF do planejamento
 
-Gera `Planejamento_Final_Atividades_GlicNutri_Ajustado.pdf` a partir do `.md` na raiz de `GlicNutri/`, usando CSS de impressão desta pasta e Microsoft Edge em modo headless.
+Gera `Planejamento_Final_Atividades_GlicNutri_Ajustado.pdf` e `Planejamento_Final_Atividades_GlicNutri_Ajustado.build.html` a partir do `.md` na raiz de `GlicNutri/`, usando CSS de impressão desta pasta e Microsoft Edge em modo headless.
 
 ```powershell
 cd GlicNutri

@@ -1,5 +1,6 @@
 import { Platform } from 'react-native';
 import { supabase } from './configSupabase';
+import { capturarExcecaoObservabilidade } from './servicoObservabilidade';
 
 const SYSTEM_LOG_BUCKET = 'system-logs';
 const SYSTEM_LOG_PREFIX = 'runtime';
@@ -365,6 +366,8 @@ export function configurarCapturaGlobalLogs() {
         },
       });
 
+      capturarExcecaoObservabilidade(error, { globalHandler: { isFatal: Boolean(isFatal) } });
+
       if (typeof globalHandler === 'function') {
         globalHandler(error, isFatal);
       }
@@ -379,6 +382,9 @@ export function configurarCapturaGlobalLogs() {
         message: event?.message || 'Erro de janela nao tratado.',
         stack: event?.error?.stack || '',
       });
+      if (event?.error) {
+        capturarExcecaoObservabilidade(event.error, { window: { type: 'error' } });
+      }
     });
 
     window.addEventListener('unhandledrejection', (event) => {
@@ -387,6 +393,10 @@ export function configurarCapturaGlobalLogs() {
         source: 'window.unhandledrejection',
         message: stringifyValue(event?.reason || 'Promise rejeitada sem tratamento.'),
       });
+      const reason = event?.reason;
+      if (reason instanceof Error) {
+        capturarExcecaoObservabilidade(reason, { window: { type: 'unhandledrejection' } });
+      }
     });
   }
 }

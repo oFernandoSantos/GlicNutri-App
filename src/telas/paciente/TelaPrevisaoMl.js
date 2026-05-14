@@ -1,7 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -14,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { mlHealthcheck, mlPredict } from '../../servicos/servicoMlLocal';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 
 function toNumber(value) {
   const normalized = Number(String(value ?? '').replace(',', '.'));
@@ -50,6 +50,7 @@ export default function TelaPrevisaoMl({ route }) {
   });
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
+  const [mensagemTopo, setMensagemTopo] = useState(null);
 
   const connectionOptions = useMemo(
     () => ({
@@ -63,12 +64,15 @@ export default function TelaPrevisaoMl({ route }) {
     try {
       setLoading(true);
       const res = await mlHealthcheck(connectionOptions);
-      Alert.alert('Conexão OK', `Servidor respondeu: ${res?.status || 'ok'}`);
+      setMensagemTopo({
+        tipo: 'sucesso',
+        texto: `Conexão OK — servidor respondeu: ${res?.status || 'ok'}`,
+      });
     } catch (error) {
-      Alert.alert(
-        'Não consegui conectar',
-        `${error?.message || error}\n\nDica: Android emulador usa 10.0.2.2. Celular real precisa do IP do seu PC.`
-      );
+      setMensagemTopo({
+        tipo: 'erro',
+        texto: `Não consegui conectar: ${error?.message || error}. Dica: emulador Android usa 10.0.2.2; no celular use o IP do PC.`,
+      });
     } finally {
       setLoading(false);
     }
@@ -92,7 +96,10 @@ export default function TelaPrevisaoMl({ route }) {
       const res = await mlPredict(payload, connectionOptions);
       setResult(res);
     } catch (error) {
-      Alert.alert('Erro ao prever', error?.message || String(error));
+      setMensagemTopo({
+        tipo: 'erro',
+        texto: error?.message || String(error) || 'Erro ao prever.',
+      });
     } finally {
       setLoading(false);
     }
@@ -106,6 +113,13 @@ export default function TelaPrevisaoMl({ route }) {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {mensagemTopo?.texto ? (
+          <MensagemInline
+            tipo={mensagemTopo.tipo || 'aviso'}
+            texto={mensagemTopo.texto}
+            onFechar={() => setMensagemTopo(null)}
+          />
+        ) : null}
         <View style={styles.header}>
           <View style={styles.headerIcon}>
             <Ionicons name="analytics-outline" size={22} color={patientTheme.colors.primaryDark} />

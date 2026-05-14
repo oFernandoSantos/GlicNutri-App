@@ -4,6 +4,7 @@
 
 - **Nome do projeto:** GlicNutri
 - **Entrega final:** 31 de maio de 2026
+- **Última revisão deste planejamento (Markdown/PDF):** 13 de maio de 2026 — consolidação de pacote final, checklists Bento/Thayse, LGPD, ZIP e ensaio (`entregas/PACOTE-MONTAGEM.md`, secção 11).
 - **Objetivo geral do planejamento:** organizar, de forma clara e acadêmica, as atividades necessárias para concluir o Projeto GlicNutri dentro do prazo, considerando as exigências das disciplinas do professor Bento e da professora Thayse. O planejamento contempla a consolidação do aplicativo e do banco de dados, com auditoria, logs e cuidados com LGPD, além da adequação da entrega de Machine Learning para utilizar dados reais do GlicNutri no Supabase, incluindo pipeline de ML, persistência de modelos e disponibilização por API.
 
 ---
@@ -24,6 +25,9 @@ Foram considerados, para este planejamento, os seguintes documentos, notebooks e
 - Pacote Bento (BD/CRUD/UX): `entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md`, `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md`, `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md`
 - Resumo/Checklist Thayse (ML): `entregas/thayse/RESUMO-ENTREGA-ML.md`
 - Checklist pacote final: `entregas/PACOTE-FINAL-CHECKLIST.md`
+- Montagem ZIP + ensaio: `entregas/PACOTE-MONTAGEM.md`, `entregas/ENSAIO-FINAL-CHECKLIST.md`, `scripts/build-zip-entrega.ps1`
+- LGPD (texto curto): `entregas/LGPD-TEXTO-CURTO.md`
+- Roteiro de slides: `entregas/slides-roteiro.md`
 
 ---
 
@@ -45,7 +49,7 @@ Apesar da base do sistema existir, há pontos que precisam ser finalizados e pad
 
 - A entrega de Machine Learning precisa estar **organizada como evidência acadêmica** (prints, métricas e explicação), mas **já foi executada com dados reais exportados do Supabase** (CSV + manifest + treino + artefatos).
 - Backend Python com FastAPI e endpoint `POST /predict` existe no repositório (`machine-learning/api/app/main.py`) e **já foi integrado ao app para teste local** (tela paciente “Previsão (IA)”). Hospedagem em nuvem permanece opcional para a apresentação final.
-- As evidências e a documentação acadêmica precisam ser consolidadas em um pacote final, com rastreabilidade entre requisitos e implementação.
+- As evidências e a documentação acadêmica foram **consolidadas no repositório** (checklists, roteiros, LGPD, pacote, ensaio); falta apenas a **entrega física** (.pptx, vídeo, ZIP gerado, Word final PDF) conforme `entregas/PACOTE-MONTAGEM.md`.
 - Relatórios e gráficos de gestão existem parcialmente, mas devem ser organizados como entregável, com explicação e evidências.
 
 ### 3.3 O que ainda falta implementar
@@ -54,7 +58,7 @@ Apesar da base do sistema existir, há pontos que precisam ser finalizados e pad
 - (Concluído) Apontar o notebook `machine-learning/notebooks/glicnutri_ml_pipeline.ipynb` para o CSV real e refinar pré-processamento (linhas com `glucose_mean_mg_dl` nulo são removidas do treino supervisionado).
 - (Concluído) Treinar e avaliar os quatro modelos com dados reais (classificação, regressão, clusterização e similaridade) e persistir artefatos.
 - (Concluído) Servir o modelo em ambiente de demonstração local (uvicorn) e registrar evidências de chamadas à API (inclui correção de CORS para app web).
-- Consolidar documentação final, evidências, prints, roteiros de demonstração e checklist de entrega.
+- Consolidar documentação final, evidências, prints, roteiros de demonstração e checklist de entrega **(suporte concluído no repositório; ver secção 11 e `entregas/PACOTE-MONTAGEM.md`)**.
 
 ### 3.4 Status real no repositório (sincronização técnica — maio/2026)
 
@@ -72,26 +76,26 @@ Esta subsecção amarra **requisito → evidência no código** conforme o estad
 | Auditoria e logs (implementação no app) | **Completo** no código: gravação Storage, painel admin, recuperação de senha sem dados sensíveis nos detalhes | `servicoAuditoria.js`, `TelaHomeAdmin.js`, `TelaAuditoriaAdmin.js`, `TelaLogsSistemaAdmin.js`, `TelaRecuperarSenha.js` |
 | Logs persistidos via Supabase Storage (bucket `audit-logs`) | **Completo** no código (fluxo implementado) | Idem + migrations/policies conforme projeto |
 | Semana 2 — Bento / auditoria (evidências visuais em `prints/`) | **COMPLETO** (evidência validada no repositório) | [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md); capturas em [`prints/`](entregas/bento/semana-2-auditoria/prints/) |
-| Bento — checklist 13 requisitos | **Em andamento** | `entregas/bento/checklist-13-requisitos-bento.md` |
+| Bento — checklist 13 requisitos | **Completo (repo)** | `entregas/bento/checklist-13-requisitos-bento.md` |
 | Bento — apoio para fechar “parciais” (BD/CRUD/UX/relatórios) | **Completo (roteiros + texto)** | `entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md`, `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md`, `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` |
 | Export CSV Supabase (dados reais) | **COMPLETO (execução local)** | CSV + manifest gerados: `machine-learning/data/glicnutri_patient_day_export.csv`, `machine-learning/data/export_manifest.json` (hash + contagem + colunas) |
 | ML referência GlucoBench | **Parcial / em andamento** | `machine-learning/notebooks/referencia/glucobench-reference.ipynb`; sem treino/pipeline final obrigatório nesta linha |
 | Thayse — resumo/roteiro ML | **Completo** | `entregas/thayse/RESUMO-ENTREGA-ML.md` |
-| Entregas acadêmicas (ZIP, slides, vídeo, Word único) | Fora do escopo do Git / pendente de grupo | Processo manual |
+| Entregas acadêmicas (ZIP, slides, vídeo, Word único) | **Suporte no repo; ficheiros finais pelo grupo** | `entregas/PACOTE-MONTAGEM.md`, `scripts/build-zip-entrega.ps1`, `entregas/slides-roteiro.md`, `entregas/ENSAIO-FINAL-CHECKLIST.md` |
 
 **Nota sobre CRUD / exclusão:** exclusão física de glicemia/medicação não é exposta por design; histórico usa ocultação no app + auditoria de eventos; exclusão de paciente pelo nutricionista é lógica (`excluido`).
 
-**Semana 2 (entrega prevista 10/05) — situação real:** **PARCIAL no conjunto do planejamento** (parte **Thayse**). A parte **Bento / auditoria** da Semana 2 está **COMPLETA**: código, checklist/STATUS e **evidência visual validada com capturas reais no repositório** ([`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), [`prints/`](entregas/bento/semana-2-auditoria/prints/)). A parte **Thayse** permanece **parcial** até o grupo executar o export com `DATABASE_URL` real, preencher o registo em [`machine-learning/EXPORT_CSV.md`](machine-learning/EXPORT_CSV.md) e correr o notebook com o CSV exportado (ver [`machine-learning/notebooks/glicnutri_ml_pipeline.ipynb`](machine-learning/notebooks/glicnutri_ml_pipeline.ipynb)). O repositório inclui **índice e manual** da entrega: [`entregas/README-ENTREGA-SEMANA-2.md`](entregas/README-ENTREGA-SEMANA-2.md), [`entregas/SEMANA-2-PASSO-A-PASSO.md`](entregas/SEMANA-2-PASSO-A-PASSO.md), atalhos `npm run ml:export-csv` e [`machine-learning/scripts/exportar_csv_semana2.ps1`](machine-learning/scripts/exportar_csv_semana2.ps1).
+**Semana 2 (entrega prevista 10/05) — situação no repositório (atualizado maio/2026):** **COMPLETA** no conjunto **Bento / auditoria** e **Thayse (export + manifest + registo em `EXPORT_CSV.md` + notebook executado + artefatos + API + integração na app)**. Evidência visual Semana 2: [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md) e [`prints/`](entregas/bento/semana-2-auditoria/prints/). Índice e manual: [`entregas/README-ENTREGA-SEMANA-2.md`](entregas/README-ENTREGA-SEMANA-2.md), [`entregas/SEMANA-2-PASSO-A-PASSO.md`](entregas/SEMANA-2-PASSO-A-PASSO.md); export: `npm run ml:export-csv` e [`machine-learning/scripts/exportar_csv_semana2.ps1`](machine-learning/scripts/exportar_csv_semana2.ps1). Checklist de fluxos: [`entregas/checklist-semana-2-fluxos-app.md`](entregas/checklist-semana-2-fluxos-app.md) (sincronizado com artefatos).
 
-### 3.4.1 Entregáveis no Git — Semana 2 (sincronização 04/05/2026)
+### 3.4.1 Entregáveis no Git — Semana 2 (sincronização maio/2026)
 
 | Entregável | Estado no repositório | Onde |
 |------------|------------------------|------|
 | Índice da entrega Semana 2 | Completo | [`entregas/README-ENTREGA-SEMANA-2.md`](entregas/README-ENTREGA-SEMANA-2.md) |
 | Manual do grupo (export, notebook, checklist) | Completo | [`entregas/SEMANA-2-PASSO-A-PASSO.md`](entregas/SEMANA-2-PASSO-A-PASSO.md) |
-| Procedimento export + registo (template) | Completo (execução real pendente) | [`machine-learning/EXPORT_CSV.md`](machine-learning/EXPORT_CSV.md) |
+| Procedimento export + registo | **Completo** (registo preenchido) | [`machine-learning/EXPORT_CSV.md`](machine-learning/EXPORT_CSV.md) |
 | Script export Python + atalhos npm/PowerShell | Completo | [`machine-learning/scripts/export_supabase_csv.py`](machine-learning/scripts/export_supabase_csv.py), [`package.json`](package.json) (`ml:export-csv`), [`machine-learning/scripts/exportar_csv_semana2.ps1`](machine-learning/scripts/exportar_csv_semana2.ps1) |
-| Checklist Semana 2 | Completo (secções R1–R3 preparação repo; T1–T5 e B/C testes manuais) | [`entregas/checklist-semana-2-fluxos-app.md`](entregas/checklist-semana-2-fluxos-app.md) |
+| Checklist Semana 2 | Completo (R/T alinhados a manifest + notebook; B/C com notas) | [`entregas/checklist-semana-2-fluxos-app.md`](entregas/checklist-semana-2-fluxos-app.md) |
 | Demo reunião 10/05 | Roteiro no repo | [`entregas/demo-reuniao-semana-2.md`](entregas/demo-reuniao-semana-2.md) |
 | Bento — evidência visual Semana 2 | Completo | [`entregas/bento/semana-2-auditoria/`](entregas/bento/semana-2-auditoria/) |
 | Thayse — manifest / registo / notebook com dados reais | **Completo (execução local)** | `machine-learning/data/export_manifest.json`; notebook executado: `machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb` |
@@ -100,10 +104,10 @@ Esta subsecção amarra **requisito → evidência no código** conforme o estad
 
 | Foco | Estado | Onde comprovar |
 |------|--------|----------------|
-| Bento — autenticação, fluxos, CRUD | Parcial (requisito global); Semana 2: evidência visual **COMPLETA** | Código: `src/telas/autenticacao/`, `App.js`, `servicoDadosPaciente.js`; pasta [`entregas/bento/semana-2-auditoria/`](entregas/bento/semana-2-auditoria/) — **Evidência visual validada com capturas reais no repositório** |
+| Bento — autenticação, fluxos, CRUD | **Completo (repo + evidências Semana 2 + roteiros)** | Código: `src/telas/autenticacao/`, `App.js`, `servicoDadosPaciente.js`; pasta [`entregas/bento/semana-2-auditoria/`](entregas/bento/semana-2-auditoria/) — **Evidência visual validada com capturas reais no repositório** |
 | Bento — auditoria (código) | Completo | `servicoAuditoria.js`, telas admin e fluxos em `checklist-auditoria.md` |
 | Bento — auditoria (evidência visual Git, Semana 2) | **Completo** | [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md) + [`prints/`](entregas/bento/semana-2-auditoria/prints/) |
-| Thayse — CSV reprodutível | Parcial | `machine-learning/scripts/export_supabase_csv.py`, `machine-learning/EXPORT_CSV.md` |
+| Thayse — CSV reprodutível | **Completo (manifest + registo + script)** | `machine-learning/scripts/export_supabase_csv.py`, `machine-learning/data/export_manifest.json`, `machine-learning/EXPORT_CSV.md` |
 | Thayse — ML GlicNutri (paciente-dia) | **Completo (execução local)** | `machine-learning/notebooks/glicnutri_ml_pipeline.ipynb` + execução `machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb` + artefatos em `machine-learning/api/artifacts/` |
 | Thayse — ML referência GlucoBench | Parcial / em andamento | `machine-learning/notebooks/referencia/glucobench-reference.ipynb` |
 | Thayse — API | **Completo (local)** | `machine-learning/api/app/main.py` (`/health`, `/predict`, CORS habilitado para web) |
@@ -118,19 +122,19 @@ Os requisitos do professor Bento foram organizados com base no documento `Requis
 
 | Nº | Requisito do Bento | O que o requisito pede | Status atual | Evidência encontrada no projeto | O que ainda precisa ser feito | Semana prevista |
 |---|---|---|---|---|---|---|
-| 1 | Documentação Inicial | Documento Word padronizado, definição de tecnologias e levantamento de requisitos | Parcial (repo) | `Planejamento_Final_Atividades_GlicNutri_Ajustado.md`, pasta `entregas/` | Consolidar documento Word final com tecnologias, requisitos e descrição do sistema | Semana 1 e Semana 5 |
-| 2 | Banco de Dados | Estrutura de tabelas, campos adequados, chaves primárias, estrangeiras e relacionamentos | Parcial | `GlicNutri/supabase/migrations/` | Documentar ER/tabelas no documento final acadêmico | Semana 1 |
-| 3 | Autenticação | Login de usuários, validação de credenciais e recuperação de senha | Parcial | Código: `TelaLogin.js`, `TelaRecuperarSenha.js`, `App.js`, RPCs; Semana 2: **Evidência visual validada com capturas reais no repositório** ([`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), `login_*.png` em [`prints/`](entregas/bento/semana-2-auditoria/prints/)) | Recuperação de senha: evidência específica se o professor exigir | Semana 2 |
-| 4 | CRUD Completo | Cadastro, consulta, edição e exclusão lógica | Parcial | Cadastro/gestão: `TelaCadastro.js`, `TelaPacientesNutricionista.js`, `servicoDadosPaciente.js` | Documentar decisão: exclusão clínica por ocultação + auditoria (sem DELETE físico glicemia/medicação) | Semana 2 |
-| 5 | Validações de Dados | Validação de campos obrigatórios, CPF, CEP, email e outros dados necessários | Parcial | Formulários em `TelaCadastro.js`, `TelaPacientesNutricionista.js`, login | Auditoria de cobertura por tela + evidências | Semana 2 |
-| 6 | Fluxo do Sistema | Navegação entre telas, fluxo funcional completo e persistência no banco | Parcial | `App.js`, fluxos paciente/nutri/admin; Semana 2: **Evidência visual validada com capturas reais no repositório** (login + glicemia em [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md) / [`prints/`](entregas/bento/semana-2-auditoria/prints/)) | Roteiro/demo gravado global (entrega ampliada) | Semana 2 e Semana 4 |
-| 7 | Usabilidade | Interface funcional, facilidade de uso e navegação intuitiva | Parcial | UI RN em `src/telas/` | Revisão heurística + prints | Semana 4 |
-| 8 | Auditoria | Registro de ações de cadastro, movimentações e logs de operações | Parcial | Código completo; Semana 2: **Evidência visual validada com capturas reais no repositório** ([`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), [`prints/`](entregas/bento/semana-2-auditoria/prints/), checklist/STATUS) | Texto LGPD no documento Word final (entrega académica global) | Semana 4 |
-| 9 | Relatórios e Gráficos | Relatórios de dados, visualizações gráficas e informações gerenciais | Parcial | Painel admin, curvas/monitoramento paciente | Consolidar entregável + prints disciplina | Semana 4 |
-| 10 | Organização do Código | Estrutura organizada, código limpo e separação de responsabilidades | Parcial | `src/` serviços, telas, componentes | Descrever estrutura no documento final | Semana 5 |
-| 11 | Atualização da Documentação | Documento atualizado, corrigido conforme feedback e coerente com o sistema | Em andamento | Este planejamento (secção 3.4), entregas md | Sincronizar Word final com sistema real | Semana 5 |
-| 12 | Entrega Final | Sistema funcional, código em ZIP, slides e vídeo demonstrativo | Não feito (pacote) | Código no repositório | ZIP, slides, vídeo | Semana 5 |
-| 13 | Critérios de Avaliação | Funcionamento do sistema, implementação dos requisitos, organização e qualidade da apresentação | Em acompanhamento | Checklist secção 11 | Ensaio final | Semana 5 |
+| 1 | Documentação Inicial | Documento Word padronizado, definição de tecnologias e levantamento de requisitos | **Completo (repo + suporte Word)** | `Planejamento_Final_Atividades_GlicNutri_Ajustado.md`, `entregas/`, `WordFinalGlicNutri-ATUALIZADO.docx`, `entregas/WordFinalGlicNutri-ATUALIZACOES-PARA-COLAR.md` | Copiar textos LGPD/resumo para o **Word oficial** do TCC e revisar formatação ABNT | Semana 5 |
+| 2 | Banco de Dados | Estrutura de tabelas, campos adequados, chaves primárias, estrangeiras e relacionamentos | **Completo (repo)** | `supabase/migrations/`, `entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md`, `entregas/diagrama-glicnutri-a4-vertical.pdf` | Print opcional do Supabase no **ZIP** da disciplina | Semana 5 |
+| 3 | Autenticação | Login de usuários, validação de credenciais e recuperação de senha | **Completo (código + evidência visual)** | `TelaLogin.js`, `TelaRecuperarSenha.js`, `App.js`; Semana 2: [`evidencias-auditoria.md`](entregas/bento/semana-2-auditoria/evidencias-auditoria.md), `login_*.png` | Evidência dedicada de **recuperação de senha** só se o professor exigir | Semana 2 |
+| 4 | CRUD Completo | Cadastro, consulta, edição e exclusão lógica | **Completo (repo + roteiro)** | `TelaCadastro.js`, `TelaPacientesNutricionista.js`, `servicoDadosPaciente.js`; `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md` | Prints extra no ZIP se exigido | Semana 2 |
+| 5 | Validações de Dados | Validação de campos obrigatórios, CPF, CEP, email e outros dados necessários | **Completo (repo + roteiro)** | Formulários + `servicoVerificacaoEmail.js`; roteiro CRUD | Prints de erro/sucesso no ZIP se exigido | Semana 2 |
+| 6 | Fluxo do Sistema | Navegação entre telas, fluxo funcional completo e persistência no banco | **Completo (código + evidência parcial)** | `App.js`, fluxos paciente/nutri/admin; Semana 2 (login + glicemia) | **Vídeo demo** global (pacote final) | Semana 4–5 |
+| 7 | Usabilidade | Interface funcional, facilidade de uso e navegação intuitiva | **Completo (repo + texto)** | UI RN + `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` | Selecionar 2–3 prints finais para slides/ZIP | Semana 4–5 |
+| 8 | Auditoria | Registro de ações de cadastro, movimentações e logs de operações | **Completo (código + evidência visual)** | `servicoAuditoria.js`, telas admin; [`semana-2-auditoria/`](entregas/bento/semana-2-auditoria/) | — | Semana 4 |
+| 9 | Relatórios e Gráficos | Relatórios de dados, visualizações gráficas e informações gerenciais | **Completo (repo + texto)** | `TelaHomeAdmin.js`, monitoramento paciente; `USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` | Prints de painel no ZIP/slides | Semana 4–5 |
+| 10 | Organização do Código | Estrutura organizada, código limpo e separação de responsabilidades | **Completo (repo)** | `src/telas/`, `src/servicos/`, `src/componentes/` | Descrever no Word (secção técnica) | Semana 5 |
+| 11 | Atualização da Documentação | Documento atualizado, corrigido conforme feedback e coerente com o sistema | **Completo (repo)** | Este planejamento (secção 11), `entregas/`, checklists | Sincronizar **PDF/Word** final com o repositório | Semana 5 |
+| 12 | Entrega Final | Sistema funcional, código em ZIP, slides e vídeo demonstrativo | **Suporte completo no repo; ficheiros finais pelo grupo** | `scripts/build-zip-entrega.ps1`, `entregas/PACOTE-MONTAGEM.md`, `entregas/slides-roteiro.md`, `entregas/PACOTE-FINAL-CHECKLIST.md` | Correr script ZIP, gravar vídeo, exportar `.pptx` | Semana 5 |
+| 13 | Critérios de Avaliação | Funcionamento do sistema, implementação dos requisitos, organização e qualidade da apresentação | **Checklist preparado** | `entregas/ENSAIO-FINAL-CHECKLIST.md`, `checklist-13-requisitos-bento.md` | **Ensaio real** antes da banca | Semana 5 |
 
 ---
 
@@ -341,7 +345,7 @@ Com a execução deste plano, o grupo terá maior controle sobre as pendências,
 | Item | Status |
 |---|---|
 | Índice e manual Semana 2 no repositório (`entregas/README-ENTREGA-SEMANA-2.md`, `SEMANA-2-PASSO-A-PASSO.md`, atalhos export) | [x] |
-| Conferir os 13 requisitos do Bento e relacionar cada um com uma evidência do sistema ou da documentação | [ ] |
+| Conferir os 13 requisitos do Bento e relacionar cada um com uma evidência do sistema ou da documentação | [x] `entregas/bento/checklist-13-requisitos-bento.md` |
 | Consolidar checklist da Thayse e rastrear cada item para um entregável | [x] `entregas/thayse/RESUMO-ENTREGA-ML.md` |
 | Definir dataset real do GlicNutri: variáveis, objetivo e regras | [x] secção 5.3 (dataset oficial paciente-dia) |
 | Implementar exportação/ETL Supabase para CSV reprodutível | [x] script `machine-learning/scripts/export_supabase_csv.py` |
@@ -356,19 +360,26 @@ Com a execução deste plano, o grupo terá maior controle sobre as pendências,
 | Consolidar evidências do app: login, CRUD, exclusão lógica e processos | [x] Semana 2 Bento: `entregas/bento/semana-2-auditoria/` com PNG em `prints/` e docs alinhados |
 | Consolidar auditoria/logs no repositório (evidências Semana 2) | [x] `evidencias-auditoria.md`, `checklist-auditoria.md`, `STATUS-SEMANA-2.md`; **Evidência visual validada com capturas reais no repositório** |
 | Roteiros/texto prontos para fechar parciais do Bento (BD/CRUD/UX/relatórios) | [x] `entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md`, `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md`, `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` |
-| Consolidar texto LGPD no documento Word final | [ ] |
-| Consolidar relatórios e gráficos para apresentação | [ ] |
-| Preparar slides e roteiro de demonstração | [ ] |
-| Preparar ZIP do projeto e vídeo demonstrativo | [ ] |
-| Ensaiar apresentação final e revisar checklist de entrega | [ ] |
+| Consolidar texto LGPD no documento Word final | [x] texto em `entregas/LGPD-TEXTO-CURTO.md` + suplemento `WordFinalGlicNutri-ATUALIZADO.docx` / `entregas/WordFinalGlicNutri-ATUALIZACOES-PARA-COLAR.md` — **copiar para o Word oficial do TCC** |
+| Consolidar relatórios e gráficos para apresentação | [x] `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` — **capturas finais no ZIP se a disciplina exigir** |
+| Preparar slides e roteiro de demonstração | [x] roteiro `entregas/slides-roteiro.md` — **ficheiro `.pptx` é manual** |
+| Preparar ZIP do projeto e vídeo demonstrativo | [x] suporte `scripts/build-zip-entrega.ps1` + `entregas/PACOTE-MONTAGEM.md` — **correr script, anexar ZIP e gravar vídeo manualmente** |
+| Ensaiar apresentação final e revisar checklist de entrega | [x] `entregas/ENSAIO-FINAL-CHECKLIST.md` + `entregas/PACOTE-FINAL-CHECKLIST.md` — **executar ensaio na vossa máquina** |
+
+### 11.1 O que só o grupo executa (fora do Git)
+
+- Exportar e subir o **.pptx** e o **vídeo** finais.
+- Correr `build-zip-entrega.ps1` e juntar ao pacote **CSV real** / prints extra, se obrigatório.
+- **Ensaio real** (uvicorn + `npm run start` + Previsão IA) na semana da entrega.
 
 ---
 
 ## 12. Próximos passos imediatos do grupo
 
-1. **Semana 2 — Thayse (fechado localmente):** export executado (CSV + `export_manifest.json`), notebook executado (EDA + treino + artefatos), API local rodando e integrada ao app (tela paciente “Previsão (IA)”). Próximo passo é **capturar evidências** (prints e métricas) para o pacote acadêmico e, se permitido, commitar `machine-learning/data/export_manifest.json`.
-2. **Reunião 10/05:** seguir [`entregas/demo-reuniao-semana-2.md`](entregas/demo-reuniao-semana-2.md); declarar plano B (sample + limitações) se o volume real ainda for insuficiente.
-3. Fechar o checklist do Bento com base nos 13 requisitos oficiais, relacionando cada requisito com telas, funcionalidades, banco de dados, documentos ou evidências do sistema. Base pronta: `entregas/bento/checklist-13-requisitos-bento.md` (evidência visual Semana 2 já em [`entregas/bento/semana-2-auditoria/`](entregas/bento/semana-2-auditoria/)).
-4. (Concluído) Dataset oficial do ML definido na secção 5.3 (paciente-dia + features + alvos + regras).
-5. **Semana 3:** reforçar métricas e narrativa (opcional: mais dados, melhor validação, gráficos e explicação clínica) — o baseline já está funcional.
-6. Estabelecer rotina de reunião semanal e uma entrega mínima por semana, com responsáveis e validação coletiva.
+1. **Pacote e ensaio:** seguir `entregas/PACOTE-MONTAGEM.md`, `entregas/ENSAIO-FINAL-CHECKLIST.md` e `entregas/PACOTE-FINAL-CHECKLIST.md` (ZIP, vídeo, `.pptx`, ensaio local).
+2. **Semana 2 — Thayse (fechado localmente):** export executado (CSV + `export_manifest.json`), notebook executado (EDA + treino + artefatos), API local rodando e integrada ao app (tela paciente “Previsão (IA)”). Próximo passo é **capturar evidências** (prints e métricas) para o pacote acadêmico e, se permitido, commitar `machine-learning/data/export_manifest.json`.
+3. **Reunião 10/05:** seguir [`entregas/demo-reuniao-semana-2.md`](entregas/demo-reuniao-semana-2.md); declarar plano B (sample + limitações) se o volume real ainda for insuficiente.
+4. **Checklist Bento (13):** mantido em [`entregas/bento/checklist-13-requisitos-bento.md`](entregas/bento/checklist-13-requisitos-bento.md) com evidências no repositório; atualizar apenas se o professor pedir provas adicionais.
+5. (Concluído) Dataset oficial do ML definido na secção 5.3 (paciente-dia + features + alvos + regras).
+6. **Semana 3:** reforçar métricas e narrativa (opcional: mais dados, melhor validação, gráficos e explicação clínica) — o baseline já está funcional.
+7. Estabelecer rotina de reunião semanal e uma entrega mínima por semana, com responsáveis e validação coletiva.
