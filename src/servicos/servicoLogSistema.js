@@ -6,6 +6,30 @@ const SYSTEM_LOG_BUCKET = 'system-logs';
 const SYSTEM_LOG_PREFIX = 'runtime';
 const MAX_LOG_FILE_SIZE = 1024 * 1024;
 
+export const TIPOS_HISTORICO_LOG = {
+  ABRIR: 'ABRIR',
+  CADASTRO: 'CADASTRO',
+  ALTERACAO: 'ALTERACAO',
+  EXCLUSAO: 'EXCLUSAO',
+  LOGIN: 'LOGIN',
+  ERRO: 'ERRO',
+  SINCRONIZACAO: 'SINCRONIZACAO',
+  ALERTA: 'ALERTA',
+};
+
+export const MODULOS_LOG_SISTEMA = {
+  LOGIN: 'LOGIN',
+  ADMIN: 'ADMIN',
+  PACIENTE: 'PACIENTE',
+  NUTRICIONISTA: 'NUTRICIONISTA',
+  GLICEMIA: 'GLICEMIA',
+  ALIMENTACAO: 'ALIMENTACAO',
+  PLANO_ALIMENTAR: 'PLANO_ALIMENTAR',
+  CONSULTA: 'CONSULTA',
+  FIREBASE: 'FIREBASE',
+  NOTIFICACAO: 'NOTIFICACAO',
+};
+
 let captureConfigured = false;
 let internalWriteInProgress = false;
 let originalConsoleMethods = null;
@@ -105,6 +129,117 @@ function stringifyValue(value) {
 
 function normalizeConsoleArgs(args) {
   return args.map((item) => stringifyValue(item)).join(' ');
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+function normalizeUserLabel(value) {
+  if (!value) return 'Sistema';
+  if (typeof value === 'string') return value;
+
+  return (
+    value.nome_completo_admin ||
+    value.nome_completo_nutri ||
+    value.nome_nutri ||
+    value.nome_completo ||
+    value.email_acesso ||
+    value.email_pac ||
+    value.email ||
+    value.id_admin_uuid ||
+    value.id_nutricionista_uuid ||
+    value.id_paciente_uuid ||
+    'Sistema'
+  );
+}
+
+function inferLevelFromHistorico(historico) {
+  switch (String(historico || '').trim().toUpperCase()) {
+    case TIPOS_HISTORICO_LOG.ERRO:
+      return 'error';
+    case TIPOS_HISTORICO_LOG.ALERTA:
+      return 'warn';
+    default:
+      return 'log';
+  }
+}
+
+function buildLegacySystemLogItem(parsed) {
+  const context = parsed?.context && typeof parsed.context === 'object' ? parsed.context : {};
+  const programa = String(context.programa || parsed?.source || 'APP').trim();
+  const descricao = String(context.descricao || parsed?.source || 'Evento do sistema').trim();
+  const usuario = normalizeUserLabel(context.usuario);
+  const historico = String(
+    context.historico ||
+      (parsed?.level === 'error'
+        ? TIPOS_HISTORICO_LOG.ERRO
+        : parsed?.level === 'warn'
+          ? TIPOS_HISTORICO_LOG.ALERTA
+          : TIPOS_HISTORICO_LOG.ALTERACAO)
+  ).trim();
+  const complemento = String(context.complemento || parsed?.message || '').trim();
+
+  return {
+    id: parsed?.id,
+    seq: '',
+    programa,
+    descricao,
+    usuario,
+    historico,
+    dataHora: parsed?.createdAt || '',
+    createdAt: parsed?.createdAt || '',
+    dataHoraFormatada: '',
+    complemento,
+    detalhes: context.detalhes || context.contexto || null,
+    origem: 'sistema',
+    path: parsed?.path || '',
+    level: parsed?.level || 'log',
+    source: parsed?.source || 'app',
+    stack: parsed?.stack || '',
+    dispositivoResumo: context.dispositivoResumo || '',
+  };
+}
+
+function matchesLegacyLogFilter(item, filters = {}) {
+  const usuario = normalizeSearchText(filters.usuario);
+  const historico = normalizeSearchText(filters.historico);
+  const complemento = normalizeSearchText(filters.complemento);
+
+  if (usuario && !normalizeSearchText(item.usuario).includes(usuario)) {
+    return false;
+  }
+
+  if (historico && !normalizeSearchText(item.historico).includes(historico)) {
+    return false;
+  }
+
+  if (complemento) {
+    const searchable = normalizeSearchText(
+      [
+        item.programa,
+        item.descricao,
+        item.usuario,
+        item.historico,
+        item.complemento,
+        item.source,
+        item.stack,
+        JSON.stringify(item.detalhes || {}),
+      ]
+        .filter(Boolean)
+        .join(' ')
+    );
+
+    if (!searchable.includes(complemento)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function buildLogText({
@@ -278,6 +413,9 @@ export async function listarLogsSistema({
   limit = 80,
   level = '',
   search = '',
+  usuario = '',
+  historico = '',
+  complemento = '',
 } = {}) {
   const prefixes = buildRecentDatePrefixes(days);
   const parsedLogs = [];
@@ -312,7 +450,10 @@ export async function listarLogsSistema({
       const parsed = parseSystemLogText(text, fullPath);
 
       if (matchesSystemLogFilter(parsed, { level, search })) {
-        parsedLogs.push(parsed);
+        const legacyItem = buildLegacySystemLogItem(parsed);
+        if (matchesLegacyLogFilter(legacyItem, { usuario, historico, complemento })) {
+          parsedLogs.push(legacyItem);
+        }
       }
     }
   }
@@ -321,6 +462,82 @@ export async function listarLogsSistema({
     .sort((left, right) => String(right.createdAt || '').localeCompare(String(left.createdAt || '')))
     .slice(0, Math.max(Number(limit) || 1, 1));
 }
+
+export const AppLogger = {
+  async registrar({
+    programa = 'APP',
+    descricao = 'Evento do sistema',
+    usuario = null,
+    historico = TIPOS_HISTORICO_LOG.ALTERACAO,
+    complemento = '',
+    detalhes = null,
+  } = {}) {
+    return registrarLogSistema({
+      level: inferLevelFromHistorico(historico),
+      source: programa,
+      message: complemento || descricao,
+      context: {
+        programa,
+        descricao,
+        usuario: normalizeUserLabel(usuario),
+        historico,
+        complemento,
+        detalhes,
+      },
+    });
+  },
+
+  async erro(programa, descricao, erro = null, meta = {}) {
+    return registrarLogSistema({
+      level: 'error',
+      source: programa || 'APP',
+      message: meta?.complemento || erro?.message || descricao || 'Erro do sistema',
+      stack: erro?.stack || '',
+      context: {
+        programa: programa || 'APP',
+        descricao: descricao || 'Erro do sistema',
+        usuario: normalizeUserLabel(meta?.usuario),
+        historico: TIPOS_HISTORICO_LOG.ERRO,
+        complemento: meta?.complemento || erro?.message || '',
+        detalhes: meta?.detalhes || null,
+        nomeErro: erro?.name || null,
+      },
+    });
+  },
+
+  async alerta(programa, descricao, meta = {}) {
+    return this.registrar({
+      programa,
+      descricao,
+      usuario: meta?.usuario,
+      historico: TIPOS_HISTORICO_LOG.ALERTA,
+      complemento: meta?.complemento || '',
+      detalhes: meta?.detalhes || null,
+    });
+  },
+
+  async cadastro(programa, descricao, meta = {}) {
+    return this.registrar({
+      programa,
+      descricao,
+      usuario: meta?.usuario,
+      historico: TIPOS_HISTORICO_LOG.CADASTRO,
+      complemento: meta?.complemento || '',
+      detalhes: meta?.detalhes || null,
+    });
+  },
+
+  async sincronizacao(programa, descricao, meta = {}) {
+    return this.registrar({
+      programa,
+      descricao,
+      usuario: meta?.usuario,
+      historico: TIPOS_HISTORICO_LOG.SINCRONIZACAO,
+      complemento: meta?.complemento || '',
+      detalhes: meta?.detalhes || null,
+    });
+  },
+};
 
 export function configurarCapturaGlobalLogs() {
   if (captureConfigured) {
