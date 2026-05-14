@@ -2103,6 +2103,10 @@ export default function PacienteMonitoramentoScreen({
           error?.message ||
           'Não foi possível salvar a glicemia. Verifique a conexão e tente novamente.',
       });
+      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Registro de glicemia', error, {
+        usuario: patient || usuarioLogado,
+        complemento: `Falha ao salvar glicemia | Valor informado: ${parsedValue || 'n/a'} mg/dL`,
+      });
     } finally {
       setSavingGlucose(false);
     }
@@ -2181,6 +2185,10 @@ export default function PacienteMonitoramentoScreen({
         tipo: 'erro',
         texto:
           'Não foi possível sincronizar o LibreView. Verifique a conexão e tente novamente.',
+      });
+      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Sincronizacao LibreView', error, {
+        usuario: patient || usuarioLogado,
+        complemento: 'Falha ao sincronizar leituras do LibreView',
       });
     } finally {
       setSyncingLibreView(false);

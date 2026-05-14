@@ -29,6 +29,7 @@ import NutriConsultaScreen from './src/telas/nutricionista/TelaConsultaNutri';
 import TelaAuditoriaAdmin from './src/telas/admin/TelaAuditoriaAdmin';
 import TelaHomeAdmin from './src/telas/admin/TelaHomeAdmin';
 import TelaLogsSistemaAdmin from './src/telas/admin/TelaLogsSistemaAdmin';
+import TelaDetalheLogSistemaAdmin from './src/telas/admin/TelaDetalheLogSistemaAdmin';
 import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
@@ -635,6 +636,10 @@ export default function App() {
 
               <Stack.Screen name="AdminLogsSistema" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <TelaLogsSistemaAdmin {...getAdminProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="AdminDetalheLogSistema" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <TelaDetalheLogSistemaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
               </Stack.Navigator>
             </NavigationContainer>

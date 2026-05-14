@@ -563,6 +563,10 @@ export default function TelaLogin({ navigation, route, session }) {
       setErrorMessage(
         'O Google voltou para o app, mas o Supabase não criou a sessão. Tente novamente.'
       );
+      AppLogger.erro(MODULOS_LOG_SISTEMA.LOGIN, 'Tela de autenticacao', null, {
+        usuario: 'paciente_google',
+        complemento: 'Google retornou para o app sem sessao Supabase',
+      });
     } catch (error) {
       console.log('Erro login Google =>', error);
       registrarLogAuditoria({
