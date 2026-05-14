@@ -26,6 +26,7 @@ export default function PatientScreenLayout({
   showTabBar = route?.name === 'HomePaciente',
   scrollEnabled = true,
   footerOverlay,
+  refreshControl,
 }) {
   const showHeader = Boolean(title || subtitle || rightAction);
 
@@ -60,6 +61,7 @@ export default function PatientScreenLayout({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
+            refreshControl={refreshControl}
           >
             {children}
           </ScrollView>

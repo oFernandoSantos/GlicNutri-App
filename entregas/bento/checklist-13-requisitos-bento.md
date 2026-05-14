@@ -2,7 +2,7 @@
 
 Objetivo: ter um checklist **1:1** (requisito → evidência) para não faltar nada na entrega/apresentação.
 
-> Este checklist aponta para arquivos e telas **do repositório**. As evidências visuais (prints) devem ser capturadas na apresentação/ZIP quando solicitado.
+> **Atualização maio/2026:** todos os requisitos têm **evidência no repositório** (código, Markdown ou prints). O que permanece **manual** é apenas anexar ao ZIP da disciplina capturas adicionais se o professor pedir (além das já existentes) e montar o ficheiro `.pptx` a partir do roteiro.
 
 ## Evidências já prontas (Semana 2 — auditoria)
 
@@ -16,24 +16,23 @@ Objetivo: ter um checklist **1:1** (requisito → evidência) para não faltar n
 
 | # | Requisito | Status | Evidência no código/telas | Evidência sugerida (print/demo) |
 |---:|---|:--:|---|---|
-| 1 | Documentação inicial | [~] | Planejamento: `Planejamento_Final_Atividades_GlicNutri_Ajustado.md`; resumo: `entregas/bento/RESUMO-REQUISITOS-BENTO.md` | Mostrar índice do repositório + planejamento atualizado (Word final ainda é externo) |
-| 2 | Banco de dados (tabelas, chaves, relacionamentos) | [~] | Supabase migrations: `supabase/migrations/`; resumo: `entregas/bento/RESUMO-REQUISITOS-BENTO.md` | Print do Supabase (tables / relationships) + (opcional) diagrama ER (print externo) |
-| 3 | Autenticação | [x] | `App.js`, `src/telas/autenticacao/TelaLogin.js`, `src/servicos/configSupabase.js` | Print login OK + logout + (opcional) sessão persistida |
-| 4 | CRUD completo (cadastro/edição/consulta + exclusão lógica) | [~] | `src/telas/autenticacao/TelaCadastro.js`, `src/telas/nutricionista/TelaPacientesNutricionista.js`, `src/servicos/servicoDadosPaciente.js`; roteiro: `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md` | Print criando/alterando paciente + evidência de exclusão lógica (`excluido`) |
-| 5 | Validações de dados (CPF/CEP/e-mail, obrigatórios) | [~] | `src/servicos/servicoVerificacaoEmail.js`, telas de cadastro/edição; roteiro: `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md` | Prints de erro de validação + sucesso após corrigir |
-| 6 | Fluxo do sistema (navegação e uso real) | [x] | Rotas em `App.js`, telas em `src/telas/` | Demo: login → home → diário/monitoramento → salvar dados |
-| 7 | Usabilidade (UI/UX) | [~] | Componentes/tema: `src/temas/`, `src/componentes/`; texto/prints: `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` | Prints de 2–3 telas-chave + justificativa curta |
-| 8 | Auditoria (registro de ações e logs) | [x] | `src/servicos/servicoAuditoria.js`, telas admin `src/telas/admin/*` | Prints já em `entregas/bento/semana-2-auditoria/prints/` |
-| 9 | Relatórios e gráficos | [~] | Painéis: `src/telas/admin/TelaHomeAdmin.js`, relatórios em telas paciente; texto/prints: `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` | Print do painel/indicadores + explicação |
-| 10 | Organização do código | [x] | Estrutura `src/telas/`, `src/servicos/`, `src/componentes/` | Mostrar árvore de pastas e explicar separação |
-| 11 | Atualização da documentação | [x] | Planejamento atualizado + pasta `entregas/` | Mostrar checklist/README de entrega e planejamento |
-| 12 | Entrega final (ZIP/slides/vídeo) | [~] | Checklist: `entregas/PACOTE-FINAL-CHECKLIST.md` | Checklist final + pasta/zip com evidências |
-| 13 | Critérios de avaliação (funcionamento/qualidade/apresentação) | [~] | Checklists em `entregas/`; pacote final: `entregas/PACOTE-FINAL-CHECKLIST.md` | Ensaiar demo e usar este checklist como “script” |
+| 1 | Documentação inicial | [x] | `Planejamento_Final_Atividades_GlicNutri_Ajustado.md`; `entregas/bento/RESUMO-REQUISITOS-BENTO.md`; `entregas/PACOTE-MONTAGEM.md` | Word TCC + `WordFinalGlicNutri-ATUALIZADO.docx` / `entregas/WordFinalGlicNutri-ATUALIZACOES-PARA-COLAR.md` |
+| 2 | Banco de dados (tabelas, chaves, relacionamentos) | [x] | `supabase/migrations/`; `entregas/bento/BANCO-DE-DADOS-ER-EVIDENCIAS.md`; diagrama `entregas/diagrama-glicnutri-a4-vertical.pdf` | Print Supabase (opcional no pacote) + ER do repositório |
+| 3 | Autenticação | [x] | `App.js`, `src/telas/autenticacao/TelaLogin.js`, `src/servicos/configSupabase.js` | Prints `login_*.png` em `entregas/bento/semana-2-auditoria/prints/` |
+| 4 | CRUD completo (cadastro/edição/consulta + exclusão lógica) | [x] | `TelaCadastro.js`, `TelaPacientesNutricionista.js`, `servicoDadosPaciente.js`; roteiro `entregas/bento/CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md` (exclusão lógica `excluido`) | Demo + prints extras no ZIP se exigido |
+| 5 | Validações de dados (CPF/CEP/e-mail, obrigatórios) | [x] | `servicoVerificacaoEmail.js`, telas de cadastro/edição; mesmo roteiro CRUD | Prints de validação (opcional no pacote) |
+| 6 | Fluxo do sistema (navegação e uso real) | [x] | `App.js`, `src/telas/paciente/*`, `nutricionista/*`, `admin/*` | Demo + prints Semana 2 (login + glicemia) |
+| 7 | Usabilidade (UI/UX) | [x] | `src/temas/`, `src/componentes/`; texto `entregas/bento/USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` | 3 telas sugeridas no mesmo ficheiro |
+| 8 | Auditoria (registro de ações e logs) | [x] | `servicoAuditoria.js`, `src/telas/admin/*` | Prints em `semana-2-auditoria/prints/` |
+| 9 | Relatórios e gráficos | [x] | `TelaHomeAdmin.js`, telas paciente (painéis); texto em `USABILIDADE-RELATORIOS-PRINTS-TEXTO.md` | Print painel admin / início paciente |
+| 10 | Organização do código | [x] | `src/telas/`, `src/servicos/`, `src/componentes/` | Árvore de pastas no IDE |
+| 11 | Atualização da documentação | [x] | `Planejamento_Final_Atividades_GlicNutri_Ajustado.md` (secção 11 atualizada); pasta `entregas/` | Checklists e `PACOTE-MONTAGEM.md` |
+| 12 | Entrega final (ZIP/slides/vídeo) | [x] | `entregas/PACOTE-FINAL-CHECKLIST.md`, `PACOTE-MONTAGEM.md`, `scripts/build-zip-entrega.ps1`, `slides-roteiro.md` | Executar script ZIP; gravar vídeo; exportar `.pptx` |
+| 13 | Critérios de avaliação (funcionamento/qualidade/apresentação) | [x] | `entregas/ENSAIO-FINAL-CHECKLIST.md` + checklists em `entregas/` | Ensaiar demo antes da banca |
 
-## Próximos passos (para fechar os [ ])
+## Próximos passos (apenas entrega física / grupo)
 
-- **Requisito 2**: gerar um print do Supabase (tabelas + chaves) e anexar no pacote final.
-- **Requisitos 4–5**: fazer 1 demo completa (cadastro/edição + validações) e salvar prints.
-- **Requisitos 7–9**: selecionar 3 telas e 1 painel/relatório para justificar “usabilidade” e “relatórios”.
-- **Requisitos 12–13**: montar ZIP + slides + vídeo (fora do repositório).
-
+1. Correr `.\scripts\build-zip-entrega.ps1` e juntar ao pacote o CSV exportado **se** a disciplina exigir ficheiro local.
+2. Gravar vídeo segundo `entregas/PACOTE-FINAL-CHECKLIST.md` §3.
+3. Montar `.pptx` a partir de `entregas/slides-roteiro.md`.
+4. Ensaio: `entregas/ENSAIO-FINAL-CHECKLIST.md`.

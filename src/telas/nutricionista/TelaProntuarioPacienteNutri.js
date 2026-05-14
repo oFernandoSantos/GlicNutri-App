@@ -1,7 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Platform,
   ScrollView,
   StatusBar,
@@ -14,10 +13,19 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import {
   createProntuarioNota,
   fetchNutriProntuario,
 } from '../../servicos/servicoProntuarioNutri';
+import { mlPredict } from '../../servicos/servicoMlLocal';
+import { buildTypicalDayFeaturesForMl } from '../../servicos/servicoAgregacaoFeaturesMl';
+import {
+  rankDietTemplatesFromMlPrediction,
+  buildProntuarioNotaSugestaoDieta,
+} from '../../servicos/servicoSugestaoDietaMl';
+import { getDietaById } from '../../constantes/dietasReferenciaNutricional';
 import {
   disableOtherMealPlansForPatient,
   fetchActiveMealPlanForPatient,
@@ -50,7 +58,20 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   const [planTitle, setPlanTitle] = useState('');
   const [planDescription, setPlanDescription] = useState('');
   const [noteText, setNoteText] = useState('');
-  const [activeTab, setActiveTab] = useState('timeline'); // timeline | plan | notes
+  const [activeTab, setActiveTab] = useState('timeline'); // timeline | plan | diets | notes
+  const [loadError, setLoadError] = useState(null);
+  const [mensagemBanner, setMensagemBanner] = useState(null);
+  const [prontuarioBundle, setProntuarioBundle] = useState({
+    glucoseReadings: [],
+    meals: [],
+    medications: [],
+  });
+  const [janelaDias, setJanelaDias] = useState(14);
+  const [agregadoMl, setAgregadoMl] = useState(null);
+  const [rankingDietas, setRankingDietas] = useState(null);
+  const [mlCarregando, setMlCarregando] = useState(false);
+  const [dietaSelecionadaId, setDietaSelecionadaId] = useState(null);
+  const [comentarioDieta, setComentarioDieta] = useState('');
 
   const canLoad = Boolean(effectivePacienteId);
 
@@ -79,13 +100,21 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       }
 
       setPatientRow(patientResp?.data || null);
+      setProntuarioBundle({
+        glucoseReadings: prontuario?.glucoseReadings || [],
+        meals: prontuario?.meals || [],
+        medications: prontuario?.medications || [],
+      });
       setTimeline(prontuario?.timeline || []);
       setMealPlan(activePlan || null);
       setPlanTitle(String(activePlan?.titulo || 'Plano alimentar'));
       setPlanDescription(String(activePlan?.descricao || ''));
+      setLoadError(null);
     } catch (error) {
       console.log('Erro ao carregar prontuario:', error);
-      Alert.alert('Erro', 'Nao foi possivel carregar o prontuario do paciente.');
+      setLoadError(
+        'Não foi possível carregar o prontuário. Verifique a conexão e tente novamente.'
+      );
     } finally {
       setLoading(false);
     }
@@ -100,7 +129,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   async function handleSavePlan() {
     try {
       if (!nutricionistaId) {
-        Alert.alert('Atencao', 'Nutricionista sem identificador.');
+        setMensagemBanner({ tipo: 'aviso', texto: 'Nutricionista sem identificador.' });
         return;
       }
 
@@ -124,21 +153,94 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       });
 
       setMealPlan(saved);
-      Alert.alert('Sucesso', 'Plano alimentar salvo e publicado para o paciente.');
+      setMensagemBanner({
+        tipo: 'sucesso',
+        texto: 'Plano alimentar salvo e publicado para o paciente.',
+      });
     } catch (error) {
       console.log('Erro ao salvar plano:', error);
-      Alert.alert('Erro', error?.message || 'Nao foi possivel salvar o plano.');
+      setMensagemBanner({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível salvar o plano. Verifique a conexão e tente novamente.',
+      });
+    }
+  }
+
+  async function handleRodarMlDietas() {
+    try {
+      setMlCarregando(true);
+      setMensagemBanner(null);
+      const agg = buildTypicalDayFeaturesForMl({
+        ...prontuarioBundle,
+        windowDays: janelaDias,
+      });
+      setAgregadoMl(agg);
+      const pred = await mlPredict(agg.features);
+      const ranked = rankDietTemplatesFromMlPrediction(pred, agg.features);
+      setRankingDietas(ranked);
+      setDietaSelecionadaId(ranked.primaryId);
+    } catch (error) {
+      console.log('Erro ML dietas:', error);
+      setMensagemBanner({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Nao foi possivel contatar a API de ML. Inicie uvicorn (porta 8001) ou verifique a rede.',
+      });
+    } finally {
+      setMlCarregando(false);
+    }
+  }
+
+  async function handleSalvarSugestaoDietaProntuario() {
+    try {
+      if (!nutricionistaId) {
+        setMensagemBanner({ tipo: 'aviso', texto: 'Nutricionista sem identificador.' });
+        return;
+      }
+      const dieta = getDietaById(dietaSelecionadaId);
+      if (!dieta) {
+        setMensagemBanner({ tipo: 'aviso', texto: 'Selecione um padrao alimentar na lista.' });
+        return;
+      }
+      const texto = buildProntuarioNotaSugestaoDieta({
+        dietaSelecionada: dieta,
+        rankedSnapshot: rankingDietas,
+        comentarioNutri: comentarioDieta,
+        windowDays: agregadoMl?.janelaDias ?? janelaDias,
+        diasComDados: agregadoMl?.diasComDados ?? 0,
+      });
+      await createProntuarioNota({
+        nutricionistaId,
+        pacienteId: effectivePacienteId,
+        consultaId: null,
+        texto,
+      });
+      setComentarioDieta('');
+      await load();
+      setActiveTab('timeline');
+      setMensagemBanner({
+        tipo: 'sucesso',
+        texto: 'Sugestao registrada no prontuario como nota.',
+      });
+    } catch (error) {
+      setMensagemBanner({
+        tipo: 'erro',
+        texto: error?.message || 'Nao foi possivel salvar a sugestao.',
+      });
     }
   }
 
   async function handleAddNote() {
     try {
       if (!nutricionistaId) {
-        Alert.alert('Atencao', 'Nutricionista sem identificador.');
+        setMensagemBanner({ tipo: 'aviso', texto: 'Nutricionista sem identificador.' });
         return;
       }
       if (!noteText.trim()) {
-        Alert.alert('Atencao', 'Digite uma nota.');
+        setMensagemBanner({ tipo: 'aviso', texto: 'Digite uma nota.' });
         return;
       }
       await createProntuarioNota({
@@ -151,7 +253,12 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       await load();
       setActiveTab('timeline');
     } catch (error) {
-      Alert.alert('Erro', error?.message || 'Nao foi possivel salvar a nota.');
+      setMensagemBanner({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível salvar a nota. Verifique a conexão e tente novamente.',
+      });
     }
   }
 
@@ -167,6 +274,15 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         contentContainerStyle={[styles.content, Platform.OS === 'web' && styles.webContent]}
         showsVerticalScrollIndicator={false}
       >
+        {mensagemBanner?.texto ? (
+          <MensagemInline
+            tipo={mensagemBanner.tipo || 'aviso'}
+            texto={mensagemBanner.texto}
+            onFechar={() => setMensagemBanner(null)}
+            autoOcultarMs={mensagemBanner.tipo === 'sucesso' ? 4000 : 0}
+          />
+        ) : null}
+
         <View style={styles.headerRow}>
           <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
             <Ionicons name="arrow-back" size={18} color={patientTheme.colors.text} />
@@ -200,12 +316,17 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
             <Text style={styles.loadingText}>Carregando prontuario...</Text>
           </SectionCard>
+        ) : loadError ? (
+          <EstadoErroCarregamento onTentarNovamente={load} loading={loading} />
         ) : null}
 
+        {!loadError ? (
+        <>
         <View style={styles.tabRow}>
           {[
             { key: 'timeline', label: 'Registros' },
             { key: 'plan', label: 'Plano' },
+            { key: 'diets', label: 'Dietas' },
             { key: 'notes', label: 'Notas' },
           ].map((tab) => {
             const active = activeTab === tab.key;
@@ -249,6 +370,130 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
               </Text>
             </SectionCard>
           )
+        ) : null}
+
+        {activeTab === 'diets' ? (
+          <SectionCard>
+            <Text style={styles.blockTitle}>Sugestao de padroes alimentares</Text>
+            <Text style={styles.hintText}>
+              O modelo do GlicNutri (mesmo da Previsao IA) estima risco de dia com glicemia media elevada e
+              agrupa padroes; esta aba traduz isso em padrões dietéticos de referência. A decisão final é sempre
+              do nutricionista.
+            </Text>
+
+            <Text style={styles.blockTitle}>Janela de dados (dias)</Text>
+            <View style={styles.chipRow}>
+              {[7, 14, 30].map((d) => {
+                const on = janelaDias === d;
+                return (
+                  <TouchableOpacity
+                    key={d}
+                    style={[styles.chip, on && styles.chipActive]}
+                    onPress={() => setJanelaDias(d)}
+                  >
+                    <Text style={[styles.chipText, on && styles.chipTextActive]}>{d} d</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            <TouchableOpacity
+              style={[styles.secondaryButton, mlCarregando && styles.buttonDisabled]}
+              onPress={handleRodarMlDietas}
+              disabled={mlCarregando}
+            >
+              {mlCarregando ? (
+                <ActivityIndicator color={patientTheme.colors.primaryDark} />
+              ) : (
+                <>
+                  <Ionicons name="analytics-outline" size={18} color={patientTheme.colors.primaryDark} />
+                  <Text style={styles.secondaryButtonText}>Analisar com ML e ordenar dietas</Text>
+                </>
+              )}
+            </TouchableOpacity>
+
+            {agregadoMl ? (
+              <View style={styles.metricsBox}>
+                <Text style={styles.metricsTitle}>Medias diarias na janela (entrada do modelo)</Text>
+                <Text style={styles.metricsLine}>
+                  Dias com dados: {agregadoMl.diasComDados} / janela {agregadoMl.janelaDias} dias
+                </Text>
+                <Text style={styles.metricsLine}>
+                  Leituras/dia: {agregadoMl.features.n_leituras_glicemia.toFixed(2)} | Carbos (g/dia):{' '}
+                  {agregadoMl.features.carbs_sum_g.toFixed(1)} | kcal/dia:{' '}
+                  {agregadoMl.features.kcal_sum.toFixed(0)}
+                </Text>
+                <Text style={styles.metricsLine}>
+                  Refeicoes IA/dia: {agregadoMl.features.n_refeicoes_ia.toFixed(2)} | Eventos medicacao/dia:{' '}
+                  {agregadoMl.features.n_eventos_medicacao.toFixed(2)}
+                </Text>
+              </View>
+            ) : null}
+
+            {rankingDietas?.mlResumo ? (
+              <View style={styles.metricsBox}>
+                <Text style={styles.metricsTitle}>Saida do modelo</Text>
+                <Text style={styles.metricsLine}>
+                  P(glicemia media elevada):{' '}
+                  {(Number(rankingDietas.mlResumo.prob_glucose_elevada) * 100).toFixed(1)}%
+                </Text>
+                <Text style={styles.metricsLine}>
+                  Glicemia media prevista:{' '}
+                  {Number(rankingDietas.mlResumo.glucose_mean_previsto_mg_dl).toFixed(1)} mg/dL | Cluster:{' '}
+                  {rankingDietas.mlResumo.cluster_id}
+                </Text>
+              </View>
+            ) : null}
+
+            {rankingDietas?.ranked?.length ? (
+              <>
+                <Text style={[styles.blockTitle, { marginTop: 14 }]}>Ordenacao sugerida (editavel)</Text>
+                {rankingDietas.ranked.map((d) => {
+                  const sel = dietaSelecionadaId === d.id;
+                  return (
+                    <TouchableOpacity
+                      key={d.id}
+                      style={[styles.dietOption, sel && styles.dietOptionSelected]}
+                      onPress={() => setDietaSelecionadaId(d.id)}
+                    >
+                      <View style={styles.dietOptionHeader}>
+                        <Ionicons
+                          name={sel ? 'radio-button-on' : 'radio-button-off'}
+                          size={20}
+                          color={sel ? patientTheme.colors.primaryDark : patientTheme.colors.textMuted}
+                        />
+                        <Text style={styles.dietOptionTitle}>{d.titulo}</Text>
+                        <Text style={styles.dietScore}>{d.score.toFixed(2)}</Text>
+                      </View>
+                      <Text style={styles.dietOptionBody}>{d.resumo}</Text>
+                      <Text style={styles.dietOptionHint}>{d.quandoConsiderar}</Text>
+                    </TouchableOpacity>
+                  );
+                })}
+
+                <Text style={[styles.blockTitle, { marginTop: 8 }]}>Observacoes (opcional)</Text>
+                <TextInput
+                  style={[styles.input, styles.inputMultiline, { minHeight: 100 }]}
+                  value={comentarioDieta}
+                  onChangeText={setComentarioDieta}
+                  placeholder="Ajustes clinicos, restricoes, proxima revisao..."
+                  placeholderTextColor={patientTheme.colors.textMuted}
+                  multiline
+                  textAlignVertical="top"
+                />
+
+                <TouchableOpacity style={styles.primaryButton} onPress={handleSalvarSugestaoDietaProntuario}>
+                  <Ionicons name="document-text-outline" size={18} color={patientTheme.colors.onPrimary} />
+                  <Text style={styles.primaryButtonText}>Registrar selecao no prontuario</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={styles.hintText}>
+                Toque em &quot;Analisar com ML&quot; para gerar a ordenacao. Sem API local, use a Previsao IA no
+                paciente para confirmar se o servidor responde.
+              </Text>
+            )}
+          </SectionCard>
         ) : null}
 
         {activeTab === 'plan' ? (
@@ -305,6 +550,8 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         ) : null}
 
         <View style={{ height: 26 }} />
+        </>
+        ) : null}
       </ScrollView>
     </View>
   );
@@ -354,10 +601,13 @@ const styles = StyleSheet.create({
     marginTop: 18,
     marginBottom: 12,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
   tabButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '22%',
+    minWidth: 72,
     minHeight: 44,
     borderRadius: patientTheme.radius.pill,
     backgroundColor: patientTheme.colors.surface,
@@ -405,5 +655,67 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   primaryButtonText: { color: patientTheme.colors.onPrimary, fontWeight: '900' },
+  hintText: {
+    color: patientTheme.colors.textMuted,
+    lineHeight: 20,
+    marginBottom: 12,
+    fontWeight: '600',
+    fontSize: 13,
+  },
+  chipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 12 },
+  chip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  chipActive: { backgroundColor: patientTheme.colors.primarySoft },
+  chipText: { fontWeight: '800', color: patientTheme.colors.textMuted },
+  chipTextActive: { color: patientTheme.colors.primaryDark },
+  secondaryButton: {
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 2,
+    borderColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  secondaryButtonText: { color: patientTheme.colors.primaryDark, fontWeight: '900' },
+  buttonDisabled: { opacity: 0.55 },
+  metricsBox: {
+    marginTop: 4,
+    marginBottom: 8,
+    padding: 12,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  metricsTitle: { fontWeight: '900', color: patientTheme.colors.text, marginBottom: 6 },
+  metricsLine: { color: patientTheme.colors.textMuted, fontWeight: '600', fontSize: 12, marginTop: 4 },
+  dietOption: {
+    borderWidth: 1,
+    borderColor: patientTheme.colors.backgroundSoft,
+    borderRadius: patientTheme.radius.lg,
+    padding: 12,
+    marginBottom: 10,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  dietOptionSelected: {
+    borderColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  dietOptionHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  dietOptionTitle: { flex: 1, fontWeight: '900', color: patientTheme.colors.text },
+  dietScore: { fontWeight: '900', color: patientTheme.colors.textMuted, fontSize: 12 },
+  dietOptionBody: { marginTop: 8, color: patientTheme.colors.text, lineHeight: 20, fontWeight: '600' },
+  dietOptionHint: {
+    marginTop: 6,
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
 });
 

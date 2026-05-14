@@ -6,12 +6,12 @@ import {
   StyleSheet,
   ScrollView,
   ActivityIndicator,
-  Alert,
   Platform,
   Modal,
   TextInput,
   KeyboardAvoidingView,
   StatusBar,
+  RefreshControl,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -22,6 +22,8 @@ import {
   buildPatientClinicalRows,
   buildPatientDataRows,
 } from '../../utilitarios/camposPerfilPaciente';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -59,6 +61,9 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [pacientePerfil, setPacientePerfil] = useState(null);
   const [perfilVisao, setPerfilVisao] = useState('patient');
   const [feedbackEdicao, setFeedbackEdicao] = useState(null);
+  const [erroCarregamento, setErroCarregamento] = useState(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const [mensagemTopo, setMensagemTopo] = useState(null);
   const [termoBusca, setTermoBusca] = useState('');
 
   const [editandoId, setEditandoId] = useState(null);
@@ -204,9 +209,13 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     limparFormulario();
   };
 
-  const carregarPacientes = useCallback(async () => {
+  const carregarPacientes = useCallback(async (options = {}) => {
+    const { silent = false } = options;
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
+      setErroCarregamento(null);
 
       const { data, error } = await supabase
         .from('paciente')
@@ -219,11 +228,21 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       setPacientes(data || []);
     } catch (error) {
       console.log('Erro ao carregar pacientes:', error);
-      Alert.alert('Erro', 'Nao foi possivel carregar os pacientes.');
+      setErroCarregamento(
+        'Não foi possível carregar os pacientes. Verifique a conexão e tente novamente.'
+      );
     } finally {
-      setLoading(false);
+      if (!silent) {
+        setLoading(false);
+      }
     }
   }, []);
+
+  const onRefreshPacientes = useCallback(async () => {
+    setRefreshing(true);
+    await carregarPacientes({ silent: true });
+    setRefreshing(false);
+  }, [carregarPacientes]);
 
   useEffect(() => {
     carregarPacientes();
@@ -263,7 +282,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       const data = await response.json();
 
       if (data.erro) {
-        Alert.alert('CEP invalido', 'Nao encontramos esse CEP.');
+        setFeedbackEdicao({
+          tipo: 'erro',
+          texto: 'Não encontramos esse CEP.',
+        });
         return;
       }
 
@@ -310,42 +332,36 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
     if (!editandoId) {
       const mensagem = 'Paciente sem identificador para atualizar.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      Alert.alert('Erro', mensagem);
       return;
     }
 
     if (!nomeLimpo || !cpfLimpo || !emailLimpo) {
       const mensagem = 'Preencha nome, CPF e e-mail para salvar as alteracoes.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      Alert.alert('Atencao', mensagem);
       return;
     }
 
     if (!validarCpf(cpfLimpo)) {
       const mensagem = 'Digite um CPF valido.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      Alert.alert('CPF invalido', mensagem);
       return;
     }
 
     if (!validarEmail(emailLimpo)) {
       const mensagem = 'Digite um e-mail valido.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      Alert.alert('E-mail invalido', mensagem);
       return;
     }
 
     if (dataNascimento.trim() && !dataNascimentoBanco) {
       const mensagem = 'Digite uma data de nascimento valida no formato DD/MM/AAAA.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      Alert.alert('Data invalida', mensagem);
       return;
     }
 
     if (cepLimpo && !validarCep(cepLimpo)) {
       const mensagem = 'Digite um CEP valido com 8 numeros.';
       setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      Alert.alert('CEP invalido', mensagem);
       return;
     }
 
@@ -413,16 +429,16 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       );
 
       setFeedbackEdicao({ tipo: 'sucesso', texto: 'Paciente atualizado com sucesso.' });
-      Alert.alert('Sucesso', 'Paciente atualizado com sucesso.');
       fecharModal();
       await carregarPacientes();
     } catch (error) {
       console.log('Erro ao atualizar paciente:', error);
       setFeedbackEdicao({
         tipo: 'erro',
-        texto: error.message || 'Nao foi possivel atualizar o paciente.',
+        texto:
+          error.message ||
+          'Não foi possível atualizar o paciente. Verifique a conexão e tente novamente.',
       });
-      Alert.alert('Erro', error.message || 'Nao foi possivel atualizar o paciente.');
     } finally {
       setLoadingSalvar(false);
     }
@@ -470,11 +486,18 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       setModalExclusaoVisible(false);
       setPacienteParaExcluir(null);
 
-      Alert.alert('Sucesso', 'Paciente excluido logicamente com sucesso.');
+      setMensagemTopo({
+        tipo: 'sucesso',
+        texto: 'Paciente excluído logicamente com sucesso.',
+      });
       carregarPacientes();
     } catch (error) {
       console.log('Erro ao excluir paciente:', error);
-      Alert.alert('Erro', 'Nao foi possivel excluir o paciente.');
+      setMensagemTopo({
+        tipo: 'erro',
+        texto:
+          'Não foi possível excluir o paciente. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setLoadingExcluirId(null);
     }
@@ -565,7 +588,21 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
         nestedScrollEnabled
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onRefreshPacientes} />
+        }
       >
+        {mensagemTopo?.texto ? (
+          <MensagemInline
+            tipo={mensagemTopo.tipo || 'aviso'}
+            texto={mensagemTopo.texto}
+            onFechar={() => setMensagemTopo(null)}
+            autoOcultarMs={mensagemTopo.tipo === 'sucesso' ? 4000 : 0}
+          />
+        ) : null}
+        {!loading && erroCarregamento ? (
+          <EstadoErroCarregamento onTentarNovamente={() => carregarPacientes()} loading={loading} />
+        ) : null}
         <View style={styles.headerRow}>
           <View style={styles.headerIconGroup}>
             <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
@@ -795,7 +832,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                   onPress={() => {
                     const pacienteId = getPacienteId(paciente);
                     if (!pacienteId) {
-                      Alert.alert('Atenção', 'Paciente sem identificador para abrir prontuário.');
+                      setMensagemTopo({
+                        tipo: 'aviso',
+                        texto: 'Paciente sem identificador para abrir prontuário.',
+                      });
                       return;
                     }
                     navigation.navigate('NutriProntuarioPaciente', {
@@ -869,7 +909,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
               style={styles.prontuarioButton}
               onPress={() => {
                 if (!pacientePerfil?.id_paciente_uuid) {
-                  Alert.alert('Atenção', 'Paciente sem identificador para abrir prontuário.');
+                  setMensagemTopo({
+                    tipo: 'aviso',
+                    texto: 'Paciente sem identificador para abrir prontuário.',
+                  });
                   return;
                 }
                 fecharModalPerfil();

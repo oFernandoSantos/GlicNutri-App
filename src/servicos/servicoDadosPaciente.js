@@ -405,6 +405,10 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     glucoseNote: 'Macros salvos no banco',
     glucoseDelta: `${Math.round(carbs)} g carbos`,
     aiNote: `Totais: ${Math.round(calories)} kcal, ${Math.round(protein)} g proteinas, ${Math.round(fat)} g gorduras.`,
+    carbsG: carbs,
+    kcal: calories,
+    proteinG: protein,
+    fatG: fat,
     storageOrigin: 'database',
     databaseId: recordId || null,
   };

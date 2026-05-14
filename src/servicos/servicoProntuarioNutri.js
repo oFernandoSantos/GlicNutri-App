@@ -70,12 +70,14 @@ function normalizeConsultaEvent(consulta) {
 
 function normalizeNotaEvent(nota) {
   const occurredAt = nota?.created_at ? new Date(nota.created_at).toISOString() : new Date(0).toISOString();
+  const texto = String(nota.texto || '').trim();
+  const isDieta = texto.includes('=== Sugestao de padrao alimentar');
   return {
     id: `nota-${nota.id}`,
     kind: 'nota',
     occurredAt,
-    title: 'Nota do prontuario',
-    subtitle: String(nota.texto || '').trim(),
+    title: isDieta ? 'Sugestao de padrao alimentar' : 'Nota do prontuario',
+    subtitle: texto,
     raw: nota,
   };
 }

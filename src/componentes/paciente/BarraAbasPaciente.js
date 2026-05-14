@@ -1,9 +1,19 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Platform, View, Text, Pressable, StyleSheet, useWindowDimensions } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import {
+  Platform,
+  View,
+  Text,
+  Pressable,
+  StyleSheet,
+  useWindowDimensions,
+  Modal,
+} from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { temaPaciente, sombraPaciente } from '../../temas/temaPaciente';
+import { TAB_BAR_COACH_SEEN_KEY } from '../../constantes/chavesArmazenamento';
 
 export const PATIENT_TAB_BAR_HEIGHT = 64;
 export const PATIENT_TAB_BAR_SPACE = 14;
@@ -72,10 +82,39 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
   const direcaoArrasteRef = useRef(null);
   const menuRapidoAbertoNoInicioRef = useRef(false);
   const ultimoToqueInicioRef = useRef(0);
+  const [coachOverlayVisible, setCoachOverlayVisible] = useState(false);
 
   useEffect(() => {
     setRotaVisual(rotaAtual);
   }, [rotaAtual]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      try {
+        const seen = await AsyncStorage.getItem(TAB_BAR_COACH_SEEN_KEY);
+        if (!cancelled && seen !== '1') {
+          setCoachOverlayVisible(true);
+        }
+      } catch (_) {
+        /* ignore */
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function dismissCoachOverlay() {
+    try {
+      await AsyncStorage.setItem(TAB_BAR_COACH_SEEN_KEY, '1');
+    } catch (_) {
+      /* ignore */
+    }
+    setCoachOverlayVisible(false);
+  }
 
   function navegar(rota) {
     setMenuRapidoVisivel(false);
@@ -323,6 +362,8 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                 height: Math.max(alturaTela - HEADER_VISIBLE_SPACE + PATIENT_TAB_BAR_HEIGHT, 0),
               },
             ]}
+            accessibilityLabel="Fechar menu de atalhos"
+            accessibilityRole="button"
             onPress={() => {
               setMenuRapidoVisivel(false);
               setAcaoRapidaEmFoco(null);
@@ -342,6 +383,8 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                   acaoRapidaEmFoco === acao.id && styles.menuRapidoItemFocado,
                   { transform: [{ translateY: index * -2 }] },
                 ]}
+                accessibilityRole="button"
+                accessibilityLabel={acao.label}
                 onPressIn={() => setAcaoRapidaEmFoco(acao.id)}
                 onPress={() => acionarMenuRapido(acao.id)}
               >
@@ -392,6 +435,13 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
             <Pressable
               key={aba.rota}
               style={styles.aba}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: ativo }}
+              accessibilityLabel={
+                aba.rota === 'HomePaciente'
+                  ? `Aba Início${ativo ? ', selecionada' : ''}. Toque duas vezes para atalhos rápidos de glicose e medicação`
+                  : `Aba ${aba.rotulo}${ativo ? ', selecionada' : ''}`
+              }
               onPressIn={() => {
                 if (arrastePeloCirculoRef.current) {
                   return;
@@ -509,11 +559,72 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
           );
         })}
       </View>
+
+      <Modal
+        visible={coachOverlayVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={dismissCoachOverlay}
+      >
+        <Pressable style={styles.coachBackdrop} onPress={dismissCoachOverlay}>
+          <View style={styles.coachCard}>
+            <Text style={styles.coachTitle}>Atalhos na barra inferior</Text>
+            <Text style={styles.coachBody}>
+              Toque duas vezes em Início para abrir atalhos (glicose, medicação, refeição).{'\n\n'}
+              Na aba ativa, arraste pelo ícone destacado para mudar de área sem soltar o dedo.
+            </Text>
+            <Pressable
+              style={styles.coachButton}
+              onPress={dismissCoachOverlay}
+              accessibilityRole="button"
+              accessibilityLabel="Entendi, fechar dica"
+            >
+              <Text style={styles.coachButtonText}>Entendi</Text>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  coachBackdrop: {
+    flex: 1,
+    backgroundColor: 'rgba(31, 38, 44, 0.52)',
+    justifyContent: 'center',
+    paddingHorizontal: 24,
+  },
+  coachCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 18,
+    padding: 20,
+    gap: 12,
+    ...sombraPaciente,
+  },
+  coachTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: temaPaciente.cores.text,
+  },
+  coachBody: {
+    fontSize: 15,
+    lineHeight: 22,
+    color: '#5c656b',
+  },
+  coachButton: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    borderRadius: 12,
+    backgroundColor: TAB_HIGHLIGHT_COLOR,
+  },
+  coachButtonText: {
+    fontSize: 16,
+    fontWeight: '800',
+    color: '#1F262C',
+  },
   areaFixa: {
     position: 'absolute',
     right: 0,

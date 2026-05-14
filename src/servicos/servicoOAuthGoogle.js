@@ -3,6 +3,19 @@ import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import { supabase } from './configSupabase';
 
+/**
+ * Producao — checklist OAuth (Google + Supabase):
+ * - scheme nativo: glicnutri (app.json "scheme") e redirect nativo glicnutri://autenticacao/callback
+ * - Supabase Dashboard → Authentication → URL configuration:
+ *   - Site URL: URL do teu site (web) ou exp://... em dev
+ *   - Redirect URLs: incluir glicnutri://autenticacao/callback e URLs web usadas em signInWithOAuth
+ * - Google Cloud Console → OAuth 2.0 Client:
+ *   - iOS: bundle com.glicnutri.app (app.json ios.bundleIdentifier)
+ *   - Android: package com.glicnutri.app + SHA-1 da keystore de release (Play) / debug
+ *   - Web: origens autorizadas alinhadas ao dominio do front
+ * Apos EAS Build, validar o redirect real no primeiro login em dispositivo fisico.
+ */
+
 const GOOGLE_OAUTH_SCHEME = 'glicnutri';
 const GOOGLE_OAUTH_CALLBACK_PATH = 'autenticacao/callback';
 const GOOGLE_OAUTH_NATIVE_REDIRECT = `${GOOGLE_OAUTH_SCHEME}://${GOOGLE_OAUTH_CALLBACK_PATH}`;

@@ -16,6 +16,7 @@ const PATIENT_ROUTES = new Set([
   'PacienteBemEstar',
   'PacientePlano',
   'PacientePerfil',
+  'PacientePrevisaoML',
   'RegistroRefeicaoIA',
 ]);
 const NUTRITIONIST_ROUTES = new Set([
@@ -43,6 +44,7 @@ const routeTitles = {
   PacienteBemEstar: 'Bem-estar',
   PacientePlano: 'Plano',
   PacientePerfil: 'Perfil',
+  PacientePrevisaoML: 'Previsão (IA)',
   RegistroRefeicaoIA: 'Registrar Refeição',
   HomeNutricionista: 'GlicNutri',
   AdminHome: 'Admin',

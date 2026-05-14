@@ -32,6 +32,13 @@ import {
   mergePatientOnboardingData,
 } from '../../servicos/servicoOnboardingPaciente';
 import {
+  computeTherapyBolusSuggestion,
+  extractTargetGlucoseFromText,
+  formatGlucoseInputProfile,
+  parseGlucoseInputProfile,
+  refeicaoMatchesRow,
+} from '../../utilitarios/bolusSugeridoTerapia';
+import {
   confirmarCodigoValidacaoEmailCadastro,
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
@@ -526,6 +533,24 @@ const BOLUS_DOSE_TYPE_OPTIONS = [
   { label: 'Dose de correção', value: 'dose_correcao' },
   { label: 'Dose variável', value: 'dose_variavel' },
 ];
+const PROFILE_BOLUS_APP_TYPES = [
+  { id: 'refeicao', label: 'Refeição', modo_uso: 'antes_refeicoes' },
+  { id: 'correcao', label: 'Correção', modo_uso: 'correcao_glicemia' },
+  { id: 'refeicao_correcao', label: 'Refeição + Correção', modo_uso: 'conforme_prescricao' },
+];
+const PROFILE_BOLUS_MEAL_CHIPS = BOLUS_MEAL_OPTIONS.filter((o) => !['correcao', 'outro'].includes(o.value));
+
+function mapModoUsoToProfileBolusAppType(modo) {
+  const v = normalizeBolusUsageValue(modo);
+  if (v === 'correcao_glicemia') return 'correcao';
+  if (v === 'conforme_prescricao') return 'refeicao_correcao';
+  return 'refeicao';
+}
+
+function buildLocalTimeHHMM() {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
 const BASAL_INTEGER_DOSE_ERROR_MESSAGE = 'A dose deve ser um número inteiro (UI).';
 const BASAL_DUPLICATE_TIME_ERROR_MESSAGE = 'Já existe uma aplicação cadastrada nesse horário.';
 const BASAL_INCOMPATIBLE_FREQUENCY_ERROR_MESSAGE =
@@ -814,6 +839,10 @@ function getBasalFrequencyConfig(value) {
 
 function getOptionLabelByValue(options, value) {
   return options.find((option) => option.value === value || option.label === value)?.label || value || '';
+}
+
+function getOptionValueByLabel(options, label) {
+  return options.find((option) => option.label === label || option.value === label)?.value || label || '';
 }
 
 function buildTherapyScheduleRowsForFrequency(frequencyValue, existingRows = []) {
@@ -1629,6 +1658,22 @@ function hydrateBolusTherapyPlanWithBrand(plan, brandOption) {
   };
 }
 
+/** HH:mm consistente para terapia bolus e sincronização com insulin_profiles. */
+function normalizarHorarioTerapiaParaRegistro(horario) {
+  const s = String(horario || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '';
+  const hh = String(Math.min(23, Math.max(0, parseInt(m[1], 10) || 0))).padStart(2, '0');
+  const mm = String(Math.min(59, Math.max(0, parseInt(m[2], 10) || 0))).padStart(2, '0');
+  return `${hh}:${mm}`;
+}
+
+function normalizarHorarioNaTabelaTerapia(horario) {
+  const raw = String(horario || '').trim();
+  const n = normalizarHorarioTerapiaParaRegistro(raw);
+  return n || raw;
+}
+
 function normalizeTherapyPlan(plan, index = 0) {
   const base = createEmptyTherapyPlan();
   const actionProfile = getActionProfileByClass(plan?.classe_acao);
@@ -1664,7 +1709,7 @@ function normalizeTherapyPlan(plan, index = 0) {
       ? plan.tabela_horarios.map((item) => ({
           dia_semana: String(item?.dia_semana || '').trim(),
           refeicao: String(item?.refeicao || '').trim(),
-          horario: String(item?.horario || '').trim(),
+          horario: normalizarHorarioNaTabelaTerapia(item?.horario),
           dose: String(item?.dose ?? '').trim(),
           dose_unidade: String(item?.dose_unidade || plan?.dose_unidade || plan?.escala_unidade || 'UI').trim(),
           tipo_dose: String(item?.tipo_dose || '').trim(),
@@ -1751,9 +1796,22 @@ function buildEditablePharmacologyPlans(patient) {
   }
 
   if (insulinProfiles?.bolus?.type || insulinProfiles?.bolus?.dose) {
-    const brandOption = (PHARMACOLOGY_BRAND_OPTIONS.bolus || []).find(
-      (item) => item.marca === insulinProfiles.bolus.type
-    );
+    const typeStr = String(insulinProfiles.bolus.type || '').trim();
+    let brandOption = (PHARMACOLOGY_BRAND_OPTIONS.bolus || []).find((item) => item.marca === typeStr);
+    if (!brandOption && typeStr) {
+      const bolusResolved = findBolusTherapyOption(typeStr, '');
+      if (bolusResolved) {
+        brandOption = {
+          label: bolusResolved.label,
+          marca: bolusResolved.label,
+          molecula: bolusResolved.molecule || '',
+          classe_acao: bolusResolved.actionProfileKey || '',
+          categoria_funcional: 'bolus',
+          concentracao: bolusResolved.concentration || '',
+          apresentacao: bolusResolved.backendPresentation || '',
+        };
+      }
+    }
     const basePlan = normalizeTherapyPlan(
       hydrateTherapyPlanWithBrand(
         {
@@ -1767,7 +1825,7 @@ function buildEditablePharmacologyPlans(patient) {
             : [createEmptyTherapyScheduleRow()],
         },
         brandOption || {
-          marca: insulinProfiles.bolus.type || '',
+          marca: typeStr || '',
           molecula: '',
           classe_acao: '',
           categoria_funcional: 'bolus',
@@ -1804,7 +1862,7 @@ function buildPharmacologyPatch(plans, patient) {
       tabela_horarios: (normalized.tabela_horarios || []).map((item) => ({
         dia_semana: String(item?.dia_semana || '').trim(),
         refeicao: String(item?.refeicao || '').trim(),
-        horario: String(item?.horario || '').trim(),
+        horario: normalizarHorarioNaTabelaTerapia(item?.horario),
         dose: normalizeNumber(item?.dose) ?? 0,
         dose_unidade: String(item?.dose_unidade || normalized.dose_unidade || 'UI').trim(),
         tipo_dose: String(item?.tipo_dose || '').trim(),
@@ -2259,12 +2317,90 @@ export default function PacientePerfilScreen({
   const [situationModalVisible, setSituationModalVisible] = useState(false);
   const [procedureModalVisible, setProcedureModalVisible] = useState(false);
   const lastFetchedCepRef = useRef(onlyDigits(usuarioLogado?.cep || '', 8));
+  const [profileBolusAppType, setProfileBolusAppType] = useState('refeicao_correcao');
+  const [profileBolusMeal, setProfileBolusMeal] = useState('almoco');
+  const [profileBolusGlucose, setProfileBolusGlucose] = useState('');
+  const [profileBolusCarbs, setProfileBolusCarbs] = useState('');
+  const [profileBolusTargetManual, setProfileBolusTargetManual] = useState('');
+  const [profileBolusDoseApplied, setProfileBolusDoseApplied] = useState('');
+  const [profileBolusTime, setProfileBolusTime] = useState('');
+  const [profileBolusDoseEdited, setProfileBolusDoseEdited] = useState(false);
+  const [profileBolusPrescriptionOpen, setProfileBolusPrescriptionOpen] = useState(false);
   const {
     scrollViewRef,
     registerScrollContainer,
     registerFieldLayout,
     scrollToField,
   } = useKeyboardAwareScroll({ topOffset: 95 });
+
+  const profileBolusSuggestion = useMemo(() => {
+    if (!therapyEditorVisible || therapyDraft.categoria_funcional !== 'bolus') return null;
+    const carbsN = Number(String(profileBolusCarbs || '').replace(',', '.'));
+    return computeTherapyBolusSuggestion({
+      applicationType: profileBolusAppType,
+      mealValue: profileBolusMeal,
+      mealOptions: BOLUS_MEAL_OPTIONS,
+      glucoseMgDl: parseGlucoseInputProfile(profileBolusGlucose),
+      carbsG: Number.isFinite(carbsN) ? carbsN : Number.NaN,
+      schedules: therapyDraft.tabela_horarios,
+      notesText: therapyDraft.observacoes || '',
+      manualTarget: profileBolusTargetManual,
+    });
+  }, [
+    therapyEditorVisible,
+    therapyDraft.categoria_funcional,
+    therapyDraft.tabela_horarios,
+    therapyDraft.observacoes,
+    profileBolusAppType,
+    profileBolusMeal,
+    profileBolusGlucose,
+    profileBolusCarbs,
+    profileBolusTargetManual,
+  ]);
+
+  const profileBolusAlerts = useMemo(() => {
+    if (!therapyEditorVisible || therapyDraft.categoria_funcional !== 'bolus') return [];
+    const list = [...(profileBolusSuggestion?.warnings || [])];
+    const g = parseGlucoseInputProfile(profileBolusGlucose);
+    if (Number.isFinite(g)) {
+      if (g < 70) list.push('Glicemia abaixo de 70 mg/dL.');
+      if (g > 250) list.push('Glicemia acima de 250 mg/dL.');
+    }
+    const d = Number(String(profileBolusDoseApplied || '').replace(',', '.'));
+    if (Number.isFinite(d) && d > 30) {
+      list.push('Dose aplicada elevada — confira antes de salvar.');
+    }
+    const t = String(profileBolusTime || '').trim();
+    if (t && isValidTime24h(t)) {
+      const others = (therapyDraft.tabela_horarios || []).filter(
+        (row) =>
+          String(row.horario || '').trim() === t &&
+          !refeicaoMatchesRow(row.refeicao, profileBolusMeal, BOLUS_MEAL_OPTIONS)
+      );
+      if (others.length) {
+        list.push('Possível sobreposição: há outra linha de bolus no mesmo horário.');
+      }
+    }
+    return list;
+  }, [
+    therapyEditorVisible,
+    therapyDraft.categoria_funcional,
+    therapyDraft.tabela_horarios,
+    profileBolusSuggestion,
+    profileBolusGlucose,
+    profileBolusDoseApplied,
+    profileBolusTime,
+    profileBolusMeal,
+  ]);
+
+  useEffect(() => {
+    if (!therapyEditorVisible || therapyDraft.categoria_funcional !== 'bolus') return;
+    if (profileBolusDoseEdited) return;
+    const total = profileBolusSuggestion?.doseTotal;
+    if (Number.isFinite(total) && total > 0) {
+      setProfileBolusDoseApplied(formatSingleDecimalDoseInput(String(total).replace('.', ',')));
+    }
+  }, [therapyEditorVisible, therapyDraft.categoria_funcional, profileBolusSuggestion, profileBolusDoseEdited]);
 
   useEffect(() => {
     let active = true;
@@ -2666,6 +2802,16 @@ export default function PacientePerfilScreen({
 
   function openTherapyEditor(plan = null) {
     const normalizedPlan = plan ? normalizeTherapyPlan(plan) : createEmptyTherapyPlan();
+    const onboarding = getOnboardingAnswers(paciente || {});
+    const bolusProfile = onboarding?.insulin_profiles?.bolus || null;
+    const hasBolusProfileConfigured = Boolean(
+      bolusProfile?.type ||
+        bolusProfile?.mode ||
+        bolusProfile?.usage ||
+        bolusProfile?.notes ||
+        bolusProfile?.dose ||
+        (Array.isArray(bolusProfile?.schedules) && bolusProfile.schedules.length)
+    );
     const nextDraft =
       normalizedPlan.categoria_funcional === 'basal'
         ? {
@@ -2687,23 +2833,81 @@ export default function PacientePerfilScreen({
             }
         : normalizedPlan;
 
-    setEditingTherapyId(plan?.id || null);
-    setTherapyDraft(
-      nextDraft.categoria_funcional === 'basal'
-        ? {
-            ...nextDraft,
-            tabela_horarios: buildTherapyScheduleRowsForFrequency(
-              nextDraft.frequencia_uso,
-              nextDraft.tabela_horarios
-            ),
-          }
-        : nextDraft.categoria_funcional === 'bolus'
-          ? {
+    const patchedDraft =
+      nextDraft.categoria_funcional === 'bolus' && hasBolusProfileConfigured
+        ? (() => {
+            const profileMode = normalizeBolusUsageValue(bolusProfile?.mode || bolusProfile?.usage || '');
+            const mappedSchedules = Array.isArray(bolusProfile?.schedules) && bolusProfile.schedules.length
+              ? bolusProfile.schedules.map((row) => ({
+                  ...createEmptyTherapyScheduleRow(),
+                  refeicao: getOptionValueByLabel(BOLUS_MEAL_OPTIONS, row?.refeicao),
+                  horario: normalizarHorarioNaTabelaTerapia(row?.horario),
+                  dose: String(row?.dose ?? '').trim(),
+                  dose_unidade: 'UI',
+                  tipo_dose: getOptionValueByLabel(BOLUS_DOSE_TYPE_OPTIONS, row?.tipo_dose),
+                  observacao: '',
+                }))
+              : nextDraft.tabela_horarios;
+
+            return {
               ...nextDraft,
-              tabela_horarios: buildBolusScheduleRowsForUsage(nextDraft.modo_uso, nextDraft.tabela_horarios),
-            }
-        : nextDraft
-    );
+              marca: String(nextDraft.marca || bolusProfile?.type || '').trim(),
+              dispositivo:
+                String(nextDraft.dispositivo || '').trim() ||
+                getOptionValueByLabel(PHARMACOLOGY_DEVICE_OPTIONS, bolusProfile?.device),
+              modo_uso: nextDraft.modo_uso || profileMode,
+              observacoes: String(nextDraft.observacoes || bolusProfile?.notes || '').trim(),
+              tabela_horarios: buildBolusScheduleRowsForUsage(nextDraft.modo_uso || profileMode, mappedSchedules),
+            };
+          })()
+        : nextDraft;
+
+    setEditingTherapyId(plan?.id || null);
+
+    let draftToSet = patchedDraft;
+    if (patchedDraft.categoria_funcional === 'basal') {
+      draftToSet = {
+        ...patchedDraft,
+        tabela_horarios: buildTherapyScheduleRowsForFrequency(
+          patchedDraft.frequencia_uso,
+          patchedDraft.tabela_horarios
+        ),
+      };
+    } else if (patchedDraft.categoria_funcional === 'bolus') {
+      draftToSet = {
+        ...patchedDraft,
+        tabela_horarios: buildBolusScheduleRowsForUsage(
+          patchedDraft.modo_uso,
+          patchedDraft.tabela_horarios
+        ),
+      };
+    }
+
+    setTherapyDraft(draftToSet);
+
+    if (draftToSet.categoria_funcional === 'bolus') {
+      const rows = draftToSet.tabela_horarios || [];
+      const mealInit =
+        PROFILE_BOLUS_MEAL_CHIPS.find((m) =>
+          rows.some((r) => refeicaoMatchesRow(r.refeicao, m.value, BOLUS_MEAL_OPTIONS))
+        )?.value || 'almoco';
+      const mealRow = rows.find((r) => refeicaoMatchesRow(r.refeicao, mealInit, BOLUS_MEAL_OPTIONS));
+      setProfileBolusAppType(mapModoUsoToProfileBolusAppType(draftToSet.modo_uso));
+      setProfileBolusMeal(mealInit);
+      setProfileBolusTime(
+        mealRow?.horario && isValidTime24h(mealRow.horario) ? mealRow.horario : buildLocalTimeHHMM()
+      );
+      setProfileBolusDoseApplied(
+        mealRow?.dose ? formatSingleDecimalDoseInput(String(mealRow.dose)) : ''
+      );
+      setProfileBolusDoseEdited(false);
+      setProfileBolusGlucose('');
+      setProfileBolusCarbs('');
+      const meta = extractTargetGlucoseFromText(draftToSet.observacoes || '');
+      setProfileBolusTargetManual(meta != null ? String(Math.round(meta)) : '');
+      setProfileBolusPrescriptionOpen(false);
+    }
+
     setFocusedTherapyField('');
     setBolusTechnicalExpanded(false);
     setTherapyEditorVisible(true);
@@ -2718,6 +2922,31 @@ export default function PacientePerfilScreen({
     setTherapyOptionField('');
     setTherapyOptionScheduleIndex(null);
     setTherapyOptionModalVisible(false);
+    setProfileBolusAppType('refeicao_correcao');
+    setProfileBolusMeal('almoco');
+    setProfileBolusGlucose('');
+    setProfileBolusCarbs('');
+    setProfileBolusTargetManual('');
+    setProfileBolusDoseApplied('');
+    setProfileBolusTime('');
+    setProfileBolusDoseEdited(false);
+    setProfileBolusPrescriptionOpen(false);
+  }
+
+  function applyProfileBolusAppType(appTypeId) {
+    setProfileBolusAppType(appTypeId);
+    setProfileBolusDoseEdited(false);
+    const opt = PROFILE_BOLUS_APP_TYPES.find((x) => x.id === appTypeId);
+    if (!opt) return;
+    setTherapyDraft((current) => {
+      if (current.categoria_funcional !== 'bolus') return current;
+      return {
+        ...current,
+        modo_uso: opt.modo_uso,
+        tabela_horarios: buildBolusScheduleRowsForUsage(opt.modo_uso, current.tabela_horarios),
+      };
+    });
+    setTherapyFeedback(null);
   }
 
   function openTherapyOptionModal(field, scheduleIndex = null) {
@@ -3196,49 +3425,87 @@ export default function PacientePerfilScreen({
       return;
     }
 
-    if (therapyDraft.categoria_funcional === 'basal') {
-      const basalValidationError = validateBasalTherapyDraft(therapyDraft);
+    let workingDraft = therapyDraft;
+
+    if (therapyDraft.categoria_funcional === 'bolus') {
+      if (!String(profileBolusDoseApplied || '').trim()) {
+        setTherapyFeedback({ type: 'error', message: 'Informe a dose aplicada em UI.' });
+        return;
+      }
+      if (!isValidTime24h(profileBolusTime)) {
+        setTherapyFeedback({ type: 'error', message: 'Informe o horário da aplicação (HH:mm).' });
+        return;
+      }
+      const rows = (therapyDraft.tabela_horarios || []).map((r) => ({ ...r }));
+      const t = formatTimeInput(profileBolusTime);
+      const doseStr = formatSingleDecimalDoseInput(String(profileBolusDoseApplied));
+      const idx = rows.findIndex((r) => refeicaoMatchesRow(r.refeicao, profileBolusMeal, BOLUS_MEAL_OPTIONS));
+      if (idx >= 0) {
+        rows[idx] = { ...rows[idx], horario: t, dose: doseStr };
+      } else {
+        rows.push({
+          ...createEmptyTherapyScheduleRow(),
+          refeicao: profileBolusMeal,
+          horario: t,
+          dose: doseStr,
+          tipo_dose:
+            profileBolusAppType === 'correcao'
+              ? 'dose_correcao'
+              : profileBolusAppType === 'refeicao'
+                ? 'dose_carboidrato'
+                : 'dose_variavel',
+          dose_unidade: 'UI',
+        });
+      }
+      workingDraft = {
+        ...therapyDraft,
+        tabela_horarios: buildBolusScheduleRowsForUsage(therapyDraft.modo_uso, rows),
+      };
+    }
+
+    if (workingDraft.categoria_funcional === 'basal') {
+      const basalValidationError = validateBasalTherapyDraft(workingDraft);
       if (basalValidationError) {
         setTherapyFeedback(basalValidationError);
         return;
       }
     }
 
-    if (therapyDraft.categoria_funcional === 'bolus') {
-      const bolusValidationError = validateBolusTherapyDraft(therapyDraft);
+    if (workingDraft.categoria_funcional === 'bolus') {
+      const bolusValidationError = validateBolusTherapyDraft(workingDraft);
       if (bolusValidationError) {
         setTherapyFeedback(bolusValidationError);
         return;
       }
     }
 
-    const doseStepValidationError = validateTherapyDoseStep(therapyDraft);
+    const doseStepValidationError = validateTherapyDoseStep(workingDraft);
     if (doseStepValidationError) {
       setTherapyFeedback(doseStepValidationError);
       return;
     }
 
     const nextPlan = normalizeTherapyPlan({
-      ...therapyDraft,
-      doseStep: resolveDoseStepForPlan(therapyDraft),
+      ...workingDraft,
+      doseStep: resolveDoseStepForPlan(workingDraft),
       dose:
-        therapyDraft.categoria_funcional === 'basal' || therapyDraft.categoria_funcional === 'bolus'
-          ? String(therapyDraft.tabela_horarios?.[0]?.dose || '').trim()
-          : therapyDraft.dose,
+        workingDraft.categoria_funcional === 'basal' || workingDraft.categoria_funcional === 'bolus'
+          ? String(workingDraft.tabela_horarios?.[0]?.dose || '').trim()
+          : workingDraft.dose,
       dose_unidade:
-        therapyDraft.categoria_funcional === 'basal'
+        workingDraft.categoria_funcional === 'basal'
           ? 'UI'
-          : therapyDraft.categoria_funcional === 'bolus'
-            ? therapyDraft.dose_unidade || 'UI'
-            : therapyDraft.dose_unidade || therapyDraft.escala_unidade || 'UI',
-      tabela_horarios: (therapyDraft.tabela_horarios || []).map((item) => ({
+          : workingDraft.categoria_funcional === 'bolus'
+            ? workingDraft.dose_unidade || 'UI'
+            : workingDraft.dose_unidade || workingDraft.escala_unidade || 'UI',
+      tabela_horarios: (workingDraft.tabela_horarios || []).map((item) => ({
         ...item,
         dose_unidade:
-          therapyDraft.categoria_funcional === 'basal'
+          workingDraft.categoria_funcional === 'basal'
             ? 'UI'
-            : therapyDraft.categoria_funcional === 'bolus'
-              ? item.dose_unidade || therapyDraft.dose_unidade || 'UI'
-              : item.dose_unidade || therapyDraft.dose_unidade || therapyDraft.escala_unidade || 'UI',
+            : workingDraft.categoria_funcional === 'bolus'
+              ? item.dose_unidade || workingDraft.dose_unidade || 'UI'
+              : item.dose_unidade || workingDraft.dose_unidade || workingDraft.escala_unidade || 'UI',
       })),
     });
 
@@ -4181,10 +4448,16 @@ export default function PacientePerfilScreen({
                   keyboardShouldPersistTaps="handled"
                 >
                   <Text style={styles.emailModalTitle}>
-                    {editingTherapyId ? 'Editar terapia farmacológica' : 'Nova terapia farmacológica'}
+                    {therapyDraft.categoria_funcional === 'bolus'
+                      ? 'Registrar Insulina Bolus'
+                      : editingTherapyId
+                        ? 'Editar terapia farmacológica'
+                        : 'Nova terapia farmacológica'}
                   </Text>
                   <Text style={styles.emailModalText}>
-                    Confira a categoria fixa, selecione a insulina e confirme os dados de uso domiciliar.
+                    {therapyDraft.categoria_funcional === 'bolus'
+                      ? 'Simule a dose com base na sua prescrição (tabela de parâmetros). Confira a dose aplicada, refeição e horário antes de salvar o plano.'
+                      : 'Confira a categoria fixa, selecione a insulina e confirme os dados de uso domiciliar.'}
                   </Text>
 
                   <View style={styles.editForm}>
@@ -4211,7 +4484,11 @@ export default function PacientePerfilScreen({
 
                     <View style={styles.editField}>
                       <Text style={styles.infoLabel}>
-                        {therapyDraft.categoria_funcional === 'basal' ? 'Marca/Tipo da Basal' : 'Marca'}
+                        {therapyDraft.categoria_funcional === 'basal'
+                          ? 'Marca/Tipo da Basal'
+                          : therapyDraft.categoria_funcional === 'bolus'
+                            ? 'Tipo/marca de insulina rápida'
+                            : 'Marca'}
                       </Text>
                       <TouchableOpacity
                         activeOpacity={0.78}
@@ -4284,23 +4561,175 @@ export default function PacientePerfilScreen({
                     {therapyDraft.categoria_funcional === 'bolus' ? (
                       <>
                         <View style={styles.editField}>
-                          <Text style={styles.infoLabel}>Modo de uso</Text>
-                          <TouchableOpacity
-                            activeOpacity={0.78}
-                            onPress={() => openTherapyOptionModal('modo_uso')}
-                            style={[styles.profileInput, styles.profileSelect]}
-                          >
-                            <Text
-                              style={[
-                                styles.profileSelectText,
-                                !therapyDraft.modo_uso ? styles.profileSelectPlaceholder : null,
-                              ]}
-                            >
-                              {getTherapyFieldDisplayValue('modo_uso', therapyDraft.modo_uso) ||
-                                'Selecione o modo de uso'}
-                            </Text>
-                            <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                          </TouchableOpacity>
+                          <Text style={styles.infoLabel}>Tipo de aplicação</Text>
+                          <Text style={styles.therapyBolusHelperText}>
+                            Define o modo de uso salvo no plano (sincronizado com as opções já cadastradas).
+                          </Text>
+                          <View style={styles.therapyBolusPillRow}>
+                            {PROFILE_BOLUS_APP_TYPES.map((opt) => (
+                              <TouchableOpacity
+                                key={opt.id}
+                                activeOpacity={0.78}
+                                onPress={() => applyProfileBolusAppType(opt.id)}
+                                style={[
+                                  styles.therapyBolusPill,
+                                  profileBolusAppType === opt.id ? styles.therapyBolusPillActive : null,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.therapyBolusPillText,
+                                    profileBolusAppType === opt.id ? styles.therapyBolusPillTextActive : null,
+                                  ]}
+                                >
+                                  {opt.label}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                          <Text style={[styles.profileInput, styles.profileInputReadOnly, { marginTop: 8 }]}>
+                            Modo no plano:{' '}
+                            {getTherapyFieldDisplayValue('modo_uso', therapyDraft.modo_uso) || '—'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Glicemia atual (mg/dL)</Text>
+                          <TextInput
+                            value={profileBolusGlucose}
+                            onChangeText={(v) => setProfileBolusGlucose(formatGlucoseInputProfile(v))}
+                            placeholder="Ex: 120"
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType="numeric"
+                            style={styles.profileInput}
+                          />
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Carboidratos (g)</Text>
+                          <TextInput
+                            value={profileBolusCarbs}
+                            onChangeText={(v) =>
+                              setProfileBolusCarbs(formatSingleDecimalDoseInput(v))
+                            }
+                            placeholder="Ex: 45"
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
+                            style={styles.profileInput}
+                          />
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Meta glicêmica (mg/dL)</Text>
+                          <Text style={styles.therapyBolusHelperText}>
+                            {profileBolusSuggestion?.target != null
+                              ? `Usando meta ${profileBolusSuggestion.target} mg/dL (observações ou campo abaixo).`
+                              : 'Informe a meta ou inclua nas observações (ex.: meta 100).'}
+                          </Text>
+                          <TextInput
+                            value={profileBolusTargetManual}
+                            onChangeText={(v) => setProfileBolusTargetManual(formatGlucoseInputProfile(v))}
+                            placeholder="Ex: 100"
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType="numeric"
+                            style={styles.profileInput}
+                          />
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Relação insulina/carboidrato</Text>
+                          <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
+                            {profileBolusSuggestion?.ratioLabel || '—'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Fator de correção</Text>
+                          <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
+                            {profileBolusSuggestion?.corrLabel || '—'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.therapyBolusCalcCard}>
+                          <Text style={styles.therapyBolusCalcTitle}>Doses sugeridas</Text>
+                          <Text style={styles.therapyBolusCalcLine}>
+                            Refeição:{' '}
+                            {profileBolusSuggestion ? `${profileBolusSuggestion.doseMeal} UI` : '—'}
+                          </Text>
+                          <Text style={styles.therapyBolusCalcLine}>
+                            Correção:{' '}
+                            {profileBolusSuggestion ? `${profileBolusSuggestion.doseCorrection} UI` : '—'}
+                          </Text>
+                          <Text style={styles.therapyBolusCalcTotal}>
+                            Total sugerido:{' '}
+                            {profileBolusSuggestion ? `${profileBolusSuggestion.doseTotal} UI` : '—'}
+                          </Text>
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Dose aplicada (UI)</Text>
+                          <TextInput
+                            value={profileBolusDoseApplied}
+                            onChangeText={(v) => {
+                              setProfileBolusDoseEdited(true);
+                              setProfileBolusDoseApplied(formatSingleDecimalDoseInput(v));
+                            }}
+                            placeholder="Ex: 4,5"
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType="decimal-pad"
+                            style={[styles.profileInput, { fontSize: 20, fontWeight: '800' }]}
+                          />
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Refeição vinculada</Text>
+                          <View style={styles.therapyBolusPillRow}>
+                            {PROFILE_BOLUS_MEAL_CHIPS.map((m) => (
+                              <TouchableOpacity
+                                key={m.value}
+                                activeOpacity={0.78}
+                                onPress={() => {
+                                  setProfileBolusMeal(m.value);
+                                  setProfileBolusDoseEdited(false);
+                                  const row = (therapyDraft.tabela_horarios || []).find((r) =>
+                                    refeicaoMatchesRow(r.refeicao, m.value, BOLUS_MEAL_OPTIONS)
+                                  );
+                                  if (row?.horario && isValidTime24h(row.horario)) {
+                                    setProfileBolusTime(row.horario);
+                                  }
+                                  if (row?.dose) {
+                                    setProfileBolusDoseApplied(formatSingleDecimalDoseInput(String(row.dose)));
+                                  }
+                                }}
+                                style={[
+                                  styles.therapyBolusPill,
+                                  profileBolusMeal === m.value ? styles.therapyBolusPillActive : null,
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.therapyBolusPillText,
+                                    profileBolusMeal === m.value ? styles.therapyBolusPillTextActive : null,
+                                  ]}
+                                >
+                                  {m.label}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        </View>
+
+                        <View style={styles.editField}>
+                          <Text style={styles.infoLabel}>Horário da aplicação</Text>
+                          <TextInput
+                            value={profileBolusTime}
+                            onChangeText={(v) => setProfileBolusTime(formatTimeInput(v))}
+                            placeholder="HH:mm"
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType="number-pad"
+                            maxLength={5}
+                            style={styles.profileInput}
+                          />
                         </View>
 
                         <View style={styles.editField}>
@@ -4315,196 +4744,16 @@ export default function PacientePerfilScreen({
                           />
                         </View>
 
-                        <View style={styles.editField}>
-                          <Text style={styles.infoLabel}>Horários e doses do bolus</Text>
-                          {(therapyDraft.tabela_horarios || []).map((schedule, index) => (
-                            <View key={`${therapyDraft.id}-schedule-${index}`} style={styles.scheduleCard}>
-                              <View style={styles.editField}>
-                                <Text style={styles.scheduleFieldLabel}>Refeição</Text>
-                                <TouchableOpacity
-                                  activeOpacity={0.78}
-                                  onPress={() => openTherapyOptionModal('schedule_refeicao', index)}
-                                  style={[styles.profileInput, styles.profileSelect]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.profileSelectText,
-                                      !schedule.refeicao ? styles.profileSelectPlaceholder : null,
-                                    ]}
-                                  >
-                                    {getTherapyFieldDisplayValue('schedule_refeicao', schedule.refeicao) ||
-                                      'Selecione a refeição'}
-                                  </Text>
-                                  <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                                </TouchableOpacity>
-                              </View>
-
-                              <View style={styles.dualFieldRow}>
-                                <View style={[styles.editField, styles.dualFieldItem]}>
-                                  <Text style={styles.scheduleFieldLabel}>Horário</Text>
-                                  <TextInput
-                                    value={schedule.horario}
-                                    onChangeText={(value) =>
-                                      handleTherapyScheduleChange(index, 'horario', formatTimeInput(value))
-                                    }
-                                    placeholder="08:00"
-                                    placeholderTextColor={patientTheme.colors.textMuted}
-                                    keyboardType="number-pad"
-                                    maxLength={5}
-                                    style={styles.profileInput}
-                                  />
-                                </View>
-
-                                <View style={[styles.editField, styles.dualFieldItem]}>
-                                  <Text style={styles.scheduleFieldLabel}>
-                                    {therapyDraft.dose_unidade === 'UI por cartucho' ? 'Dose (cartucho)' : 'Dose (UI)'}
-                                  </Text>
-                                  <TextInput
-                                    value={schedule.dose}
-                                    onChangeText={(value) =>
-                                      handleTherapyScheduleChange(index, 'dose', formatSingleDecimalDoseInput(value))
-                                    }
-                                    placeholder="Ex: 10"
-                                    placeholderTextColor={patientTheme.colors.textMuted}
-                                    keyboardType="decimal-pad"
-                                    style={styles.profileInput}
-                                  />
-                                </View>
-                              </View>
-
-                              <View style={styles.editField}>
-                                <Text style={styles.scheduleFieldLabel}>Tipo de dose</Text>
-                                <TouchableOpacity
-                                  activeOpacity={0.78}
-                                  onPress={() => openTherapyOptionModal('schedule_tipo_dose', index)}
-                                  style={[styles.profileInput, styles.profileSelect]}
-                                >
-                                  <Text
-                                    style={[
-                                      styles.profileSelectText,
-                                      !schedule.tipo_dose ? styles.profileSelectPlaceholder : null,
-                                    ]}
-                                  >
-                                    {getTherapyFieldDisplayValue('schedule_tipo_dose', schedule.tipo_dose) ||
-                                      'Selecione o tipo de dose'}
-                                  </Text>
-                                  <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                                </TouchableOpacity>
-                              </View>
-
-                              <View style={styles.editField}>
-                                <Text style={styles.scheduleFieldLabel}>Observação</Text>
-                                <TextInput
-                                  value={schedule.observacao}
-                                  onChangeText={(value) => handleTherapyScheduleChange(index, 'observacao', value)}
-                                  placeholder="Ex: corrigir se glicemia estiver alta"
-                                  placeholderTextColor={patientTheme.colors.textMuted}
-                                  multiline
-                                  style={[styles.profileInput, styles.profileTextArea]}
-                                />
-                              </View>
-
-                              <TouchableOpacity
-                                activeOpacity={0.78}
-                                onPress={() => removeTherapyScheduleRow(index)}
-                                style={styles.scheduleRemoveButton}
-                              >
-                                <Text style={styles.scheduleRemoveButtonText}>Remover horário</Text>
-                              </TouchableOpacity>
-                            </View>
-                          ))}
-
-                          <TouchableOpacity
-                            activeOpacity={0.78}
-                            onPress={addTherapyScheduleRow}
-                            style={styles.therapyInlineAddButton}
-                          >
-                            <Text style={styles.therapyInlineAddButtonText}>Adicionar horário</Text>
-                          </TouchableOpacity>
-                        </View>
-
-                        <TouchableOpacity
-                          activeOpacity={0.78}
-                          onPress={() => setBolusTechnicalExpanded((current) => !current)}
-                          style={styles.technicalToggleButton}
-                        >
-                          <Text style={styles.technicalToggleText}>Detalhes técnicos</Text>
-                          <Ionicons
-                            name={bolusTechnicalExpanded ? 'chevron-up' : 'chevron-down'}
-                            size={18}
-                            color={patientTheme.colors.textMuted}
-                          />
-                        </TouchableOpacity>
-
-                        {bolusTechnicalExpanded ? (
-                          <View style={styles.technicalDetailsCard}>
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Molécula</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.molecula || 'Preenchida automaticamente'}
+                        {profileBolusAlerts.length ? (
+                          <View style={styles.editField}>
+                            {profileBolusAlerts.map((msg, i) => (
+                              <Text key={`pbolus-al-${i}`} style={styles.therapyBolusAlertText}>
+                                {msg}
                               </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Classe de ação</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {getBolusDisplayMetadata(
-                                  therapyDraft.marca,
-                                  getBolusLookupValue(therapyDraft)
-                                ).actionClass || 'Preenchida automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Concentração</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.concentracao || 'Preenchida automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Apresentação</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.apresentacao || 'Preenchida automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Via</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {getTherapyFieldDisplayValue('via', therapyDraft.via) || 'Preenchida automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Início da ação</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.inicio_acao || 'Estimado automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Pico</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.pico || 'Estimado automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Duração</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.duracao || 'Estimado automaticamente'}
-                              </Text>
-                            </View>
-
-                            <View style={styles.editField}>
-                              <Text style={styles.infoLabel}>Tempo de aplicação sugerido</Text>
-                              <Text style={[styles.profileInput, styles.profileInputReadOnly]}>
-                                {therapyDraft.tempo_aplicacao_sugerido || 'Estimado automaticamente'}
-                              </Text>
-                            </View>
+                            ))}
                           </View>
                         ) : null}
+
                       </>
                     ) : therapyDraft.categoria_funcional !== 'basal' && therapyDraft.categoria_funcional !== 'bolus' ? (
                       <View style={styles.editField}>
@@ -4807,7 +5056,11 @@ export default function PacientePerfilScreen({
                       onPress={saveTherapyDraftLocally}
                       style={styles.emailModalPrimaryButton}
                     >
-                      <Text style={styles.emailModalPrimaryButtonText}>Salvar este plano</Text>
+                      <Text style={styles.emailModalPrimaryButtonText}>
+                        {therapyDraft.categoria_funcional === 'bolus'
+                          ? 'Salvar Insulina Bolus'
+                          : 'Salvar este plano'}
+                      </Text>
                     </TouchableOpacity>
 
                     {editingTherapyId ? (
@@ -6022,6 +6275,70 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     fontSize: 13,
     lineHeight: 18,
+  },
+  therapyBolusHelperText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginBottom: 10,
+  },
+  therapyBolusPillRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  therapyBolusPill: {
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderColor: patientTheme.colors.surfaceBorder,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  therapyBolusPillActive: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  therapyBolusPillText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  therapyBolusPillTextActive: {
+    color: patientTheme.colors.primaryDark,
+  },
+  therapyBolusCalcCard: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    marginTop: 4,
+    padding: 14,
+  },
+  therapyBolusCalcTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+    marginBottom: 8,
+  },
+  therapyBolusCalcLine: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  therapyBolusCalcTotal: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 17,
+    fontWeight: '800',
+    marginTop: 6,
+  },
+  therapyBolusAlertText: {
+    color: '#b45309',
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
   },
   therapyDeleteButton: {
     alignSelf: 'flex-start',

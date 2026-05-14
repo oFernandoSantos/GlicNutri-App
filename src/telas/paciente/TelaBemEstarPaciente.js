@@ -5,10 +5,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   symptomOptions,
@@ -52,6 +52,7 @@ export default function PacienteBemEstarScreen({
   const [selectedSymptoms, setSelectedSymptoms] = useState(['focused']);
   const [selectedSleep, setSelectedSleep] = useState('good');
   const [selectedStress, setSelectedStress] = useState(2);
+  const [mensagemBanner, setMensagemBanner] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -123,12 +124,18 @@ export default function PacienteBemEstarScreen({
     const previousState = appState;
 
     if (!selectedSymptoms.length) {
-      Alert.alert('Atenção', 'Selecione pelo menos um sintoma ou estado atual.');
+      setMensagemBanner({
+        tipo: 'aviso',
+        texto: 'Selecione pelo menos um sintoma ou estado atual.',
+      });
       return;
     }
 
     if (!canResolvePatient) {
-      Alert.alert('Atenção', 'Paciente sem identificador para registrar o bem-estar.');
+      setMensagemBanner({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para registrar o bem-estar.',
+      });
       return;
     }
 
@@ -161,11 +168,19 @@ export default function PacienteBemEstarScreen({
       setObjectiveText(saved.clinicalObjective || objectiveText);
       setAppState(saved.appState);
 
-      Alert.alert('Bem-estar salvo', 'Seus sinais do dia foram atualizados com sucesso.');
+      setMensagemBanner({
+        tipo: 'sucesso',
+        texto: 'Bem-estar salvo: seus sinais do dia foram atualizados.',
+      });
     } catch (error) {
       console.log('Erro ao salvar bem-estar:', error);
       setAppState(previousState);
-      Alert.alert('Erro', error?.message || 'Nao foi possivel salvar seu bem-estar agora.');
+      setMensagemBanner({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível salvar seu bem-estar. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setSaving(false);
     }
@@ -175,7 +190,10 @@ export default function PacienteBemEstarScreen({
     const previousState = appState;
 
     if (!canResolvePatient) {
-      Alert.alert('Atenção', 'Paciente sem identificador para registrar atividade.');
+      setMensagemBanner({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para registrar atividade.',
+      });
       return;
     }
 
@@ -208,11 +226,19 @@ export default function PacienteBemEstarScreen({
       setObjectiveText(saved.clinicalObjective || objectiveText);
       setAppState(saved.appState);
 
-      Alert.alert('Atividade registrada', 'A caminhada foi registrada com sucesso.');
+      setMensagemBanner({
+        tipo: 'sucesso',
+        texto: 'Atividade registrada: caminhada leve salva com sucesso.',
+      });
     } catch (error) {
       console.log('Erro ao salvar atividade:', error);
       setAppState(previousState);
-      Alert.alert('Erro', error?.message || 'Nao foi possivel registrar a atividade agora.');
+      setMensagemBanner({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Não foi possível registrar a atividade. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setSaving(false);
     }
@@ -226,6 +252,14 @@ export default function PacienteBemEstarScreen({
       title="Bem-estar"
       subtitle="Registre sintomas, sono e estresse para entender melhor sua glicose."
     >
+      {mensagemBanner?.texto ? (
+        <MensagemInline
+          tipo={mensagemBanner.tipo || 'aviso'}
+          texto={mensagemBanner.texto}
+          onFechar={() => setMensagemBanner(null)}
+          autoOcultarMs={mensagemBanner.tipo === 'sucesso' ? 4000 : 0}
+        />
+      ) : null}
       {loading ? (
         <View style={styles.loadingCard}>
           <ActivityIndicator color={patientTheme.colors.primaryDark} />

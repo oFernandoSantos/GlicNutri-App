@@ -102,6 +102,170 @@ function roundNutrient(value) {
   return Math.round(normalizeNumber(value) * 10) / 10;
 }
 
+const EXTRA_NUTRIENT_DEFAULTS = {
+  fibras: 0,
+  acucares: 0,
+  gorduras_saturadas: 0,
+  sodio: 0,
+  ferro: 0,
+  calcio: 0,
+  magnesio: 0,
+  potassio: 0,
+  zinco: 0,
+  vitamina_a: 0,
+  vitamina_c: 0,
+  vitamina_d: 0,
+  vitamina_b12: 0,
+  folato: 0,
+};
+
+const FOOD_NUTRIENT_HINTS = [
+  {
+    keys: ['arroz', 'massa', 'macarrao', 'batata', 'pao', 'quinoa', 'aveia'],
+    fibras: 3,
+    acucares: 2,
+    gorduras_saturadas: 0.4,
+    sodio: 120,
+    ferro: 0.8,
+    calcio: 18,
+    magnesio: 28,
+    potassio: 110,
+    zinco: 0.7,
+    vitamina_a: 0,
+    vitamina_c: 2,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 28,
+  },
+  {
+    keys: ['feijao', 'lentilha', 'grao de bico', 'ervilha'],
+    fibras: 7,
+    acucares: 1,
+    gorduras_saturadas: 0.1,
+    sodio: 10,
+    ferro: 2.4,
+    calcio: 40,
+    magnesio: 42,
+    potassio: 240,
+    zinco: 1.1,
+    vitamina_a: 8,
+    vitamina_c: 1,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 120,
+  },
+  {
+    keys: ['frango', 'carne', 'peixe', 'ovo', 'atum', 'salmao'],
+    fibras: 0,
+    acucares: 0,
+    gorduras_saturadas: 2.2,
+    sodio: 85,
+    ferro: 1.6,
+    calcio: 16,
+    magnesio: 24,
+    potassio: 260,
+    zinco: 1.8,
+    vitamina_a: 40,
+    vitamina_c: 0,
+    vitamina_d: 2.4,
+    vitamina_b12: 1.1,
+    folato: 18,
+  },
+  {
+    keys: ['salada', 'legume', 'verdura', 'brocolis', 'cenoura', 'espinafre', 'couve'],
+    fibras: 4,
+    acucares: 3,
+    gorduras_saturadas: 0,
+    sodio: 35,
+    ferro: 0.9,
+    calcio: 48,
+    magnesio: 30,
+    potassio: 210,
+    zinco: 0.4,
+    vitamina_a: 260,
+    vitamina_c: 18,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 72,
+  },
+  {
+    keys: ['queijo', 'leite', 'iogurte', 'kefir'],
+    fibras: 0,
+    acucares: 5,
+    gorduras_saturadas: 3,
+    sodio: 95,
+    ferro: 0.1,
+    calcio: 180,
+    magnesio: 18,
+    potassio: 190,
+    zinco: 0.8,
+    vitamina_a: 62,
+    vitamina_c: 0,
+    vitamina_d: 1.2,
+    vitamina_b12: 0.9,
+    folato: 10,
+  },
+  {
+    keys: ['fruta', 'banana', 'maca', 'mamao', 'laranja', 'morango', 'abacate'],
+    fibras: 3,
+    acucares: 12,
+    gorduras_saturadas: 0,
+    sodio: 2,
+    ferro: 0.3,
+    calcio: 22,
+    magnesio: 20,
+    potassio: 240,
+    zinco: 0.2,
+    vitamina_a: 54,
+    vitamina_c: 28,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 34,
+  },
+  {
+    keys: ['castanha', 'amendoa', 'nozes', 'amendoim', 'chia'],
+    fibras: 3,
+    acucares: 1,
+    gorduras_saturadas: 1.1,
+    sodio: 2,
+    ferro: 1.1,
+    calcio: 48,
+    magnesio: 64,
+    potassio: 180,
+    zinco: 0.9,
+    vitamina_a: 0,
+    vitamina_c: 0,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 22,
+  },
+];
+
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function hasValue(value) {
+  return value !== null && typeof value !== 'undefined' && String(value).trim() !== '';
+}
+
+function inferFoodNutrientDefaults(alimento) {
+  const text = normalizeText(`${alimento?.nome || alimento?.foodName || ''} ${alimento?.categoria || alimento?.category || ''}`);
+  const match = FOOD_NUTRIENT_HINTS.find((item) => item.keys.some((key) => text.includes(key)));
+  if (!match) return EXTRA_NUTRIENT_DEFAULTS;
+
+  return { ...EXTRA_NUTRIENT_DEFAULTS, ...match };
+}
+
+function pickNutrientValue(alimento, ptKey, enKey, fallback) {
+  if (hasValue(alimento?.[ptKey])) return roundNutrient(alimento[ptKey]);
+  if (hasValue(alimento?.[enKey])) return roundNutrient(alimento[enKey]);
+  return roundNutrient(fallback);
+}
+
 function inferExtension(fileName, mimeType) {
   const normalizedName = String(fileName || '').toLowerCase();
 
@@ -287,6 +451,8 @@ export async function analisarImagemRefeicaoIA(payload) {
 }
 
 export function criarAlimentoEditavel(alimento = {}) {
+  const inferred = inferFoodNutrientDefaults(alimento);
+
   return {
     id: alimento.id || buildUuid(),
     nome: String(alimento.nome || alimento.foodName || 'Alimento').trim(),
@@ -296,6 +462,25 @@ export function criarAlimentoEditavel(alimento = {}) {
     carboidratos: roundNutrient(alimento.carboidratos || alimento.carbs),
     proteinas: roundNutrient(alimento.proteinas || alimento.proteins),
     gorduras: roundNutrient(alimento.gorduras || alimento.fats),
+    fibras: pickNutrientValue(alimento, 'fibras', 'fiber', inferred.fibras),
+    acucares: pickNutrientValue(alimento, 'acucares', 'sugar', inferred.acucares),
+    gorduras_saturadas: pickNutrientValue(
+      alimento,
+      'gorduras_saturadas',
+      'saturatedFat',
+      inferred.gorduras_saturadas
+    ),
+    sodio: pickNutrientValue(alimento, 'sodio', 'sodium', inferred.sodio),
+    ferro: pickNutrientValue(alimento, 'ferro', 'iron', inferred.ferro),
+    calcio: pickNutrientValue(alimento, 'calcio', 'calcium', inferred.calcio),
+    magnesio: pickNutrientValue(alimento, 'magnesio', 'magnesium', inferred.magnesio),
+    potassio: pickNutrientValue(alimento, 'potassio', 'potassium', inferred.potassio),
+    zinco: pickNutrientValue(alimento, 'zinco', 'zinc', inferred.zinco),
+    vitamina_a: pickNutrientValue(alimento, 'vitamina_a', 'vitaminA', inferred.vitamina_a),
+    vitamina_c: pickNutrientValue(alimento, 'vitamina_c', 'vitaminC', inferred.vitamina_c),
+    vitamina_d: pickNutrientValue(alimento, 'vitamina_d', 'vitaminD', inferred.vitamina_d),
+    vitamina_b12: pickNutrientValue(alimento, 'vitamina_b12', 'vitaminB12', inferred.vitamina_b12),
+    folato: pickNutrientValue(alimento, 'folato', 'folate', inferred.folato),
   };
 }
 
@@ -306,12 +491,42 @@ export function calcularTotaisRefeicaoIA(alimentos) {
       calorias_total: roundNutrient(totais.calorias_total + item.calorias),
       proteinas_total: roundNutrient(totais.proteinas_total + item.proteinas),
       gorduras_total: roundNutrient(totais.gorduras_total + item.gorduras),
+      fibras_total: roundNutrient(totais.fibras_total + item.fibras),
+      acucares_total: roundNutrient(totais.acucares_total + item.acucares),
+      gorduras_saturadas_total: roundNutrient(
+        totais.gorduras_saturadas_total + item.gorduras_saturadas
+      ),
+      sodio_total: roundNutrient(totais.sodio_total + item.sodio),
+      ferro_total: roundNutrient(totais.ferro_total + item.ferro),
+      calcio_total: roundNutrient(totais.calcio_total + item.calcio),
+      magnesio_total: roundNutrient(totais.magnesio_total + item.magnesio),
+      potassio_total: roundNutrient(totais.potassio_total + item.potassio),
+      zinco_total: roundNutrient(totais.zinco_total + item.zinco),
+      vitamina_a_total: roundNutrient(totais.vitamina_a_total + item.vitamina_a),
+      vitamina_c_total: roundNutrient(totais.vitamina_c_total + item.vitamina_c),
+      vitamina_d_total: roundNutrient(totais.vitamina_d_total + item.vitamina_d),
+      vitamina_b12_total: roundNutrient(totais.vitamina_b12_total + item.vitamina_b12),
+      folato_total: roundNutrient(totais.folato_total + item.folato),
     }),
     {
       carboidratos_total: 0,
       calorias_total: 0,
       proteinas_total: 0,
       gorduras_total: 0,
+      fibras_total: 0,
+      acucares_total: 0,
+      gorduras_saturadas_total: 0,
+      sodio_total: 0,
+      ferro_total: 0,
+      calcio_total: 0,
+      magnesio_total: 0,
+      potassio_total: 0,
+      zinco_total: 0,
+      vitamina_a_total: 0,
+      vitamina_c_total: 0,
+      vitamina_d_total: 0,
+      vitamina_b12_total: 0,
+      folato_total: 0,
     }
   );
 }

@@ -18,6 +18,7 @@ export default function LayoutNutricionista({
   contentContainerStyle,
   showTabBar = route?.name === 'HomeNutricionista',
   scrollEnabled = true,
+  refreshControl,
 }) {
   const showHeader = Boolean(title || subtitle || rightAction);
 
@@ -51,6 +52,7 @@ export default function LayoutNutricionista({
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             nestedScrollEnabled
+            refreshControl={refreshControl}
           >
             {children}
           </ScrollView>

@@ -5,10 +5,10 @@ import {
   TouchableOpacity,
   StyleSheet,
   ScrollView,
-  Alert,
   Platform,
   StatusBar,
   ActivityIndicator,
+  RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
@@ -19,6 +19,8 @@ import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_SPACE,
 } from '../../componentes/nutricionista/BarraAbasNutricionista';
 import { fetchNutriDashboard } from '../../servicos/servicoDashboardNutri';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -51,6 +53,9 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
   const [menuVisible, setMenuVisible] = useState(false);
   const [loadingLogout, setLoadingLogout] = useState(false);
   const [loadingDashboard, setLoadingDashboard] = useState(true);
+  const [dashboardErro, setDashboardErro] = useState(null);
+  const [refreshingDash, setRefreshingDash] = useState(false);
+  const [mensagemTopo, setMensagemTopo] = useState(null);
   const [dashboard, setDashboard] = useState({
     patientsCount: 0,
     consultsTodayCount: 0,
@@ -94,7 +99,11 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
       });
     } catch (error) {
       console.log('Erro inesperado no logout:', error);
-      Alert.alert('Erro', 'Nao foi possivel sair da conta.');
+      setMensagemTopo({
+        tipo: 'erro',
+        texto:
+          'Não foi possível sair da conta. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setLoadingLogout(false);
     }
@@ -104,23 +113,41 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     navigation.navigate(routeName, { usuarioLogado });
   }
 
-  const loadDashboard = useCallback(async () => {
-    try {
-      setLoadingDashboard(true);
-      const data = await fetchNutriDashboard(usuarioLogado);
-      setDashboard({
-        patientsCount: data.patientsCount || 0,
-        consultsTodayCount: data.consultsTodayCount || 0,
-        upcomingConsults: data.upcomingConsults || [],
-        recentPatients: data.recentPatients || [],
-        lastUpdatedAt: data.lastUpdatedAt || new Date().toISOString(),
-      });
-    } catch (error) {
-      console.log('Erro ao carregar dashboard nutri:', error);
-    } finally {
-      setLoadingDashboard(false);
-    }
-  }, [usuarioLogado]);
+  const loadDashboard = useCallback(
+    async (options = {}) => {
+      const { silent = false } = options;
+      try {
+        if (!silent) {
+          setLoadingDashboard(true);
+        }
+        setDashboardErro(null);
+        const data = await fetchNutriDashboard(usuarioLogado);
+        setDashboard({
+          patientsCount: data.patientsCount || 0,
+          consultsTodayCount: data.consultsTodayCount || 0,
+          upcomingConsults: data.upcomingConsults || [],
+          recentPatients: data.recentPatients || [],
+          lastUpdatedAt: data.lastUpdatedAt || new Date().toISOString(),
+        });
+      } catch (error) {
+        console.log('Erro ao carregar dashboard nutri:', error);
+        setDashboardErro(
+          'Não foi possível carregar o painel. Verifique a conexão e tente novamente.'
+        );
+      } finally {
+        if (!silent) {
+          setLoadingDashboard(false);
+        }
+      }
+    },
+    [usuarioLogado]
+  );
+
+  const onRefreshDashboard = useCallback(async () => {
+    setRefreshingDash(true);
+    await loadDashboard({ silent: true });
+    setRefreshingDash(false);
+  }, [loadDashboard]);
 
   useEffect(() => {
     navigation.setOptions({
@@ -162,7 +189,23 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
+        refreshControl={
+          <RefreshControl refreshing={refreshingDash} onRefresh={onRefreshDashboard} />
+        }
       >
+        {mensagemTopo?.texto ? (
+          <MensagemInline
+            tipo={mensagemTopo.tipo || 'erro'}
+            texto={mensagemTopo.texto}
+            onFechar={() => setMensagemTopo(null)}
+          />
+        ) : null}
+        {!loadingDashboard && dashboardErro ? (
+          <EstadoErroCarregamento
+            onTentarNovamente={() => loadDashboard()}
+            loading={loadingDashboard}
+          />
+        ) : null}
         <View style={styles.headerRow}>
           <View style={styles.headerCopy}>
             <Text style={styles.greeting}>{`Dra. ${nomeNutri}`}</Text>

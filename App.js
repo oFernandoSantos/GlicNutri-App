@@ -6,6 +6,7 @@ import {
   Platform,
   StyleSheet,
   Dimensions,
+  Text,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
@@ -41,9 +42,10 @@ import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
 import TelaPrevisaoMl from './src/telas/paciente/TelaPrevisaoMl';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
 import SwipeBackContainer from './src/componentes/comum/SwipeBackContainer';
-import { supabase } from './src/servicos/configSupabase';
+import { supabase, isSupabaseConfigured } from './src/servicos/configSupabase';
 import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
 import { configurarCapturaGlobalLogs } from './src/servicos/servicoLogSistema';
+import { initObservabilidade } from './src/servicos/servicoObservabilidade';
 import { patientTheme } from './src/temas/temaVisualPaciente';
 import { INTRO_SEEN_STORAGE_KEY } from './src/constantes/chavesArmazenamento';
 import { hasPatientOnboardingSeen } from './src/servicos/servicoOnboardingPaciente';
@@ -117,6 +119,17 @@ function useWebDocumentScroll() {
         height: 0 !important;
         width: 0 !important;
       }
+
+      a:focus-visible,
+      button:focus-visible,
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible,
+      [role='button']:focus-visible,
+      [tabindex]:focus-visible {
+        outline: 2px solid #4fdfa3 !important;
+        outline-offset: 2px !important;
+      }
     `;
 
     document.documentElement.style.height = 'auto';
@@ -134,6 +147,7 @@ export default function App() {
 
   useEffect(() => {
     configurarCapturaGlobalLogs();
+    initObservabilidade();
   }, []);
 
   const [session, setSession] = useState(null);
@@ -171,6 +185,12 @@ export default function App() {
   }, [session, adminSession]);
 
   useEffect(() => {
+    if (!isSupabaseConfigured) {
+      setSession(null);
+      setAuthReady(true);
+      return undefined;
+    }
+
     let isMounted = true;
 
     async function prepararSessao(nextSession) {
@@ -302,6 +322,37 @@ export default function App() {
       isMounted = false;
     };
   }, []);
+
+  if (!isSupabaseConfigured) {
+    return (
+      <GestureHandlerRootView style={styles.gestureRoot}>
+        <SafeAreaProvider>
+          <View
+            style={[
+              styles.appRoot,
+              Platform.OS === 'web' && styles.webDocumentRoot,
+              { justifyContent: 'center' },
+            ]}
+          >
+            <StatusBar
+              barStyle="dark-content"
+              backgroundColor={patientTheme.colors.background}
+            />
+            <View style={{ paddingHorizontal: 28, maxWidth: 520, alignSelf: 'center' }}>
+              <Text style={{ fontSize: 18, fontWeight: '700', marginBottom: 12, textAlign: 'center' }}>
+                Configuracao incompleta
+              </Text>
+              <Text style={{ fontSize: 15, lineHeight: 22, color: '#444', textAlign: 'center' }}>
+                Crie um ficheiro .env na raiz do projeto com EXPO_PUBLIC_SUPABASE_URL e
+                EXPO_PUBLIC_SUPABASE_ANON_KEY (copie de .env.example e preencha). Reinicie o Expo
+                (npm start).
+              </Text>
+            </View>
+          </View>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
 
   if (!authReady || !introReady || !patientOnboardingReady || !adminReady) {
     return (

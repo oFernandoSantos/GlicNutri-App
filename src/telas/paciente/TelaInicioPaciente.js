@@ -7,7 +7,6 @@ import {
   StyleSheet,
   StatusBar,
   ActivityIndicator,
-  Alert,
   Platform,
   Modal,
   useWindowDimensions,
@@ -44,6 +43,7 @@ import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
+import MensagemInline from '../../componentes/comum/MensagemInline';
 
 function padDatePart(value) {
   return String(value).padStart(2, '0');
@@ -646,6 +646,7 @@ export default function PacienteHomeScreen({
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saindo, setSaindo] = useState(false);
+  const [mensagemHome, setMensagemHome] = useState(null);
   const [activeMetricIndex, setActiveMetricIndex] = useState(0);
 
   const [paciente, setPaciente] = useState(null);
@@ -768,7 +769,11 @@ export default function PacienteHomeScreen({
       });
     } catch (error) {
       console.log('Erro inesperado no logout:', error);
-      Alert.alert('Erro', 'Não foi possível sair da conta.');
+      setMensagemHome({
+        tipo: 'erro',
+        texto:
+          'Não foi possível sair da conta. Verifique a conexão e tente novamente.',
+      });
     } finally {
       setSaindo(false);
     }
@@ -940,10 +945,17 @@ export default function PacienteHomeScreen({
 
         try {
           await persistirAppState(nextState);
-          Alert.alert('Hidratação registrada', `Agora você tem ${next} copos registrados hoje.`);
+          setMensagemHome({
+            tipo: 'sucesso',
+            texto: `Hidratação registrada: ${next} copo(s) hoje.`,
+          });
         } catch (error) {
           console.log('Erro ao salvar hidratação:', error);
-          Alert.alert('Erro', 'Não foi possível salvar a hidratação agora.');
+          setMensagemHome({
+            tipo: 'erro',
+            texto:
+              'Não foi possível salvar a hidratação. Verifique a conexão e tente novamente.',
+          });
           setAppState(appState);
         }
       },
@@ -1123,6 +1135,14 @@ export default function PacienteHomeScreen({
         keyboardShouldPersistTaps="handled"
         nestedScrollEnabled
       >
+        {mensagemHome?.texto ? (
+          <MensagemInline
+            tipo={mensagemHome.tipo || 'aviso'}
+            texto={mensagemHome.texto}
+            onFechar={() => setMensagemHome(null)}
+            autoOcultarMs={mensagemHome.tipo === 'sucesso' ? 3500 : 0}
+          />
+        ) : null}
         <View style={styles.metricCarouselWrap}>
           <ScrollView
             horizontal

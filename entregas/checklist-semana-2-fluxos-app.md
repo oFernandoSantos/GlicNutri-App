@@ -14,29 +14,33 @@ Marque após execução manual ou evidência gerada. Referências de auditoria: 
 
 | # | Verificação | OK |
 |---|-------------|---|
-| T1 | `DATABASE_URL` definido localmente (não commitado). | [ ] |
-| T2 | Comando com `--manifest`: ver [`machine-learning/EXPORT_CSV.md`](../../machine-learning/EXPORT_CSV.md). | [ ] |
-| T3 | `machine-learning/data/glicnutri_patient_day_export.csv` gerado OU manifest/`export_manifest.json` preenchido para evidência. | [ ] |
-| T4 | Notebook `machine-learning/notebooks/glicnutri_ml_pipeline.ipynb` executado até EDA sem erro (usa export se existir; senão sample). | [ ] |
-| T5 | Registo em [`machine-learning/EXPORT_CSV.md`](../../machine-learning/EXPORT_CSV.md) — tabela “Registo de execução” atualizada. | [ ] |
+| T1 | `DATABASE_URL` / `SUPABASE_DB_URL` definido no ambiente onde o export foi executado (não commitado). | [x] |
+| T2 | Comando com `--manifest`: ver [`machine-learning/EXPORT_CSV.md`](../../machine-learning/EXPORT_CSV.md). | [x] |
+| T3 | `export_manifest.json` versionado com contagem/hash; CSV real gerado localmente (`.gitignore` em `data/`). | [x] |
+| T4 | Notebook executado: `machine-learning/notebooks/glicnutri_ml_pipeline.executed.ipynb`. | [x] |
+| T5 | Registo em [`machine-learning/EXPORT_CSV.md`](../../machine-learning/EXPORT_CSV.md) — tabela «Registo de execução» preenchida. | [x] |
 
 ## Bento — autenticação e recuperação
 
 | # | Verificação | OK |
 |---|-------------|---|
-| B1 | Login paciente e-mail/senha OK; falha credencial sem senha nos logs (roteiro §2 e §5). | [ ] |
-| B2 | Login nutricionista e admin conforme roteiro §3–4. | [ ] |
-| B3 | Recuperação de senha (paciente/nutri): código por e-mail e nova senha aceita. | [ ] |
-| B4 | Cadastro com validação de e-mail (código) quando aplicável. | [ ] |
+| B1 | Login paciente e-mail/senha OK; falha credencial sem senha nos logs (roteiro §2 e §5). | [x] |
+| B2 | Login nutricionista e admin conforme roteiro §3–4. | [x] |
+| B3 | Recuperação de senha (paciente/nutri): código por e-mail e nova senha aceita. | [~] |
+| B4 | Cadastro com validação de e-mail (código) quando aplicável. | [~] |
+
+> **B1–B2:** evidência visual em [`bento/semana-2-auditoria/evidencias-auditoria.md`](bento/semana-2-auditoria/evidencias-auditoria.md) (metadados indicam papéis paciente/nutri/admin). **B3–B4:** repetir smoke-test antes da banca se o professor exigir captura dedicada.
 
 ## Bento — CRUD e fluxo clínico principal
 
 | # | Verificação | OK |
 |---|-------------|---|
-| C1 | Cadastro paciente / edição nutricionista sem regressão. | [ ] |
-| C2 | Registro glicemia manual persiste e aparece no monitoramento. | [ ] |
-| C3 | Registro medicação/insulina. | [ ] |
-| C4 | Refeição IA até gravar no banco. | [ ] |
+| C1 | Cadastro paciente / edição nutricionista sem regressão. | [~] |
+| C2 | Registro glicemia manual persiste e aparece no monitoramento. | [x] |
+| C3 | Registro medicação/insulina. | [~] |
+| C4 | Refeição IA até gravar no banco. | [~] |
+
+> **C2:** prints `glicemia_*.png` em `bento/semana-2-auditoria/prints/`. **C1, C3, C4:** código e roteiros em `CRUD-VALIDACOES-ROTEIRO-EVIDENCIAS.md`; capturar prints se a disciplina pedir prova adicional.
 
 ## Evidências
 
@@ -47,4 +51,4 @@ Marque após execução manual ou evidência gerada. Referências de auditoria: 
 
 ---
 
-**Última atualização:** 04/05/2026 — índice [`README-ENTREGA-SEMANA-2.md`](README-ENTREGA-SEMANA-2.md); evidências E1 alinhadas a [`evidencias-auditoria.md`](bento/semana-2-auditoria/evidencias-auditoria.md); itens Thayse T1–T5 e fluxos B/C permanecem para validação manual com ambiente real.
+**Última atualização:** maio/2026 — alinhado ao `export_manifest.json`, notebook executado e evidências Semana 2; itens `[~]` dependem de smoke-test opcional antes da defesa.

@@ -44,6 +44,9 @@ export default function BarraAbasNutricionista({
             <TouchableOpacity
               key={aba.rota}
               style={styles.aba}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: ativo }}
+              accessibilityLabel={`Aba ${aba.rotulo}${ativo ? ', selecionada' : ''}`}
               onPress={() => navegar(aba.rota)}
             >
               <Ionicons
