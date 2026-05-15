@@ -124,6 +124,122 @@ function formatDateTime(value) {
   });
 }
 
+function humanizarToken(value) {
+  return String(value || '')
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function inferirProgramaAuditoria(text) {
+  if (text.includes('login') || text.includes('sessao')) return MODULOS_LOG_SISTEMA.LOGIN;
+  if (text.includes('glic')) return MODULOS_LOG_SISTEMA.GLICEMIA;
+  if (text.includes('refeicao') || text.includes('aliment')) return MODULOS_LOG_SISTEMA.ALIMENTACAO;
+  if (text.includes('plano')) return MODULOS_LOG_SISTEMA.PLANO_ALIMENTAR;
+  if (text.includes('consulta') || text.includes('agenda') || text.includes('disponibilidade')) return MODULOS_LOG_SISTEMA.CONSULTA;
+  if (text.includes('nutri')) return MODULOS_LOG_SISTEMA.NUTRICIONISTA;
+  if (text.includes('admin')) return MODULOS_LOG_SISTEMA.ADMIN;
+  if (text.includes('notific')) return MODULOS_LOG_SISTEMA.NOTIFICACAO;
+  return MODULOS_LOG_SISTEMA.PACIENTE;
+}
+
+function inferirHistoricoAuditoria(action, status) {
+  const actionText = normalizeSearchText(action);
+  const statusText = normalizeSearchText(status);
+
+  if (statusText === 'falha' || actionText.includes('falha') || actionText.includes('erro')) {
+    return TIPOS_HISTORICO_LOG.ERRO;
+  }
+  if (actionText.includes('login')) return TIPOS_HISTORICO_LOG.LOGIN;
+  if (statusText === 'alerta' || actionText.includes('alert')) return TIPOS_HISTORICO_LOG.ALERTA;
+  if (
+    actionText.includes('delete') ||
+    actionText.includes('exclu') ||
+    actionText.includes('remov') ||
+    actionText.includes('ocult') ||
+    actionText.includes('arquiv') ||
+    actionText.includes('inativ')
+  ) {
+    return TIPOS_HISTORICO_LOG.EXCLUSAO;
+  }
+  if (actionText.includes('sync') || actionText.includes('sincron')) return TIPOS_HISTORICO_LOG.SINCRONIZACAO;
+  if (
+    actionText.includes('create') ||
+    actionText.includes('insert') ||
+    actionText.includes('cadastro') ||
+    actionText.includes('cadastrad') ||
+    actionText.includes('registr') ||
+    actionText.includes('salv')
+  ) {
+    return TIPOS_HISTORICO_LOG.CADASTRO;
+  }
+  return TIPOS_HISTORICO_LOG.ALTERACAO;
+}
+
+function montarDescricaoAuditoria(action, entity, programa, historico) {
+  const actionText = normalizeSearchText(action);
+
+  if (programa === MODULOS_LOG_SISTEMA.LOGIN) return 'Tela de autenticacao';
+  if (programa === MODULOS_LOG_SISTEMA.GLICEMIA) {
+    if (historico === TIPOS_HISTORICO_LOG.ALERTA) return 'Alerta de glicemia alta';
+    if (historico === TIPOS_HISTORICO_LOG.EXCLUSAO) return 'Exclusao de registro de glicemia';
+    if (historico === TIPOS_HISTORICO_LOG.CADASTRO) return 'Registro de glicemia';
+    return 'Alteracao de registro de glicemia';
+  }
+  if (programa === MODULOS_LOG_SISTEMA.ALIMENTACAO) {
+    if (historico === TIPOS_HISTORICO_LOG.EXCLUSAO) return 'Exclusao de alimentacao';
+    if (historico === TIPOS_HISTORICO_LOG.CADASTRO) return 'Registro de alimentacao';
+    return 'Alteracao de alimentacao';
+  }
+  if (programa === MODULOS_LOG_SISTEMA.PLANO_ALIMENTAR) return 'Plano alimentar do paciente';
+  if (actionText.includes('disponibilidade')) return 'Disponibilidade do nutricionista';
+  if (actionText.includes('medic')) return 'Registro de medicacao';
+  return humanizarToken(entity || action || 'Acao do usuario') || 'Acao do usuario';
+}
+
+function montarComplementoAuditoria(event, historico, programa) {
+  const action = String(event?.action || 'acao');
+  const details = event?.details || {};
+  const partes = [];
+
+  if (historico === TIPOS_HISTORICO_LOG.EXCLUSAO) {
+    partes.push(programa === MODULOS_LOG_SISTEMA.GLICEMIA
+      ? 'Registro de glicemia excluido'
+      : `${humanizarToken(event?.entity || 'registro')} excluido`);
+  } else if (historico === TIPOS_HISTORICO_LOG.CADASTRO) {
+    partes.push(`${humanizarToken(event?.entity || 'registro')} incluido`);
+  } else if (historico === TIPOS_HISTORICO_LOG.ALTERACAO) {
+    partes.push(`${humanizarToken(event?.entity || 'registro')} alterado`);
+  } else if (historico === TIPOS_HISTORICO_LOG.LOGIN) {
+    const isGoogle = action.includes('google') || details.provedor === 'google';
+    partes.push(action.includes('falha')
+      ? `Falha de login${details.motivo ? ` | Motivo: ${details.motivo}` : ''}`
+      : isGoogle
+        ? 'Login efetuado com sucesso via Google'
+        : 'Login efetuado com sucesso');
+  } else if (historico === TIPOS_HISTORICO_LOG.ALERTA) {
+    partes.push(programa === MODULOS_LOG_SISTEMA.GLICEMIA
+      ? 'Alerta gerado por glicemia alta'
+      : humanizarToken(action));
+  } else {
+    partes.push(humanizarToken(action));
+  }
+
+  if (details.valorMgDl != null) partes.push(`Valor: ${details.valorMgDl} mg/dL`);
+  if (details.valor != null) partes.push(`Valor: ${details.valor}`);
+  if (details.data) partes.push(`Data: ${details.data}`);
+  if (details.hora) partes.push(`Hora: ${details.hora}`);
+  if (details.tipoGlicemia) partes.push(`Tipo: ${details.tipoGlicemia}`);
+  if (details.pacienteNome) partes.push(`Paciente: ${details.pacienteNome}`);
+  if (details.nomePaciente) partes.push(`Paciente: ${details.nomePaciente}`);
+  if (details.email) partes.push(`Email: ${details.email}`);
+  if (event?.entityId) partes.push(`ID: ${event.entityId}`);
+  if (event?.status) partes.push(`Status: ${event.status}`);
+  if (!partes.length) partes.push(`${action} | ${event?.status || 'status nao informado'}`);
+
+  return partes.join(' | ');
+}
+
 function mapAuditEventToLog(event) {
   const action = String(event?.action || '').toLowerCase();
   const isGoogle = action.includes('google') || event?.details?.provedor === 'google';
@@ -158,35 +274,9 @@ function mapAuditEventToLogUsuario(event) {
     return null;
   }
 
-  const programa = text.includes('login') || text.includes('sessao')
-    ? MODULOS_LOG_SISTEMA.LOGIN
-    : text.includes('glic')
-      ? MODULOS_LOG_SISTEMA.GLICEMIA
-      : text.includes('refeicao') || text.includes('aliment')
-        ? MODULOS_LOG_SISTEMA.ALIMENTACAO
-        : text.includes('plano')
-          ? MODULOS_LOG_SISTEMA.PLANO_ALIMENTAR
-          : text.includes('consulta')
-            ? MODULOS_LOG_SISTEMA.CONSULTA
-            : text.includes('nutri')
-              ? MODULOS_LOG_SISTEMA.NUTRICIONISTA
-              : text.includes('admin')
-                ? MODULOS_LOG_SISTEMA.ADMIN
-                : MODULOS_LOG_SISTEMA.PACIENTE;
+  const programa = inferirProgramaAuditoria(text);
 
-  const historico = String(event?.status || '').toLowerCase() === 'falha' || action.includes('falha') || action.includes('erro')
-    ? TIPOS_HISTORICO_LOG.ERRO
-    : action.includes('login')
-      ? TIPOS_HISTORICO_LOG.LOGIN
-      : action.includes('delete') || action.includes('exclu') || action.includes('remov') || action.includes('ocult')
-        ? TIPOS_HISTORICO_LOG.EXCLUSAO
-        : action.includes('sync') || action.includes('sincron')
-          ? TIPOS_HISTORICO_LOG.SINCRONIZACAO
-          : action.includes('alert')
-            ? TIPOS_HISTORICO_LOG.ALERTA
-            : action.includes('create') || action.includes('insert') || action.includes('cadastro') || action.includes('cadastrad') || action.includes('registr')
-              ? TIPOS_HISTORICO_LOG.CADASTRO
-              : TIPOS_HISTORICO_LOG.ALTERACAO;
+  const historico = inferirHistoricoAuditoria(action, event?.status);
 
   const descricao = action.includes('login')
     ? 'Tela de autenticação'
@@ -220,17 +310,20 @@ function mapAuditEventToLogUsuario(event) {
     complemento = partes.join(' | ') || complemento;
   }
 
+  const descricaoFinal = montarDescricaoAuditoria(action, event?.entity, programa, historico) || descricao;
+  const complementoFinal = montarComplementoAuditoria(event, historico, programa) || complemento;
+
   return {
     id: `audit-${event.id}`,
     seq: '',
     programa,
-    descricao,
+    descricao: descricaoFinal,
     usuario: event.actorName || event.actorPatientId || event.actorNutritionistId || event.actorAdminId || 'Usuário',
     historico,
     dataHora: event.createdAt,
     createdAt: event.createdAt,
     dataHoraFormatada: formatDateTime(event.createdAt),
-    complemento,
+    complemento: complementoFinal,
     detalhes: details,
     path: event.path,
     atorTipo: event.actorType,
@@ -300,7 +393,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   const [logs, setLogs] = useState([]);
   const [menuVisible, setMenuVisible] = useState(false);
   const [detalharLog, setDetalharLog] = useState(true);
-  const [exportText, setExportText] = useState('');
   const [filters, setFilters] = useState({
     dataInicial: '',
     dataFinal: '',
@@ -344,7 +436,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
 
       await AppLogger.registrar({
         programa: MODULOS_LOG_SISTEMA.ADMIN,
-        descricao: 'Consulta Log do Sistema',
+        descricao: 'Auditoria/Log',
         usuario: adminUser,
         historico: TIPOS_HISTORICO_LOG.LOGIN,
         complemento: 'Administrador saiu da consulta de logs',
@@ -358,8 +450,8 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     });
   }
 
-  function handleNavigate(routeName) {
-    navigation.navigate(routeName, { usuarioLogado: adminUser });
+  function handleNavigate(routeName, params = {}) {
+    navigation.navigate(routeName, { usuarioLogado: adminUser, ...params });
   }
 
   async function carregarLogs({ isRefresh = false, filtersOverride = null } = {}) {
@@ -442,12 +534,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     }
   }
 
-  function handleExportar() {
-    const csvText = buildExportPreview(logs);
-    setExportText(csvText);
-
-  }
-
   function handleSelecionarLog(item) {
     navigation.navigate('AdminDetalheLogSistema', {
       usuarioLogado: adminUser,
@@ -501,11 +587,11 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
         <MenuAdmin
           visible={menuVisible}
           onClose={() => setMenuVisible(false)}
-          onNavigate={handleNavigate}
+          onNavigate={(routeName, params = {}) => handleNavigate(routeName, params)}
           onLogout={handleLogout}
           currentRoute={route?.name || 'AdminLogsSistema'}
           userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-          userSubtitle="Consulta e rastreamento de logs"
+          userSubtitle="Auditoria, logs e rastreamento de acoes"
         />
       ) : null}
 
@@ -523,18 +609,14 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
       >
         <View style={styles.headerBar}>
           <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle}>Consulta Log do Sistema</Text>
-            <Text style={styles.headerSubtitle}>Consulta administrativa para auditoria e rastreamento operacional</Text>
+            <Text style={styles.headerTitle}>Auditoria/Log</Text>
+            <Text style={styles.headerSubtitle}>Eventos de cadastro, alteracao, exclusao e rastreamento operacional</Text>
           </View>
 
           <View style={styles.headerActions}>
             <TouchableOpacity style={styles.actionButton} onPress={() => carregarLogs()}>
               <Ionicons name="search-outline" size={17} color={adminTheme.colors.onPrimary} />
               <Text style={styles.actionButtonText}>Pesquisar</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={styles.secondaryActionButton} onPress={handleExportar}>
-              <Ionicons name="print-outline" size={17} color={adminTheme.colors.text} />
-              <Text style={styles.secondaryActionButtonText}>Imprimir/Exportar</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.exitButton} onPress={handleVoltar}>
               <Ionicons name="arrow-back-outline" size={17} color={adminTheme.colors.danger} />
@@ -682,24 +764,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
           </ScrollView>
         </SectionCard>
 
-        {exportText ? (
-          <SectionCard style={styles.exportCard}>
-            <View style={styles.exportHeader}>
-              <Text style={styles.exportTitle}>Bloco de texto para exportacao</Text>
-              <TouchableOpacity style={styles.clearExportButton} onPress={() => setExportText('')}>
-                <Ionicons name="close-outline" size={18} color={adminTheme.colors.danger} />
-                <Text style={styles.clearExportButtonText}>Fechar</Text>
-              </TouchableOpacity>
-            </View>
-            <TextInput
-              style={styles.exportTextArea}
-              value={exportText}
-              multiline
-              editable={false}
-              selectTextOnFocus
-            />
-          </SectionCard>
-        ) : null}
       </ScrollView>
 
       <BarraAbasAdmin
@@ -795,22 +859,6 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.onPrimary,
     fontSize: 13,
     fontWeight: '900',
-    marginLeft: 7,
-  },
-  secondaryActionButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.panelMuted,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    flexDirection: 'row',
-    minHeight: 42,
-    paddingHorizontal: 14,
-  },
-  secondaryActionButtonText: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '800',
     marginLeft: 7,
   },
   exitButton: {
@@ -1008,46 +1056,6 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.textMuted,
     fontSize: 13,
     fontWeight: '700',
-  },
-  exportCard: {
-    marginTop: 12,
-  },
-  exportHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-    marginBottom: 10,
-  },
-  exportTitle: {
-    color: adminTheme.colors.text,
-    flex: 1,
-    fontSize: 16,
-    fontWeight: '900',
-  },
-  clearExportButton: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    minHeight: 34,
-  },
-  clearExportButtonText: {
-    color: adminTheme.colors.danger,
-    fontSize: 12,
-    fontWeight: '900',
-    marginLeft: 4,
-  },
-  exportTextArea: {
-    backgroundColor: adminTheme.colors.background,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    color: adminTheme.colors.text,
-    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
-    fontSize: 11,
-    lineHeight: 16,
-    minHeight: 220,
-    padding: 12,
-    textAlignVertical: 'top',
   },
   primaryButton: {
     alignItems: 'center',

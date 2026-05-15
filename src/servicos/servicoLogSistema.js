@@ -527,6 +527,28 @@ export const AppLogger = {
     });
   },
 
+  async alteracao(programa, descricao, meta = {}) {
+    return this.registrar({
+      programa,
+      descricao,
+      usuario: meta?.usuario,
+      historico: TIPOS_HISTORICO_LOG.ALTERACAO,
+      complemento: meta?.complemento || '',
+      detalhes: meta?.detalhes || null,
+    });
+  },
+
+  async exclusao(programa, descricao, meta = {}) {
+    return this.registrar({
+      programa,
+      descricao,
+      usuario: meta?.usuario,
+      historico: TIPOS_HISTORICO_LOG.EXCLUSAO,
+      complemento: meta?.complemento || '',
+      detalhes: meta?.detalhes || null,
+    });
+  },
+
   async sincronizacao(programa, descricao, meta = {}) {
     return this.registrar({
       programa,

@@ -376,8 +376,8 @@ export default function TelaAuditoriaAdmin({ navigation, route, usuarioLogado, o
     });
   }
 
-  function handleNavigate(routeName) {
-    navigation.navigate(routeName, { usuarioLogado: adminUser });
+  function handleNavigate(routeName, params = {}) {
+    navigation.navigate(routeName, { usuarioLogado: adminUser, ...params });
   }
 
   async function carregarPainelResumoAtual({ actorType, status, textSearch, dateRange } = {}) {

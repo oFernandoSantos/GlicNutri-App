@@ -10,9 +10,10 @@ const TAB_HIGHLIGHT_COLOR = adminTheme.colors.primary;
 const TAB_ACTIVE_BACKGROUND = '#0B1A17';
 
 const abasPrincipais = [
-  { rota: 'AdminAuditoria', rotulo: 'Auditoria', icone: 'shield-checkmark-outline' },
+  { rota: 'AdminCadastros', rotulo: 'Cadastros', icone: 'person-add-outline' },
   { rota: 'AdminHome', rotulo: 'Inicio', icone: 'home-outline' },
-  { rota: 'AdminLogsSistema', rotulo: 'Logs', icone: 'pulse-outline' },
+  { rota: 'AdminOperacoes', rotulo: 'Operacoes', icone: 'briefcase-outline' },
+  { rota: 'AdminLogsSistema', rotulo: 'Auditoria/Log', icone: 'pulse-outline' },
 ];
 
 const rodapeWebFixo = Platform.OS === 'web' ? { position: 'fixed', zIndex: 850 } : null;
@@ -144,16 +145,16 @@ const styles = StyleSheet.create({
   },
   rotuloAba: {
     marginTop: 1,
-    fontSize: 10,
+    fontSize: 9,
     fontWeight: '500',
     color: '#FFFFFF',
   },
   rotuloAbaDentroAtivo: {
     alignSelf: 'center',
     color: TAB_HIGHLIGHT_COLOR,
-    fontSize: 9,
+    fontSize: 8,
     fontWeight: '700',
-    lineHeight: 11,
+    lineHeight: 9,
     marginTop: 0,
     textAlign: 'center',
   },

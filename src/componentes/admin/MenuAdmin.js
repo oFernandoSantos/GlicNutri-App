@@ -15,8 +15,10 @@ import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
 
 const menuItems = [
   { label: 'Inicio', route: 'AdminHome', icon: 'home-outline' },
-  { label: 'Auditoria', route: 'AdminAuditoria', icon: 'shield-checkmark-outline' },
-  { label: 'Logs do sistema', route: 'AdminLogsSistema', icon: 'pulse-outline' },
+  { label: 'Cadastros', route: 'AdminCadastros', icon: 'person-add-outline' },
+  { label: 'Cadastrar admin', route: 'AdminCadastroAdministrador', icon: 'shield-checkmark-outline' },
+  { label: 'Operacoes', route: 'AdminOperacoes', icon: 'briefcase-outline' },
+  { label: 'Auditoria/Log', route: 'AdminLogsSistema', icon: 'pulse-outline' },
 ];
 
 export default function MenuAdmin({
@@ -94,7 +96,7 @@ export default function MenuAdmin({
                     onPress={() => {
                       onClose();
                       setTimeout(() => {
-                        onNavigate(item.route);
+                        onNavigate(item.route, item.params);
                       }, 120);
                     }}
                   >

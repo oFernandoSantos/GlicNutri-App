@@ -28,6 +28,9 @@ import NutriProntuarioPacienteScreen from './src/telas/nutricionista/TelaProntua
 import NutriConsultaScreen from './src/telas/nutricionista/TelaConsultaNutri';
 import TelaAuditoriaAdmin from './src/telas/admin/TelaAuditoriaAdmin';
 import TelaHomeAdmin from './src/telas/admin/TelaHomeAdmin';
+import TelaCadastrosAdmin from './src/telas/admin/TelaCadastrosAdmin';
+import TelaCadastroAdministradorAdmin from './src/telas/admin/TelaCadastroAdministradorAdmin';
+import TelaOperacoesAdmin from './src/telas/admin/TelaOperacoesAdmin';
 import TelaLogsSistemaAdmin from './src/telas/admin/TelaLogsSistemaAdmin';
 import TelaDetalheLogSistemaAdmin from './src/telas/admin/TelaDetalheLogSistemaAdmin';
 import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
@@ -632,6 +635,18 @@ export default function App() {
 
               <Stack.Screen name="AdminAuditoria" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <TelaAuditoriaAdmin {...getAdminProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="AdminCadastros" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <TelaCadastrosAdmin {...getAdminProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="AdminCadastroAdministrador" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <TelaCadastroAdministradorAdmin {...getAdminProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="AdminOperacoes" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <TelaOperacoesAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="AdminLogsSistema" options={readerScreenOptions}>

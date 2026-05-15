@@ -49,7 +49,9 @@ const googleLogo = {
 export default function TelaLogin({ navigation, route, session }) {
   const isAdminAccess = route?.params?.roleInicial === 'Admin';
   const roleInicial =
-    route?.params?.roleInicial === 'Nutricionista'
+    route?.params?.roleInicial === 'Admin'
+      ? 'Admin'
+      : route?.params?.roleInicial === 'Nutricionista'
       ? 'Nutricionista'
       : 'Paciente';
 
@@ -925,7 +927,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
         <TouchableOpacity
           style={forgotPasswordButtonStyle}
-          onPress={() => navigation.navigate('ForgotPassword')}
+          onPress={() => navigation.navigate('ForgotPassword', { roleInicial: role })}
         >
           <Text style={linkTextStyle}>Esqueci minha senha</Text>
         </TouchableOpacity>
