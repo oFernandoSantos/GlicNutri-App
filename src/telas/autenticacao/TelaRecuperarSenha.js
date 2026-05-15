@@ -41,8 +41,8 @@ const camposIniciaisErro = {
   confirmarSenha: '',
 };
 
-export default function ForgotPassword({ navigation }) {
-  const [role, setRole] = useState('Paciente');
+export default function ForgotPassword({ navigation, route }) {
+  const [role, setRole] = useState(route?.params?.roleInicial === 'Admin' ? 'Admin' : 'Paciente');
   const [email, setEmail] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
@@ -78,6 +78,7 @@ export default function ForgotPassword({ navigation }) {
   }
 
   function tipoPerfilAuditoria(perfil) {
+    if (perfil === 'Admin') return 'admin';
     return perfil === 'Nutricionista' ? 'nutricionista' : 'paciente';
   }
 
@@ -209,7 +210,7 @@ export default function ForgotPassword({ navigation }) {
   function irParaLogin() {
     navigation.reset({
       index: 0,
-      routes: [{ name: 'Login' }],
+      routes: [{ name: 'Login', params: role === 'Admin' ? { roleInicial: 'Admin' } : undefined }],
     });
   }
 
@@ -379,6 +380,7 @@ export default function ForgotPassword({ navigation }) {
 
               <SeletorPerfil
                 role={role}
+                opcoes={['Paciente', 'Nutricionista', 'Admin']}
                 onChangeRole={(perfil) => {
                   setRole(perfil);
                   setEmail('');

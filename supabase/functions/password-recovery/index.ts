@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.100.1';
 import { corsHeaders } from '../_shared/cors.ts';
 import { sendPasswordCodeEmail } from '../_shared/resendEmailService.ts';
 
-type Role = 'Paciente' | 'Nutricionista';
+type Role = 'Paciente' | 'Nutricionista' | 'Admin';
 
 type PasswordRecoveryPayload = {
   action?: 'request-code' | 'reset-password';
@@ -28,6 +28,12 @@ const roleConfig = {
     emailColumn: 'email_acesso',
     passwordColumn: 'senha_nutri',
     idColumn: 'id_nutricionista_uuid',
+  },
+  Admin: {
+    table: 'administrador',
+    emailColumn: 'email_acesso',
+    passwordColumn: 'senha_admin',
+    idColumn: 'id_admin_uuid',
   },
 } satisfies Record<Role, {
   table: string;
@@ -90,7 +96,7 @@ function getPasswordValidationMessage(password: string) {
 }
 
 function normalizeRole(role?: string): Role | null {
-  return role === 'Paciente' || role === 'Nutricionista' ? role : null;
+  return role === 'Paciente' || role === 'Nutricionista' || role === 'Admin' ? role : null;
 }
 
 function generateCode() {

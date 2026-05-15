@@ -27,6 +27,9 @@ const NUTRITIONIST_ROUTES = new Set([
 ]);
 const ADMIN_ROUTES = new Set([
   'AdminAuditoria',
+  'AdminCadastros',
+  'AdminCadastroAdministrador',
+  'AdminOperacoes',
   'AdminLogsSistema',
   'AdminDetalheLogSistema',
 ]);
@@ -49,7 +52,10 @@ const routeTitles = {
   HomeNutricionista: 'GlicNutri',
   AdminHome: 'Admin',
   AdminAuditoria: 'Auditoria',
-  AdminLogsSistema: 'Logs do Sistema',
+  AdminCadastros: 'Cadastros',
+  AdminCadastroAdministrador: 'Cadastrar admin',
+  AdminOperacoes: 'Operacoes',
+  AdminLogsSistema: 'Auditoria/Log',
   AdminDetalheLogSistema: 'Detalhe do Log',
   GerenciarPacientes: 'Pacientes',
   NutricionistaAgenda: 'Agenda',

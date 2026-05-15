@@ -41,27 +41,6 @@ function buildComplementoComDispositivo(item) {
   return complemento ? `${complemento} | Dispositivo: ${dispositivo}` : `Dispositivo: ${dispositivo}`;
 }
 
-function buildExportPreview(item) {
-  const header = 'SEQ;Usuario;Programa;Descricao;Acao;Data/Hora;Complemento;Origem;Status;Entidade;Arquivo';
-  const row = [
-    item?.seq,
-    item?.usuario,
-    item?.programa || item?.modulo,
-    item?.descricao,
-    item?.historico || item?.acao,
-    item?.dataHoraFormatada || item?.dataHora || item?.createdAt,
-    buildComplementoComDispositivo(item),
-    item?.origem,
-    item?.status,
-    item?.entidade || item?.entity,
-    item?.path,
-  ]
-    .map((value) => `"${String(value || '').replace(/"/g, '""')}"`)
-    .join(';');
-
-  return [header, row].join('\n');
-}
-
 function buildLogTxtCompleto(item) {
   const linhas = [
     'GlicNutri - Log completo',
@@ -172,11 +151,6 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
     navigation.navigate('AdminLogsSistema', { usuarioLogado: adminUser });
   }
 
-  function handleExportarRegistro() {
-    if (!log) return;
-    setExportText(buildExportPreview(log));
-  }
-
   function handleExportarTxt() {
     if (!log) return;
     const txt = buildLogTxtCompleto(log);
@@ -225,10 +199,6 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
           </View>
 
           <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.actionButton} onPress={handleExportarRegistro} disabled={!log}>
-              <Ionicons name="download-outline" size={17} color={adminTheme.colors.onPrimary} />
-              <Text style={styles.actionButtonText}>Exportar CSV</Text>
-            </TouchableOpacity>
             <TouchableOpacity style={styles.secondaryActionButton} onPress={handleExportarTxt} disabled={!log}>
               <Ionicons name="document-text-outline" size={17} color={adminTheme.colors.text} />
               <Text style={styles.secondaryActionButtonText}>Baixar .txt</Text>
@@ -392,20 +362,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
-  },
-  actionButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    flexDirection: 'row',
-    minHeight: 42,
-    paddingHorizontal: 14,
-  },
-  actionButtonText: {
-    color: adminTheme.colors.onPrimary,
-    fontSize: 13,
-    fontWeight: '900',
-    marginLeft: 7,
   },
   secondaryActionButton: {
     alignItems: 'center',

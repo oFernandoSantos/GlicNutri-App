@@ -7,6 +7,7 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
+  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
@@ -43,8 +44,11 @@ import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
+import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import { AppLogger, MODULOS_LOG_SISTEMA } from '../../servicos/servicoLogSistema';
 
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
+const LIMITE_ALERTA_GLICEMIA_ALTA = 250;
 
 const bolusMealOptions = ['Café da manhã', 'Almoço', 'Jantar', 'Ceia', 'Lanche'];
 const BOLUS_MEAL_VALUE_TO_LABEL = {
@@ -685,6 +689,32 @@ function getGlucoseStatus(value) {
     badgeColor: '#b80710',
     icon: 'alert-circle-outline',
   };
+}
+
+async function mostrarPopupAlertaGlicemiaAlta(reading) {
+  const titulo = 'Alerta de glicose alta';
+  const mensagem = `Glicemia de ${reading?.value} mg/dL registrada. Siga o plano orientado pela equipe de saude.`;
+
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && 'Notification' in window) {
+    try {
+      let permission = window.Notification.permission;
+      if (permission === 'default') {
+        permission = await window.Notification.requestPermission();
+      }
+
+      if (permission === 'granted') {
+        new window.Notification(titulo, {
+          body: mensagem,
+          tag: `glicnutri-alerta-glicemia-${reading?.id || Date.now()}`,
+        });
+        return;
+      }
+    } catch (_error) {
+      // Se o navegador bloquear notificacao, o alerta interno continua funcionando.
+    }
+  }
+
+  Alert.alert(titulo, mensagem);
 }
 
 function GlucoseLineChart({ series }) {
@@ -1735,6 +1765,45 @@ export default function PacienteMonitoramentoScreen({
     };
   }
 
+  async function registrarAlertaGlicemiaAlta(reading) {
+    if (!reading || Number(reading.value) <= LIMITE_ALERTA_GLICEMIA_ALTA) {
+      return;
+    }
+
+    const complemento = `Alerta de glicemia alta | Valor: ${reading.value} mg/dL | Data: ${reading.date || ''} | Hora: ${String(reading.time || '').slice(0, 5)}`;
+
+    await Promise.allSettled([
+      registrarLogAuditoria({
+        actor: patient || usuarioLogado,
+        targetPatientId: activePatientId,
+        action: 'alerta_glicemia_alta_gerado',
+        entity: 'registro_glicemia_manual',
+        entityId: reading.id,
+        origin: 'monitoramento_manual',
+        status: 'alerta',
+        details: {
+          valorMgDl: reading.value,
+          limiteMgDl: LIMITE_ALERTA_GLICEMIA_ALTA,
+          data: reading.date,
+          hora: reading.time,
+          tipoGlicemia: reading.glucoseType || manualGlucoseType || '',
+        },
+      }),
+      AppLogger.alerta(MODULOS_LOG_SISTEMA.GLICEMIA, 'Alerta de glicemia alta', {
+        usuario: patient || usuarioLogado,
+        complemento,
+        detalhes: {
+          id: reading.id,
+          valorMgDl: reading.value,
+          limiteMgDl: LIMITE_ALERTA_GLICEMIA_ALTA,
+          data: reading.date,
+          hora: reading.time,
+        },
+      }),
+      mostrarPopupAlertaGlicemiaAlta(reading),
+    ]);
+  }
+
   function resetMedicineForm() {
     setMedicineName('');
     setMedicineSearchQuery('');
@@ -2076,6 +2145,7 @@ export default function PacienteMonitoramentoScreen({
         currentPatient: patient,
         patientContext: usuarioLogado,
       });
+      await registrarAlertaGlicemiaAlta(savedReading);
       setNewGlucoseValue('');
       setManualMeasurementDate('');
       setManualMeasurementTime('');

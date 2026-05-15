@@ -7,6 +7,7 @@ import {
   StatusBar,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -19,55 +20,35 @@ import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { supabase } from '../../servicos/configSupabase';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
-import { listarLogsSistema } from '../../servicos/servicoLogSistema';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
 
-const modules = [
-  {
-    key: 'auditoria',
-    title: 'Auditoria Central',
-    subtitle: 'Rastreabilidade de negocio',
-    helper: 'Eventos de cadastro, alteracao, exclusao logica e movimentacoes sensiveis.',
-    icon: 'shield-checkmark-outline',
-    route: 'AdminAuditoria',
-  },
-  {
-    key: 'logs',
-    title: 'Observabilidade',
-    subtitle: 'Erros e sinais tecnicos',
-    helper: 'Ocorrencias tecnicas, warnings e falhas de execucao consolidadas.',
-    icon: 'pulse-outline',
-    route: 'AdminLogsSistema',
-  },
-];
+const USERS_LIMIT = 8;
 
 const initialDashboardState = {
-  activePatients: 0,
-  excludedPatients: 0,
-  nutritionists: 0,
-  doctors: 0,
-  activeAdmins: 0,
-  auditEventsToday: 0,
-  auditEventsWeek: 0,
-  failedAuditEvents: 0,
-  systemErrorsToday: 0,
-  systemWarningsToday: 0,
-  recentAuditEvents: [],
-  recentSystemErrors: [],
+  pacientesAtivos: 0,
+  pacientesExcluidos: 0,
+  nutricionistas: 0,
+  medicos: 0,
+  administradores: 0,
+  eventosHoje: 0,
+  alertasHoje: 0,
+  falhasHoje: 0,
+  pacientesRecentes: [],
+  nutricionistasRecentes: [],
+  medicosRecentes: [],
+  adminsRecentes: [],
+  eventosRecentes: [],
   lastUpdatedAt: null,
 };
 
-function DashboardCard({ children, style }) {
+function Card({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
 function formatDateTime(value) {
   if (!value) return '--';
-
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return String(value);
-  }
+  if (Number.isNaN(date.getTime())) return String(value);
 
   return date.toLocaleString('pt-BR', {
     dateStyle: 'short',
@@ -75,80 +56,120 @@ function formatDateTime(value) {
   });
 }
 
-function normalizeAuditStatus(value) {
-  return String(value || '').trim().toLowerCase();
+function normalizeText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
 }
 
-function prettifyAction(value) {
-  return String(value || 'acao_nao_informada')
-    .replace(/_/g, ' ')
-    .replace(/\b\w/g, (char) => char.toUpperCase());
+function getDisplayDate(item) {
+  return (
+    item?.created_at ||
+    item?.data_hora_cadastro ||
+    item?.data_hora_ultima_atualizacao ||
+    item?.updated_at ||
+    item?.createdAt ||
+    null
+  );
 }
 
-function startOfDay(date = new Date()) {
-  const current = new Date(date);
-  current.setHours(0, 0, 0, 0);
-  return current;
-}
+function mapUserRow(row, type) {
+  const id =
+    row?.id_paciente_uuid ||
+    row?.id_nutricionista_uuid ||
+    row?.id_medico_uuid ||
+    row?.id_admin_uuid ||
+    row?.id ||
+    `${type}-${Math.random()}`;
+  const name =
+    row?.nome_completo ||
+    row?.nome_completo_nutri ||
+    row?.nome_nutri ||
+    row?.nome_completo_medico ||
+    row?.nome_medico ||
+    row?.nome_completo_admin ||
+    row?.email_pac ||
+    row?.email_acesso ||
+    row?.email_medico ||
+    row?.email ||
+    'Nome nao informado';
+  const email = row?.email_pac || row?.email_acesso || row?.email_medico || row?.email || '';
+  const document = row?.cpf_paciente || row?.crm_numero || row?.crm_medico || row?.documento || '';
+  const isInactive = row?.excluido === true || row?.ativo === false || row?.status === 'inativo';
 
-function buildAlertItems(state) {
-  const alerts = [];
-
-  if (state.failedAuditEvents > 0) {
-    alerts.push({
-      key: 'audit-failures',
-      tone: 'danger',
-      title: `${state.failedAuditEvents} falha(s) na trilha de auditoria`,
-      helper: 'Revise os eventos com status de falha e confirme a rastreabilidade do fluxo.',
-    });
-  }
-
-  if (state.systemErrorsToday > 0) {
-    alerts.push({
-      key: 'system-errors',
-      tone: 'warning',
-      title: `${state.systemErrorsToday} erro(s) tecnicos hoje`,
-      helper: 'Acompanhe os erros do sistema antes que eles virem regressao operacional.',
-    });
-  }
-
-  if (state.excludedPatients > 0) {
-    alerts.push({
-      key: 'lgpd-review',
-      tone: 'info',
-      title: `${state.excludedPatients} paciente(s) em exclusao logica`,
-      helper: 'Valide acesso, historico e politica de retencao associada a esses registros.',
-    });
-  }
-
-  if (!alerts.length) {
-    alerts.push({
-      key: 'stable',
-      tone: 'success',
-      title: 'Operacao estavel neste momento',
-      helper: 'Nao ha alertas prioritarios ativos nos indicadores acompanhados pela home.',
-    });
-  }
-
-  return alerts;
+  return {
+    id,
+    type,
+    name,
+    email,
+    document,
+    status: isInactive ? 'Inativo' : 'Ativo',
+    date: getDisplayDate(row),
+    raw: row,
+  };
 }
 
 async function fetchCount(queryBuilder) {
   const { count, error } = await queryBuilder;
-
-  if (error) {
-    throw error;
-  }
-
+  if (error) throw error;
   return count || 0;
 }
 
-function getAlertStyle(tone) {
-  if (tone === 'danger') return [styles.alertCard, styles.alertDanger];
-  if (tone === 'warning') return [styles.alertCard, styles.alertWarning];
-  if (tone === 'info') return [styles.alertCard, styles.alertInfo];
-  if (tone === 'success') return [styles.alertCard, styles.alertSuccess];
-  return [styles.alertCard];
+async function fetchRows(tableName, type, orderColumn) {
+  let query = supabase.from(tableName).select('*').limit(USERS_LIMIT);
+  if (orderColumn) {
+    query = query.order(orderColumn, { ascending: false });
+  }
+
+  const { data, error } = await query;
+  if (error && orderColumn) {
+    const retry = await supabase.from(tableName).select('*').limit(USERS_LIMIT);
+    if (retry.error) return [];
+    return (retry.data || []).map((row) => mapUserRow(row, type));
+  }
+  if (error) return [];
+  return (data || []).map((row) => mapUserRow(row, type));
+}
+
+function getUserTypeMeta(type) {
+  if (type === 'paciente') {
+    return { label: 'Paciente', icon: 'person-outline', color: adminTheme.colors.primary };
+  }
+  if (type === 'nutricionista') {
+    return { label: 'Nutricionista', icon: 'nutrition-outline', color: adminTheme.colors.success };
+  }
+  if (type === 'medico') {
+    return { label: 'Medico', icon: 'medkit-outline', color: adminTheme.colors.info };
+  }
+  return { label: 'Admin', icon: 'shield-checkmark-outline', color: adminTheme.colors.warning };
+}
+
+function UserRow({ item }) {
+  const meta = getUserTypeMeta(item.type);
+
+  return (
+    <View style={styles.userRow}>
+      <View style={[styles.userIcon, { borderColor: meta.color }]}>
+        <Ionicons name={meta.icon} size={18} color={meta.color} />
+      </View>
+      <View style={styles.userInfo}>
+        <View style={styles.userTopLine}>
+          <Text style={styles.userName} numberOfLines={1}>{item.name}</Text>
+          <Text style={[styles.statusPill, item.status === 'Ativo' ? styles.statusActive : styles.statusInactive]}>
+            {item.status}
+          </Text>
+        </View>
+        <Text style={styles.userMeta} numberOfLines={1}>
+          {meta.label}{item.email ? ` | ${item.email}` : ''}
+        </Text>
+        <Text style={styles.userMeta} numberOfLines={1}>
+          {item.document || 'Documento nao informado'} | {formatDateTime(item.date)}
+        </Text>
+      </View>
+    </View>
+  );
 }
 
 export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
@@ -157,6 +178,8 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState(initialDashboardState);
   const [menuVisible, setMenuVisible] = useState(false);
+  const [search, setSearch] = useState('');
+  const [activeType, setActiveType] = useState('todos');
 
   async function handleLogout() {
     setMenuVisible(false);
@@ -173,6 +196,7 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
         details: {},
       });
     }
+
     await onAdminLogout?.();
     navigation.reset({
       index: 0,
@@ -182,22 +206,23 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
 
   async function carregarDashboard({ isRefresh = false } = {}) {
     try {
-      if (isRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
+      if (isRefresh) setRefreshing(true);
+      else setLoading(true);
 
-      const todayStart = startOfDay();
+      const todayStart = new Date();
+      todayStart.setHours(0, 0, 0, 0);
 
       const [
-        activePatients,
-        excludedPatients,
-        nutritionists,
-        doctors,
-        activeAdmins,
-        auditEvents,
-        systemLogs,
+        pacientesAtivos,
+        pacientesExcluidos,
+        nutricionistas,
+        medicos,
+        administradores,
+        pacientesRecentes,
+        nutricionistasRecentes,
+        medicosRecentes,
+        adminsRecentes,
+        eventosRecentes,
       ] = await Promise.all([
         fetchCount(
           supabase
@@ -211,60 +236,39 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
             .select('*', { count: 'exact', head: true })
             .eq('excluido', true)
         ).catch(() => 0),
-        fetchCount(supabase.from('nutricionista').select('*', { count: 'exact', head: true })).catch(
-          () => 0
-        ),
-        fetchCount(
-          supabase
-            .from('medico')
-            .select('*', { count: 'exact', head: true })
-            .eq('ativo', true)
-        ).catch(() => 0),
-        fetchCount(
-          supabase
-            .from('administrador')
-            .select('*', { count: 'exact', head: true })
-            .eq('ativo', true)
-        ).catch(() => 0),
-        listarEventosAuditoria({ days: 14, limit: 80 }).catch(() => []),
-        listarLogsSistema({ days: 2, limit: 80 }).catch(() => []),
+        fetchCount(supabase.from('nutricionista').select('*', { count: 'exact', head: true })).catch(() => 0),
+        fetchCount(supabase.from('medico').select('*', { count: 'exact', head: true })).catch(() => 0),
+        fetchCount(supabase.from('administrador').select('*', { count: 'exact', head: true })).catch(() => 0),
+        fetchRows('paciente', 'paciente', 'data_hora_ultima_atualizacao'),
+        fetchRows('nutricionista', 'nutricionista', 'created_at'),
+        fetchRows('medico', 'medico', 'created_at'),
+        fetchRows('administrador', 'admin', 'created_at'),
+        listarEventosAuditoria({ days: 2, limit: 12 }).catch(() => []),
       ]);
 
-      const auditEventsToday = auditEvents.filter((item) => {
+      const eventosHoje = eventosRecentes.filter((item) => {
         const createdAt = new Date(item.createdAt || 0);
         return !Number.isNaN(createdAt.getTime()) && createdAt >= todayStart;
       });
-      const failedAuditEvents = auditEvents.filter(
-        (item) => normalizeAuditStatus(item.status) === 'falha'
-      );
-      const systemErrorsToday = systemLogs.filter((item) => {
-        const createdAt = new Date(item.createdAt || 0);
-        return item.level === 'error' && !Number.isNaN(createdAt.getTime()) && createdAt >= todayStart;
-      });
-      const systemWarningsToday = systemLogs.filter((item) => {
-        const createdAt = new Date(item.createdAt || 0);
-        return item.level === 'warn' && !Number.isNaN(createdAt.getTime()) && createdAt >= todayStart;
-      });
 
       setDashboard({
-        activePatients,
-        excludedPatients,
-        nutritionists,
-        doctors,
-        activeAdmins,
-        auditEventsToday: auditEventsToday.length,
-        auditEventsWeek: auditEvents.length,
-        failedAuditEvents: failedAuditEvents.length,
-        systemErrorsToday: systemErrorsToday.length,
-        systemWarningsToday: systemWarningsToday.length,
-        recentAuditEvents: auditEvents.slice(0, 4),
-        recentSystemErrors: systemLogs
-          .filter((item) => item.level === 'error' || item.level === 'warn')
-          .slice(0, 4),
+        pacientesAtivos,
+        pacientesExcluidos,
+        nutricionistas,
+        medicos,
+        administradores,
+        eventosHoje: eventosHoje.length,
+        alertasHoje: eventosHoje.filter((item) => normalizeText(item.status) === 'alerta').length,
+        falhasHoje: eventosHoje.filter((item) => normalizeText(item.status) === 'falha').length,
+        pacientesRecentes,
+        nutricionistasRecentes,
+        medicosRecentes,
+        adminsRecentes,
+        eventosRecentes,
         lastUpdatedAt: new Date().toISOString(),
       });
     } catch (error) {
-      console.log('Erro ao carregar dashboard admin:', error);
+      console.log('Erro ao carregar home admin:', error);
       setDashboard(initialDashboardState);
     } finally {
       setRefreshing(false);
@@ -272,16 +276,14 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     }
   }
 
-  function handleNavigate(routeName) {
-    navigation.navigate(routeName, { usuarioLogado: adminUser });
+  function handleNavigate(routeName, params = {}) {
+    navigation.navigate(routeName, { usuarioLogado: adminUser, ...params });
   }
 
   useEffect(() => {
-    if (!isAdminUser(adminUser)) {
-      return;
+    if (isAdminUser(adminUser)) {
+      carregarDashboard();
     }
-
-    carregarDashboard();
   }, [adminUser]);
 
   useEffect(() => {
@@ -299,101 +301,68 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     });
   }, [navigation, adminUser, refreshing, loading]);
 
-  const alerts = useMemo(() => buildAlertItems(dashboard), [dashboard]);
-  const openAlertsCount = useMemo(
-    () => alerts.filter((item) => item.tone !== 'success').length,
-    [alerts]
-  );
-  const userBaseCount = useMemo(
-    () =>
-      dashboard.activePatients +
-      dashboard.nutritionists +
-      dashboard.doctors +
-      dashboard.activeAdmins,
-    [dashboard]
-  );
-  const kpis = useMemo(
+  const userGroups = useMemo(
     () => [
       {
-        key: 'patients',
-        label: 'Pacientes ativos',
-        value: dashboard.activePatients,
-        note: 'Base assistida ativa',
+        key: 'paciente',
+        title: 'Pacientes',
+        count: dashboard.pacientesAtivos,
+        helper: `${dashboard.pacientesExcluidos} em exclusao logica`,
+        icon: 'person-outline',
+        items: dashboard.pacientesRecentes,
       },
       {
-        key: 'nutritionists',
-        label: 'Nutricionistas',
-        value: dashboard.nutritionists,
-        note: 'Perfis operacionais',
+        key: 'nutricionista',
+        title: 'Nutricionistas',
+        count: dashboard.nutricionistas,
+        helper: 'Equipe de acompanhamento',
+        icon: 'nutrition-outline',
+        items: dashboard.nutricionistasRecentes,
       },
       {
-        key: 'doctors',
-        label: 'Medicos',
-        value: dashboard.doctors,
-        note: 'Perfis clinicos',
+        key: 'medico',
+        title: 'Medicos',
+        count: dashboard.medicos,
+        helper: 'Perfis clinicos',
+        icon: 'medkit-outline',
+        items: dashboard.medicosRecentes,
       },
       {
-        key: 'admins',
-        label: 'Admins ativos',
-        value: dashboard.activeAdmins,
-        note: 'Controle institucional',
+        key: 'admin',
+        title: 'Administradores',
+        count: dashboard.administradores,
+        helper: 'Acesso institucional',
+        icon: 'shield-checkmark-outline',
+        items: dashboard.adminsRecentes,
       },
     ],
     [dashboard]
   );
-  const governanceStats = useMemo(
-    () => [
-      {
-        key: 'audit-week',
-        label: 'Auditorias em 7 dias',
-        value: dashboard.auditEventsWeek,
-      },
-      {
-        key: 'audit-today',
-        label: 'Auditorias hoje',
-        value: dashboard.auditEventsToday,
-      },
-      {
-        key: 'warnings',
-        label: 'Warnings hoje',
-        value: dashboard.systemWarningsToday,
-      },
-      {
-        key: 'excluded',
-        label: 'Exclusoes logicas',
-        value: dashboard.excludedPatients,
-      },
-    ],
-    [dashboard]
+
+  const allUsers = useMemo(
+    () => userGroups.flatMap((group) => group.items),
+    [userGroups]
   );
-  const overviewCards = useMemo(
-    () => [
-      {
-        key: 'usuarios',
-        icon: 'people-outline',
-        title: `${userBaseCount} usuarios`,
-        text: 'ecossistema monitorado',
-      },
-      {
-        key: 'alertas',
-        icon: 'alert-circle-outline',
-        title: `${openAlertsCount} alertas`,
-        text: 'prioridades abertas agora',
-      },
-      {
-        key: 'atualizacao',
-        icon: 'time-outline',
-        title: formatDateTime(dashboard.lastUpdatedAt),
-        text: 'ultima atualizacao do painel',
-      },
-    ],
-    [dashboard.lastUpdatedAt, openAlertsCount, userBaseCount]
-  );
+
+  const visibleUsers = useMemo(() => {
+    const query = normalizeText(search);
+    return allUsers.filter((item) => {
+      if (activeType !== 'todos' && item.type !== activeType) return false;
+      if (!query) return true;
+      return normalizeText([item.name, item.email, item.document, item.status, item.type].join(' ')).includes(query);
+    });
+  }, [activeType, allUsers, search]);
+
+  const totalUsers =
+    dashboard.pacientesAtivos +
+    dashboard.nutricionistas +
+    dashboard.medicos +
+    dashboard.administradores;
 
   if (!isAdminUser(adminUser)) {
     return (
       <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
-        <DashboardCard style={styles.accessDeniedCard}>
+        <Card style={styles.accessDeniedCard}>
           <Text style={styles.accessDeniedTitle}>Acesso restrito</Text>
           <Text style={styles.accessDeniedText}>
             Entre com um perfil administrador para abrir o centro de controle.
@@ -409,7 +378,7 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
           >
             <Text style={styles.primaryButtonText}>Ir para login admin</Text>
           </TouchableOpacity>
-        </DashboardCard>
+        </Card>
       </View>
     );
   }
@@ -426,7 +395,7 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
           onLogout={handleLogout}
           currentRoute={route?.name || 'AdminHome'}
           userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-          userSubtitle="Console administrativo"
+          userSubtitle="Centro de controle"
         />
       ) : null}
 
@@ -444,151 +413,144 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
         }
       >
         {loading ? (
-          <DashboardCard style={styles.loadingCard}>
+          <Card style={styles.loadingCard}>
             <ActivityIndicator color={adminTheme.colors.primary} />
-            <Text style={styles.loadingText}>Carregando metricas administrativas...</Text>
-          </DashboardCard>
+            <Text style={styles.loadingText}>Carregando centro de controle...</Text>
+          </Card>
         ) : (
           <>
-            <Text style={styles.sectionTitle}>Visao geral</Text>
-            <View style={styles.overviewGrid}>
-              {overviewCards.map((item) => (
-                <DashboardCard key={item.key} style={styles.overviewCard}>
-                  <View style={styles.overviewIcon}>
-                    <Ionicons name={item.icon} size={18} color={adminTheme.colors.primary} />
-                  </View>
-                  <View style={styles.overviewContent}>
-                    <Text style={styles.overviewTitle}>{item.title}</Text>
-                    <Text style={styles.overviewText}>{item.text}</Text>
-                  </View>
-                </DashboardCard>
-              ))}
-            </View>
-
-            <Text style={styles.sectionTitle}>Centros administrativos</Text>
-            <View style={styles.moduleGrid}>
-              {modules.map((item) => {
-                const metric =
-                  item.key === 'auditoria'
-                    ? `${dashboard.auditEventsToday} evento(s) hoje`
-                    : `${dashboard.systemErrorsToday} erro(s) hoje`;
-
-                return (
-                  <TouchableOpacity
-                    key={item.key}
-                    style={styles.moduleCard}
-                    onPress={() => navigation.navigate(item.route)}
-                  >
-                    <View style={styles.moduleBadge}>
-                      <Ionicons name={item.icon} size={20} color={adminTheme.colors.accent} />
-                    </View>
-                    <Text style={styles.moduleTitle}>{item.title}</Text>
-                    <Text style={styles.moduleSubtitle}>{item.subtitle}</Text>
-                    <Text style={styles.moduleHelper}>{item.helper}</Text>
-                    <Text style={styles.moduleMetric}>{metric}</Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
-
-            <Text style={styles.sectionTitle}>Base operacional</Text>
-            <View style={styles.kpiGrid}>
-              {kpis.map((item) => (
-                <DashboardCard key={item.key} style={styles.kpiCard}>
-                  <Text style={styles.kpiLabel}>{item.label}</Text>
-                  <Text style={styles.kpiValue}>{item.value}</Text>
-                  <Text style={styles.kpiNote}>{item.note}</Text>
-                </DashboardCard>
-              ))}
-            </View>
-
-            <View style={styles.splitSection}>
-              <View style={styles.splitColumnLarge}>
-                <Text style={styles.sectionTitle}>Risco e governanca</Text>
-                <View style={styles.metricStrip}>
-                  {governanceStats.map((item) => (
-                    <DashboardCard key={item.key} style={styles.stripCard}>
-                      <Text style={styles.stripLabel}>{item.label}</Text>
-                      <Text style={styles.stripValue}>{item.value}</Text>
-                    </DashboardCard>
-                  ))}
+            <View style={styles.hero}>
+              <View style={styles.heroTitleWrap}>
+                <Text style={styles.heroKicker}>Admin</Text>
+                <Text style={styles.heroTitle}>Centro de controle</Text>
+                <Text style={styles.heroSubtitle}>
+                  Controle usuarios, acompanhe perfis ativos e monitore eventos importantes do app.
+                </Text>
+              </View>
+              <View style={styles.heroStats}>
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatValue}>{totalUsers}</Text>
+                  <Text style={styles.heroStatLabel}>usuarios</Text>
                 </View>
-
-                <Text style={styles.sectionTitle}>Alertas operacionais</Text>
-                {alerts.map((item) => (
-                  <DashboardCard key={item.key} style={getAlertStyle(item.tone)}>
-                    <Text style={styles.alertTitle}>{item.title}</Text>
-                    <Text style={styles.alertHelper}>{item.helper}</Text>
-                  </DashboardCard>
-                ))}
-              </View>
-
-            </View>
-
-            <View style={styles.splitSection}>
-              <View style={styles.splitColumnLarge}>
-                <Text style={styles.sectionTitle}>Ultimos eventos de auditoria</Text>
-                {dashboard.recentAuditEvents.length ? (
-                  dashboard.recentAuditEvents.map((item) => (
-                    <TouchableOpacity
-                      key={item.path || item.id}
-                      style={styles.eventCard}
-                      onPress={() => navigation.navigate('AdminAuditoria')}
-                    >
-                      <View style={styles.eventHeader}>
-                        <Text style={styles.eventTitle}>{prettifyAction(item.action)}</Text>
-                        <Text style={styles.eventTime}>{formatDateTime(item.createdAt)}</Text>
-                      </View>
-                      <Text style={styles.eventMeta}>
-                        {[item.actorType || 'anonimo', item.actorName || 'Sem nome'].join(' | ')}
-                      </Text>
-                      <Text style={styles.eventMeta}>
-                        {[item.entity || 'entidade', item.entityId || 'sem id'].join(' | ')}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <DashboardCard style={styles.emptyCard}>
-                    <Text style={styles.emptyText}>Nenhum evento de auditoria recente.</Text>
-                  </DashboardCard>
-                )}
-              </View>
-
-              <View style={styles.splitColumnSmall}>
-                <Text style={styles.sectionTitle}>Sinais tecnicos</Text>
-                {dashboard.recentSystemErrors.length ? (
-                  dashboard.recentSystemErrors.map((item) => (
-                    <TouchableOpacity
-                      key={item.path || item.id}
-                      style={styles.systemCard}
-                      onPress={() => navigation.navigate('AdminLogsSistema')}
-                    >
-                      <View style={styles.systemLevelRow}>
-                        <Text style={styles.systemSource}>{item.source || 'sistema'}</Text>
-                        <Text
-                          style={[
-                            styles.systemLevel,
-                            item.level === 'error'
-                              ? styles.systemLevelDanger
-                              : styles.systemLevelWarning,
-                          ]}
-                        >
-                          {String(item.level || 'log').toUpperCase()}
-                        </Text>
-                      </View>
-                      <Text style={styles.eventTime}>{formatDateTime(item.createdAt)}</Text>
-                      <Text style={styles.systemMessage} numberOfLines={3}>
-                        {item.message || 'Mensagem nao informada.'}
-                      </Text>
-                    </TouchableOpacity>
-                  ))
-                ) : (
-                  <DashboardCard style={styles.emptyCard}>
-                    <Text style={styles.emptyText}>Sem erros ou warnings recentes.</Text>
-                  </DashboardCard>
-                )}
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatValue}>{dashboard.eventosHoje}</Text>
+                  <Text style={styles.heroStatLabel}>eventos hoje</Text>
+                </View>
+                <View style={styles.heroStat}>
+                  <Text style={styles.heroStatValue}>{dashboard.alertasHoje + dashboard.falhasHoje}</Text>
+                  <Text style={styles.heroStatLabel}>atencoes</Text>
+                </View>
               </View>
             </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Usuarios do sistema</Text>
+              <Text style={styles.sectionNote}>Atualizado em {formatDateTime(dashboard.lastUpdatedAt)}</Text>
+            </View>
+
+            <View style={styles.groupGrid}>
+              {userGroups.map((group) => (
+                <TouchableOpacity
+                  key={group.key}
+                  style={[
+                    styles.groupCard,
+                    activeType === group.key && styles.groupCardActive,
+                  ]}
+                  onPress={() => setActiveType(activeType === group.key ? 'todos' : group.key)}
+                >
+                  <View style={styles.groupTop}>
+                    <View style={styles.groupIcon}>
+                      <Ionicons name={group.icon} size={20} color={adminTheme.colors.primary} />
+                    </View>
+                    <Text style={styles.groupCount}>{group.count}</Text>
+                  </View>
+                  <Text style={styles.groupTitle}>{group.title}</Text>
+                  <Text style={styles.groupHelper}>{group.helper}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            <Card style={styles.controlPanel}>
+              <View style={styles.searchRow}>
+                <View style={styles.searchBox}>
+                  <Ionicons name="search-outline" size={18} color={adminTheme.colors.textMuted} />
+                  <TextInput
+                    value={search}
+                    onChangeText={setSearch}
+                    placeholder="Buscar por nome, email, documento ou tipo"
+                    placeholderTextColor={adminTheme.colors.textMuted}
+                    style={styles.searchInput}
+                  />
+                </View>
+                <TouchableOpacity
+                  style={[styles.filterButton, activeType === 'todos' && styles.filterButtonActive]}
+                  onPress={() => setActiveType('todos')}
+                >
+                  <Text style={[styles.filterText, activeType === 'todos' && styles.filterTextActive]}>Todos</Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.userListHeader}>
+                <Text style={styles.userListTitle}>Controle rapido de usuarios</Text>
+                <Text style={styles.userListCount}>{visibleUsers.length} exibidos</Text>
+              </View>
+
+              {visibleUsers.length ? (
+                visibleUsers.map((item) => <UserRow key={`${item.type}-${item.id}`} item={item} />)
+              ) : (
+                <View style={styles.emptyBlock}>
+                  <Text style={styles.emptyTitle}>Nenhum usuario encontrado</Text>
+                  <Text style={styles.emptyText}>Ajuste o filtro ou atualize o painel.</Text>
+                </View>
+              )}
+            </Card>
+
+            <View style={styles.actionGrid}>
+              <TouchableOpacity style={styles.actionCard} onPress={() => handleNavigate('AdminCadastros')}>
+                <Ionicons name="person-add-outline" size={22} color={adminTheme.colors.primary} />
+                <Text style={styles.actionTitle}>Abrir cadastros</Text>
+                <Text style={styles.actionText}>Consultar pacientes, nutricionistas, medicos e admins.</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionCard} onPress={() => handleNavigate('AdminOperacoes')}>
+                <Ionicons name="briefcase-outline" size={22} color={adminTheme.colors.primary} />
+                <Text style={styles.actionTitle}>Abrir operacoes</Text>
+                <Text style={styles.actionText}>Acompanhar pendencias, riscos e alertas operacionais.</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.actionCard} onPress={() => handleNavigate('AdminLogsSistema')}>
+                <Ionicons name="pulse-outline" size={22} color={adminTheme.colors.primary} />
+                <Text style={styles.actionTitle}>Auditoria/Log</Text>
+                <Text style={styles.actionText}>Ver alertas, exclusoes, alteracoes e ocorrencias tecnicas.</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Eventos recentes</Text>
+              <Text style={styles.sectionNote}>Ultimas atividades registradas</Text>
+            </View>
+
+            <Card style={styles.eventsPanel}>
+              {dashboard.eventosRecentes.length ? (
+                dashboard.eventosRecentes.slice(0, 6).map((item) => (
+                  <View key={item.path || item.id} style={styles.eventRow}>
+                    <View style={styles.eventDot} />
+                    <View style={styles.eventInfo}>
+                      <Text style={styles.eventTitle} numberOfLines={1}>
+                        {String(item.action || 'acao').replace(/_/g, ' ')}
+                      </Text>
+                      <Text style={styles.eventMeta} numberOfLines={1}>
+                        {item.actorName || item.actorType || 'Usuario nao identificado'} | {formatDateTime(item.createdAt)}
+                      </Text>
+                    </View>
+                    <Text style={styles.eventStatus}>{item.status || 'ok'}</Text>
+                  </View>
+                ))
+              ) : (
+                <View style={styles.emptyBlock}>
+                  <Text style={styles.emptyTitle}>Sem eventos recentes</Text>
+                  <Text style={styles.emptyText}>Os eventos aparecem aqui conforme o app for utilizado.</Text>
+                </View>
+              )}
+            </Card>
           </>
         )}
       </ScrollView>
@@ -616,325 +578,381 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: adminTheme.spacing.screen,
-    paddingTop: 6,
-    paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 28,
+    paddingTop: 10,
+    paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 30,
   },
   card: {
     backgroundColor: adminTheme.colors.panel,
+    borderColor: adminTheme.colors.panelBorder,
     borderRadius: adminTheme.radius.lg,
+    borderWidth: 1,
     padding: adminTheme.spacing.card,
     ...adminShadow,
   },
-  primaryButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.pill,
-    justifyContent: 'center',
-    minHeight: 46,
-    paddingHorizontal: 18,
-  },
-  primaryButtonText: {
-    color: adminTheme.colors.onPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-  },
   loadingCard: {
     alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: adminTheme.spacing.section,
-    minHeight: 120,
-  },
-  overviewGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
     gap: 12,
-  },
-  overviewCard: {
-    alignItems: 'center',
-    borderColor: adminTheme.colors.panelBorder,
-    borderWidth: 1.1,
-    flexDirection: 'row',
-    gap: 12,
-    minHeight: 78,
-    minWidth: 180,
-    width: '24%',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-  },
-  overviewIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: adminTheme.colors.primarySoft,
-    borderWidth: 1,
-    borderColor: adminTheme.colors.primary,
-  },
-  overviewContent: {
-    flex: 1,
-    minWidth: 0,
-  },
-  overviewTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  overviewText: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 11,
-    lineHeight: 15,
-    marginTop: 2,
+    marginTop: 28,
   },
   loadingText: {
     color: adminTheme.colors.textMuted,
-    marginTop: 12,
-    textAlign: 'center',
-  },
-  sectionTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 21,
-    fontWeight: '800',
-    marginBottom: 12,
-    marginTop: 12,
-  },
-  kpiGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  moduleGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  kpiCard: {
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1.2,
-    minHeight: 136,
-    minWidth: 220,
-    width: '23.8%',
-  },
-  kpiLabel: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  kpiValue: {
-    color: adminTheme.colors.primaryStrong,
-    fontSize: 32,
-    fontWeight: '800',
-    marginTop: 14,
-  },
-  kpiNote: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    marginTop: 8,
-  },
-  splitSection: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 14,
-  },
-  splitColumnLarge: {
-    flex: 1.35,
-    minWidth: 280,
-  },
-  splitColumnSmall: {
-    flex: 1,
-    minWidth: 250,
-  },
-  metricStrip: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  stripCard: {
-    borderColor: adminTheme.colors.primary,
-    borderWidth: 1.2,
-    minHeight: 104,
-    minWidth: 220,
-    width: '23.8%',
-  },
-  stripLabel: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-  },
-  stripValue: {
-    color: adminTheme.colors.text,
-    fontSize: 27,
-    fontWeight: '800',
-    marginTop: 12,
-  },
-  alertCard: {
-    borderWidth: 1.2,
-    marginBottom: 12,
-  },
-  alertSuccess: {
-    backgroundColor: adminTheme.colors.successSoft,
-    borderColor: adminTheme.colors.primarySoft,
-  },
-  alertWarning: {
-    backgroundColor: adminTheme.colors.warningSoft,
-    borderColor: adminTheme.colors.panelBorder,
-  },
-  alertDanger: {
-    backgroundColor: adminTheme.colors.dangerSoft,
-    borderColor: adminTheme.colors.danger,
-  },
-  alertInfo: {
-    backgroundColor: adminTheme.colors.infoSoft,
-    borderColor: adminTheme.colors.panelBorder,
-  },
-  alertTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 16,
-    fontWeight: '800',
-  },
-  alertHelper: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-  },
-  moduleCard: {
-    backgroundColor: adminTheme.colors.panelStrong,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.lg,
-    borderWidth: 1.3,
-    padding: adminTheme.spacing.card,
-    width: '48%',
-  },
-  moduleBadge: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.primarySoft,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 18,
-    borderWidth: 1,
-    height: 38,
-    justifyContent: 'center',
-    width: 38,
-  },
-  moduleTitle: {
-    color: adminTheme.colors.textOnDark,
-    fontSize: 18,
-    fontWeight: '800',
-    marginTop: 14,
-  },
-  moduleSubtitle: {
-    color: adminTheme.colors.textMuted,
     fontSize: 14,
-    marginTop: 6,
-  },
-  moduleHelper: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-  },
-  moduleMetric: {
-    color: adminTheme.colors.primary,
-    fontSize: 13,
-    fontWeight: '800',
-    marginTop: 12,
-  },
-  eventCard: {
-    backgroundColor: adminTheme.colors.panel,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.lg,
-    borderWidth: 1.1,
-    marginBottom: 12,
-    padding: adminTheme.spacing.card,
-  },
-  eventHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 10,
-    justifyContent: 'space-between',
-  },
-  eventTitle: {
-    color: adminTheme.colors.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  eventTime: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
     fontWeight: '700',
-    marginTop: 8,
-  },
-  eventMeta: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 8,
-  },
-  systemCard: {
-    backgroundColor: adminTheme.colors.panel,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.lg,
-    borderWidth: 1.1,
-    marginBottom: 12,
-    padding: adminTheme.spacing.card,
-  },
-  systemLevelRow: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  systemSource: {
-    color: adminTheme.colors.text,
-    flex: 1,
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  systemLevel: {
-    borderRadius: adminTheme.radius.pill,
-    fontSize: 11,
-    fontWeight: '800',
-    overflow: 'hidden',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-  },
-  systemLevelDanger: {
-    backgroundColor: adminTheme.colors.dangerSoft,
-    color: adminTheme.colors.danger,
-  },
-  systemLevelWarning: {
-    backgroundColor: adminTheme.colors.warningSoft,
-    color: adminTheme.colors.warning,
-  },
-  systemMessage: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 10,
-  },
-  emptyCard: {
-    minHeight: 108,
-    justifyContent: 'center',
-  },
-  emptyText: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 14,
-    textAlign: 'center',
   },
   accessDeniedCard: {
     margin: adminTheme.spacing.screen,
-    marginTop: 26,
+    marginTop: 40,
   },
   accessDeniedTitle: {
     color: adminTheme.colors.text,
-    fontSize: 28,
-    fontWeight: '800',
+    fontSize: 22,
+    fontWeight: '900',
   },
   accessDeniedText: {
     color: adminTheme.colors.textMuted,
     fontSize: 14,
-    lineHeight: 21,
+    lineHeight: 20,
+    marginTop: 8,
+  },
+  primaryButton: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.primary,
+    borderRadius: adminTheme.radius.md,
+    marginTop: 16,
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingHorizontal: 16,
+  },
+  primaryButtonText: {
+    color: adminTheme.colors.onPrimary,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  hero: {
+    backgroundColor: adminTheme.colors.panelStrong,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: adminTheme.radius.xl,
+    borderWidth: 1,
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: 16,
+    justifyContent: 'space-between',
+    padding: 18,
+    ...adminShadow,
+  },
+  heroTitleWrap: {
+    flex: 1,
+  },
+  heroKicker: {
+    color: adminTheme.colors.primary,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  heroTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 28,
+    fontWeight: '900',
+    marginTop: 4,
+  },
+  heroSubtitle: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    marginTop: 8,
+    maxWidth: 620,
+  },
+  heroStats: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  heroStat: {
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    minWidth: 104,
+    padding: 12,
+  },
+  heroStatValue: {
+    color: adminTheme.colors.text,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  heroStatLabel: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    marginTop: 2,
+  },
+  sectionHeader: {
+    alignItems: 'flex-end',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 24,
+  },
+  sectionTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '900',
+  },
+  sectionNote: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  groupGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 12,
+  },
+  groupCard: {
+    backgroundColor: adminTheme.colors.panel,
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.lg,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 170,
+    padding: 14,
+    width: Platform.OS === 'web' ? '23%' : '47%',
+    ...adminShadow,
+  },
+  groupCardActive: {
+    borderColor: adminTheme.colors.primary,
+    backgroundColor: adminTheme.colors.primarySoft,
+  },
+  groupTop: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  groupIcon: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.background,
+    borderRadius: adminTheme.radius.md,
+    height: 38,
+    justifyContent: 'center',
+    width: 38,
+  },
+  groupCount: {
+    color: adminTheme.colors.text,
+    fontSize: 26,
+    fontWeight: '900',
+  },
+  groupTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 12,
+  },
+  groupHelper: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  controlPanel: {
+    marginTop: 16,
+  },
+  searchRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: 10,
+  },
+  searchBox: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    flex: 1,
+    flexDirection: 'row',
+    minHeight: 46,
+    paddingHorizontal: 12,
+  },
+  searchInput: {
+    color: adminTheme.colors.text,
+    flex: 1,
+    fontSize: 14,
+    marginLeft: 8,
+    outlineStyle: 'none',
+  },
+  filterButton: {
+    alignItems: 'center',
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 46,
+    paddingHorizontal: 18,
+  },
+  filterButtonActive: {
+    backgroundColor: adminTheme.colors.primary,
+    borderColor: adminTheme.colors.primary,
+  },
+  filterText: {
+    color: adminTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '900',
+  },
+  filterTextActive: {
+    color: adminTheme.colors.onPrimary,
+  },
+  userListHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 18,
+    marginBottom: 8,
+  },
+  userListTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  userListCount: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  userRow: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 8,
+    padding: 12,
+  },
+  userIcon: {
+    alignItems: 'center',
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  userInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  userTopLine: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  userName: {
+    color: adminTheme.colors.text,
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  userMeta: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  statusPill: {
+    borderRadius: adminTheme.radius.pill,
+    fontSize: 11,
+    fontWeight: '900',
+    overflow: 'hidden',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+  },
+  statusActive: {
+    backgroundColor: adminTheme.colors.successSoft,
+    color: adminTheme.colors.success,
+  },
+  statusInactive: {
+    backgroundColor: adminTheme.colors.dangerSoft,
+    color: adminTheme.colors.danger,
+  },
+  actionGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+    marginTop: 16,
+  },
+  actionCard: {
+    backgroundColor: adminTheme.colors.panel,
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.lg,
+    borderWidth: 1,
+    flexGrow: 1,
+    minWidth: 220,
+    padding: 16,
+    width: Platform.OS === 'web' ? '48%' : '100%',
+    ...adminShadow,
+  },
+  actionTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 15,
+    fontWeight: '900',
     marginTop: 10,
+  },
+  actionText: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    lineHeight: 18,
+    marginTop: 5,
+  },
+  eventsPanel: {
+    marginTop: 12,
+  },
+  eventRow: {
+    alignItems: 'center',
+    borderBottomColor: adminTheme.colors.panelBorder,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    paddingVertical: 10,
+  },
+  eventDot: {
+    backgroundColor: adminTheme.colors.primary,
+    borderRadius: 5,
+    height: 10,
+    width: 10,
+  },
+  eventInfo: {
+    flex: 1,
+    minWidth: 0,
+  },
+  eventTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '900',
+    textTransform: 'capitalize',
+  },
+  eventMeta: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 3,
+  },
+  eventStatus: {
+    color: adminTheme.colors.primary,
+    fontSize: 11,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+  },
+  emptyBlock: {
+    alignItems: 'center',
+    padding: 22,
+  },
+  emptyTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 5,
+    textAlign: 'center',
   },
 });
