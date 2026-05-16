@@ -16,7 +16,6 @@ import BarraAbasAdmin, {
   ADMIN_TAB_BAR_HEIGHT,
   ADMIN_TAB_BAR_SPACE,
 } from '../../componentes/admin/BarraAbasAdmin';
-import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { supabase } from '../../servicos/configSupabase';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
@@ -35,6 +34,21 @@ const initialState = {
     excluidos: 0,
   },
 };
+
+function buildCadastrosAuditSnapshot(currentState, currentTipo, currentQuery) {
+  return {
+    filtroTipo: currentTipo || 'todos',
+    buscaAtiva: Boolean(String(currentQuery || '').trim()),
+    tamanhoBusca: String(currentQuery || '').trim().length,
+    totais: {
+      pacientes: Number(currentState?.totals?.pacientes) || 0,
+      nutricionistas: Number(currentState?.totals?.nutricionistas) || 0,
+      medicos: Number(currentState?.totals?.medicos) || 0,
+      admins: Number(currentState?.totals?.admins) || 0,
+      excluidos: Number(currentState?.totals?.excluidos) || 0,
+    },
+  };
+}
 
 function normalizeText(value) {
   return String(value || '')
@@ -127,13 +141,12 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
   const adminUser = usuarioLogado || route?.params?.usuarioLogado || null;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [query, setQuery] = useState('');
   const [tipo, setTipo] = useState('todos');
   const [state, setState] = useState(initialState);
+  const [hasLoadedCadastros, setHasLoadedCadastros] = useState(false);
 
   async function handleLogout() {
-    setMenuVisible(false);
     if (adminUser) {
       await registrarLogAuditoria({
         actor: adminUser,
@@ -190,6 +203,32 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
           excluidos,
         },
       });
+      setHasLoadedCadastros(true);
+
+      if (isAdminUser(adminUser)) {
+        await registrarLogAuditoria({
+          actor: adminUser,
+          actorType: 'admin',
+          action: isRefresh ? 'admin_atualiza_cadastros' : 'admin_consulta_cadastros',
+          entity: 'painel_cadastros',
+          entityId: adminUser?.id_admin_uuid || null,
+          origin: 'admin_cadastros',
+          status: 'sucesso',
+          details: buildCadastrosAuditSnapshot(
+            {
+              totals: {
+                pacientes: totalPacientes,
+                nutricionistas: totalNutricionistas,
+                medicos: totalMedicos,
+                admins: totalAdmins,
+                excluidos,
+              },
+            },
+            tipo,
+            query
+          ),
+        });
+      }
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -209,8 +248,8 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
 
   useEffect(() => {
     navigation.setOptions({
-      readerOnMenuPress: isAdminUser(adminUser) ? () => setMenuVisible(true) : undefined,
-      readerMenuDisabled: !isAdminUser(adminUser),
+      readerOnMenuPress: undefined,
+      readerMenuDisabled: true,
       readerRightAction: () => carregar({ isRefresh: true }),
       readerRightIcon: 'refresh-outline',
       readerRightLoading: refreshing,
@@ -227,6 +266,32 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
     });
   }, [query, state, tipo]);
 
+  useEffect(() => {
+    if (!hasLoadedCadastros || !isAdminUser(adminUser)) {
+      return undefined;
+    }
+
+    const timeoutId = setTimeout(() => {
+      registrarLogAuditoria({
+        actor: adminUser,
+        actorType: 'admin',
+        action: 'admin_filtra_cadastros',
+        entity: 'painel_cadastros',
+        entityId: adminUser?.id_admin_uuid || null,
+        origin: 'admin_cadastros',
+        status: 'sucesso',
+        details: {
+          filtroTipo: tipo || 'todos',
+          buscaAtiva: Boolean(String(query || '').trim()),
+          tamanhoBusca: String(query || '').trim().length,
+          totalResultados: registros.length,
+        },
+      }).catch(() => {});
+    }, 500);
+
+    return () => clearTimeout(timeoutId);
+  }, [adminUser, hasLoadedCadastros, query, registros.length, tipo]);
+
   if (!isAdminUser(adminUser)) {
     return (
       <View style={styles.container}>
@@ -238,17 +303,6 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="light-content" backgroundColor={adminTheme.colors.background} />
-      {menuVisible ? (
-        <MenuAdmin
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={(routeName, params = {}) => navigation.navigate(routeName, { usuarioLogado: adminUser, ...params })}
-          onLogout={handleLogout}
-          currentRoute="AdminCadastros"
-          userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-          userSubtitle="Cadastros e perfis"
-        />
-      ) : null}
 
       <ScrollView
         style={styles.scroll}
