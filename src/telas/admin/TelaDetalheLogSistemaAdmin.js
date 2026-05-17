@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   Platform,
   ScrollView,
@@ -137,11 +137,6 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
   const log = route?.params?.log || null;
   const [exportText, setExportText] = useState('');
 
-  const titulo = useMemo(() => {
-    if (!log) return 'Registro nao encontrado';
-    return `${log.historico || log.acao || 'LOG'} - ${log.programa || log.modulo || 'Sistema'}`;
-  }, [log]);
-
   function handleVoltar() {
     if (navigation.canGoBack?.()) {
       navigation.goBack();
@@ -185,25 +180,11 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
         contentContainerStyle={[styles.scrollContent, Platform.OS === 'web' && styles.webScrollContent]}
         showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerBar}>
-          <TouchableOpacity style={styles.backButton} onPress={handleVoltar}>
-            <Ionicons name="arrow-back-outline" size={18} color={adminTheme.colors.text} />
-            <Text style={styles.backButtonText}>Voltar para logs</Text>
+        <View>
+          <TouchableOpacity style={styles.secondaryActionButtonSolo} onPress={handleExportarTxt} disabled={!log}>
+            <Ionicons name="document-text-outline" size={17} color={adminTheme.colors.text} />
+            <Text style={styles.secondaryActionButtonText}>Baixar .txt</Text>
           </TouchableOpacity>
-
-          <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle}>{titulo}</Text>
-            <Text style={styles.headerSubtitle}>
-              {log?.dataHoraFormatada || log?.dataHora || log?.createdAt || 'Data nao informada'}
-            </Text>
-          </View>
-
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.secondaryActionButton} onPress={handleExportarTxt} disabled={!log}>
-              <Ionicons name="document-text-outline" size={17} color={adminTheme.colors.text} />
-              <Text style={styles.secondaryActionButtonText}>Baixar .txt</Text>
-            </TouchableOpacity>
-          </View>
         </View>
 
         {!log ? (
@@ -212,20 +193,10 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
           </SectionCard>
         ) : (
           <>
-            <SectionCard style={styles.summaryCard}>
-              <View style={styles.summaryIcon}>
-                <Ionicons name="pulse-outline" size={28} color={adminTheme.colors.primary} />
-              </View>
-              <View style={styles.summaryContent}>
-                <Text style={styles.summaryLabel}>Registro {log.seq || '-'}</Text>
-                <Text style={styles.summaryTitle}>{log.descricao || 'Acao do sistema'}</Text>
-                <Text style={styles.summaryText}>{buildComplementoComDispositivo(log) || '-'}</Text>
-              </View>
-            </SectionCard>
-
             <SectionCard style={styles.detailCard}>
               <Text style={styles.cardTitle}>Dados do registro</Text>
               <View style={styles.detailGrid}>
+                <DetailItem label="Numero do registro" value={log.seq} />
                 <DetailItem label="Usuario" value={log.usuario} />
                 <DetailItem label="Programa" value={log.programa || log.modulo} />
                 <DetailItem label="Historico / Acao" value={log.historico || log.acao} />
@@ -234,7 +205,7 @@ export default function TelaDetalheLogSistemaAdmin({ navigation, route, usuarioL
                 <DetailItem label="Origem" value={log.origem} />
                 <DetailItem label="Entidade" value={log.entidade || log.entity} />
                 <DetailItem label="ID da entidade" value={log.entidadeId || log.entityId} />
-                <DetailItem label="Complemento" value={buildComplementoComDispositivo(log)} wide />
+                <DetailItem label="Complemento" value={buildComplementoComDispositivo(log)} />
               </View>
             </SectionCard>
 
@@ -309,7 +280,7 @@ const styles = StyleSheet.create({
   },
   sectionCard: {
     backgroundColor: adminTheme.colors.panel,
-    borderRadius: 8,
+    borderRadius: adminTheme.radius.xl,
     padding: adminTheme.spacing.card,
     ...adminShadow,
   },
@@ -325,52 +296,16 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.textMuted,
     marginTop: 8,
   },
-  headerBar: {
-    backgroundColor: adminTheme.colors.panelStrong,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    marginBottom: 12,
-    padding: 16,
-  },
-  backButton: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    minHeight: 34,
-  },
-  backButtonText: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-    marginLeft: 7,
-  },
-  headerTitleWrap: {
-    marginTop: 10,
-    marginBottom: 14,
-  },
-  headerTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 23,
-    fontWeight: '900',
-  },
-  headerSubtitle: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    marginTop: 5,
-  },
-  headerActions: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  secondaryActionButton: {
+  secondaryActionButtonSolo: {
     alignItems: 'center',
     backgroundColor: adminTheme.colors.panelMuted,
     borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
+    borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
+    marginBottom: 12,
     minHeight: 42,
+    alignSelf: 'flex-start',
     paddingHorizontal: 14,
   },
   secondaryActionButtonText: {
@@ -390,43 +325,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textAlign: 'center',
   },
-  summaryCard: {
-    alignItems: 'flex-start',
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
-  },
-  summaryIcon: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.panelMuted,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    height: 52,
-    justifyContent: 'center',
-    width: 52,
-  },
-  summaryContent: {
-    flex: 1,
-  },
-  summaryLabel: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  summaryTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 18,
-    fontWeight: '900',
-    marginTop: 4,
-  },
-  summaryText: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
-  },
   detailCard: {
     marginBottom: 12,
   },
@@ -444,7 +342,7 @@ const styles = StyleSheet.create({
   detailItem: {
     backgroundColor: adminTheme.colors.background,
     borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 8,
+    borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
     flexBasis: '48%',
     flexGrow: 1,
@@ -501,7 +399,7 @@ const styles = StyleSheet.create({
   exportTextArea: {
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
+    borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
     color: adminTheme.colors.text,
     fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',

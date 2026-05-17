@@ -241,6 +241,7 @@ export default function TelaOperacoesAdmin({ navigation, route, usuarioLogado, o
 
   useEffect(() => {
     navigation.setOptions({
+      readerBackAction: () => navigation.navigate('AdminHome', { usuarioLogado: adminUser }),
       readerOnMenuPress: undefined,
       readerMenuDisabled: true,
       readerRightAction: () => carregar({ isRefresh: true }),
