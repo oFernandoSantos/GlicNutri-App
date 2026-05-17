@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -17,7 +17,6 @@ import BarraAbasAdmin, {
   ADMIN_TAB_BAR_HEIGHT,
   ADMIN_TAB_BAR_SPACE,
 } from '../../componentes/admin/BarraAbasAdmin';
-import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
 import {
   AppLogger,
@@ -27,25 +26,26 @@ import {
 } from '../../servicos/servicoLogSistema';
 import {
   listarEventosAuditoria,
-  listarEventosAuditoriaRecentesDireto,
   registrarLogAuditoria,
 } from '../../servicos/servicoAuditoria';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 
 const historicoOptions = [
-  '',
-  TIPOS_HISTORICO_LOG.CADASTRO,
-  TIPOS_HISTORICO_LOG.ALTERACAO,
-  TIPOS_HISTORICO_LOG.EXCLUSAO,
-  TIPOS_HISTORICO_LOG.LOGIN,
-  TIPOS_HISTORICO_LOG.ERRO,
-  TIPOS_HISTORICO_LOG.SINCRONIZACAO,
-  TIPOS_HISTORICO_LOG.ALERTA,
+  { value: '', label: 'TODOS' },
+  { value: TIPOS_HISTORICO_LOG.CADASTRO, label: 'CADASTRO' },
+  { value: TIPOS_HISTORICO_LOG.ALTERACAO, label: 'ALTERAÇÃO' },
+  { value: TIPOS_HISTORICO_LOG.EXCLUSAO, label: 'EXCLUSÃO' },
+  { value: TIPOS_HISTORICO_LOG.LOGIN, label: 'LOGIN' },
+  { value: TIPOS_HISTORICO_LOG.ERRO, label: 'ERRO' },
+  { value: TIPOS_HISTORICO_LOG.SINCRONIZACAO, label: 'SINCRONIZAÇÃO' },
+  { value: TIPOS_HISTORICO_LOG.ALERTA, label: 'ALERTA' },
 ];
 const LOG_LOOKBACK_DAYS = 3650;
 const SYSTEM_LOG_LOOKBACK_DAYS = 30;
-const LOG_SYSTEM_LIMIT = 500;
-const LOG_AUDIT_LIMIT = 120;
+const LOG_SYSTEM_LIMIT = 50000;
+const LOG_AUDIT_LIMIT = 50000;
+const LOG_PAGE_SIZE = 10;
+const FIXED_HEADER_TOP_OFFSET = 56;
 
 function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
@@ -81,6 +81,60 @@ function buildExportPreview(logs) {
   return [header, ...rows].join('\n');
 }
 
+function formatDetailValue(value) {
+  if (value == null || value === '') return '-';
+  if (typeof value === 'object') {
+    try {
+      return JSON.stringify(value, null, 2);
+    } catch (_error) {
+      return String(value);
+    }
+  }
+  return String(value);
+}
+
+function buildLogTxtCompleto(item) {
+  return [
+    'GlicNutri - Log completo',
+    '========================',
+    '',
+    `SEQ: ${formatDetailValue(item?.seq)}`,
+    `Usuario: ${formatDetailValue(item?.usuario)}`,
+    `Programa: ${formatDetailValue(item?.programa || item?.modulo)}`,
+    `Descricao: ${formatDetailValue(item?.descricao)}`,
+    `Acao: ${formatDetailValue(item?.historico || item?.acao)}`,
+    `Data/Hora: ${formatDetailValue(item?.dataHoraFormatada || item?.dataHora || item?.createdAt)}`,
+    `Complemento: ${formatDetailValue(buildComplementoComDispositivo(item))}`,
+    `Arquivo: ${formatDetailValue(item?.path)}`,
+    `Status: ${formatDetailValue(item?.status)}`,
+    '',
+    'Payload completo',
+    '----------------',
+    formatDetailValue(item),
+  ].join('\n');
+}
+
+function buildSelectedLogsTxt(logs) {
+  return logs.map((item) => buildLogTxtCompleto(item)).join('\n\n========================================\n\n');
+}
+
+function baixarTxtNoWeb(fileName, content) {
+  if (Platform.OS !== 'web' || typeof document === 'undefined' || typeof Blob === 'undefined') {
+    return false;
+  }
+
+  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = fileName;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+  return true;
+}
+
 function normalizeSearchText(value) {
   return String(value || '')
     .normalize('NFD')
@@ -108,6 +162,14 @@ function parseFilterDate(value, endOfDay = false) {
   if (!date || Number.isNaN(date.getTime())) return null;
   date.setHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, endOfDay ? 999 : 0);
   return date;
+}
+
+function applyDateMask(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+  if (!digits) return '';
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
 }
 
 function formatDateTime(value) {
@@ -389,10 +451,22 @@ function withTimeout(promise, timeoutMs, fallbackValue) {
 export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
   const adminUser = usuarioLogado || route?.params?.usuarioLogado || null;
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [allLogs, setAllLogs] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [menuVisible, setMenuVisible] = useState(false);
+  const [loadedCount, setLoadedCount] = useState(LOG_PAGE_SIZE);
+  const [totalLogsCount, setTotalLogsCount] = useState(0);
   const [detalharLog, setDetalharLog] = useState(true);
+  const [filtersVisible, setFiltersVisible] = useState(false);
+  const [fixedHeaderHeight, setFixedHeaderHeight] = useState(0);
+  const [selectedLogIds, setSelectedLogIds] = useState([]);
+  const [exportText, setExportText] = useState('');
+  const scrollMetricsRef = useRef({
+    viewportHeight: 0,
+    contentHeight: 0,
+    offsetY: 0,
+  });
   const [filters, setFilters] = useState({
     dataInicial: '',
     dataFinal: '',
@@ -402,8 +476,13 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   });
 
   const totalErros = useMemo(
-    () => logs.filter((item) => item.historico === TIPOS_HISTORICO_LOG.ERRO).length,
-    [logs]
+    () => allLogs.filter((item) => item.historico === TIPOS_HISTORICO_LOG.ERRO).length,
+    [allLogs]
+  );
+  const hasMoreLogs = logs.length < totalLogsCount;
+  const selectedLogs = useMemo(
+    () => logs.filter((item, index) => selectedLogIds.includes(item.path || item.id || `${item.seq}-${index}`)),
+    [logs, selectedLogIds]
   );
 
   function updateFilter(field, value, options = {}) {
@@ -420,8 +499,6 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   }
 
   async function handleLogout() {
-    setMenuVisible(false);
-
     if (adminUser) {
       await registrarLogAuditoria({
         actor: adminUser,
@@ -454,56 +531,66 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     navigation.navigate(routeName, { usuarioLogado: adminUser, ...params });
   }
 
-  async function carregarLogs({ isRefresh = false, filtersOverride = null } = {}) {
+  async function carregarTotalLogs(filtrosConsulta) {
+    const [logsSistema, eventosAuditoria] = await Promise.all([
+      withTimeout(
+        listarLogsSistema({
+          days: SYSTEM_LOG_LOOKBACK_DAYS,
+          limit: LOG_SYSTEM_LIMIT,
+          dataInicial: filtrosConsulta.dataInicial,
+          dataFinal: filtrosConsulta.dataFinal,
+          usuario: filtrosConsulta.usuario,
+          historico: filtrosConsulta.historico,
+          complemento: filtrosConsulta.complemento,
+          incluirExemplos: false,
+        }).catch(() => []),
+        8000,
+        []
+      ),
+      withTimeout(
+        listarEventosAuditoria({
+          days: LOG_LOOKBACK_DAYS,
+          limit: LOG_AUDIT_LIMIT,
+        }).catch(() => []),
+        30000,
+        []
+      ),
+    ]);
+
+    const logsAuditoria = eventosAuditoria
+      .map(mapAuditEventToLogUsuario)
+      .filter(Boolean)
+      .filter((item) => matchesTelaFilters(item, filtrosConsulta));
+
+    return prepararResultadoTabela([...logsSistema, ...logsAuditoria]);
+  }
+
+  async function carregarLogs({ isRefresh = false, filtersOverride = null, append = false } = {}) {
     const filtrosConsulta = filtersOverride || filters;
+    const targetCount = append ? loadedCount + LOG_PAGE_SIZE : LOG_PAGE_SIZE;
 
     try {
-      if (isRefresh) {
+      if (append) {
+        setLoadingMore(true);
+        const nextCount = Math.min(targetCount, allLogs.length);
+        setLoadedCount(nextCount);
+        setLogs(allLogs.slice(0, nextCount));
+        return;
+      } else if (isRefresh) {
         setRefreshing(true);
       } else {
         setLoading(true);
       }
 
-      const [logsSistema, eventosAuditoria] = await Promise.all([
-        withTimeout(
-          listarLogsSistema({
-            days: SYSTEM_LOG_LOOKBACK_DAYS,
-            limit: LOG_SYSTEM_LIMIT,
-            dataInicial: filtrosConsulta.dataInicial,
-            dataFinal: filtrosConsulta.dataFinal,
-            usuario: filtrosConsulta.usuario,
-            historico: filtrosConsulta.historico,
-            complemento: filtrosConsulta.complemento,
-            incluirExemplos: false,
-          }).catch(() => []),
-          8000,
-          []
-        ),
-        withTimeout(
-          listarEventosAuditoriaRecentesDireto({
-            days: SYSTEM_LOG_LOOKBACK_DAYS,
-            limit: LOG_AUDIT_LIMIT,
-          })
-            .then((eventos) => {
-              if (eventos.length) return eventos;
-              return listarEventosAuditoria({
-                days: LOG_LOOKBACK_DAYS,
-                limit: LOG_AUDIT_LIMIT,
-              });
-            })
-            .catch(() => []),
-          30000,
-          []
-        ),
-      ]);
+      const data = await carregarTotalLogs(filtrosConsulta);
+      const firstPageCount = Math.min(LOG_PAGE_SIZE, data.length);
 
-      const logsAuditoria = eventosAuditoria
-        .map(mapAuditEventToLogUsuario)
-        .filter(Boolean)
-        .filter((item) => matchesTelaFilters(item, filtrosConsulta));
-      const data = prepararResultadoTabela([...logsSistema, ...logsAuditoria]);
-
-      setLogs(data);
+      setAllLogs(data);
+      setLogs(data.slice(0, firstPageCount));
+      setLoadedCount(firstPageCount);
+      setTotalLogsCount(data.length);
+      setSelectedLogIds([]);
+      setExportText('');
       setRefreshing(false);
       setLoading(false);
 
@@ -529,6 +616,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
       });
       Alert.alert('Erro', 'Nao foi possivel consultar os logs agora.');
     } finally {
+      setLoadingMore(false);
       setRefreshing(false);
       setLoading(false);
     }
@@ -541,8 +629,97 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     });
   }
 
+  function toggleLogSelection(item, index) {
+    const key = item.path || item.id || `${item.seq}-${index}`;
+    setSelectedLogIds((current) =>
+      current.includes(key) ? current.filter((value) => value !== key) : [...current, key]
+    );
+  }
+
+  function toggleSelectAllVisibleLogs() {
+    const visibleKeys = logs.map((item, index) => item.path || item.id || `${item.seq}-${index}`);
+    const allSelected = visibleKeys.length > 0 && visibleKeys.every((key) => selectedLogIds.includes(key));
+
+    setSelectedLogIds((current) => {
+      if (allSelected) {
+        return current.filter((key) => !visibleKeys.includes(key));
+      }
+
+      return Array.from(new Set([...current, ...visibleKeys]));
+    });
+  }
+
+  function handleExportarSelecionadosTxt() {
+    if (!selectedLogs.length) {
+      Alert.alert('Selecione registros', 'Marque ao menos um resultado para exportar em .txt.');
+      return;
+    }
+
+    const content = buildSelectedLogsTxt(selectedLogs);
+    const fileName = `glicnutri-logs-selecionados-${selectedLogs.length}.txt`;
+
+    if (!baixarTxtNoWeb(fileName, content)) {
+      setExportText(content);
+    } else {
+      setExportText('');
+    }
+  }
+
   function handleVoltar() {
     navigation.navigate('AdminHome', { usuarioLogado: adminUser });
+  }
+
+  function loadMoreLogsIfNeeded() {
+    if (!hasMoreLogs || loading || refreshing || loadingMore) {
+      return;
+    }
+
+    const { viewportHeight, contentHeight, offsetY } = scrollMetricsRef.current;
+    if (!viewportHeight || !contentHeight) {
+      return;
+    }
+
+    const distanceToBottom = contentHeight - (offsetY + viewportHeight);
+
+    if (distanceToBottom <= 160) {
+      carregarLogs({ append: true });
+    }
+  }
+
+  function maybeLoadMoreFromScroll(event) {
+    if (!hasMoreLogs || loading || refreshing) {
+      return;
+    }
+
+      const metrics = event?.nativeEvent;
+    if (!metrics) {
+      return;
+    }
+
+    scrollMetricsRef.current = {
+      viewportHeight: metrics.layoutMeasurement.height || 0,
+      contentHeight: metrics.contentSize.height || 0,
+      offsetY: metrics.contentOffset.y || 0,
+    };
+
+    loadMoreLogsIfNeeded();
+  }
+
+  function handleContentSizeChange(_width, height) {
+    scrollMetricsRef.current = {
+      ...scrollMetricsRef.current,
+      contentHeight: height || 0,
+    };
+    loadMoreLogsIfNeeded();
+  }
+
+  function handleScrollLayout(event) {
+    const height = event?.nativeEvent?.layout?.height || 0;
+    scrollMetricsRef.current = {
+      ...scrollMetricsRef.current,
+      viewportHeight: height,
+    };
+    loadMoreLogsIfNeeded();
   }
 
   useEffect(() => {
@@ -550,12 +727,45 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   }, []);
 
   useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      loadMoreLogsIfNeeded();
+    }, 0);
+
+    return () => clearTimeout(timeoutId);
+  }, [logs.length, totalLogsCount, loading, refreshing, loadingMore]);
+
+  useEffect(() => {
     navigation.setOptions({
-      readerOnMenuPress: isAdminUser(adminUser) ? () => setMenuVisible(true) : undefined,
-      readerMenuDisabled: !isAdminUser(adminUser),
+      readerOnMenuPress: undefined,
+      readerMenuDisabled: true,
       readerMenuLoading: false,
     });
   }, [navigation, adminUser]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      return undefined;
+    }
+
+    const previousBodyOverflow = document.body?.style?.overflow;
+    const previousHtmlOverflow = document.documentElement?.style?.overflow;
+
+    if (document.body) {
+      document.body.style.overflow = 'hidden';
+    }
+    if (document.documentElement) {
+      document.documentElement.style.overflow = 'hidden';
+    }
+
+    return () => {
+      if (document.body) {
+        document.body.style.overflow = previousBodyOverflow || '';
+      }
+      if (document.documentElement) {
+        document.documentElement.style.overflow = previousHtmlOverflow || '';
+      }
+    };
+  }, []);
 
   if (!isAdminUser(adminUser)) {
     return (
@@ -583,51 +793,124 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="light-content" backgroundColor={adminTheme.colors.background} />
 
-      {menuVisible ? (
-        <MenuAdmin
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={(routeName, params = {}) => handleNavigate(routeName, params)}
-          onLogout={handleLogout}
-          currentRoute={route?.name || 'AdminLogsSistema'}
-          userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-          userSubtitle="Auditoria, logs e rastreamento de acoes"
-        />
-      ) : null}
-
-      <ScrollView
+      <View
         style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
-        contentContainerStyle={[
-          styles.scrollContent,
-          Platform.OS === 'web' && styles.webScrollContent,
-        ]}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={() => carregarLogs({ isRefresh: true })} />
-        }
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
       >
-        <View style={styles.headerBar}>
-          <View style={styles.headerTitleWrap}>
-            <Text style={styles.headerTitle}>Auditoria/Log</Text>
-            <Text style={styles.headerSubtitle}>Eventos de cadastro, alteracao, exclusao e rastreamento operacional</Text>
+        <View
+          style={[
+            styles.scrollContent,
+            Platform.OS === 'web' && styles.webScrollContent,
+          ]}
+        >
+        <View
+          style={styles.fixedHeaderArea}
+          onLayout={(event) => {
+            const nextHeight = event?.nativeEvent?.layout?.height || 0;
+            if (nextHeight && Math.abs(nextHeight - fixedHeaderHeight) > 1) {
+              setFixedHeaderHeight(nextHeight);
+            }
+          }}
+        >
+          <View style={styles.searchChipsRow}>
+            {historicoOptions.map((item) => {
+              const active = filters.historico === item.value;
+              return (
+                <TouchableOpacity
+                  key={item.value || 'todos-historicos-topo'}
+                  style={[styles.searchChip, active && styles.searchChipActive]}
+                  onPress={() => updateFilter('historico', item.value, { searchAfterChange: true })}
+                >
+                  <Text style={[styles.searchChipText, active && styles.searchChipTextActive]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
           </View>
 
-          <View style={styles.headerActions}>
-            <TouchableOpacity style={styles.actionButton} onPress={() => carregarLogs()}>
-              <Ionicons name="search-outline" size={17} color={adminTheme.colors.onPrimary} />
-              <Text style={styles.actionButtonText}>Pesquisar</Text>
+          <View style={styles.headerSearchWrap}>
+            <TextInput
+              nativeID="admin-logs-search-input"
+              style={styles.headerSearchInput}
+              value={filters.complemento}
+              onChangeText={(value) => updateFilter('complemento', value)}
+              onSubmitEditing={() => carregarLogs()}
+              placeholder="Pesquisar logs"
+              placeholderTextColor={adminTheme.colors.textMuted}
+            />
+            <TouchableOpacity
+              style={styles.headerFilterAction}
+              onPress={() => setFiltersVisible((current) => !current)}
+              accessibilityLabel="Mostrar filtros"
+            >
+              <Ionicons
+                name={filtersVisible ? 'calendar' : 'calendar-outline'}
+                size={18}
+                color={adminTheme.colors.onPrimary}
+              />
             </TouchableOpacity>
-            <TouchableOpacity style={styles.exitButton} onPress={handleVoltar}>
-              <Ionicons name="arrow-back-outline" size={17} color={adminTheme.colors.danger} />
-              <Text style={styles.exitButtonText}>Sair/Voltar</Text>
+            <TouchableOpacity
+              nativeID="admin-logs-search-button"
+              style={styles.headerSearchAction}
+              onPress={() => carregarLogs()}
+              accessibilityLabel="Confirmar pesquisa"
+            >
+              <Ionicons name="search-outline" size={18} color={adminTheme.colors.onPrimary} />
             </TouchableOpacity>
           </View>
-        </View>
 
-        <SectionCard style={styles.filterCard}>
-          <View style={styles.cardHeaderRow}>
-            <Text style={styles.cardTitle}>Filtros</Text>
+          {filtersVisible ? (
+            <SectionCard style={styles.filterCard}>
+              <View style={styles.cardHeaderRow}>
+                <Text style={styles.cardTitle}>Filtros</Text>
+              </View>
+
+              <View style={styles.filterGrid}>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Data inicial</Text>
+                  <TextInput
+                    nativeID="admin-logs-date-start-input"
+                    style={styles.input}
+                    value={filters.dataInicial}
+                    onChangeText={(value) => updateFilter('dataInicial', applyDateMask(value))}
+                    placeholder="DD/MM/AAAA"
+                    placeholderTextColor={adminTheme.colors.textMuted}
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                </View>
+                <View style={styles.field}>
+                  <Text style={styles.fieldLabel}>Data final</Text>
+                  <TextInput
+                    nativeID="admin-logs-date-end-input"
+                    style={styles.input}
+                    value={filters.dataFinal}
+                    onChangeText={(value) => updateFilter('dataFinal', applyDateMask(value))}
+                    placeholder="DD/MM/AAAA"
+                    placeholderTextColor={adminTheme.colors.textMuted}
+                    keyboardType="numeric"
+                    maxLength={10}
+                  />
+                </View>
+              </View>
+            </SectionCard>
+          ) : null}
+
+          <View style={styles.resultHeader}>
+            <View style={styles.resultSide}>
+              <Text style={styles.resultTitle}>Resultado</Text>
+            </View>
+            <View style={styles.resultCenter}>
+              <Text style={styles.resultMeta}>
+                {totalLogsCount || logs.length} registros encontrados
+                {totalErros > 0 ? ` • ${totalErros} erros` : ''}
+              </Text>
+              {!loading && logs.length > 0 ? (
+                <Text style={styles.resultPinnedHint}>
+                  Mostrando {logs.length} de {totalLogsCount || logs.length} registros
+                </Text>
+              ) : null}
+            </View>
             <TouchableOpacity
               style={styles.checkboxRow}
               onPress={() => setDetalharLog((current) => !current)}
@@ -640,82 +923,60 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
               <Text style={styles.checkboxText}>Detalhar LOG</Text>
             </TouchableOpacity>
           </View>
-
-          <View style={styles.filterGrid}>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Data inicial</Text>
+          {exportText ? (
+            <View style={styles.exportInlineCard}>
+              <View style={styles.exportInlineHeader}>
+                <Text style={styles.exportInlineTitle}>Exportação pronta</Text>
+                <TouchableOpacity onPress={() => setExportText('')}>
+                  <Ionicons name="close-outline" size={18} color={adminTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
               <TextInput
-                style={styles.input}
-                value={filters.dataInicial}
-                onChangeText={(value) => updateFilter('dataInicial', value)}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor={adminTheme.colors.textMuted}
+                style={styles.exportInlineTextArea}
+                value={exportText}
+                multiline
+                editable={false}
+                selectTextOnFocus
               />
             </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Data final</Text>
-              <TextInput
-                style={styles.input}
-                value={filters.dataFinal}
-                onChangeText={(value) => updateFilter('dataFinal', value)}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor={adminTheme.colors.textMuted}
-              />
-            </View>
-            <View style={styles.field}>
-              <Text style={styles.fieldLabel}>Usuário</Text>
-              <TextInput
-                style={styles.input}
-                value={filters.usuario}
-                onChangeText={(value) => updateFilter('usuario', value)}
-                placeholder="email ou nome"
-                placeholderTextColor={adminTheme.colors.textMuted}
-                autoCapitalize="none"
-              />
-            </View>
-            <View style={styles.fieldWide}>
-              <Text style={styles.fieldLabel}>Tipo de acao / Historico</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.optionRow}>
-                {historicoOptions.map((item) => {
-                  const active = filters.historico === item;
-                  return (
-                    <TouchableOpacity
-                      key={item || 'todos-historicos'}
-                      style={[styles.optionButton, active && styles.optionButtonActive]}
-                      onPress={() => updateFilter('historico', item, { searchAfterChange: true })}
-                    >
-                      <Text style={[styles.optionButtonText, active && styles.optionButtonTextActive]}>
-                        {item || 'TODOS'}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </ScrollView>
-            </View>
-            <View style={styles.fieldWide}>
-              <Text style={styles.fieldLabel}>Complemento</Text>
-              <TextInput
-                style={styles.input}
-                value={filters.complemento}
-                onChangeText={(value) => updateFilter('complemento', value)}
-                placeholder="texto livre, descricao ou detalhe do log"
-                placeholderTextColor={adminTheme.colors.textMuted}
-              />
-            </View>
-          </View>
-        </SectionCard>
-
-        <View style={styles.resultHeader}>
-          <Text style={styles.resultTitle}>Resultado</Text>
-          <Text style={styles.resultMeta}>
-            {logs.length} registro(s) encontrado(s) - {totalErros} erro(s)
-          </Text>
+          ) : null}
         </View>
 
+        <View style={[styles.resultsArea, { paddingTop: fixedHeaderHeight + FIXED_HEADER_TOP_OFFSET + 8 }]}>
         <SectionCard style={styles.tableCard}>
+          <View style={styles.tableToolsBar}>
+            <TouchableOpacity style={styles.secondaryActionButtonCompact} onPress={toggleSelectAllVisibleLogs}>
+              <Ionicons
+                name={selectedLogs.length === logs.length && logs.length ? 'checkbox' : 'square-outline'}
+                size={16}
+                color={adminTheme.colors.text}
+              />
+              <Text style={styles.secondaryActionButtonCompactText}>Selecionar</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.secondaryActionButtonCompact} onPress={handleExportarSelecionadosTxt}>
+              <Ionicons name="document-text-outline" size={16} color={adminTheme.colors.text} />
+              <Text style={styles.secondaryActionButtonCompactText}>Exportar .txt</Text>
+            </TouchableOpacity>
+          </View>
+          <ScrollView
+            style={styles.tableVerticalScroll}
+            contentContainerStyle={styles.tableVerticalScrollContent}
+            refreshControl={
+              <RefreshControl refreshing={refreshing} onRefresh={() => carregarLogs({ isRefresh: true })} />
+            }
+            keyboardShouldPersistTaps="handled"
+            onLayout={handleScrollLayout}
+            onScroll={maybeLoadMoreFromScroll}
+            onScrollEndDrag={maybeLoadMoreFromScroll}
+            onMomentumScrollEnd={maybeLoadMoreFromScroll}
+            onContentSizeChange={handleContentSizeChange}
+            scrollEventThrottle={16}
+            showsVerticalScrollIndicator={false}
+          >
           <ScrollView horizontal showsHorizontalScrollIndicator>
             <View style={styles.table}>
-              <View style={[styles.tableRow, styles.tableHeaderRow]}>
+              <View style={[styles.tableRow, styles.tableHeaderRow, Platform.OS === 'web' && styles.tableHeaderRowSticky]}>
+                <Text style={[styles.cell, styles.selectCell, styles.tableHeaderText]}>SEL</Text>
                 <Text style={[styles.cell, styles.seqCell, styles.tableHeaderText]}>SEQ</Text>
                 <Text style={[styles.cell, styles.userCell, styles.tableHeaderText]}>Usuário</Text>
                 <Text style={[styles.cell, styles.programCell, styles.tableHeaderText]}>Programa</Text>
@@ -746,6 +1007,21 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
                     activeOpacity={0.82}
                     onPress={() => handleSelecionarLog(item)}
                   >
+                    <TouchableOpacity
+                      style={[styles.cell, styles.selectCell, styles.selectCellWrap]}
+                      onPress={() => toggleLogSelection(item, index)}
+                    >
+                      <View
+                        style={[
+                          styles.checkbox,
+                          selectedLogIds.includes(item.path || item.id || `${item.seq}-${index}`) && styles.checkboxChecked,
+                        ]}
+                      >
+                        {selectedLogIds.includes(item.path || item.id || `${item.seq}-${index}`) ? (
+                          <Ionicons name="checkmark" size={14} color={adminTheme.colors.onPrimary} />
+                        ) : null}
+                      </View>
+                    </TouchableOpacity>
                     <Text style={[styles.cell, styles.seqCell]}>{item.seq}</Text>
                     <Text style={[styles.cell, styles.userCell]} numberOfLines={detalharLog ? 3 : 1}>
                       {item.usuario}
@@ -762,9 +1038,12 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
               )}
             </View>
           </ScrollView>
+          </ScrollView>
         </SectionCard>
+        </View>
 
-      </ScrollView>
+        </View>
+      </View>
 
       <BarraAbasAdmin
         navigation={navigation}
@@ -782,30 +1061,63 @@ const styles = StyleSheet.create({
     backgroundColor: adminTheme.colors.background,
   },
   containerWeb: {
+    bottom: 0,
+    height: '100dvh',
+    left: 0,
+    maxHeight: '100dvh',
     minHeight: '100%',
-    overflow: 'visible',
+    overflow: 'hidden',
+    position: 'fixed',
+    right: 0,
+    top: 0,
+    width: '100vw',
   },
   scroll: {
     flex: 1,
     minHeight: 0,
+    overflow: 'hidden',
   },
   webScroll: {
+    height: '100%',
+    maxHeight: '100%',
     overflowX: 'hidden',
-    overflowY: 'visible',
+    overflowY: 'hidden',
   },
   scrollContent: {
-    flexGrow: 1,
-    paddingHorizontal: adminTheme.spacing.screen,
-    paddingTop: 6,
-    paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 26,
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    position: 'relative',
+    paddingHorizontal: 0,
+    paddingTop: 0,
+    paddingBottom: 8,
   },
   webScrollContent: {
-    flexGrow: 0,
-    minHeight: '100%',
+    flex: 1,
+    height: '100%',
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  fixedHeaderArea: {
+    left: 0,
+    paddingHorizontal: adminTheme.spacing.screen,
+    paddingTop: 18,
+    paddingBottom: 10,
+    position: 'absolute',
+    right: 0,
+    top: FIXED_HEADER_TOP_OFFSET,
+    zIndex: 20,
+    backgroundColor: adminTheme.colors.background,
+  },
+  resultsArea: {
+    flex: 1,
+    minHeight: 0,
+    paddingHorizontal: adminTheme.spacing.screen,
+    paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 28,
   },
   sectionCard: {
     backgroundColor: adminTheme.colors.panel,
-    borderRadius: 8,
+    borderRadius: adminTheme.radius.xl,
     padding: adminTheme.spacing.card,
     ...adminShadow,
   },
@@ -821,61 +1133,80 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.textMuted,
     marginTop: 8,
   },
-  headerBar: {
-    backgroundColor: adminTheme.colors.panelStrong,
+  headerSearchWrap: {
+    marginBottom: 16,
+    position: 'relative',
+    justifyContent: 'center',
+  },
+  headerSearchInput: {
+    backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
+    borderRadius: 999,
     borderWidth: 1,
-    marginBottom: 12,
-    padding: 16,
-  },
-  headerTitleWrap: {
-    marginBottom: 14,
-  },
-  headerTitle: {
     color: adminTheme.colors.text,
-    fontSize: 24,
-    fontWeight: '900',
+    fontSize: 14,
+    minHeight: 48,
+    paddingLeft: 14,
+    paddingRight: 94,
+    ...(Platform.OS === 'web'
+      ? {
+          outlineColor: 'transparent',
+          outlineStyle: 'none',
+          outlineWidth: 0,
+          boxShadow: 'none',
+        }
+      : null),
   },
-  headerSubtitle: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 13,
-    marginTop: 5,
+  headerFilterAction: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.primary,
+    borderRadius: 999,
+    height: 36,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 50,
+    top: 6,
+    width: 36,
   },
-  headerActions: {
+  headerSearchAction: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.primary,
+    borderRadius: 999,
+    height: 36,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 8,
+    top: 6,
+    width: 36,
+  },
+  searchChipsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
+    marginBottom: 16,
   },
-  actionButton: {
+  searchChip: {
     alignItems: 'center',
-    backgroundColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    flexDirection: 'row',
-    minHeight: 42,
-    paddingHorizontal: 14,
-  },
-  actionButtonText: {
-    color: adminTheme.colors.onPrimary,
-    fontSize: 13,
-    fontWeight: '900',
-    marginLeft: 7,
-  },
-  exitButton: {
-    alignItems: 'center',
-    backgroundColor: adminTheme.colors.dangerSoft,
-    borderColor: adminTheme.colors.danger,
-    borderRadius: 8,
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: adminTheme.radius.pill,
     borderWidth: 1,
-    flexDirection: 'row',
-    minHeight: 42,
+    flexGrow: 1,
+    justifyContent: 'center',
+    minHeight: 48,
+    minWidth: 120,
     paddingHorizontal: 14,
   },
-  exitButtonText: {
-    color: adminTheme.colors.danger,
-    fontSize: 13,
+  searchChipActive: {
+    backgroundColor: adminTheme.colors.primary,
+  },
+  searchChipText: {
+    color: adminTheme.colors.text,
+    fontSize: 11,
     fontWeight: '900',
-    marginLeft: 7,
+  },
+  searchChipTextActive: {
+    color: adminTheme.colors.onPrimary,
   },
   filterCard: {
     marginBottom: 12,
@@ -925,10 +1256,6 @@ const styles = StyleSheet.create({
     flexGrow: 1,
     flexBasis: '30%',
   },
-  fieldWide: {
-    flexBasis: '100%',
-    flexGrow: 1,
-  },
   fieldLabel: {
     color: adminTheme.colors.textMuted,
     fontSize: 12,
@@ -939,42 +1266,40 @@ const styles = StyleSheet.create({
   input: {
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
+    borderRadius: adminTheme.radius.pill,
     borderWidth: 1,
     color: adminTheme.colors.text,
-    minHeight: 42,
-    paddingHorizontal: 12,
-  },
-  optionRow: {
-    gap: 8,
-    paddingRight: 8,
-  },
-  optionButton: {
-    backgroundColor: adminTheme.colors.background,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: 8,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 38,
-    paddingHorizontal: 10,
-  },
-  optionButtonActive: {
-    backgroundColor: adminTheme.colors.primary,
-  },
-  optionButtonText: {
-    color: adminTheme.colors.text,
-    fontSize: 11,
-    fontWeight: '900',
-  },
-  optionButtonTextActive: {
-    color: adminTheme.colors.onPrimary,
+    minHeight: 48,
+    paddingHorizontal: 14,
+    ...(Platform.OS === 'web'
+      ? {
+          outlineColor: 'transparent',
+          outlineStyle: 'none',
+          outlineWidth: 0,
+          boxShadow: 'none',
+        }
+      : null),
   },
   resultHeader: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 8,
-    marginTop: 4,
+    marginBottom: 12,
+    marginTop: 2,
+    position: 'relative',
+  },
+  resultSide: {
+    width: 180,
+  },
+  resultCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    left: '50%',
+    paddingHorizontal: 12,
+    position: 'absolute',
+    top: 0,
+    transform: [{ translateX: -160 }],
+    width: 320,
   },
   resultTitle: {
     color: adminTheme.colors.text,
@@ -982,13 +1307,92 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   resultMeta: {
+    color: adminTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  resultPinnedHint: {
     color: adminTheme.colors.textMuted,
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '600',
+    marginTop: 6,
+    textAlign: 'center',
+  },
+  secondaryActionButtonCompact: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.panel,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: adminTheme.radius.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    minHeight: 36,
+    paddingHorizontal: 12,
+  },
+  secondaryActionButtonCompactText: {
+    color: adminTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  exportInlineCard: {
+    backgroundColor: adminTheme.colors.panel,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 18,
+    borderWidth: 1,
+    marginBottom: 10,
+    padding: 12,
+  },
+  exportInlineHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  exportInlineTitle: {
+    color: adminTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  exportInlineTextArea: {
+    backgroundColor: adminTheme.colors.background,
+    borderColor: 'rgba(255,255,255,0.08)',
+    borderRadius: 14,
+    borderWidth: 1,
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    maxHeight: 160,
+    minHeight: 120,
+    padding: 12,
+    textAlignVertical: 'top',
   },
   tableCard: {
+    flex: 1,
+    minHeight: 0,
+    maxHeight: '100%',
+    marginBottom: 18,
+    borderRadius: adminTheme.radius.xl,
     padding: 0,
     overflow: 'hidden',
+  },
+  tableToolsBar: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.panel,
+    flexDirection: 'row',
+    gap: 10,
+    justifyContent: 'flex-start',
+    paddingHorizontal: 12,
+    paddingTop: 12,
+    paddingBottom: 10,
+  },
+  tableVerticalScroll: {
+    flex: 1,
+    minHeight: 0,
+    maxHeight: '100%',
+  },
+  tableVerticalScrollContent: {
+    flexGrow: 1,
+    minHeight: '100%',
   },
   table: {
     minWidth: 1160,
@@ -999,6 +1403,11 @@ const styles = StyleSheet.create({
   },
   tableHeaderRow: {
     backgroundColor: '#0B1A17',
+  },
+  tableHeaderRowSticky: {
+    position: 'sticky',
+    top: 0,
+    zIndex: 4,
   },
   tableRowEven: {
     backgroundColor: adminTheme.colors.panel,
@@ -1026,6 +1435,14 @@ const styles = StyleSheet.create({
   },
   seqCell: {
     width: 58,
+  },
+  selectCell: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 64,
+  },
+  selectCellWrap: {
+    paddingHorizontal: 0,
   },
   programCell: {
     width: 150,

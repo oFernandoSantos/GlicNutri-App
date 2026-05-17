@@ -16,7 +16,6 @@ import BarraAbasAdmin, {
   ADMIN_TAB_BAR_HEIGHT,
   ADMIN_TAB_BAR_SPACE,
 } from '../../componentes/admin/BarraAbasAdmin';
-import MenuAdmin from '../../componentes/admin/MenuAdmin';
 import { supabase } from '../../servicos/configSupabase';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 import { listarEventosAuditoria, registrarLogAuditoria } from '../../servicos/servicoAuditoria';
@@ -155,13 +154,11 @@ export default function TelaOperacoesAdmin({ navigation, route, usuarioLogado, o
   const adminUser = usuarioLogado || route?.params?.usuarioLogado || null;
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [menuVisible, setMenuVisible] = useState(false);
   const [state, setState] = useState(initialState);
   const [activeDetail, setActiveDetail] = useState('glicemiasCriticas');
   const [detailModalVisible, setDetailModalVisible] = useState(false);
 
   async function handleLogout() {
-    setMenuVisible(false);
     if (adminUser) {
       await registrarLogAuditoria({
         actor: adminUser,
@@ -244,8 +241,8 @@ export default function TelaOperacoesAdmin({ navigation, route, usuarioLogado, o
 
   useEffect(() => {
     navigation.setOptions({
-      readerOnMenuPress: isAdminUser(adminUser) ? () => setMenuVisible(true) : undefined,
-      readerMenuDisabled: !isAdminUser(adminUser),
+      readerOnMenuPress: undefined,
+      readerMenuDisabled: true,
       readerRightAction: () => carregar({ isRefresh: true }),
       readerRightIcon: 'refresh-outline',
       readerRightLoading: refreshing,
@@ -274,17 +271,6 @@ export default function TelaOperacoesAdmin({ navigation, route, usuarioLogado, o
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="light-content" backgroundColor={adminTheme.colors.background} />
-      {menuVisible ? (
-        <MenuAdmin
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={(routeName, params = {}) => navigation.navigate(routeName, { usuarioLogado: adminUser, ...params })}
-          onLogout={handleLogout}
-          currentRoute="AdminOperacoes"
-          userName={adminUser?.nome_completo_admin || adminUser?.email_acesso || 'Administrador'}
-          userSubtitle="Operacao do app"
-        />
-      ) : null}
 
       <ScrollView
         style={styles.scroll}

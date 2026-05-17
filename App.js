@@ -125,10 +125,10 @@ function useWebDocumentScroll() {
 
       a:focus-visible,
       button:focus-visible,
-      input:focus-visible,
+      input:not(#admin-logs-search-input):not(#admin-logs-date-start-input):not(#admin-logs-date-end-input):not(#admin-logs-user-input):focus-visible,
       textarea:focus-visible,
       select:focus-visible,
-      [role='button']:focus-visible,
+      [role='button']:not(#admin-logs-search-button):focus-visible,
       [tabindex]:focus-visible {
         outline: 2px solid #4fdfa3 !important;
         outline-offset: 2px !important;

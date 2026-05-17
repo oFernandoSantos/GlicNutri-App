@@ -34,23 +34,159 @@ function inferActorType(actor) {
   return 'anonimo';
 }
 
+function maskEmail(value) {
+  const raw = String(value || '').trim();
+  const [local = '', domain = ''] = raw.split('@');
+
+  if (!local || !domain) {
+    return '[redacted-email]';
+  }
+
+  const visibleLocal = local.length <= 2 ? `${local[0] || '*' }*` : `${local.slice(0, 2)}***`;
+  const domainParts = domain.split('.');
+  const host = domainParts.shift() || '';
+  const suffix = domainParts.length ? `.${domainParts.join('.')}` : '';
+  const visibleHost = host.length <= 2 ? `${host[0] || '*' }*` : `${host.slice(0, 2)}***`;
+
+  return `${visibleLocal}@${visibleHost}${suffix}`;
+}
+
+function maskDocument(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+
+  if (!digits) {
+    return '[redacted-document]';
+  }
+
+  if (digits.length <= 4) {
+    return `${'*'.repeat(Math.max(digits.length - 1, 0))}${digits.slice(-1)}`;
+  }
+
+  return `${'*'.repeat(digits.length - 4)}${digits.slice(-4)}`;
+}
+
+function maskPhone(value) {
+  const digits = String(value || '').replace(/\D/g, '');
+
+  if (!digits) {
+    return '[redacted-phone]';
+  }
+
+  return `${'*'.repeat(Math.max(digits.length - 4, 0))}${digits.slice(-4)}`;
+}
+
+function shouldRedactKey(key) {
+  const normalized = String(key || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  return [
+    'senha',
+    'codigo',
+    'code',
+    'token',
+    'access_token',
+    'refresh_token',
+    'foto_url',
+    'url_foto',
+    'imagem_base64',
+    'nome',
+    'nomecompleto',
+    'nome_completo',
+    'nome_paciente',
+    'pacientenome',
+    'patientname',
+    'logradouro',
+    'bairro',
+    'cidade',
+    'cep',
+    'endereco',
+    'address',
+  ].includes(normalized);
+}
+
+function sanitizeDetailEntry(key, value) {
+  if (value == null) {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map((item) => sanitizeDetailEntry(key, item));
+  }
+
+  if (typeof value === 'object') {
+    return buildSafeDetails(value);
+  }
+
+  const normalizedKey = String(key || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+
+  if (shouldRedactKey(normalizedKey)) {
+    return '[redacted]';
+  }
+
+  if (
+    normalizedKey.includes('email') ||
+    normalizedKey.includes('mail')
+  ) {
+    return maskEmail(value);
+  }
+
+  if (
+    normalizedKey.includes('cpf') ||
+    normalizedKey.includes('crm') ||
+    normalizedKey.includes('crn') ||
+    normalizedKey.includes('documento') ||
+    normalizedKey.includes('doc')
+  ) {
+    return maskDocument(value);
+  }
+
+  if (
+    normalizedKey.includes('telefone') ||
+    normalizedKey.includes('phone') ||
+    normalizedKey.includes('celular')
+  ) {
+    return maskPhone(value);
+  }
+
+  return value;
+}
+
 function buildSafeDetails(details) {
   if (!details || typeof details !== 'object' || Array.isArray(details)) {
     return {};
   }
 
-  const sanitized = { ...details };
-  delete sanitized.senha;
-  delete sanitized.senha_pac;
-  delete sanitized.senha_nutri;
-  delete sanitized.codigo;
-  delete sanitized.code;
-  delete sanitized.access_token;
-  delete sanitized.refresh_token;
-  delete sanitized.token;
-  delete sanitized.foto_url;
-  delete sanitized.url_foto;
-  delete sanitized.imagem_base64;
+  const sanitized = {};
+
+  Object.entries(details).forEach(([key, value]) => {
+    const normalizedKey = String(key || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase();
+
+    if (
+      normalizedKey === 'senha' ||
+      normalizedKey === 'senha_pac' ||
+      normalizedKey === 'senha_nutri' ||
+      normalizedKey === 'codigo' ||
+      normalizedKey === 'code' ||
+      normalizedKey === 'access_token' ||
+      normalizedKey === 'refresh_token' ||
+      normalizedKey === 'token' ||
+      normalizedKey === 'foto_url' ||
+      normalizedKey === 'url_foto' ||
+      normalizedKey === 'imagem_base64'
+    ) {
+      return;
+    }
+
+    sanitized[key] = sanitizeDetailEntry(key, value);
+  });
 
   return sanitized;
 }
