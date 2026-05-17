@@ -115,9 +115,15 @@ export default function ReaderTopo({ navigation, route, options }) {
   const rightActionLoading = options?.readerRightLoading;
   const rightActionLabel = options?.readerRightAccessibilityLabel || 'Acao';
   const extraContent = options?.readerExtraContent;
+  const backAction = options?.readerBackAction;
   const hasNotifications = notificationCount > 0;
 
   function handleBack() {
+    if (backAction) {
+      backAction();
+      return;
+    }
+
     if (navigation?.canGoBack?.()) {
       navigation.goBack();
       return;

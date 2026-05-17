@@ -7,7 +7,6 @@ import {
   StatusBar,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
@@ -43,6 +42,20 @@ const initialDashboardState = {
 
 function Card({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
+}
+
+function QuickAction({ icon, title, onPress }) {
+  return (
+    <TouchableOpacity style={styles.quickAction} activeOpacity={0.84} onPress={onPress}>
+      <View style={styles.quickActionLeading}>
+        <View style={styles.quickActionIcon}>
+          <Ionicons name={icon} size={16} color={adminTheme.colors.primary} />
+        </View>
+        <Text style={styles.quickActionTitle}>{title}</Text>
+      </View>
+      <Ionicons name="chevron-forward-outline" size={16} color={adminTheme.colors.primary} />
+    </TouchableOpacity>
+  );
 }
 
 function formatDateTime(value) {
@@ -107,7 +120,6 @@ function mapUserRow(row, type) {
     document,
     status: isInactive ? 'Inativo' : 'Ativo',
     date: getDisplayDate(row),
-    raw: row,
   };
 }
 
@@ -115,6 +127,12 @@ async function fetchCount(queryBuilder) {
   const { count, error } = await queryBuilder;
   if (error) throw error;
   return count || 0;
+}
+
+async function fetchAdminCount() {
+  const { data, error } = await supabase.rpc('contar_administradores');
+  if (error) throw error;
+  return Number(data) || 0;
 }
 
 async function fetchRows(tableName, type, orderColumn) {
@@ -135,41 +153,24 @@ async function fetchRows(tableName, type, orderColumn) {
 
 function getUserTypeMeta(type) {
   if (type === 'paciente') {
-    return { label: 'Paciente', icon: 'person-outline', color: adminTheme.colors.primary };
+    return { label: 'Pacientes', icon: 'person-outline', color: adminTheme.colors.primary };
   }
   if (type === 'nutricionista') {
-    return { label: 'Nutricionista', icon: 'nutrition-outline', color: adminTheme.colors.success };
+    return { label: 'Nutricionistas', icon: 'nutrition-outline', color: adminTheme.colors.success };
   }
   if (type === 'medico') {
-    return { label: 'Medico', icon: 'medkit-outline', color: adminTheme.colors.info };
+    return { label: 'Medicos', icon: 'medkit-outline', color: adminTheme.colors.info };
   }
-  return { label: 'Admin', icon: 'shield-checkmark-outline', color: adminTheme.colors.warning };
+  return { label: 'Administradores', icon: 'shield-checkmark-outline', color: adminTheme.colors.warning };
 }
 
-function UserRow({ item }) {
-  const meta = getUserTypeMeta(item.type);
+function getLatestEntry(items) {
+  return items?.length ? items[0] : null;
+}
 
-  return (
-    <View style={styles.userRow}>
-      <View style={[styles.userIcon, { borderColor: meta.color }]}>
-        <Ionicons name={meta.icon} size={18} color={meta.color} />
-      </View>
-      <View style={styles.userInfo}>
-        <View style={styles.userTopLine}>
-          <Text style={styles.userName} numberOfLines={1}>{item.name}</Text>
-          <Text style={[styles.statusPill, item.status === 'Ativo' ? styles.statusActive : styles.statusInactive]}>
-            {item.status}
-          </Text>
-        </View>
-        <Text style={styles.userMeta} numberOfLines={1}>
-          {meta.label}{item.email ? ` | ${item.email}` : ''}
-        </Text>
-        <Text style={styles.userMeta} numberOfLines={1}>
-          {item.document || 'Documento nao informado'} | {formatDateTime(item.date)}
-        </Text>
-      </View>
-    </View>
-  );
+function getRecentLabel(item) {
+  if (!item) return 'Sem registro recente';
+  return item.name || item.email || item.document || 'Sem registro recente';
 }
 
 export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdminLogout }) {
@@ -178,8 +179,6 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
   const [refreshing, setRefreshing] = useState(false);
   const [dashboard, setDashboard] = useState(initialDashboardState);
   const [menuVisible, setMenuVisible] = useState(false);
-  const [search, setSearch] = useState('');
-  const [activeType, setActiveType] = useState('todos');
 
   async function handleLogout() {
     setMenuVisible(false);
@@ -238,7 +237,7 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
         ).catch(() => 0),
         fetchCount(supabase.from('nutricionista').select('*', { count: 'exact', head: true })).catch(() => 0),
         fetchCount(supabase.from('medico').select('*', { count: 'exact', head: true })).catch(() => 0),
-        fetchCount(supabase.from('administrador').select('*', { count: 'exact', head: true })).catch(() => 0),
+        fetchAdminCount().catch(() => 0),
         fetchRows('paciente', 'paciente', 'data_hora_ultima_atualizacao'),
         fetchRows('nutricionista', 'nutricionista', 'created_at'),
         fetchRows('medico', 'medico', 'created_at'),
@@ -301,63 +300,70 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
     });
   }, [navigation, adminUser, refreshing, loading]);
 
-  const userGroups = useMemo(
-    () => [
-      {
-        key: 'paciente',
-        title: 'Pacientes',
-        count: dashboard.pacientesAtivos,
-        helper: `${dashboard.pacientesExcluidos} em exclusao logica`,
-        icon: 'person-outline',
-        items: dashboard.pacientesRecentes,
-      },
-      {
-        key: 'nutricionista',
-        title: 'Nutricionistas',
-        count: dashboard.nutricionistas,
-        helper: 'Equipe de acompanhamento',
-        icon: 'nutrition-outline',
-        items: dashboard.nutricionistasRecentes,
-      },
-      {
-        key: 'medico',
-        title: 'Medicos',
-        count: dashboard.medicos,
-        helper: 'Perfis clinicos',
-        icon: 'medkit-outline',
-        items: dashboard.medicosRecentes,
-      },
-      {
-        key: 'admin',
-        title: 'Administradores',
-        count: dashboard.administradores,
-        helper: 'Acesso institucional',
-        icon: 'shield-checkmark-outline',
-        items: dashboard.adminsRecentes,
-      },
-    ],
-    [dashboard]
-  );
-
-  const allUsers = useMemo(
-    () => userGroups.flatMap((group) => group.items),
-    [userGroups]
-  );
-
-  const visibleUsers = useMemo(() => {
-    const query = normalizeText(search);
-    return allUsers.filter((item) => {
-      if (activeType !== 'todos' && item.type !== activeType) return false;
-      if (!query) return true;
-      return normalizeText([item.name, item.email, item.document, item.status, item.type].join(' ')).includes(query);
-    });
-  }, [activeType, allUsers, search]);
-
   const totalUsers =
     dashboard.pacientesAtivos +
     dashboard.nutricionistas +
     dashboard.medicos +
     dashboard.administradores;
+
+  const priorityCount = dashboard.alertasHoje + dashboard.falhasHoje + dashboard.pacientesExcluidos;
+
+  const metrics = useMemo(
+    () => [
+      {
+        key: 'usuarios',
+        title: 'Usuarios ativos',
+        value: totalUsers,
+        helper: 'Base principal',
+        icon: 'people-outline',
+      },
+      {
+        key: 'eventos',
+        title: 'Eventos hoje',
+        value: dashboard.eventosHoje,
+        helper: 'Fluxo operacional',
+        icon: 'pulse-outline',
+      },
+      {
+        key: 'inativos',
+        title: 'Pacientes inativos',
+        value: dashboard.pacientesExcluidos,
+        helper: 'Exclusao logica',
+        icon: 'archive-outline',
+      },
+    ],
+    [dashboard, totalUsers]
+  );
+
+  const userOverview = useMemo(
+    () => [
+      {
+        key: 'paciente',
+        count: dashboard.pacientesAtivos,
+        helper: `${dashboard.pacientesExcluidos} em exclusao logica`,
+        recent: getRecentLabel(getLatestEntry(dashboard.pacientesRecentes)),
+      },
+      {
+        key: 'nutricionista',
+        count: dashboard.nutricionistas,
+        helper: 'Equipe de acompanhamento',
+        recent: getRecentLabel(getLatestEntry(dashboard.nutricionistasRecentes)),
+      },
+      {
+        key: 'medico',
+        count: dashboard.medicos,
+        helper: 'Perfis clinicos',
+        recent: getRecentLabel(getLatestEntry(dashboard.medicosRecentes)),
+      },
+      {
+        key: 'admin',
+        count: dashboard.administradores,
+        helper: 'Acesso institucional',
+        recent: getRecentLabel(getLatestEntry(dashboard.adminsRecentes)),
+      },
+    ],
+    [dashboard]
+  );
 
   if (!isAdminUser(adminUser)) {
     return (
@@ -419,138 +425,131 @@ export default function TelaHomeAdmin({ navigation, route, usuarioLogado, onAdmi
           </Card>
         ) : (
           <>
-            <View style={styles.hero}>
-              <View style={styles.heroTitleWrap}>
-                <Text style={styles.heroKicker}>Admin</Text>
-                <Text style={styles.heroTitle}>Centro de controle</Text>
-                <Text style={styles.heroSubtitle}>
-                  Controle usuarios, acompanhe perfis ativos e monitore eventos importantes do app.
-                </Text>
-              </View>
-              <View style={styles.heroStats}>
-                <View style={styles.heroStat}>
-                  <Text style={styles.heroStatValue}>{totalUsers}</Text>
-                  <Text style={styles.heroStatLabel}>usuarios</Text>
+            <Card style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <View>
+                  <Text style={styles.sectionTitle}>Visao geral</Text>
+                  <Text style={styles.sectionSubtitle}>Somente o que precisa de leitura imediata</Text>
                 </View>
-                <View style={styles.heroStat}>
-                  <Text style={styles.heroStatValue}>{dashboard.eventosHoje}</Text>
-                  <Text style={styles.heroStatLabel}>eventos hoje</Text>
-                </View>
-                <View style={styles.heroStat}>
-                  <Text style={styles.heroStatValue}>{dashboard.alertasHoje + dashboard.falhasHoje}</Text>
-                  <Text style={styles.heroStatLabel}>atencoes</Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Usuarios do sistema</Text>
-              <Text style={styles.sectionNote}>Atualizado em {formatDateTime(dashboard.lastUpdatedAt)}</Text>
-            </View>
-
-            <View style={styles.groupGrid}>
-              {userGroups.map((group) => (
-                <TouchableOpacity
-                  key={group.key}
-                  style={[
-                    styles.groupCard,
-                    activeType === group.key && styles.groupCardActive,
-                  ]}
-                  onPress={() => setActiveType(activeType === group.key ? 'todos' : group.key)}
-                >
-                  <View style={styles.groupTop}>
-                    <View style={styles.groupIcon}>
-                      <Ionicons name={group.icon} size={20} color={adminTheme.colors.primary} />
-                    </View>
-                    <Text style={styles.groupCount}>{group.count}</Text>
+                <View style={styles.overviewMiniRow}>
+                  <View style={styles.overviewMiniCard}>
+                    <Text style={styles.overviewMiniLabel}>Pontos de atencao</Text>
+                    <Text style={styles.overviewMiniValue}>{priorityCount}</Text>
+                    <Text style={styles.overviewMiniMeta}>
+                      {dashboard.alertasHoje} alertas • {dashboard.falhasHoje} falhas • {dashboard.pacientesExcluidos} inativos
+                    </Text>
                   </View>
-                  <Text style={styles.groupTitle}>{group.title}</Text>
-                  <Text style={styles.groupHelper}>{group.helper}</Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-
-            <Card style={styles.controlPanel}>
-              <View style={styles.searchRow}>
-                <View style={styles.searchBox}>
-                  <Ionicons name="search-outline" size={18} color={adminTheme.colors.textMuted} />
-                  <TextInput
-                    value={search}
-                    onChangeText={setSearch}
-                    placeholder="Buscar por nome, email, documento ou tipo"
-                    placeholderTextColor={adminTheme.colors.textMuted}
-                    style={styles.searchInput}
-                  />
+                  <View style={styles.overviewMiniCard}>
+                    <Text style={styles.overviewMiniLabel}>Atualizado</Text>
+                    <Text style={styles.overviewMiniDate}>{formatDateTime(dashboard.lastUpdatedAt)}</Text>
+                  </View>
                 </View>
-                <TouchableOpacity
-                  style={[styles.filterButton, activeType === 'todos' && styles.filterButtonActive]}
-                  onPress={() => setActiveType('todos')}
-                >
-                  <Text style={[styles.filterText, activeType === 'todos' && styles.filterTextActive]}>Todos</Text>
-                </TouchableOpacity>
               </View>
 
-              <View style={styles.userListHeader}>
-                <Text style={styles.userListTitle}>Controle rapido de usuarios</Text>
-                <Text style={styles.userListCount}>{visibleUsers.length} exibidos</Text>
+              <View style={styles.metricsRow}>
+                {metrics.map((item) => (
+                  <View key={item.key} style={styles.metricCard}>
+                    <View style={styles.metricTop}>
+                      <View style={styles.metricIcon}>
+                        <Ionicons name={item.icon} size={16} color={adminTheme.colors.primary} />
+                      </View>
+                      <Text style={styles.metricValue}>{item.value}</Text>
+                    </View>
+                    <Text style={styles.metricTitle}>{item.title}</Text>
+                    <Text style={styles.metricHelper}>{item.helper}</Text>
+                  </View>
+                ))}
               </View>
-
-              {visibleUsers.length ? (
-                visibleUsers.map((item) => <UserRow key={`${item.type}-${item.id}`} item={item} />)
-              ) : (
-                <View style={styles.emptyBlock}>
-                  <Text style={styles.emptyTitle}>Nenhum usuario encontrado</Text>
-                  <Text style={styles.emptyText}>Ajuste o filtro ou atualize o painel.</Text>
-                </View>
-              )}
             </Card>
 
-            <View style={styles.actionGrid}>
-              <TouchableOpacity style={styles.actionCard} onPress={() => handleNavigate('AdminCadastros')}>
-                <Ionicons name="person-add-outline" size={22} color={adminTheme.colors.primary} />
-                <Text style={styles.actionTitle}>Abrir cadastros</Text>
-                <Text style={styles.actionText}>Consultar pacientes, nutricionistas, medicos e admins.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => handleNavigate('AdminOperacoes')}>
-                <Ionicons name="briefcase-outline" size={22} color={adminTheme.colors.primary} />
-                <Text style={styles.actionTitle}>Abrir operacoes</Text>
-                <Text style={styles.actionText}>Acompanhar pendencias, riscos e alertas operacionais.</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.actionCard} onPress={() => handleNavigate('AdminLogsSistema')}>
-                <Ionicons name="pulse-outline" size={22} color={adminTheme.colors.primary} />
-                <Text style={styles.actionTitle}>Auditoria/Log</Text>
-                <Text style={styles.actionText}>Ver alertas, exclusoes, alteracoes e ocorrencias tecnicas.</Text>
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Eventos recentes</Text>
-              <Text style={styles.sectionNote}>Ultimas atividades registradas</Text>
-            </View>
-
-            <Card style={styles.eventsPanel}>
-              {dashboard.eventosRecentes.length ? (
-                dashboard.eventosRecentes.slice(0, 6).map((item) => (
-                  <View key={item.path || item.id} style={styles.eventRow}>
-                    <View style={styles.eventDot} />
-                    <View style={styles.eventInfo}>
-                      <Text style={styles.eventTitle} numberOfLines={1}>
-                        {String(item.action || 'acao').replace(/_/g, ' ')}
-                      </Text>
-                      <Text style={styles.eventMeta} numberOfLines={1}>
-                        {item.actorName || item.actorType || 'Usuario nao identificado'} | {formatDateTime(item.createdAt)}
-                      </Text>
-                    </View>
-                    <Text style={styles.eventStatus}>{item.status || 'ok'}</Text>
-                  </View>
-                ))
-              ) : (
-                <View style={styles.emptyBlock}>
-                  <Text style={styles.emptyTitle}>Sem eventos recentes</Text>
-                  <Text style={styles.emptyText}>Os eventos aparecem aqui conforme o app for utilizado.</Text>
+            <Card style={styles.sectionCard}>
+              <View style={styles.sectionHeader}>
+                <View>
+                  <Text style={styles.sectionTitle}>Acesso rapido</Text>
+                  <Text style={styles.sectionSubtitle}>Entradas principais do admin</Text>
                 </View>
-              )}
+              </View>
+
+              <View style={styles.quickActionsRow}>
+                <QuickAction icon="person-add-outline" title="Cadastros" onPress={() => handleNavigate('AdminCadastros')} />
+                <QuickAction icon="briefcase-outline" title="Operacoes" onPress={() => handleNavigate('AdminOperacoes')} />
+                <QuickAction icon="pulse-outline" title="Auditoria/Log" onPress={() => handleNavigate('AdminLogsSistema')} />
+              </View>
             </Card>
+
+            <View style={styles.contentGrid}>
+              <Card style={[styles.sectionCard, styles.contentPanel]}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>Usuarios</Text>
+                    <Text style={styles.sectionSubtitle}>Distribuicao e ultimo movimento por perfil</Text>
+                  </View>
+                  <TouchableOpacity style={styles.linkButton} onPress={() => handleNavigate('AdminCadastros')}>
+                    <Text style={styles.linkButtonText}>Abrir cadastros</Text>
+                    <Ionicons name="chevron-forward-outline" size={15} color={adminTheme.colors.primary} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={styles.userList}>
+                  {userOverview.map((item) => {
+                    const meta = getUserTypeMeta(item.key);
+
+                    return (
+                      <View key={item.key} style={styles.userRow}>
+                        <View style={[styles.userIconWrap, { borderColor: meta.color }]}>
+                          <Ionicons name={meta.icon} size={16} color={meta.color} />
+                        </View>
+
+                        <View style={styles.userInfo}>
+                          <View style={styles.userHeaderRow}>
+                            <Text style={styles.userTitle}>{meta.label}</Text>
+                            <Text style={styles.userCount}>{item.count}</Text>
+                          </View>
+                          <Text style={styles.userHelper} numberOfLines={1}>{item.helper}</Text>
+                          <Text style={styles.userRecent} numberOfLines={1}>Ultimo: {item.recent}</Text>
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              </Card>
+
+              <Card style={[styles.sectionCard, styles.contentPanel]}>
+                <View style={styles.sectionHeader}>
+                  <View>
+                    <Text style={styles.sectionTitle}>Eventos recentes</Text>
+                    <Text style={styles.sectionSubtitle}>Ultimas atividades registradas</Text>
+                  </View>
+                </View>
+
+                <View style={styles.eventsList}>
+                  {dashboard.eventosRecentes.length ? (
+                    dashboard.eventosRecentes.slice(0, 5).map((item) => (
+                      <View key={item.path || item.id} style={styles.eventRow}>
+                        <View style={styles.eventMarker} />
+                        <View style={styles.eventInfo}>
+                          <Text style={styles.eventTitle} numberOfLines={1}>
+                            {String(item.action || 'acao').replace(/_/g, ' ')}
+                          </Text>
+                          <Text style={styles.eventMeta} numberOfLines={1}>
+                            {item.actorName || item.actorType || 'Usuario nao identificado'}
+                          </Text>
+                          <Text style={styles.eventMeta} numberOfLines={1}>
+                            {formatDateTime(item.createdAt)}
+                          </Text>
+                        </View>
+                        <Text style={styles.eventStatus}>{item.status || 'ok'}</Text>
+                      </View>
+                    ))
+                  ) : (
+                    <View style={styles.emptyBlock}>
+                      <Text style={styles.emptyTitle}>Sem eventos recentes</Text>
+                      <Text style={styles.emptyText}>As atividades do sistema aparecem aqui em tempo real.</Text>
+                    </View>
+                  )}
+                </View>
+              </Card>
+            </View>
           </>
         )}
       </ScrollView>
@@ -578,7 +577,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: adminTheme.spacing.screen,
-    paddingTop: 10,
+    paddingTop: 12,
     paddingBottom: ADMIN_TAB_BAR_HEIGHT + ADMIN_TAB_BAR_SPACE + 30,
   },
   card: {
@@ -586,7 +585,7 @@ const styles = StyleSheet.create({
     borderColor: adminTheme.colors.panelBorder,
     borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
-    padding: adminTheme.spacing.card,
+    padding: 16,
     ...adminShadow,
   },
   loadingCard: {
@@ -628,293 +627,272 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '900',
   },
-  hero: {
-    backgroundColor: adminTheme.colors.panelStrong,
-    borderColor: adminTheme.colors.primary,
-    borderRadius: adminTheme.radius.xl,
-    borderWidth: 1,
+  sectionCard: {
+    marginTop: 12,
+  },
+  sectionHeader: {
+    alignItems: Platform.OS === 'web' ? 'center' : 'flex-start',
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    gap: 16,
+    gap: 12,
     justifyContent: 'space-between',
-    padding: 18,
-    ...adminShadow,
   },
-  heroTitleWrap: {
-    flex: 1,
-  },
-  heroKicker: {
-    color: adminTheme.colors.primary,
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-  },
-  heroTitle: {
+  sectionTitle: {
     color: adminTheme.colors.text,
-    fontSize: 28,
+    fontSize: 20,
     fontWeight: '900',
+  },
+  sectionSubtitle: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
     marginTop: 4,
   },
-  heroSubtitle: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
-    maxWidth: 620,
+  overviewMiniRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: 8,
   },
-  heroStats: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  heroStat: {
+  overviewMiniCard: {
+    alignItems: 'center',
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.panelBorder,
     borderRadius: adminTheme.radius.md,
     borderWidth: 1,
-    minWidth: 104,
-    padding: 12,
+    justifyContent: 'center',
+    minWidth: Platform.OS === 'web' ? 150 : '100%',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
-  heroStatValue: {
-    color: adminTheme.colors.text,
-    fontSize: 24,
-    fontWeight: '900',
-  },
-  heroStatLabel: {
+  overviewMiniLabel: {
     color: adminTheme.colors.textMuted,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '800',
-    marginTop: 2,
+    textAlign: 'center',
+    textTransform: 'uppercase',
   },
-  sectionHeader: {
-    alignItems: 'flex-end',
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginTop: 24,
+  overviewMiniValue: {
+    color: adminTheme.colors.text,
+    fontSize: 19,
+    fontWeight: '900',
+    marginTop: 3,
+    textAlign: 'center',
   },
-  sectionTitle: {
+  overviewMiniDate: {
+    color: adminTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '900',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  overviewMiniMeta: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  alertPill: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.background,
+    borderColor: adminTheme.colors.panelBorder,
+    borderRadius: adminTheme.radius.pill,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minWidth: 88,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  alertPillLabel: {
+    color: adminTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '800',
+    textAlign: 'center',
+    textTransform: 'uppercase',
+  },
+  alertPillValue: {
     color: adminTheme.colors.text,
     fontSize: 18,
     fontWeight: '900',
+    marginTop: 2,
+    textAlign: 'center',
   },
-  sectionNote: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  groupGrid: {
+  metricsRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
-    marginTop: 12,
+    marginTop: 16,
   },
-  groupCard: {
-    backgroundColor: adminTheme.colors.panel,
+  metricCard: {
+    backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.panelBorder,
     borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
     flexGrow: 1,
-    minWidth: 170,
+    minWidth: 180,
     padding: 14,
-    width: Platform.OS === 'web' ? '23%' : '47%',
-    ...adminShadow,
+    width: Platform.OS === 'web' ? '31%' : '100%',
   },
-  groupCardActive: {
-    borderColor: adminTheme.colors.primary,
-    backgroundColor: adminTheme.colors.primarySoft,
-  },
-  groupTop: {
+  metricTop: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  groupIcon: {
+  metricIcon: {
     alignItems: 'center',
-    backgroundColor: adminTheme.colors.background,
+    backgroundColor: adminTheme.colors.panel,
+    borderColor: adminTheme.colors.primary,
     borderRadius: adminTheme.radius.md,
-    height: 38,
+    borderWidth: 1,
+    height: 34,
     justifyContent: 'center',
-    width: 38,
+    width: 34,
   },
-  groupCount: {
+  metricValue: {
     color: adminTheme.colors.text,
-    fontSize: 26,
+    fontSize: 30,
     fontWeight: '900',
   },
-  groupTitle: {
+  metricTitle: {
     color: adminTheme.colors.text,
     fontSize: 14,
     fontWeight: '900',
-    marginTop: 12,
+    marginTop: 10,
   },
-  groupHelper: {
+  metricHelper: {
     color: adminTheme.colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
     marginTop: 4,
   },
-  controlPanel: {
+  quickActionsRow: {
+    gap: 10,
     marginTop: 16,
   },
-  searchRow: {
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    gap: 10,
-  },
-  searchBox: {
+  quickAction: {
     alignItems: 'center',
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.panelBorder,
-    borderRadius: adminTheme.radius.md,
+    borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
-    flex: 1,
-    flexDirection: 'row',
-    minHeight: 46,
-    paddingHorizontal: 12,
-  },
-  searchInput: {
-    color: adminTheme.colors.text,
-    flex: 1,
-    fontSize: 14,
-    marginLeft: 8,
-    outlineStyle: 'none',
-  },
-  filterButton: {
-    alignItems: 'center',
-    borderColor: adminTheme.colors.panelBorder,
-    borderRadius: adminTheme.radius.md,
-    borderWidth: 1,
-    justifyContent: 'center',
-    minHeight: 46,
-    paddingHorizontal: 18,
-  },
-  filterButtonActive: {
-    backgroundColor: adminTheme.colors.primary,
-    borderColor: adminTheme.colors.primary,
-  },
-  filterText: {
-    color: adminTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '900',
-  },
-  filterTextActive: {
-    color: adminTheme.colors.onPrimary,
-  },
-  userListHeader: {
-    alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 18,
-    marginBottom: 8,
+    minHeight: 56,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
   },
-  userListTitle: {
+  quickActionLeading: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flex: 1,
+    minWidth: 0,
+  },
+  quickActionIcon: {
+    alignItems: 'center',
+    backgroundColor: adminTheme.colors.panel,
+    borderColor: adminTheme.colors.primary,
+    borderRadius: adminTheme.radius.md,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: 'center',
+    width: 32,
+  },
+  quickActionTitle: {
     color: adminTheme.colors.text,
-    fontSize: 15,
+    fontSize: 14,
+    fontWeight: '800',
+    marginLeft: 10,
+  },
+  contentGrid: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: 12,
+    marginTop: 14,
+  },
+  contentPanel: {
+    flex: 1,
+    minWidth: 280,
+  },
+  linkButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  linkButtonText: {
+    color: adminTheme.colors.primary,
+    fontSize: 12,
     fontWeight: '900',
   },
-  userListCount: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
+  userList: {
+    gap: 10,
+    marginTop: 16,
   },
   userRow: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.panelBorder,
-    borderRadius: adminTheme.radius.md,
+    borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     gap: 12,
-    marginTop: 8,
-    padding: 12,
+    padding: 14,
   },
-  userIcon: {
+  userIconWrap: {
     alignItems: 'center',
+    backgroundColor: adminTheme.colors.panel,
     borderRadius: adminTheme.radius.md,
     borderWidth: 1,
-    height: 40,
+    height: 36,
     justifyContent: 'center',
-    width: 40,
+    width: 36,
   },
   userInfo: {
     flex: 1,
     minWidth: 0,
   },
-  userTopLine: {
+  userHeaderRow: {
     alignItems: 'center',
     flexDirection: 'row',
-    gap: 8,
+    justifyContent: 'space-between',
   },
-  userName: {
+  userTitle: {
     color: adminTheme.colors.text,
-    flex: 1,
     fontSize: 14,
     fontWeight: '900',
   },
-  userMeta: {
+  userCount: {
+    color: adminTheme.colors.text,
+    fontSize: 24,
+    fontWeight: '900',
+  },
+  userHelper: {
     color: adminTheme.colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
-    marginTop: 3,
+    marginTop: 4,
   },
-  statusPill: {
-    borderRadius: adminTheme.radius.pill,
-    fontSize: 11,
-    fontWeight: '900',
-    overflow: 'hidden',
-    paddingHorizontal: 8,
-    paddingVertical: 3,
+  userRecent: {
+    color: adminTheme.colors.primaryStrong,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
   },
-  statusActive: {
-    backgroundColor: adminTheme.colors.successSoft,
-    color: adminTheme.colors.success,
-  },
-  statusInactive: {
-    backgroundColor: adminTheme.colors.dangerSoft,
-    color: adminTheme.colors.danger,
-  },
-  actionGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
+  eventsList: {
+    gap: 8,
     marginTop: 16,
   },
-  actionCard: {
-    backgroundColor: adminTheme.colors.panel,
+  eventRow: {
+    alignItems: 'flex-start',
+    backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.panelBorder,
     borderRadius: adminTheme.radius.lg,
     borderWidth: 1,
-    flexGrow: 1,
-    minWidth: 220,
-    padding: 16,
-    width: Platform.OS === 'web' ? '48%' : '100%',
-    ...adminShadow,
-  },
-  actionTitle: {
-    color: adminTheme.colors.text,
-    fontSize: 15,
-    fontWeight: '900',
-    marginTop: 10,
-  },
-  actionText: {
-    color: adminTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '700',
-    lineHeight: 18,
-    marginTop: 5,
-  },
-  eventsPanel: {
-    marginTop: 12,
-  },
-  eventRow: {
-    alignItems: 'center',
-    borderBottomColor: adminTheme.colors.panelBorder,
-    borderBottomWidth: 1,
     flexDirection: 'row',
     gap: 10,
-    paddingVertical: 10,
+    padding: 14,
   },
-  eventDot: {
+  eventMarker: {
     backgroundColor: adminTheme.colors.primary,
-    borderRadius: 5,
+    borderRadius: 999,
     height: 10,
+    marginTop: 6,
     width: 10,
   },
   eventInfo: {
@@ -923,7 +901,7 @@ const styles = StyleSheet.create({
   },
   eventTitle: {
     color: adminTheme.colors.text,
-    fontSize: 13,
+    fontSize: 14,
     fontWeight: '900',
     textTransform: 'capitalize',
   },
@@ -937,11 +915,12 @@ const styles = StyleSheet.create({
     color: adminTheme.colors.primary,
     fontSize: 11,
     fontWeight: '900',
+    marginLeft: 8,
     textTransform: 'uppercase',
   },
   emptyBlock: {
     alignItems: 'center',
-    padding: 22,
+    paddingVertical: 24,
   },
   emptyTitle: {
     color: adminTheme.colors.text,

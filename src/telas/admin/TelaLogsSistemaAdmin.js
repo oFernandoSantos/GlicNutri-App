@@ -736,6 +736,7 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
 
   useEffect(() => {
     navigation.setOptions({
+      readerBackAction: handleVoltar,
       readerOnMenuPress: undefined,
       readerMenuDisabled: true,
       readerMenuLoading: false,
