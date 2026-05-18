@@ -1,5 +1,10 @@
 import { supabase } from './configSupabase';
 import { isValidGoogleMeetUrl, normalizeGoogleMeetUrl } from './servicoGoogleMeet';
+import {
+  getStableExperienceYears,
+  getStableRating,
+  getStableReviewCount,
+} from '../utilitarios/slotsTeleconsulta';
 
 const PERFIL_TELECONSULTA_SELECT = '*';
 
@@ -24,6 +29,8 @@ export async function listNutritionists({ limit = 80 } = {}) {
 }
 
 function enrichNutricionistaFallback(item) {
+  const seed = item?.id_nutricionista_uuid || item?.nome_completo_nutri || item?.email_acesso || 'nutri';
+
   return {
     ...item,
     especialidade: item?.especialidade || 'Nutrição clínica',
@@ -40,15 +47,15 @@ function enrichNutricionistaFallback(item) {
     rating_media:
       Number.isFinite(Number(item?.rating_media)) && Number(item?.rating_media) > 0
         ? Number(item.rating_media)
-        : null,
+        : Number(getStableRating(seed)),
     total_avaliacoes:
-      Number.isFinite(Number(item?.total_avaliacoes)) && Number(item?.total_avaliacoes) >= 0
+      Number.isFinite(Number(item?.total_avaliacoes)) && Number(item?.total_avaliacoes) > 0
         ? Number(item.total_avaliacoes)
-        : null,
+        : getStableReviewCount(seed),
     anos_experiencia:
-      Number.isFinite(Number(item?.anos_experiencia)) && Number(item?.anos_experiencia) >= 0
+      Number.isFinite(Number(item?.anos_experiencia)) && Number(item?.anos_experiencia) > 0
         ? Number(item.anos_experiencia)
-        : null,
+        : getStableExperienceYears(seed),
   };
 }
 

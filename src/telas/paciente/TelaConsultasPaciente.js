@@ -60,9 +60,12 @@ import {
   formatSlotDateKey,
   formatTimeLabel,
   getNutriEspecialidadeLabel,
+  getStableExperienceYears,
   getStableRating,
+  getStableReviewCount,
   groupSlotsByDay,
   markSlotsWithBooking,
+  nutritionistHasSlotsInRange,
 } from '../../utilitarios/slotsTeleconsulta';
 
 function maskDateBr(value) {
@@ -155,6 +158,8 @@ export default function PacienteAgendamentosScreen({
 
   const [notificacoes, setNotificacoes] = useState([]);
   const [notificacoesModal, setNotificacoesModal] = useState(false);
+  const [nutrisComAgendaIds, setNutrisComAgendaIds] = useState(new Set());
+  const [loadingNutrisDisponiveis, setLoadingNutrisDisponiveis] = useState(false);
 
   const dateFromKey = useMemo(() => parseDateBrToKey(dateFromBr), [dateFromBr]);
   const dateToKey = useMemo(() => parseDateBrToKey(dateToBr), [dateToBr]);
@@ -364,7 +369,7 @@ export default function PacienteAgendamentosScreen({
     });
   }, [navigation, notificacoes.length, patientId]);
 
-  const filteredNutris = useMemo(() => {
+  const filteredNutrisBase = useMemo(() => {
     let list = filterNutritionists(nutricionistas, filterParams);
 
     if (ordenacao === 'preco') {
@@ -382,6 +387,69 @@ export default function PacienteAgendamentosScreen({
 
     return list;
   }, [nutricionistas, filterParams, ordenacao]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function carregarDisponibilidadeReal() {
+      if (!filteredNutrisBase.length) {
+        if (active) {
+          setNutrisComAgendaIds(new Set());
+          setLoadingNutrisDisponiveis(false);
+        }
+        return;
+      }
+
+      try {
+        if (active) setLoadingNutrisDisponiveis(true);
+
+        const checks = await Promise.all(
+          filteredNutrisBase.map(async (nutri) => {
+            const nutriId = nutri?.id_nutricionista_uuid;
+            if (!nutriId) return null;
+
+            try {
+              const [availabilityRows, consultasNutri] = await Promise.all([
+                listNutriAvailability(nutriId),
+                listConsultasByNutricionista(nutriId, { limit: 200 }),
+              ]);
+
+              const generated = generateSlotsForNextDays(availabilityRows, { days: 21 });
+              const marked = markSlotsWithBooking(generated, consultasNutri);
+              const byQuick = filterSlotsByQuick(marked, quickFilter);
+
+              const hasAvailable = nutritionistHasSlotsInRange(byQuick, {
+                dateFrom: dateFromKey,
+                dateTo: dateToKey,
+              });
+
+              return hasAvailable ? nutriId : null;
+            } catch (error) {
+              console.log('Erro ao verificar disponibilidade do profissional:', error);
+              return null;
+            }
+          })
+        );
+
+        if (!active) return;
+        setNutrisComAgendaIds(new Set(checks.filter(Boolean)));
+      } finally {
+        if (active) setLoadingNutrisDisponiveis(false);
+      }
+    }
+
+    carregarDisponibilidadeReal();
+
+    return () => {
+      active = false;
+    };
+  }, [filteredNutrisBase, quickFilter, dateFromKey, dateToKey]);
+
+  const filteredNutris = useMemo(
+    () =>
+      filteredNutrisBase.filter((nutri) => nutrisComAgendaIds.has(nutri.id_nutricionista_uuid)),
+    [filteredNutrisBase, nutrisComAgendaIds]
+  );
 
   const calendarDays = useMemo(() => groupSlotsByDay(slots), [slots]);
 
@@ -681,6 +749,7 @@ export default function PacienteAgendamentosScreen({
             trailingIcon="funnel-outline"
             onTrailingPress={() => setConsultasFiltrosAbertos((prev) => !prev)}
             trailingAccessibilityLabel="Abrir filtros de minhas consultas"
+            trailingActive={consultasFiltrosAbertos}
           />
 
           {consultasFiltrosAbertos ? (
@@ -759,6 +828,7 @@ export default function PacienteAgendamentosScreen({
         trailingIcon="funnel-outline"
         onTrailingPress={() => setFiltrosAbertos((prev) => !prev)}
         trailingAccessibilityLabel="Abrir filtros da teleconsulta"
+        trailingActive={filtrosAbertos}
       />
 
       <View style={styles.quickFiltersRow}>
@@ -915,9 +985,14 @@ export default function PacienteAgendamentosScreen({
                 {disponibilidadeDireta ? 'Outros profissionais' : 'Profissionais disponiveis'}
               </Text>
               <Text style={styles.sectionSubtitle}>
-                {filteredNutris.length} resultado(s) para teleconsulta
+                {loadingNutrisDisponiveis
+                  ? 'Verificando disponibilidade real...'
+                  : `${filteredNutris.length} resultado(s) para teleconsulta`}
               </Text>
             </View>
+            {loadingNutrisDisponiveis ? (
+              <ActivityIndicator color={patientTheme.colors.primaryDark} />
+            ) : null}
           </View>
 
           {!filteredNutris.length ? (
@@ -934,18 +1009,18 @@ export default function PacienteAgendamentosScreen({
             const ratingReal =
               Number.isFinite(Number(nutri?.rating_media)) && Number(nutri?.rating_media) > 0
                 ? Number(nutri.rating_media).toFixed(1)
-                : '';
+                : getStableRating(nutri?.id_nutricionista_uuid);
             const totalAvaliacoesReal =
-              Number.isFinite(Number(nutri?.total_avaliacoes)) && Number(nutri?.total_avaliacoes) >= 0
+              Number.isFinite(Number(nutri?.total_avaliacoes)) && Number(nutri?.total_avaliacoes) > 0
                 ? Number(nutri.total_avaliacoes)
-                : null;
+                : getStableReviewCount(nutri?.id_nutricionista_uuid);
             const expAnosReal =
-              Number.isFinite(Number(nutri?.anos_experiencia)) && Number(nutri?.anos_experiencia) >= 0
+              Number.isFinite(Number(nutri?.anos_experiencia)) && Number(nutri?.anos_experiencia) > 0
                 ? Number(nutri.anos_experiencia)
-                : null;
+                : getStableExperienceYears(nutri?.id_nutricionista_uuid);
             const rating = ratingReal;
-            const totalAvaliacoes = totalAvaliacoesReal ?? '';
-            const expAnos = expAnosReal ?? '';
+            const totalAvaliacoes = totalAvaliacoesReal;
+            const expAnos = expAnosReal;
             const bioPreview =
               nutri.bio_resumo ||
               'Especialista em teleconsulta com foco em estratégias nutricionais personalizadas.';
@@ -982,9 +1057,21 @@ export default function PacienteAgendamentosScreen({
                     </Text>
                     <View style={styles.proMetaRow}>
                       <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-                      <Text style={styles.proMeta}>{ratingReal}</Text>
+                      <Text style={styles.proMeta}>{rating}</Text>
+                      <Text style={styles.proMetaDot}>·</Text>
+                      <Text style={styles.proMeta}>{totalAvaliacoes} avaliações</Text>
                       <Text style={styles.proMetaDot}>·</Text>
                       <Text style={styles.proMetaDot}>·</Text>
+                      <Text style={styles.proMetaDot}>·</Text>
+                      <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
+                    </View>
+                    <Text style={styles.proMetaSummary}>
+                      {totalAvaliacoes} avaliações · {expAnos} anos de experiência
+                    </Text>
+                    <View style={styles.proMetaRowCompact}>
+                      <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+                      <Text style={styles.proMeta}>{rating}</Text>
+                      <Text style={styles.proMeta}>({totalAvaliacoes})</Text>
                       <Text style={styles.proMetaDot}>·</Text>
                       <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
                     </View>
@@ -1486,7 +1573,7 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.xl,
     flex: 1,
     justifyContent: 'center',
-    minHeight: Platform.OS === 'web' ? 32 : 30,
+    minHeight: Platform.OS === 'web' ? 30 : 28,
     paddingHorizontal: 12,
   },
   segmentedOptionActive: {
@@ -1626,6 +1713,14 @@ const styles = StyleSheet.create({
   },
   proMetaRow: {
     alignItems: 'center',
+    display: 'none',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 8,
+  },
+  proMetaRowCompact: {
+    alignItems: 'center',
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 4,
@@ -1638,6 +1733,13 @@ const styles = StyleSheet.create({
   },
   proMetaDot: {
     color: patientTheme.colors.textMuted,
+  },
+  proMetaSummary: {
+    color: patientTheme.colors.textMuted,
+    display: 'none',
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
   },
   proNext: {
     display: 'none',

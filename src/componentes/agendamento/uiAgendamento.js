@@ -170,6 +170,7 @@ export function CampoBuscaAgendamento({
   trailingIcon,
   onTrailingPress,
   trailingAccessibilityLabel,
+  trailingActive,
 }) {
   return (
     <View style={styles.searchWrap}>
@@ -190,9 +191,13 @@ export function CampoBuscaAgendamento({
           onPress={onTrailingPress}
           accessibilityRole="button"
           accessibilityLabel={trailingAccessibilityLabel || 'Abrir filtros'}
-          style={styles.searchAction}
+          style={[styles.searchAction, trailingActive && styles.searchActionActive]}
         >
-          <Ionicons name={trailingIcon} size={16} color={patientTheme.colors.text} />
+          <Ionicons
+            name={trailingIcon}
+            size={16}
+            color={trailingActive ? patientTheme.colors.onPrimary : patientTheme.colors.text}
+          />
         </TouchableOpacity>
       ) : (
         <View style={styles.searchActionPlaceholder} />
@@ -389,15 +394,18 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.pill,
-    height: 24,
+    height: 32,
     justifyContent: 'center',
-    marginRight: -4,
-    width: 24,
+    marginRight: -8,
+    width: 32,
+  },
+  searchActionActive: {
+    backgroundColor: patientTheme.colors.primaryDark,
   },
   searchActionPlaceholder: {
-    height: 24,
-    marginRight: -4,
-    width: 24,
+    height: 32,
+    marginRight: -8,
+    width: 32,
   },
   skeletonWrap: { gap: 12, marginTop: 12 },
   skeletonCard: {

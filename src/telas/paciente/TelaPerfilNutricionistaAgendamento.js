@@ -1,7 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  KeyboardAvoidingView,
   Modal,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -31,10 +33,13 @@ import {
 import {
   formatTimeLabel,
   getNutriEspecialidadeLabel,
+  getStableExperienceYears,
   getStableRating,
+  getStableReviewCount,
   groupSlotsByDay,
   markSlotsWithBooking,
 } from '../../utilitarios/slotsTeleconsulta';
+import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 
 function getPacienteNome(usuario) {
   return usuario?.nome_completo || usuario?.nome_pac || usuario?.email_pac || 'Paciente';
@@ -47,18 +52,29 @@ function getNutriAvatarUri(nutri) {
   return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
 }
 
+function uniqueSlotsByScheduledAt(items) {
+  const seen = new Set();
+  return (items || []).filter((slot) => {
+    const key = String(slot?.scheduledAt || '');
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export default function PacientePerfilNutricionistaScreen({
   navigation,
   route,
   usuarioLogado: usuarioProp,
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
-  const nutricionista = route?.params?.nutricionista || null;
+  const nutricionistaBase = route?.params?.nutricionista || null;
   const consultaEdicao = route?.params?.editingConsulta || null;
   const tipoConsulta = route?.params?.tipoConsulta || 'Teleconsulta';
   const convenio = route?.params?.convenio || 'Particular';
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const isEditing = Boolean(consultaEdicao?.id);
+  const [nutricionista, setNutricionista] = useState(nutricionistaBase);
 
   const [agendaVisible, setAgendaVisible] = useState(Boolean(route?.params?.openSchedulePopup));
   const [loadingAgenda, setLoadingAgenda] = useState(false);
@@ -70,9 +86,54 @@ export default function PacientePerfilNutricionistaScreen({
   const [observacoes, setObservacoes] = useState('');
   const [selectorAberto, setSelectorAberto] = useState('');
 
+  useEffect(() => {
+    setNutricionista(nutricionistaBase);
+  }, [nutricionistaBase]);
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function carregarPerfilCompleto() {
+      if (!nutricionistaBase?.id_nutricionista_uuid) return;
+
+      try {
+        const perfilCompleto = await getNutritionistById(nutricionistaBase.id_nutricionista_uuid);
+        if (!ativo || !perfilCompleto) return;
+        setNutricionista((anterior) => ({
+          ...(anterior || {}),
+          ...perfilCompleto,
+        }));
+      } catch (error) {
+        console.log('Erro ao carregar perfil completo do profissional:', error);
+      }
+    }
+
+    carregarPerfilCompleto();
+
+    return () => {
+      ativo = false;
+    };
+  }, [nutricionistaBase?.id_nutricionista_uuid]);
+
   const rating = useMemo(
     () => getStableRating(nutricionista?.id_nutricionista_uuid),
     [nutricionista?.id_nutricionista_uuid]
+  );
+  const totalAvaliacoes = useMemo(
+    () =>
+      Number.isFinite(Number(nutricionista?.total_avaliacoes)) &&
+      Number(nutricionista?.total_avaliacoes) > 0
+        ? Number(nutricionista.total_avaliacoes)
+        : getStableReviewCount(nutricionista?.id_nutricionista_uuid),
+    [nutricionista?.id_nutricionista_uuid, nutricionista?.total_avaliacoes]
+  );
+  const anosExperiencia = useMemo(
+    () =>
+      Number.isFinite(Number(nutricionista?.anos_experiencia)) &&
+      Number(nutricionista?.anos_experiencia) > 0
+        ? Number(nutricionista.anos_experiencia)
+        : getStableExperienceYears(nutricionista?.id_nutricionista_uuid),
+    [nutricionista?.id_nutricionista_uuid, nutricionista?.anos_experiencia]
   );
 
   const especialidade = getNutriEspecialidadeLabel(nutricionista);
@@ -90,7 +151,10 @@ export default function PacientePerfilNutricionistaScreen({
     [availableDays, selectedDayKey]
   );
   const availableSlots = useMemo(
-    () => (selectedDay?.slots || []).filter((slot) => slot.status === 'available'),
+    () =>
+      uniqueSlotsByScheduledAt(
+        (selectedDay?.slots || []).filter((slot) => slot.status === 'available')
+      ),
     [selectedDay]
   );
 
@@ -276,8 +340,19 @@ export default function PacientePerfilNutricionistaScreen({
                   : 'CRN não informado'}
               </Text>
               <View style={styles.ratingRow}>
-                <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-                <Text style={styles.rating}>{rating}</Text>
+                <View style={styles.metaGroup}>
+                  <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+                  <Text style={styles.rating}>{rating}</Text>
+                </View>
+                {anosExperiencia != null ? (
+                  <>
+                    <Text style={styles.dot}>•</Text>
+                    <Text style={styles.metaInfo}>{anosExperiencia} anos de experiÃªncia</Text>
+                  </>
+                ) : null}
+                {totalAvaliacoes != null ? (
+                  <Text style={styles.ratingCount}>({totalAvaliacoes} avaliações)</Text>
+                ) : null}
                 <Text style={styles.dot}>•</Text>
                 <Ionicons
                   name="videocam-outline"
@@ -285,6 +360,15 @@ export default function PacientePerfilNutricionistaScreen({
                   color={patientTheme.colors.primaryDark}
                 />
                 <Text style={styles.channel}>Google Meet</Text>
+              </View>
+              <View style={styles.ratingRowCompact}>
+                <View style={styles.metaGroup}>
+                  <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+                  <Text style={styles.rating}>{rating}</Text>
+                </View>
+                <Text style={styles.ratingCount}>({totalAvaliacoes})</Text>
+                <Text style={styles.dot}>·</Text>
+                <Text style={styles.metaInfo}>{anosExperiencia} anos de experiência</Text>
               </View>
             </View>
           </View>
@@ -339,46 +423,50 @@ export default function PacientePerfilNutricionistaScreen({
           icon="calendar-outline"
           onPress={handleAbrirAgenda}
         />
-        <BotaoAgendamento
-          label="Voltar à lista"
-          variant="ghost"
-          onPress={() => navigation.goBack()}
-        />
       </ScrollView>
 
       <Modal visible={agendaVisible} transparent animationType="fade" onRequestClose={handleFecharAgenda}>
         <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>
-                {isEditing ? 'Editar Agendamento' : 'Agendar Consulta'}
-              </Text>
-              <TouchableOpacity onPress={handleFecharAgenda}>
-                <Ionicons name="close" size={18} color={patientTheme.colors.textMuted} />
-              </TouchableOpacity>
-            </View>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalKeyboardWrap}
+          >
+            <View style={styles.modalCard}>
+              <ScrollView
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+                contentContainerStyle={styles.modalScrollContent}
+              >
+                <View style={styles.modalHeader}>
+                  <Text style={styles.modalTitle}>
+                    {isEditing ? 'Editar Agendamento' : 'Agendar Consulta'}
+                  </Text>
+                  <TouchableOpacity onPress={handleFecharAgenda}>
+                    <Ionicons name="close" size={18} color={patientTheme.colors.textMuted} />
+                  </TouchableOpacity>
+                </View>
 
-            <View style={styles.modalProfile}>
-              <AvatarProfissional
-                name={nutricionista.nome_completo_nutri}
-                size={44}
-                imageUri={getNutriAvatarUri(nutricionista)}
-              />
-              <View style={styles.modalProfileBody}>
-                <Text style={styles.modalProfileName}>{nutricionista.nome_completo_nutri}</Text>
-                <Text style={styles.modalProfileSpec}>{especialidade}</Text>
-              </View>
-            </View>
+                <View style={styles.modalProfile}>
+                  <AvatarProfissional
+                    name={nutricionista.nome_completo_nutri}
+                    size={44}
+                    imageUri={getNutriAvatarUri(nutricionista)}
+                  />
+                  <View style={styles.modalProfileBody}>
+                    <Text style={styles.modalProfileName}>{nutricionista.nome_completo_nutri}</Text>
+                    <Text style={styles.modalProfileSpec}>{especialidade}</Text>
+                  </View>
+                </View>
 
-            <View style={styles.modalDivider} />
+                <View style={styles.modalDivider} />
 
-            {loadingAgenda ? (
-              <View style={styles.modalLoading}>
-                <ActivityIndicator color={patientTheme.colors.primaryDark} />
-                <Text style={styles.modalLoadingText}>Carregando disponibilidade...</Text>
-              </View>
-            ) : (
-              <>
+                {loadingAgenda ? (
+                  <View style={styles.modalLoading}>
+                    <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                    <Text style={styles.modalLoadingText}>Carregando disponibilidade...</Text>
+                  </View>
+                ) : (
+                  <>
                 <Text style={styles.fieldLabel}>Dia da Semana</Text>
                 <TouchableOpacity
                   activeOpacity={0.9}
@@ -496,9 +584,11 @@ export default function PacientePerfilNutricionistaScreen({
                     style={styles.confirmButton}
                   />
                 </View>
-              </>
-            )}
-          </View>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </KeyboardAvoidingView>
         </View>
       </Modal>
     </PatientScreenLayout>
@@ -539,20 +629,50 @@ const styles = StyleSheet.create({
   ratingRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    display: 'none',
+    flexWrap: 'wrap',
     gap: 4,
     marginTop: 10,
   },
+  ratingRowCompact: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 10,
+  },
+  metaGroup: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexShrink: 0,
+    gap: 4,
+  },
   rating: {
+    flexShrink: 0,
     fontWeight: '800',
     color: patientTheme.colors.textMuted,
     fontSize: 12,
   },
+  ratingCount: {
+    color: patientTheme.colors.textMuted,
+    flexShrink: 0,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metaInfo: {
+    color: patientTheme.colors.textMuted,
+    flexShrink: 0,
+    fontSize: 12,
+    fontWeight: '600',
+  },
   dot: {
     color: patientTheme.colors.textMuted,
+    flexShrink: 0,
   },
   channel: {
     fontWeight: '700',
     color: patientTheme.colors.textMuted,
+    flexShrink: 0,
     fontSize: 12,
   },
   block: {
@@ -610,10 +730,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     padding: 14,
   },
+  modalKeyboardWrap: {
+    flex: 1,
+    justifyContent: 'center',
+  },
   modalCard: {
     backgroundColor: patientTheme.colors.background,
     borderRadius: 14,
+    maxHeight: '92%',
     padding: 16,
+  },
+  modalScrollContent: {
+    paddingBottom: 4,
   },
   modalHeader: {
     alignItems: 'center',

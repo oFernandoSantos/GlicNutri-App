@@ -1,5 +1,15 @@
 const MS_DAY = 24 * 60 * 60 * 1000;
 
+function getStableSeedHash(seed) {
+  const text = String(seed || '0');
+  let hash = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    hash = (hash << 5) - hash + text.charCodeAt(i);
+    hash |= 0;
+  }
+  return Math.abs(hash);
+}
+
 export function getGreetingName(usuario) {
   const raw =
     usuario?.nome_completo ||
@@ -13,14 +23,16 @@ export function getGreetingName(usuario) {
 }
 
 export function getStableRating(seed) {
-  const text = String(seed || '0');
-  let hash = 0;
-  for (let i = 0; i < text.length; i += 1) {
-    hash = (hash << 5) - hash + text.charCodeAt(i);
-    hash |= 0;
-  }
-  const normalized = 4.2 + (Math.abs(hash) % 8) / 10;
+  const normalized = 4.2 + (getStableSeedHash(seed) % 8) / 10;
   return normalized.toFixed(1);
+}
+
+export function getStableReviewCount(seed) {
+  return 12 + (getStableSeedHash(seed) % 89);
+}
+
+export function getStableExperienceYears(seed) {
+  return 2 + (getStableSeedHash(seed) % 18);
 }
 
 export function formatSlotDateKey(iso) {

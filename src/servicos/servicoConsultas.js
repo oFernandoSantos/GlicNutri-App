@@ -48,19 +48,30 @@ async function persistirMeetLink(consulta, nutricionista) {
     return consulta;
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('consulta')
     .update({ meet_link: meetLink, canal: 'google_meet' })
     .eq('id', consulta.id)
     .select('*')
     .maybeSingle();
 
-  if (error) {
-    console.log('Erro ao salvar link Google Meet:', error);
-    return { ...consulta, meet_link: meetLink, canal: 'google_meet' };
+  if (error && String(error.message || '').toLowerCase().includes('canal')) {
+    const retry = await supabase
+      .from('consulta')
+      .update({ meet_link: meetLink })
+      .eq('id', consulta.id)
+      .select('*')
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
   }
 
-  return data || { ...consulta, meet_link: meetLink, canal: 'google_meet' };
+  if (error) {
+    console.log('Erro ao salvar link Google Meet:', error);
+    return { ...consulta, meet_link: meetLink };
+  }
+
+  return data || { ...consulta, meet_link: meetLink };
 }
 
 async function notificarAgendamento({ consulta, nutricionista, pacienteNome }) {
@@ -168,6 +179,7 @@ export async function createConsulta({
       throw new Error('Este horario ja foi reservado. Escolha outro slot.');
     }
     if (
+      message.includes('canal') ||
       message.includes('tipo_consulta') ||
       message.includes('meet_link') ||
       message.includes('valor_centavos')
@@ -217,21 +229,25 @@ export async function createConsulta({
   }
 
   if (consulta?.id) {
-    await registrarLogAuditoria({
-      actor: actor || null,
-      actorType: actor?.tipo_perfil || null,
-      targetPatientId: pacienteId,
-      action: 'consulta_agendada',
-      entity: 'consulta',
-      entityId: consulta.id,
-      origin,
-      details: {
-        nutricionistaId,
-        scheduledAt,
-        status: consulta.status,
-        meetLink: consulta.meet_link,
-      },
-    });
+    try {
+      await registrarLogAuditoria({
+        actor: actor || null,
+        actorType: actor?.tipo_perfil || null,
+        targetPatientId: pacienteId,
+        action: 'consulta_agendada',
+        entity: 'consulta',
+        entityId: consulta.id,
+        origin,
+        details: {
+          nutricionistaId,
+          scheduledAt,
+          status: consulta.status,
+          meetLink: consulta.meet_link,
+        },
+      });
+    } catch (auditError) {
+      console.log('Erro ao registrar auditoria do agendamento:', auditError);
+    }
   }
 
   return consulta;
@@ -341,12 +357,24 @@ export async function updateConsultaSchedule({
     canal: 'google_meet',
   };
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('consulta')
     .update(patch)
     .eq('id', consultaId)
     .select('*')
     .maybeSingle();
+
+  if (error && String(error.message || '').toLowerCase().includes('canal')) {
+    const { canal, ...fallbackPatch } = patch;
+    const retry = await supabase
+      .from('consulta')
+      .update(fallbackPatch)
+      .eq('id', consultaId)
+      .select('*')
+      .maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     const message = String(error.message || '').toLowerCase();
