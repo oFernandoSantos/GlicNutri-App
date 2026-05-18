@@ -38,6 +38,7 @@ import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoP
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
 import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
+import PacientePerfilNutricionistaScreen from './src/telas/paciente/TelaPerfilNutricionistaAgendamento';
 import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
@@ -553,6 +554,12 @@ export default function App() {
 
               <Stack.Screen name="PacienteAgendamentos" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacienteAgendamentosScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfilNutricionista" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(props, <PacientePerfilNutricionistaScreen {...getPacienteProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen name="PacienteBemEstar" options={readerScreenOptions}>

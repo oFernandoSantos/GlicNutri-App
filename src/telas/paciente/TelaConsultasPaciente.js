@@ -1,27 +1,112 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Modal,
+  Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import CalendarioHorarios from '../../componentes/agendamento/CalendarioHorarios';
+import FiltrosAgendamentoAvancado, {
+  parseDateBrToKey,
+} from '../../componentes/agendamento/FiltrosAgendamentoAvancado';
+import {
+  AvatarProfissional,
+  BotaoAgendamento,
+  CampoBuscaAgendamento,
+  CartaoAgendamento,
+  ChipFiltro,
+  EsqueletoAgendamento,
+} from '../../componentes/agendamento/uiAgendamento';
+import MensagemInline from '../../componentes/comum/MensagemInline';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import {
+  CONVENIOS_OPCOES,
+  TIPOS_CONSULTA_OPCOES,
+} from '../../constantes/especialidadesTeleconsulta';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { getPatientId } from '../../servicos/servicoDadosPaciente';
 import { listNutritionists } from '../../servicos/servicoNutricionistas';
-import { listNutriAvailability, generateSlotsForNextDays } from '../../servicos/servicoAgendaNutri';
-import { createConsulta, listConsultasByPaciente, formatConsultaDateTime } from '../../servicos/servicoConsultas';
+import {
+  generateSlotsForNextDays,
+  listNutriAvailability,
+} from '../../servicos/servicoAgendaNutri';
+import {
+  abrirLinkGoogleMeet,
+  createConsulta,
+  formatConsultaDateTime,
+  listConsultasByNutricionista,
+  listConsultasByPaciente,
+  updateConsultaStatus,
+} from '../../servicos/servicoConsultas';
+import { formatValorConsulta, resolveMeetLink } from '../../servicos/servicoGoogleMeet';
+import {
+  listarNotificacoesConsulta,
+  marcarNotificacoesComoLidas,
+  subscribeNotificacoesConsulta,
+} from '../../servicos/servicoNotificacoesConsulta';
+import {
+  filterNutritionists,
+  filterSlotsByDateRange,
+  filterSlotsByQuick,
+  formatDayLabel,
+  formatSlotDateKey,
+  formatTimeLabel,
+  getNutriEspecialidadeLabel,
+  getStableRating,
+  groupSlotsByDay,
+  markSlotsWithBooking,
+} from '../../utilitarios/slotsTeleconsulta';
 
-function getInitials(name) {
-  return String(name || 'P')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part.slice(0, 1).toUpperCase())
-    .join('');
+function maskDateBr(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function maskConsultaProfissionalFiltro(value) {
+  return String(value || '')
+    .replace(/[^A-Za-zÀ-ÿ0-9\s./-]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 40);
+}
+
+function maskConsultaTipoFiltro(value) {
+  return String(value || '')
+    .replace(/[^A-Za-zÀ-ÿ\s-]/g, '')
+    .replace(/\s{2,}/g, ' ')
+    .slice(0, 24);
+}
+
+function normalizeSearchText(value) {
+  return String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+function getNextAvailableSlot(slots) {
+  return (slots || []).find((slot) => slot.status === 'available') || null;
+}
+
+function getPacienteNome(usuario) {
+  return usuario?.nome_completo || usuario?.nome_pac || usuario?.email_pac || 'Paciente';
+}
+
+function getNutriAvatarUri(nutri) {
+  const seed = encodeURIComponent(
+    String(nutri?.id_nutricionista_uuid || nutri?.nome_completo_nutri || 'nutri').trim()
+  );
+  return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
 }
 
 export default function PacienteAgendamentosScreen({
@@ -31,413 +116,1720 @@ export default function PacienteAgendamentosScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
+
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
-  const [loadingAgendar, setLoadingAgendar] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [mensagem, setMensagem] = useState(null);
+
   const [nutricionistas, setNutricionistas] = useState([]);
+  const [consultasPaciente, setConsultasPaciente] = useState([]);
   const [selectedNutri, setSelectedNutri] = useState(null);
   const [slots, setSlots] = useState([]);
-  const [consultas, setConsultas] = useState([]);
+  const [selectedDayKey, setSelectedDayKey] = useState('');
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [confirmModalVisible, setConfirmModalVisible] = useState(false);
+  const [lastBooking, setLastBooking] = useState(null);
+
+  const [searchQuery, setSearchQuery] = useState('');
+  const [activeSection, setActiveSection] = useState(route?.params?.activeSection || 'agendar');
+  const [consultasSearchQuery, setConsultasSearchQuery] = useState('');
+  const [consultasSection, setConsultasSection] = useState('agendadas');
+  const [consultasFiltrosAbertos, setConsultasFiltrosAbertos] = useState(false);
+  const [consultasProfissionalFiltro, setConsultasProfissionalFiltro] = useState('');
+  const [consultasTipoFiltro, setConsultasTipoFiltro] = useState('');
+  const [consultasDataFiltro, setConsultasDataFiltro] = useState('');
+  const [filtrosAbertos, setFiltrosAbertos] = useState(false);
+  const [quickFilter, setQuickFilter] = useState('all');
+  const [tipoConsulta, setTipoConsulta] = useState(TIPOS_CONSULTA_OPCOES[0]);
+  const [convenio, setConvenio] = useState(CONVENIOS_OPCOES[0]);
+  const [especialidadeFiltro, setEspecialidadeFiltro] = useState('Todas');
+  const [dateFromBr, setDateFromBr] = useState('');
+  const [dateToBr, setDateToBr] = useState('');
+  const [maxValorReais, setMaxValorReais] = useState('');
+  const [ratingMinimo, setRatingMinimo] = useState('');
+  const [somenteConvenio, setSomenteConvenio] = useState(false);
+  const [ordenacao, setOrdenacao] = useState('relevancia');
+
+  const [notificacoes, setNotificacoes] = useState([]);
+  const [notificacoesModal, setNotificacoesModal] = useState(false);
+
+  const dateFromKey = useMemo(() => parseDateBrToKey(dateFromBr), [dateFromBr]);
+  const dateToKey = useMemo(() => parseDateBrToKey(dateToBr), [dateToBr]);
+  const maxValorCentavos = useMemo(() => {
+    const reais = Number(String(maxValorReais).replace(',', '.'));
+    if (!reais || Number.isNaN(reais)) return 0;
+    return Math.round(reais * 100);
+  }, [maxValorReais]);
+
+  const filterParams = useMemo(
+    () => ({
+      query: searchQuery,
+      quickFilter,
+      especialidade: especialidadeFiltro,
+      convenio,
+      maxValorCentavos,
+      ratingMinimo,
+      somenteConvenio,
+    }),
+    [
+      searchQuery,
+      quickFilter,
+      especialidadeFiltro,
+      convenio,
+      maxValorCentavos,
+      ratingMinimo,
+      somenteConvenio,
+    ]
+  );
+
+  const filtrosAtivos = useMemo(
+    () =>
+      [
+        quickFilter !== 'all',
+        tipoConsulta !== TIPOS_CONSULTA_OPCOES[0],
+        convenio !== CONVENIOS_OPCOES[0],
+        especialidadeFiltro !== 'Todas',
+        Boolean(dateFromBr),
+        Boolean(dateToBr),
+        Boolean(maxValorReais),
+        Boolean(ratingMinimo),
+        somenteConvenio,
+        ordenacao !== 'relevancia',
+      ].filter(Boolean).length,
+    [
+      quickFilter,
+      tipoConsulta,
+      convenio,
+      especialidadeFiltro,
+      dateFromBr,
+      dateToBr,
+      maxValorReais,
+      ratingMinimo,
+      somenteConvenio,
+      ordenacao,
+    ]
+  );
 
   const loadBase = useCallback(async () => {
     try {
-      setLoading(true);
+      setLoadError(null);
       const [nutris, cons] = await Promise.all([
         listNutritionists({ limit: 80 }),
-        listConsultasByPaciente(patientId, { limit: 120 }),
+        patientId ? listConsultasByPaciente(patientId, { limit: 120 }) : Promise.resolve([]),
       ]);
+
       setNutricionistas(nutris || []);
-      setConsultas(cons || []);
-      if (!selectedNutri && (nutris || []).length) {
-        setSelectedNutri(nutris[0]);
+      setConsultasPaciente(cons || []);
+
+      const routeNutriId = route?.params?.selectedNutriId;
+      if (routeNutriId) {
+        const found = (nutris || []).find((n) => n.id_nutricionista_uuid === routeNutriId);
+        if (found) setSelectedNutri(found);
+      } else {
+        setSelectedNutri((prev) => {
+          if (!prev?.id_nutricionista_uuid) return null;
+          return (
+            (nutris || []).find(
+              (item) => item.id_nutricionista_uuid === prev.id_nutricionista_uuid
+            ) || null
+          );
+        });
+      }
+
+      if (route?.params?.tipoConsulta) {
+        setTipoConsulta(route.params.tipoConsulta);
+      }
+      if (route?.params?.convenio) {
+        setConvenio(route.params.convenio);
       }
     } catch (error) {
-      console.log('Erro ao carregar consultas/pacientes:', error);
-    } finally {
-      setLoading(false);
+      console.log('Erro ao carregar agendamento:', error);
+      setLoadError('Nao foi possivel carregar os profissionais. Verifique a conexao e tente novamente.');
     }
-  }, [patientId, selectedNutri]);
+  }, [patientId, route?.params?.selectedNutriId, route?.params?.tipoConsulta, route?.params?.convenio]);
 
   const loadSlots = useCallback(async () => {
-    try {
-      if (!selectedNutri?.id_nutricionista_uuid) {
-        setSlots([]);
-        return;
-      }
-      setLoadingSlots(true);
-      const avail = await listNutriAvailability(selectedNutri.id_nutricionista_uuid);
-      const generated = generateSlotsForNextDays(avail, { days: 14 });
-      setSlots(generated);
-    } catch (error) {
-      console.log('Erro ao carregar slots:', error);
+    if (!selectedNutri?.id_nutricionista_uuid) {
       setSlots([]);
+      return;
+    }
+
+    try {
+      setLoadingSlots(true);
+      const nutriId = selectedNutri.id_nutricionista_uuid;
+      const [avail, consultasNutri] = await Promise.all([
+        listNutriAvailability(nutriId),
+        listConsultasByNutricionista(nutriId, { limit: 200 }),
+      ]);
+      const generated = generateSlotsForNextDays(avail, { days: 21 });
+      const marked = markSlotsWithBooking(generated, consultasNutri);
+      const byQuick = filterSlotsByQuick(marked, quickFilter);
+      const byDate = filterSlotsByDateRange(byQuick, {
+        dateFrom: dateFromKey,
+        dateTo: dateToKey,
+      });
+      setSlots(byDate);
+    } catch (error) {
+      console.log('Erro ao carregar horarios:', error);
+      setSlots([]);
+      setMensagem({
+        tipo: 'erro',
+        texto: 'Nao foi possivel carregar os horarios deste profissional.',
+      });
     } finally {
       setLoadingSlots(false);
     }
-  }, [selectedNutri]);
+  }, [selectedNutri, quickFilter, dateFromKey, dateToKey]);
 
   useEffect(() => {
-    loadBase();
+    let active = true;
+    (async () => {
+      setLoading(true);
+      await loadBase();
+      if (active) setLoading(false);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [loadBase]);
+
+  useEffect(() => {
     const unsubscribe = navigation.addListener('focus', () => loadBase());
     return unsubscribe;
   }, [navigation, loadBase]);
 
   useEffect(() => {
+    if (route?.params?.activeSection) {
+      setActiveSection(route.params.activeSection);
+    }
+  }, [route?.params?.activeSection]);
+
+  useEffect(() => {
     loadSlots();
+    setSelectedSlot(null);
   }, [loadSlots]);
 
-  const consultasProximas = useMemo(() => {
+  useEffect(() => {
+    if (!patientId) return undefined;
+
+    return subscribeNotificacoesConsulta({
+      destinatarioTipo: 'paciente',
+      destinatarioId: patientId,
+      intervalMs: 18000,
+      onChange: (items) => {
+        setNotificacoes(items || []);
+        const latest = items?.[0];
+        if (latest && !latest._shown) {
+          latest._shown = true;
+          setMensagem({
+            tipo: latest.evento === 'cancelada' ? 'aviso' : 'sucesso',
+            texto: latest.mensagem || latest.titulo,
+          });
+        }
+      },
+    });
+  }, [patientId]);
+
+  async function abrirPainelNotificacoes() {
+    if (!patientId) return;
+    try {
+      const items = await listarNotificacoesConsulta({
+        destinatarioTipo: 'paciente',
+        destinatarioId: patientId,
+        limit: 30,
+      });
+      setNotificacoes(items || []);
+      setNotificacoesModal(true);
+      await marcarNotificacoesComoLidas({
+        destinatarioTipo: 'paciente',
+        destinatarioId: patientId,
+      });
+    } catch (error) {
+      setMensagem({
+        tipo: 'erro',
+        texto: 'Nao foi possivel carregar as notificacoes.',
+      });
+    }
+  }
+
+  useEffect(() => {
+    navigation.setOptions({
+      readerTitle: 'Agendamentos',
+      readerNotificationCount: notificacoes.length,
+      readerNotificationDisabled: false,
+      readerOnNotificationPress: abrirPainelNotificacoes,
+    });
+  }, [navigation, notificacoes.length, patientId]);
+
+  const filteredNutris = useMemo(() => {
+    let list = filterNutritionists(nutricionistas, filterParams);
+
+    if (ordenacao === 'preco') {
+      list = [...list].sort(
+        (a, b) =>
+          Number(a.valor_consulta_centavos || 0) - Number(b.valor_consulta_centavos || 0)
+      );
+    } else if (ordenacao === 'avaliacao') {
+      list = [...list].sort(
+        (a, b) =>
+          Number(getStableRating(b.id_nutricionista_uuid)) -
+          Number(getStableRating(a.id_nutricionista_uuid))
+      );
+    }
+
+    return list;
+  }, [nutricionistas, filterParams, ordenacao]);
+
+  const calendarDays = useMemo(() => groupSlotsByDay(slots), [slots]);
+
+  useEffect(() => {
+    if (!calendarDays.length) {
+      setSelectedDayKey('');
+      return;
+    }
+    if (!selectedDayKey || !calendarDays.some((d) => d.dateKey === selectedDayKey)) {
+      setSelectedDayKey(calendarDays[0].dateKey);
+    }
+  }, [calendarDays, selectedDayKey]);
+
+  const onRefresh = useCallback(async () => {
+    setRefreshing(true);
+    await loadBase();
+    await loadSlots();
+    setRefreshing(false);
+  }, [loadBase, loadSlots]);
+
+  const proximasConsultas = useMemo(() => {
     const now = Date.now();
-    return (consultas || [])
-      .slice()
-      .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)))
+    return (consultasPaciente || [])
       .filter((item) => {
         const dt = new Date(item.scheduled_at || 0);
         return !Number.isNaN(dt.getTime()) && dt.getTime() >= now && item.status !== 'cancelled';
       })
-      .slice(0, 12);
-  }, [consultas]);
+      .sort((a, b) => String(a.scheduled_at).localeCompare(String(b.scheduled_at)))
+      .slice(0, 8);
+  }, [consultasPaciente]);
 
-  async function handleAgendar(slot) {
-    try {
-      if (!patientId) {
-        return;
-      }
-      if (!selectedNutri?.id_nutricionista_uuid) {
-        return;
-      }
-      setLoadingAgendar(true);
-      await createConsulta({
-        nutricionistaId: selectedNutri.id_nutricionista_uuid,
-        pacienteId: patientId,
-        scheduledAt: slot.scheduledAt,
-        motivo: '',
-        actor: usuarioLogado,
+  const consultasAnteriores = useMemo(() => {
+    const now = Date.now();
+    return (consultasPaciente || [])
+      .filter((item) => {
+        const dt = new Date(item.scheduled_at || 0);
+        if (Number.isNaN(dt.getTime())) return false;
+        return dt.getTime() < now || item.status === 'cancelled';
+      })
+      .sort((a, b) => String(b.scheduled_at).localeCompare(String(a.scheduled_at)))
+      .slice(0, 12);
+  }, [consultasPaciente]);
+
+  const consultasSearchNormalized = useMemo(
+    () => normalizeSearchText(consultasSearchQuery),
+    [consultasSearchQuery]
+  );
+  const consultasProfissionalNormalized = useMemo(
+    () => normalizeSearchText(consultasProfissionalFiltro),
+    [consultasProfissionalFiltro]
+  );
+  const consultasTipoNormalized = useMemo(
+    () => normalizeSearchText(consultasTipoFiltro),
+    [consultasTipoFiltro]
+  );
+  const consultasDataNormalized = useMemo(
+    () => normalizeSearchText(consultasDataFiltro),
+    [consultasDataFiltro]
+  );
+
+  const filterConsultasByQuery = useCallback(
+    (items) =>
+      (items || []).filter((item) => {
+        const nutri =
+          nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) || null;
+        const profissionalText = normalizeSearchText(
+          [
+            nutri?.nome_completo_nutri,
+            nutri?.crm_numero,
+            getNutriEspecialidadeLabel(nutri),
+          ].join(' ')
+        );
+        const tipoText = normalizeSearchText(item?.tipo_consulta);
+        const dataText = normalizeSearchText(formatConsultaDateTime(item?.scheduled_at));
+        const searchable = normalizeSearchText(
+          [profissionalText, tipoText, item?.convenio, item?.status, dataText].join(' ')
+        );
+
+        if (consultasSearchNormalized && !searchable.includes(consultasSearchNormalized)) return false;
+        if (consultasProfissionalNormalized && !profissionalText.includes(consultasProfissionalNormalized)) return false;
+        if (consultasTipoNormalized && !tipoText.includes(consultasTipoNormalized)) return false;
+        if (consultasDataNormalized && !dataText.includes(consultasDataNormalized)) return false;
+        return true;
+      }),
+    [
+      consultasDataNormalized,
+      consultasProfissionalNormalized,
+      consultasSearchNormalized,
+      consultasTipoNormalized,
+      nutricionistas,
+    ]
+  );
+
+  const proximasConsultasFiltradas = useMemo(
+    () => filterConsultasByQuery(proximasConsultas),
+    [filterConsultasByQuery, proximasConsultas]
+  );
+
+  const consultasAnterioresFiltradas = useMemo(
+    () => filterConsultasByQuery(consultasAnteriores),
+    [consultasAnteriores, filterConsultasByQuery]
+  );
+
+  const proximaConsultaResumo = proximasConsultas[0] || null;
+  const resumoVisivel = activeSection === 'agendar' && Boolean(selectedNutri && selectedSlot);
+  const showCalendar = Boolean(selectedNutri);
+  const disponibilidadeDireta = Boolean(route?.params?.openCalendar && selectedNutri);
+
+  function limparFiltrosAvancados() {
+    setTipoConsulta(TIPOS_CONSULTA_OPCOES[0]);
+    setConvenio(CONVENIOS_OPCOES[0]);
+    setEspecialidadeFiltro('Todas');
+    setDateFromBr('');
+    setDateToBr('');
+    setMaxValorReais('');
+    setRatingMinimo('');
+    setSomenteConvenio(false);
+    setOrdenacao('relevancia');
+  }
+
+  function handleSelecionarProfissional(nutri, options = {}) {
+    setSelectedSlot(null);
+    setSelectedNutri(nutri);
+
+    if (options.openCalendar) {
+      navigation.setParams({
+        selectedNutriId: nutri?.id_nutricionista_uuid || null,
+        openCalendar: true,
       });
-      await loadBase();
-    } catch (error) {
-      console.log('Erro ao agendar:', error);
-    } finally {
-      setLoadingAgendar(false);
     }
   }
+
+  function handleCancelarFluxoAgendamento() {
+    setSelectedSlot(null);
+    setSelectedDayKey('');
+    setSelectedNutri(null);
+    navigation.setParams({
+      selectedNutriId: null,
+      openCalendar: false,
+    });
+  }
+
+  async function handleConfirmarConsulta() {
+    if (!selectedSlot || !selectedNutri?.id_nutricionista_uuid || !patientId) {
+      setMensagem({ tipo: 'aviso', texto: 'Selecione um horario disponivel para continuar.' });
+      return;
+    }
+
+    try {
+      setConfirming(true);
+      const saved = await createConsulta({
+        nutricionistaId: selectedNutri.id_nutricionista_uuid,
+        pacienteId: patientId,
+        scheduledAt: selectedSlot.scheduledAt,
+        motivo: `${tipoConsulta} · ${convenio} · ${getNutriEspecialidadeLabel(selectedNutri)}`,
+        tipoConsulta,
+        convenio,
+        especialidade: getNutriEspecialidadeLabel(selectedNutri),
+        valorCentavos: selectedNutri.valor_consulta_centavos,
+        nutricionista: selectedNutri,
+        pacienteNome: getPacienteNome(usuarioLogado),
+        actor: usuarioLogado,
+      });
+
+      setLastBooking({
+        consulta: saved,
+        nutri: selectedNutri,
+        slot: selectedSlot,
+        tipoConsulta,
+        convenio,
+        meetLink: resolveMeetLink({ consulta: saved, nutricionista: selectedNutri }),
+      });
+
+      setConfirmModalVisible(true);
+      setSelectedSlot(null);
+      await loadBase();
+      await loadSlots();
+    } catch (error) {
+      console.log('Erro ao confirmar:', error);
+      setMensagem({
+        tipo: 'erro',
+        texto:
+          error?.message ||
+          'Nao foi possivel confirmar o agendamento. Verifique a conexao e tente novamente.',
+      });
+    } finally {
+      setConfirming(false);
+    }
+  }
+
+  async function handleAbrirMeet(consulta, nutri) {
+    const link = resolveMeetLink({ consulta, nutricionista: nutri });
+    try {
+      await abrirLinkGoogleMeet(link);
+    } catch (error) {
+      setMensagem({
+        tipo: 'erro',
+        texto: error?.message || 'Nao foi possivel abrir o Google Meet.',
+      });
+    }
+  }
+
+  async function handleCancelarConsulta(item, nutri) {
+    try {
+      await updateConsultaStatus({
+        consultaId: item.id,
+        status: 'cancelled',
+        nutricionista: nutri,
+        actor: usuarioLogado,
+        origin: 'agendamentos_paciente',
+      });
+      setMensagem({
+        tipo: 'sucesso',
+        texto: 'Consulta cancelada com sucesso.',
+      });
+      await loadBase();
+      if (selectedNutri?.id_nutricionista_uuid === nutri?.id_nutricionista_uuid) {
+        await loadSlots();
+      }
+    } catch (error) {
+      setMensagem({
+        tipo: 'erro',
+        texto: error?.message || 'Nao foi possivel cancelar a consulta.',
+      });
+    }
+  }
+
+  function handleEditarConsulta(item, nutri) {
+    navigation.navigate('PacientePerfilNutricionista', {
+      usuarioLogado,
+      nutricionista: nutri,
+      tipoConsulta: item.tipo_consulta || tipoConsulta,
+      convenio: item.convenio || convenio,
+      openSchedulePopup: true,
+      editingConsulta: item,
+    });
+  }
+
+  const footerOverlay = resumoVisivel ? (
+    <CartaoAgendamento style={styles.summaryCard}>
+      <Text style={styles.summaryTitle}>Resumo do agendamento</Text>
+      <Text style={styles.summaryLine}>
+        {selectedNutri?.nome_completo_nutri} · {getNutriEspecialidadeLabel(selectedNutri)}
+      </Text>
+      <Text style={styles.summaryLine}>
+        {formatDayLabel(formatSlotDateKey(selectedSlot.scheduledAt))} as{' '}
+        {formatTimeLabel(selectedSlot.scheduledAt)}
+      </Text>
+      <Text style={styles.summaryLine}>{tipoConsulta} · {convenio} · Google Meet</Text>
+      <Text style={styles.summaryLine}>
+        {formatValorConsulta(selectedNutri?.valor_consulta_centavos)}
+      </Text>
+      <View style={styles.summaryActions}>
+        <BotaoAgendamento
+          label="Cancelar"
+          variant="ghost"
+          onPress={handleCancelarFluxoAgendamento}
+          style={styles.summarySecondaryBtn}
+        />
+        <BotaoAgendamento
+          label="Confirmar consulta"
+          onPress={handleConfirmarConsulta}
+          loading={confirming}
+          icon="checkmark-circle-outline"
+          style={styles.summaryPrimaryBtn}
+        />
+      </View>
+    </CartaoAgendamento>
+  ) : null;
 
   return (
     <PatientScreenLayout
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
+      contentContainerStyle={[
+        styles.screenContent,
+        resumoVisivel && styles.screenContentWithFooter,
+      ]}
+      footerOverlay={footerOverlay}
+      showTabBar={route?.name === 'PacienteAgendamentos'}
+      refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      <View style={styles.summaryRow}>
-        <View style={styles.summaryPill}>
-          <Ionicons name="people-outline" size={18} color={patientTheme.colors.primaryDark} />
-          <Text style={styles.summaryText}>{nutricionistas.length} nutricionistas</Text>
-        </View>
-        <View style={styles.summaryPill}>
-          <Ionicons name="calendar-outline" size={18} color={patientTheme.colors.primaryDark} />
-          <Text style={styles.summaryText}>Agendar por slots</Text>
-        </View>
-      </View>
+      {mensagem?.texto ? (
+        <MensagemInline
+          tipo={mensagem.tipo || 'aviso'}
+          texto={mensagem.texto}
+          onFechar={() => setMensagem(null)}
+          autoOcultarMs={mensagem.tipo === 'sucesso' ? 5000 : 0}
+        />
+      ) : activeSection === 'consultas' ? (
+        <>
+          <CampoBuscaAgendamento
+            value={consultasSearchQuery}
+            onChangeText={setConsultasSearchQuery}
+            placeholder="Buscar profissional, tipo ou data"
+            trailingIcon="funnel-outline"
+            onTrailingPress={() => setConsultasFiltrosAbertos((prev) => !prev)}
+            trailingAccessibilityLabel="Abrir filtros de minhas consultas"
+          />
 
-      {loading ? (
-        <View style={styles.loadingCard}>
-          <ActivityIndicator color={patientTheme.colors.primaryDark} />
-          <Text style={styles.loadingText}>Carregando agenda...</Text>
-        </View>
+          {consultasFiltrosAbertos ? (
+            <View style={styles.consultasDrilldownPanel}>
+              <Text style={styles.consultasDrilldownTitle}>Filtrar minhas consultas</Text>
+
+              <View style={styles.consultasFieldBlock}>
+                <Text style={styles.consultasFieldLabel}>Profissional</Text>
+                <TextInput
+                  value={consultasProfissionalFiltro}
+                  onChangeText={(value) =>
+                    setConsultasProfissionalFiltro(maskConsultaProfissionalFiltro(value))
+                  }
+                  placeholder="Nome ou CRN"
+                  placeholderTextColor={patientTheme.colors.textMuted}
+                  style={styles.consultasFieldInput}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+              </View>
+
+              <View style={styles.consultasFieldBlock}>
+                <Text style={styles.consultasFieldLabel}>Tipo</Text>
+                <TextInput
+                  value={consultasTipoFiltro}
+                  onChangeText={(value) => setConsultasTipoFiltro(maskConsultaTipoFiltro(value))}
+                  placeholder="Ex.: Teleconsulta"
+                  placeholderTextColor={patientTheme.colors.textMuted}
+                  style={styles.consultasFieldInput}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                />
+              </View>
+
+              <View style={styles.consultasFieldBlock}>
+                <Text style={styles.consultasFieldLabel}>Data</Text>
+                <TextInput
+                  value={consultasDataFiltro}
+                  onChangeText={(value) => setConsultasDataFiltro(maskDateBr(value))}
+                  placeholder="DD/MM/AAAA"
+                  placeholderTextColor={patientTheme.colors.textMuted}
+                  style={styles.consultasFieldInput}
+                  keyboardType="number-pad"
+                />
+              </View>
+            </View>
+          ) : null}
+
+          <View style={styles.quickFiltersRow}>
+            <ChipFiltro
+              label={`Agendadas ${proximasConsultasFiltradas.length}`}
+              icon="calendar-outline"
+              active={consultasSection === 'agendadas'}
+              onPress={() => setConsultasSection('agendadas')}
+              style={styles.quickFilterChip}
+              textStyle={styles.quickFilterChipText}
+            />
+            <ChipFiltro
+              label={`Anteriores ${consultasAnterioresFiltradas.length}`}
+              icon="time-outline"
+              active={consultasSection === 'anteriores'}
+              onPress={() => setConsultasSection('anteriores')}
+              style={styles.quickFilterChip}
+              textStyle={styles.quickFilterChipText}
+            />
+          </View>
+        </>
       ) : null}
 
-      <View style={styles.nutriSelectorRow}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.nutriSelectorScroll}>
-          {nutricionistas.map((nutri) => {
-            const active = selectedNutri?.id_nutricionista_uuid === nutri.id_nutricionista_uuid;
-            return (
-              <TouchableOpacity
-                key={nutri.id_nutricionista_uuid}
-                style={[styles.nutriPill, active && styles.nutriPillActive]}
-                onPress={() => setSelectedNutri(nutri)}
-              >
-                <Text style={[styles.nutriPillText, active && styles.nutriPillTextActive]}>
-                  {nutri.nome_completo_nutri || 'Nutricionista'}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
+      {activeSection === 'agendar' ? (
+        <>
+      <CampoBuscaAgendamento
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        placeholder="Buscar por nome, CRN ou especialidade"
+        trailingIcon="funnel-outline"
+        onTrailingPress={() => setFiltrosAbertos((prev) => !prev)}
+        trailingAccessibilityLabel="Abrir filtros da teleconsulta"
+      />
+
+      <View style={styles.quickFiltersRow}>
+        <ChipFiltro
+          label="Todos"
+          icon="apps-outline"
+          active={quickFilter === 'all'}
+          onPress={() => setQuickFilter('all')}
+          style={styles.quickFilterChip}
+          textStyle={styles.quickFilterChipText}
+        />
+        <ChipFiltro
+          label="Hoje"
+          icon="today-outline"
+          active={quickFilter === 'today'}
+          onPress={() => setQuickFilter('today')}
+          style={styles.quickFilterChip}
+          textStyle={styles.quickFilterChipText}
+        />
+        <ChipFiltro
+          label="Amanhã"
+          icon="sunny-outline"
+          active={quickFilter === 'tomorrow'}
+          onPress={() => setQuickFilter('tomorrow')}
+          style={styles.quickFilterChip}
+          textStyle={styles.quickFilterChipText}
+        />
+        <ChipFiltro
+          label="Melhores"
+          icon="star-outline"
+          active={quickFilter === 'top'}
+          onPress={() => setQuickFilter('top')}
+          style={styles.quickFilterChip}
+          textStyle={styles.quickFilterChipText}
+        />
       </View>
 
-      <View style={styles.professionalCard}>
-        <View style={styles.professionalHeader}>
-          <View style={styles.avatar}>
-            <Text style={styles.avatarText}>{getInitials(selectedNutri?.nome_completo_nutri)}</Text>
-          </View>
-          <View style={styles.professionalInfo}>
-            <Text style={styles.professionalName} numberOfLines={1}>
-              {selectedNutri?.nome_completo_nutri || 'Selecione um nutricionista'}
-            </Text>
-            <Text style={styles.professionalCrn}>
-              {selectedNutri?.crm_numero ? `CRN ${selectedNutri.crm_numero}` : 'CRN não informado'}
-            </Text>
-          </View>
-          <TouchableOpacity style={styles.refreshSlots} onPress={loadSlots} disabled={loadingSlots}>
-            <Ionicons name="refresh-outline" size={18} color={patientTheme.colors.text} />
-          </TouchableOpacity>
-        </View>
+      <FiltrosAgendamentoAvancado
+        tipoConsulta={tipoConsulta}
+        onTipoConsultaChange={setTipoConsulta}
+        convenio={convenio}
+        onConvenioChange={setConvenio}
+        especialidade={especialidadeFiltro}
+        onEspecialidadeChange={setEspecialidadeFiltro}
+        dateFromBr={dateFromBr}
+        dateToBr={dateToBr}
+        onDateFromBrChange={(value) => setDateFromBr(maskDateBr(value))}
+        onDateToBrChange={(value) => setDateToBr(maskDateBr(value))}
+        maxValorReais={maxValorReais}
+        onMaxValorReaisChange={setMaxValorReais}
+        ordenacao={ordenacao}
+        onOrdenacaoChange={setOrdenacao}
+        ratingMinimo={ratingMinimo}
+        onRatingMinimoChange={setRatingMinimo}
+        somenteConvenio={somenteConvenio}
+        onSomenteConvenioChange={setSomenteConvenio}
+        filtrosAtivos={filtrosAtivos}
+        onLimpar={limparFiltrosAvancados}
+        abertoExterno={filtrosAbertos}
+        onAbertoChange={setFiltrosAbertos}
+        ocultarToggle
+      />
+        </>
+      ) : null}
 
-        <View style={styles.availabilityHeader}>
-          <Ionicons name="time-outline" size={18} color={patientTheme.colors.primaryDark} />
-          <Text style={styles.availabilityTitle}>Slots disponíveis (próximos 14 dias)</Text>
-        </View>
-
-        {loadingSlots ? (
-          <View style={styles.inlineLoading}>
-            <ActivityIndicator color={patientTheme.colors.primaryDark} />
-            <Text style={styles.loadingText}>Carregando slots...</Text>
-          </View>
-        ) : slots.length ? (
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.slotList}
-          >
-            {slots.slice(0, 30).map((slot) => (
-              <TouchableOpacity
-                key={slot.scheduledAt}
-                activeOpacity={0.78}
-                style={styles.slotButton}
-                onPress={() => handleAgendar(slot)}
-                disabled={loadingAgendar}
-              >
-                <Text style={styles.slotText}>{slot.localLabel}</Text>
-              </TouchableOpacity>
-            ))}
-          </ScrollView>
-        ) : (
-          <Text style={styles.focusText}>
-            Este nutricionista ainda nao cadastrou disponibilidade.
+      <View style={styles.segmentedWrap}>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={[styles.segmentedOption, activeSection === 'agendar' && styles.segmentedOptionActive]}
+          onPress={() => setActiveSection('agendar')}
+        >
+          <Text style={[styles.segmentedText, activeSection === 'agendar' && styles.segmentedTextActive]}>
+            Agendar
           </Text>
-        )}
-      </View>
-
-      <View style={styles.sectionHeader}>
-        <Text style={styles.sectionTitle}>Minhas consultas</Text>
-        <TouchableOpacity style={styles.smallIcon} onPress={loadBase} disabled={loading}>
-          <Ionicons name="refresh-outline" size={18} color={patientTheme.colors.text} />
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={[styles.segmentedOption, activeSection === 'consultas' && styles.segmentedOptionActive]}
+          onPress={() => setActiveSection('consultas')}
+        >
+          <Text style={[styles.segmentedText, activeSection === 'consultas' && styles.segmentedTextActive]}>
+            Minhas Consultas
+          </Text>
         </TouchableOpacity>
       </View>
 
-      {consultasProximas.length ? (
-        consultasProximas.map((item) => (
-          <View key={item.id} style={styles.consultaCard}>
-            <Text style={styles.consultaTitle}>{formatConsultaDateTime(item.scheduled_at)}</Text>
-            <Text style={styles.consultaMeta}>Status: {String(item.status || '')}</Text>
-          </View>
-        ))
+      {loading ? (
+        <EsqueletoAgendamento rows={4} />
+      ) : loadError ? (
+        <EstadoErroCarregamento onTentarNovamente={loadBase} loading={loading} />
       ) : (
-        <View style={styles.consultaEmpty}>
-          <Text style={styles.focusText}>Nenhuma consulta agendada.</Text>
-        </View>
+        <>
+          {activeSection === 'agendar' ? (
+            <>
+          {disponibilidadeDireta ? (
+            <>
+              <View style={styles.sectionHeaderRow}>
+                <View>
+                  <Text style={styles.sectionTitle}>Disponibilidade do profissional</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    {selectedNutri?.nome_completo_nutri || 'Selecione um profissional'}
+                  </Text>
+                </View>
+                {loadingSlots ? <ActivityIndicator color={patientTheme.colors.primaryDark} /> : null}
+              </View>
+
+              <CartaoAgendamento style={styles.selectedProCard}>
+                <View style={styles.proRow}>
+                  <AvatarProfissional
+                    name={selectedNutri?.nome_completo_nutri}
+                    size={42}
+                    online
+                    imageUri={getNutriAvatarUri(selectedNutri)}
+                  />
+                  <View style={styles.proBody}>
+                    <Text style={styles.proName}>{selectedNutri?.nome_completo_nutri}</Text>
+                    <Text style={styles.proSpec}>
+                      {getNutriEspecialidadeLabel(selectedNutri)} · Google Meet
+                    </Text>
+                  </View>
+                </View>
+                <BotaoAgendamento
+                  label="Cancelar"
+                  variant="ghost"
+                  onPress={handleCancelarFluxoAgendamento}
+                  style={styles.selectedProCancelBtn}
+                />
+              </CartaoAgendamento>
+
+              {(dateFromKey || dateToKey) && !slots.length && !loadingSlots ? (
+                <CartaoAgendamento style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Sem horários no período</Text>
+                  <Text style={styles.emptyText}>
+                    Tente outras datas ou remova parte dos filtros para ver novas opções.
+                  </Text>
+                </CartaoAgendamento>
+              ) : null}
+
+              <CartaoAgendamento style={styles.calendarCard}>
+                <CalendarioHorarios
+                  days={calendarDays}
+                  selectedDayKey={selectedDayKey}
+                  onSelectDay={setSelectedDayKey}
+                  selectedSlot={selectedSlot}
+                  onSelectSlot={setSelectedSlot}
+                />
+              </CartaoAgendamento>
+            </>
+          ) : null}
+
+          <View style={styles.sectionHeaderRow}>
+            <View>
+              <Text style={styles.sectionTitle}>
+                {disponibilidadeDireta ? 'Outros profissionais' : 'Profissionais disponiveis'}
+              </Text>
+              <Text style={styles.sectionSubtitle}>
+                {filteredNutris.length} resultado(s) para teleconsulta
+              </Text>
+            </View>
+          </View>
+
+          {!filteredNutris.length ? (
+            <CartaoAgendamento style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Nenhum profissional encontrado</Text>
+              <Text style={styles.emptyText}>
+                Ajuste especialidade, avaliação, valor ou período para ampliar os resultados.
+              </Text>
+            </CartaoAgendamento>
+          ) : null}
+
+          {filteredNutris.map((nutri) => {
+            const spec = getNutriEspecialidadeLabel(nutri);
+            const ratingReal =
+              Number.isFinite(Number(nutri?.rating_media)) && Number(nutri?.rating_media) > 0
+                ? Number(nutri.rating_media).toFixed(1)
+                : '';
+            const totalAvaliacoesReal =
+              Number.isFinite(Number(nutri?.total_avaliacoes)) && Number(nutri?.total_avaliacoes) >= 0
+                ? Number(nutri.total_avaliacoes)
+                : null;
+            const expAnosReal =
+              Number.isFinite(Number(nutri?.anos_experiencia)) && Number(nutri?.anos_experiencia) >= 0
+                ? Number(nutri.anos_experiencia)
+                : null;
+            const rating = ratingReal;
+            const totalAvaliacoes = totalAvaliacoesReal ?? '';
+            const expAnos = expAnosReal ?? '';
+            const bioPreview =
+              nutri.bio_resumo ||
+              'Especialista em teleconsulta com foco em estratégias nutricionais personalizadas.';
+            const abrirPerfil = () =>
+              navigation.navigate('PacientePerfilNutricionista', {
+                usuarioLogado,
+                nutricionista: nutri,
+                tipoConsulta,
+                convenio,
+              });
+
+            return (
+              <CartaoAgendamento
+                key={nutri.id_nutricionista_uuid}
+                style={styles.proCard}
+                onPress={abrirPerfil}
+              >
+                <View style={styles.proRow}>
+                  <AvatarProfissional
+                    name={nutri.nome_completo_nutri}
+                    size={56}
+                    online
+                    imageUri={getNutriAvatarUri(nutri)}
+                  />
+                  <View style={styles.proBody}>
+                    <Text style={styles.proName}>{nutri.nome_completo_nutri}</Text>
+                    <Text style={styles.proSpec}>{spec} · Google Meet</Text>
+                    <Text style={styles.proCrn}>
+                      {nutri.crm_numero ? `CRN ${nutri.crm_numero}` : 'CRN nao informado'}
+                    </Text>
+
+                    <Text numberOfLines={1} style={styles.proSpecVisible}>
+                      {spec}
+                    </Text>
+                    <View style={styles.proMetaRow}>
+                      <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+                      <Text style={styles.proMeta}>{ratingReal}</Text>
+                      <Text style={styles.proMetaDot}>·</Text>
+                      <Text style={styles.proMetaDot}>·</Text>
+                      <Text style={styles.proMetaDot}>·</Text>
+                      <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
+                    </View>
+                    <Text numberOfLines={2} style={styles.proBio}>
+                      {bioPreview}
+                    </Text>
+
+                  </View>
+                </View>
+
+                <View style={styles.proHighlights}>
+                  <View style={styles.highlightPill}>
+                    <Ionicons name="cash-outline" size={14} color={patientTheme.colors.primaryDark} />
+                    <Text style={styles.highlightText}>{formatValorConsulta(nutri.valor_consulta_centavos)}</Text>
+                  </View>
+                  <View style={styles.highlightPill}>
+                    <Ionicons
+                      name={nutri.aceita_convenio ? 'shield-checkmark-outline' : 'card-outline'}
+                      size={14}
+                      color={patientTheme.colors.primaryDark}
+                    />
+                    <Text style={styles.highlightText}>
+                      {nutri.aceita_convenio ? 'Aceita convênio' : 'Particular'}
+                    </Text>
+                  </View>
+                </View>
+
+                <View style={styles.proActions}>
+                  <BotaoAgendamento
+                    label="Agendar Consulta"
+                    icon="calendar-outline"
+                    onPress={(event) => {
+                      event?.stopPropagation?.();
+                      navigation.navigate('PacientePerfilNutricionista', {
+                        usuarioLogado,
+                        nutricionista: nutri,
+                        tipoConsulta,
+                        convenio,
+                        openSchedulePopup: true,
+                      });
+                    }}
+                    style={styles.proScheduleBtn}
+                  />
+                </View>
+              </CartaoAgendamento>
+            );
+          })}
+
+          {false ? (
+            <CartaoAgendamento style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Escolha um profissional para agendar</Text>
+              <Text style={styles.emptyText}>
+                Toque em <Text style={styles.emptyTextStrong}>Agendar</Text> para abrir os horários
+                disponíveis.
+              </Text>
+            </CartaoAgendamento>
+          ) : null}
+
+          {!disponibilidadeDireta && showCalendar ? (
+            <>
+              <View style={styles.sectionHeaderRow}>
+                <View>
+                  <Text style={styles.sectionTitle}>Calendario de horarios</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    {selectedNutri?.nome_completo_nutri || 'Selecione um profissional'}
+                  </Text>
+                </View>
+                {loadingSlots ? <ActivityIndicator color={patientTheme.colors.primaryDark} /> : null}
+              </View>
+
+              {(dateFromKey || dateToKey) && !slots.length && !loadingSlots ? (
+                <CartaoAgendamento style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Sem horarios no periodo</Text>
+                  <Text style={styles.emptyText}>
+                    Tente outras datas ou remova parte dos filtros para ver novas opções.
+                  </Text>
+                </CartaoAgendamento>
+              ) : null}
+
+              <CartaoAgendamento style={styles.calendarCard}>
+                <CalendarioHorarios
+                  days={calendarDays}
+                  selectedDayKey={selectedDayKey}
+                  onSelectDay={setSelectedDayKey}
+                  selectedSlot={selectedSlot}
+                  onSelectSlot={setSelectedSlot}
+                />
+              </CartaoAgendamento>
+            </>
+          ) : null}
+
+            </>
+          ) : null}
+
+          {false ? (
+            <>
+          <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
+            <View>
+              <Text style={styles.sectionTitle}>Minhas consultas</Text>
+              <Text style={styles.sectionSubtitle}>Acompanhe links e horarios confirmados</Text>
+            </View>
+          </View>
+
+          {proximasConsultas.length ? (
+            proximasConsultas.map((item) => {
+              const nutri =
+                nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
+                null;
+              const meetLink = resolveMeetLink({ consulta: item, nutricionista: nutri });
+
+              return (
+                <CartaoAgendamento key={item.id} style={styles.bookingCard}>
+                  <Text style={styles.bookingTitle}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                  <Text style={styles.bookingMeta}>
+                    {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio} · {item.status}
+                  </Text>
+                  {meetLink ? (
+                    <BotaoAgendamento
+                      label="Entrar no Google Meet"
+                      icon="videocam-outline"
+                      variant="ghost"
+                      onPress={() => handleAbrirMeet(item, nutri)}
+                      style={styles.meetBtn}
+                    />
+                  ) : null}
+                </CartaoAgendamento>
+              );
+            })
+          ) : (
+            <CartaoAgendamento style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Sem consultas agendadas</Text>
+              <Text style={styles.emptyText}>
+                Escolha um profissional acima para reservar seu primeiro horario.
+              </Text>
+            </CartaoAgendamento>
+          )}
+        </>
+      ) : null}
+
+      {!loading && !loadError && activeSection === 'consultas' && false ? (
+        <>
+          <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
+            <View>
+              <Text style={styles.sectionTitle}>Próximas consultas</Text>
+              <Text style={styles.sectionSubtitle}>Edite horário ou cancele quando precisar</Text>
+            </View>
+          </View>
+
+          {proximasConsultas.length ? (
+            proximasConsultas.map((item) => {
+              const nutri =
+                nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
+                null;
+              const meetLink = resolveMeetLink({ consulta: item, nutricionista: nutri });
+
+              return (
+                <CartaoAgendamento key={`next-${item.id}`} style={styles.bookingCard}>
+                  <View style={styles.bookingTopRow}>
+                    <AvatarProfissional
+                      name={nutri?.nome_completo_nutri || 'Profissional'}
+                      size={48}
+                      imageUri={getNutriAvatarUri(nutri)}
+                    />
+                    <View style={styles.bookingBody}>
+                      <Text style={styles.bookingName}>
+                        {nutri?.nome_completo_nutri || 'Profissional'}
+                      </Text>
+                      <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
+                      <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                      <Text style={styles.bookingMeta}>
+                        {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
+                      </Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.bookingActions}>
+                    <BotaoAgendamento
+                      label="Editar"
+                      variant="ghost"
+                      onPress={() => handleEditarConsulta(item, nutri)}
+                      style={styles.bookingActionSecondary}
+                    />
+                    <BotaoAgendamento
+                      label="Cancelar"
+                      variant="ghost"
+                      onPress={() => handleCancelarConsulta(item, nutri)}
+                      style={styles.bookingActionSecondary}
+                    />
+                    {meetLink ? (
+                      <BotaoAgendamento
+                        label="Entrar"
+                        icon="videocam-outline"
+                        onPress={() => handleAbrirMeet(item, nutri)}
+                        style={styles.bookingActionPrimary}
+                      />
+                    ) : null}
+                  </View>
+                </CartaoAgendamento>
+              );
+            })
+          ) : (
+            <CartaoAgendamento style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Sem consultas agendadas</Text>
+              <Text style={styles.emptyText}>Suas Próximas teleconsultas vão aparecer aqui.</Text>
+            </CartaoAgendamento>
+          )}
+
+          <View style={styles.sectionHeaderRow}>
+            <View>
+              <Text style={styles.sectionTitle}>Consultas anteriores</Text>
+              <Text style={styles.sectionSubtitle}>Histórico recente de atendimentos</Text>
+            </View>
+          </View>
+
+          {consultasAnteriores.length ? (
+            consultasAnteriores.map((item) => {
+              const nutri =
+                nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
+                null;
+
+              return (
+                <CartaoAgendamento key={`past-${item.id}`} style={styles.bookingCardPast}>
+                  <View style={styles.bookingTopRow}>
+                    <AvatarProfissional
+                      name={nutri?.nome_completo_nutri || 'Profissional'}
+                      size={44}
+                      imageUri={getNutriAvatarUri(nutri)}
+                    />
+                    <View style={styles.bookingBody}>
+                      <Text style={styles.bookingName}>
+                        {nutri?.nome_completo_nutri || 'Profissional'}
+                      </Text>
+                      <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
+                      <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                      <Text style={styles.bookingMeta}>
+                        {item.tipo_consulta || 'Teleconsulta'} · {item.status || 'finalizada'}
+                      </Text>
+                    </View>
+                  </View>
+                </CartaoAgendamento>
+              );
+            })
+          ) : (
+            <CartaoAgendamento style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Sem histórico recente</Text>
+              <Text style={styles.emptyText}>
+                As consultas concluídas e canceladas aparecem nesta seção.
+              </Text>
+            </CartaoAgendamento>
+          )}
+        </>
+      ) : null}
+
+      {!loading && !loadError && activeSection === 'consultas' ? (
+        <>
+          {consultasSection === 'agendadas' ? (
+            <>
+              <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
+                <View>
+                  <Text style={styles.sectionTitle}>Minhas consultas agendadas</Text>
+                  <Text style={styles.sectionSubtitle}>Edite horário ou cancele quando precisar</Text>
+                </View>
+              </View>
+
+              {proximasConsultasFiltradas.length ? (
+                proximasConsultasFiltradas.map((item) => {
+                  const nutri =
+                    nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
+                    null;
+                  const meetLink = resolveMeetLink({ consulta: item, nutricionista: nutri });
+
+                  return (
+                    <CartaoAgendamento key={`next-filtered-${item.id}`} style={styles.bookingCard}>
+                      <View style={styles.bookingTopRow}>
+                        <AvatarProfissional
+                          name={nutri?.nome_completo_nutri || 'Profissional'}
+                          size={48}
+                          imageUri={getNutriAvatarUri(nutri)}
+                        />
+                        <View style={styles.bookingBody}>
+                          <Text style={styles.bookingName}>
+                            {nutri?.nome_completo_nutri || 'Profissional'}
+                          </Text>
+                          <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
+                          <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                          <Text style={styles.bookingMeta}>
+                            {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.bookingActions}>
+                        <BotaoAgendamento
+                          label="Editar"
+                          variant="ghost"
+                          onPress={() => handleEditarConsulta(item, nutri)}
+                          style={styles.bookingActionSecondary}
+                        />
+                        <BotaoAgendamento
+                          label="Cancelar"
+                          variant="ghost"
+                          onPress={() => handleCancelarConsulta(item, nutri)}
+                          style={styles.bookingActionSecondary}
+                        />
+                        {meetLink ? (
+                          <BotaoAgendamento
+                            label="Entrar"
+                            icon="videocam-outline"
+                            onPress={() => handleAbrirMeet(item, nutri)}
+                            style={styles.bookingActionPrimary}
+                          />
+                        ) : null}
+                      </View>
+                    </CartaoAgendamento>
+                  );
+                })
+              ) : (
+                <CartaoAgendamento style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Sem consultas agendadas</Text>
+                  <Text style={styles.emptyText}>
+                    {consultasSearchQuery
+                      ? 'Nenhuma consulta agendada corresponde ao filtro informado.'
+                      : 'Suas próximas teleconsultas vão aparecer aqui.'}
+                  </Text>
+                </CartaoAgendamento>
+              )}
+            </>
+          ) : (
+            <>
+              <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
+                <View>
+                  <Text style={styles.sectionTitle}>Consultas anteriores</Text>
+                  <Text style={styles.sectionSubtitle}>Histórico recente de atendimentos</Text>
+                </View>
+              </View>
+
+              {consultasAnterioresFiltradas.length ? (
+                consultasAnterioresFiltradas.map((item) => {
+                  const nutri =
+                    nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
+                    null;
+
+                  return (
+                    <CartaoAgendamento key={`past-filtered-${item.id}`} style={styles.bookingCardPast}>
+                      <View style={styles.bookingTopRow}>
+                        <AvatarProfissional
+                          name={nutri?.nome_completo_nutri || 'Profissional'}
+                          size={44}
+                          imageUri={getNutriAvatarUri(nutri)}
+                        />
+                        <View style={styles.bookingBody}>
+                          <Text style={styles.bookingName}>
+                            {nutri?.nome_completo_nutri || 'Profissional'}
+                          </Text>
+                          <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
+                          <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                          <Text style={styles.bookingMeta}>
+                            {item.tipo_consulta || 'Teleconsulta'} · {item.status || 'finalizada'}
+                          </Text>
+                        </View>
+                      </View>
+                    </CartaoAgendamento>
+                  );
+                })
+              ) : (
+                <CartaoAgendamento style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Sem histórico recente</Text>
+                  <Text style={styles.emptyText}>
+                    {consultasSearchQuery
+                      ? 'Nenhuma consulta anterior corresponde ao filtro informado.'
+                      : 'As consultas concluídas e canceladas aparecem nesta seção.'}
+                  </Text>
+                </CartaoAgendamento>
+              )}
+            </>
+          )}
+        </>
+      ) : null}
+
+        </>
       )}
+
+      {resumoVisivel ? (
+        <View style={[styles.summaryDock, Platform.OS === 'web' && styles.summaryDockWeb]}>
+          <CartaoAgendamento style={styles.summaryCard}>
+            <Text style={styles.summaryTitle}>Resumo do agendamento</Text>
+            <Text style={styles.summaryLine}>
+              {selectedNutri?.nome_completo_nutri} · {getNutriEspecialidadeLabel(selectedNutri)}
+            </Text>
+            <Text style={styles.summaryLine}>
+              {formatDayLabel(formatSlotDateKey(selectedSlot.scheduledAt))} as{' '}
+              {formatTimeLabel(selectedSlot.scheduledAt)}
+            </Text>
+            <Text style={styles.summaryLine}>{tipoConsulta} · {convenio} · Google Meet</Text>
+            <Text style={styles.summaryLine}>
+              {formatValorConsulta(selectedNutri?.valor_consulta_centavos)}
+            </Text>
+            <BotaoAgendamento
+              label="Confirmar consulta"
+              onPress={handleConfirmarConsulta}
+              loading={confirming}
+              icon="checkmark-circle-outline"
+            />
+          </CartaoAgendamento>
+        </View>
+      ) : null}
+
+      <Modal visible={confirmModalVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalIcon}>
+              <Ionicons
+                name="checkmark-circle"
+                size={42}
+                color={patientTheme.colors.primaryDark}
+              />
+            </View>
+            <Text style={styles.modalTitle}>Consulta confirmada</Text>
+            <Text style={styles.modalText}>
+              {lastBooking?.nutri?.nome_completo_nutri}
+              {'\n'}
+              {formatConsultaDateTime(lastBooking?.slot?.scheduledAt)}
+              {'\n'}
+              {lastBooking?.tipoConsulta} · {lastBooking?.convenio}
+              {'\n'}
+              Canal: Google Meet
+            </Text>
+            <BotaoAgendamento
+              label="Entrar no Google Meet"
+              icon="videocam-outline"
+              onPress={async () => {
+                try {
+                  await abrirLinkGoogleMeet(lastBooking?.meetLink);
+                } catch (error) {
+                  setMensagem({
+                    tipo: 'erro',
+                    texto: error?.message || 'Link do Meet indisponivel.',
+                  });
+                }
+              }}
+            />
+            <BotaoAgendamento
+              label="Fechar"
+              variant="ghost"
+              onPress={() => setConfirmModalVisible(false)}
+            />
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={notificacoesModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.notifCard]}>
+            <Text style={styles.modalTitle}>Notificacoes</Text>
+            <ScrollView style={styles.notifList}>
+              {notificacoes.length ? (
+                notificacoes.map((item) => (
+                  <View key={item.id} style={styles.notifItem}>
+                    <Text style={styles.notifTitle}>{item.titulo}</Text>
+                    <Text style={styles.notifBody}>{item.mensagem}</Text>
+                  </View>
+                ))
+              ) : (
+                <Text style={styles.emptyText}>Nenhuma notificacao recente.</Text>
+              )}
+            </ScrollView>
+            <BotaoAgendamento
+              label="Fechar"
+              variant="ghost"
+              onPress={() => setNotificacoesModal(false)}
+            />
+          </View>
+        </View>
+      </Modal>
     </PatientScreenLayout>
   );
 }
 
 const styles = StyleSheet.create({
-  summaryRow: {
+  screenContent: {
+    paddingBottom: 112,
+  },
+  screenContentWithFooter: {
+    paddingBottom: 340,
+  },
+  segmentedWrap: {
+    alignSelf: 'stretch',
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
     gap: 8,
-    marginTop: 14,
+    marginBottom: 12,
+    minHeight: Platform.OS === 'web' ? 44 : 42,
+    padding: 5,
+    width: '100%',
   },
-  summaryPill: {
+  segmentedOption: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: '#d7f8ea',
-    borderRadius: patientTheme.radius.pill,
-    borderWidth: 1,
-    flexDirection: 'row',
-    gap: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-  },
-  summaryText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 12,
-    fontWeight: '800',
-  },
-  professionalList: {
-    gap: 14,
-    marginTop: 16,
-  },
-  loadingCard: {
-    marginTop: 14,
-    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    padding: 16,
-    alignItems: 'center',
-    gap: 10,
-    ...patientShadow,
-  },
-  loadingText: {
-    color: patientTheme.colors.textMuted,
-    fontWeight: '700',
-  },
-  professionalCard: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 16,
-    ...patientShadow,
-  },
-  professionalHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-  },
-  avatar: {
-    alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderRadius: 23,
-    height: 46,
-    justifyContent: 'center',
-    marginRight: 12,
-    width: 46,
-  },
-  avatarText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 14,
-    fontWeight: '900',
-  },
-  professionalInfo: {
     flex: 1,
+    justifyContent: 'center',
+    minHeight: Platform.OS === 'web' ? 32 : 30,
+    paddingHorizontal: 12,
   },
-  professionalName: {
-    color: patientTheme.colors.text,
-    fontSize: 16,
-    fontWeight: '900',
+  segmentedOptionActive: {
+    backgroundColor: '#ffffff',
   },
-  professionalSpecialty: {
+  segmentedText: {
     color: patientTheme.colors.textMuted,
     fontSize: 13,
     fontWeight: '700',
-    marginTop: 3,
   },
-  professionalCrn: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 12,
-    fontWeight: '800',
-    marginTop: 3,
-  },
-  focusText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    fontWeight: '600',
-    lineHeight: 19,
-    marginTop: 12,
-  },
-  availabilityHeader: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    gap: 6,
-    marginTop: 14,
-  },
-  availabilityTitle: {
+  segmentedTextActive: {
     color: patientTheme.colors.text,
-    fontSize: 13,
     fontWeight: '800',
   },
-  nutriSelectorRow: {
-    marginTop: 12,
-  },
-  nutriSelectorScroll: {
-    gap: 8,
-    paddingVertical: 6,
-  },
-  nutriPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
-    ...patientShadow,
-  },
-  nutriPillActive: {
-    backgroundColor: patientTheme.colors.primaryDark,
-  },
-  nutriPillText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  nutriPillTextActive: {
-    color: patientTheme.colors.onPrimary,
-  },
-  refreshSlots: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+  quickFiltersRow: {
+    alignSelf: 'stretch',
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  inlineLoading: {
     flexDirection: 'row',
-    alignItems: 'center',
+    gap: 8,
+    justifyContent: 'space-between',
+    paddingVertical: 12,
+    width: '100%',
+  },
+  quickFilterChip: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    flex: 1,
+    justifyContent: 'center',
+    paddingHorizontal: 8,
+  },
+  quickFilterChipText: {
+    fontWeight: '600',
+  },
+  consultasDrilldownPanel: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
     gap: 10,
     marginTop: 10,
+    padding: 12,
+    width: '100%',
+    ...patientShadow,
   },
-  slotList: {
-    gap: 8,
-    paddingTop: 10,
-  },
-  slotButton: {
-    backgroundColor: '#ffffff',
-    borderColor: patientTheme.colors.primary,
-    borderRadius: patientTheme.radius.pill,
-    borderWidth: 1.5,
-    minWidth: 74,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  slotText: {
-    color: patientTheme.colors.primaryDark,
+  consultasDrilldownTitle: {
+    color: patientTheme.colors.text,
     fontSize: 13,
-    fontWeight: '900',
-    textAlign: 'center',
+    fontWeight: '800',
   },
-  sectionHeader: {
-    marginTop: 18,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
+  consultasFieldBlock: {
+    gap: 6,
+  },
+  consultasFieldLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+  },
+  consultasFieldInput: {
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '600',
+    minHeight: 42,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  sectionHeaderRow: {
+    marginTop: 12,
+    marginBottom: 10,
+  },
+  bookingSectionHeaderRow: {
+    marginTop: 10,
   },
   sectionTitle: {
     color: patientTheme.colors.text,
     fontSize: 18,
     fontWeight: '900',
   },
-  smallIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: patientTheme.colors.surface,
+  sectionSubtitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 4,
+  },
+  emptyCard: {
+    marginBottom: 12,
+  },
+  emptyTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    lineHeight: 20,
+    marginTop: 6,
+  },
+  emptyTextStrong: {
+    color: patientTheme.colors.text,
+    fontWeight: '800',
+  },
+  proCard: {
+    marginBottom: 10,
+    borderRadius: 18,
+    padding: 16,
+  },
+  proRow: {
+    flexDirection: 'row',
+    gap: 14,
+  },
+  proBody: {
+    flex: 1,
+  },
+  proName: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  proSpec: {
+    display: 'none',
+  },
+  proSpecVisible: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    marginTop: 3,
+  },
+  proCrn: {
+    display: 'none',
+  },
+  proMetaRow: {
     alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    marginTop: 8,
   },
-  consultaCard: {
+  proMeta: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  proMetaDot: {
+    color: patientTheme.colors.textMuted,
+  },
+  proNext: {
+    display: 'none',
+  },
+  proBio: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 18,
+    marginTop: 8,
+  },
+  proHighlights: {
+    display: 'none',
+  },
+  highlightPill: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+  },
+  highlightText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  proActions: {
+    marginTop: 14,
+  },
+  proActionBtn: {
+    borderWidth: 0,
+    flex: 1,
+  },
+  proScheduleBtn: {
+    width: '100%',
+  },
+  calendarCard: {
+    marginBottom: 4,
+  },
+  selectedProCard: {
+    gap: 10,
+    marginBottom: 10,
+  },
+  selectedProCancelBtn: {
+    borderWidth: 0,
+  },
+  bookingCard: {
+    marginBottom: 10,
+    gap: 12,
+  },
+  bookingCardPast: {
+    marginBottom: 10,
+    opacity: 0.94,
+  },
+  bookingTopRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  bookingBody: {
+    flex: 1,
+  },
+  bookingName: {
+    color: patientTheme.colors.text,
+    fontSize: 15,
+    fontWeight: '900',
+  },
+  bookingSpec: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+    marginTop: 2,
+  },
+  bookingDate: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
     marginTop: 10,
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 14,
-    ...patientShadow,
   },
-  consultaTitle: {
+  bookingTitle: {
     color: patientTheme.colors.text,
     fontWeight: '900',
   },
-  consultaMeta: {
-    marginTop: 8,
+  bookingMeta: {
     color: patientTheme.colors.textMuted,
+    fontSize: 12,
     fontWeight: '700',
+    marginTop: 4,
   },
-  consultaEmpty: {
-    marginTop: 12,
+  bookingActions: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  bookingActionSecondary: {
+    borderWidth: 1,
+    flex: 1,
+  },
+  bookingActionPrimary: {
+    flex: 1.15,
+  },
+  meetBtn: {
+    marginTop: 10,
+  },
+  summaryDock: {
+    display: 'none',
+  },
+  summaryDockWeb: {
+    display: 'none',
+  },
+  summaryCard: {
+    gap: 8,
+  },
+  summaryActions: {
+    flexDirection: 'row',
+    gap: 10,
+    marginTop: 4,
+  },
+  summarySecondaryBtn: {
+    borderWidth: 0,
+    flex: 1,
+  },
+  summaryPrimaryBtn: {
+    flex: 1,
+  },
+  summaryTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  summaryLine: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  modalOverlay: {
+    backgroundColor: patientTheme.colors.overlay,
+    flex: 1,
+    justifyContent: 'center',
+    padding: 24,
+  },
+  modalCard: {
     alignItems: 'center',
+    backgroundColor: patientTheme.colors.background,
+    borderRadius: patientTheme.radius.xl,
+    gap: 12,
+    padding: 22,
+    ...patientShadow,
+  },
+  notifCard: {
+    maxHeight: '80%',
+    width: '100%',
+  },
+  notifList: {
+    maxHeight: 320,
+    width: '100%',
+  },
+  notifItem: {
+    borderBottomColor: patientTheme.colors.border,
+    borderBottomWidth: 1,
+    paddingVertical: 10,
+    width: '100%',
+  },
+  notifTitle: {
+    color: patientTheme.colors.text,
+    fontWeight: '900',
+    marginBottom: 4,
+  },
+  notifBody: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '600',
+    lineHeight: 20,
+  },
+  modalIcon: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: 32,
+    height: 64,
+    justifyContent: 'center',
+    width: 64,
+  },
+  modalTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 20,
+    fontWeight: '900',
+  },
+  modalText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '600',
+    lineHeight: 22,
+    textAlign: 'center',
   },
 });

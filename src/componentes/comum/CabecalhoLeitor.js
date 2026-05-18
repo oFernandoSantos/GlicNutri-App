@@ -117,6 +117,7 @@ export default function ReaderTopo({ navigation, route, options }) {
   const extraContent = options?.readerExtraContent;
   const backAction = options?.readerBackAction;
   const hasNotifications = notificationCount > 0;
+  const shouldShowNotificationButton = Boolean(notificationAction) && !isAdminContext;
 
   function handleBack() {
     if (backAction) {
@@ -239,7 +240,7 @@ export default function ReaderTopo({ navigation, route, options }) {
                 />
               )}
             </TouchableOpacity>
-          ) : isPatientHome ? (
+          ) : shouldShowNotificationButton ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel={
