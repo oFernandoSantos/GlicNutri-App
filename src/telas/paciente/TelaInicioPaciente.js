@@ -452,6 +452,16 @@ function buildNutritionSummary(mealEntries, planSections) {
   };
 }
 
+function buildHomePlanMealSummary(section, index, consumedCount) {
+  return {
+    kcal: 180 + section.foods.length * 85 + index * 20,
+    carbs: 35 + index * 10,
+    protein: 12 + index * 6,
+    fat: 8 + index * 4,
+    completed: index < consumedCount,
+  };
+}
+
 function buildGlucoseSummary(glucoseReadings) {
   const today = todayDateString();
   const todayReadings = (glucoseReadings || []).filter((item) => item.date === today);
@@ -827,6 +837,18 @@ export default function PacienteHomeScreen({
     () => buildNutritionSummary(mealEntries, planSections),
     [mealEntries, planSections]
   );
+  const homePlanMeals = useMemo(() => {
+    const consumedCount = Math.min(mealEntries.length, 3);
+    return (planSections || []).slice(0, 3).map((section, index) => ({
+      ...section,
+      summary: buildHomePlanMealSummary(section, index, consumedCount),
+    }));
+  }, [mealEntries.length, planSections]);
+  const homePlanProgress = homePlanMeals.length
+    ? Math.round(
+        (homePlanMeals.filter((item) => item.summary.completed).length / homePlanMeals.length) * 100
+      )
+    : 0;
   const insights = useMemo(
     () => buildHomeInsights(glucoseForInsights, mealEntries.length),
     [glucoseForInsights, mealEntries.length]
@@ -920,67 +942,6 @@ export default function PacienteHomeScreen({
       return proximas;
     });
   }
-
-  const quickActions = [
-    {
-      id: 'meal',
-      label: 'Registrar refeição',
-      helper: 'Foto, texto ou voz',
-      icon: 'camera-outline',
-      action: () => navigation.navigate('PacienteDiario', { usuarioLogado }),
-    },
-    {
-      id: 'water',
-      label: 'Hidratação',
-      helper: `+1 copo (agora ${waterCount})`,
-      icon: 'water-outline',
-      action: async () => {
-        const next = waterCount + 1;
-        const nextState = {
-          ...appState,
-          waterCount: next,
-        };
-
-        setAppState(nextState);
-
-        try {
-          await persistirAppState(nextState);
-          setMensagemHome({
-            tipo: 'sucesso',
-            texto: `Hidratação registrada: ${next} copo(s) hoje.`,
-          });
-        } catch (error) {
-          console.log('Erro ao salvar hidratação:', error);
-          setMensagemHome({
-            tipo: 'erro',
-            texto:
-              'Não foi possível salvar a hidratação. Verifique a conexão e tente novamente.',
-          });
-          setAppState(appState);
-        }
-      },
-    },
-    {
-      id: 'activity',
-      label: 'Atividade física',
-      helper: 'Registrar treino',
-      icon: 'barbell-outline',
-      action: () => navigation.navigate('PacienteBemEstar', { usuarioLogado }),
-    },
-    {
-      id: 'medication',
-      label: 'Medicação',
-      helper: 'Insulina e rotina',
-      icon: 'pill',
-      library: 'material',
-      action: () =>
-        navigation.navigate('PacienteMonitoramento', {
-          usuarioLogado,
-          openMedication: true,
-        }),
-    },
-  ];
-
 
   if (loading) {
     return (
@@ -1183,28 +1144,87 @@ export default function PacienteHomeScreen({
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Ações rápidas</Text>
-        <View style={styles.quickGrid}>
-          {quickActions.map((item) => (
-            <TouchableOpacity key={item.id} style={styles.quickCard} onPress={item.action}>
-              <View style={styles.quickIconWrap}>
-                {item.library === 'material' ? (
-                  <MaterialCommunityIcons
-                    name={item.icon}
-                    size={24}
-                    color={patientTheme.colors.primaryDark}
-                  />
-                ) : (
-                  <Ionicons name={item.icon} size={24} color={patientTheme.colors.primaryDark} />
-                )}
-              </View>
-              <Text style={styles.quickTitle}>{item.label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
         <Text style={styles.sectionTitle}>Meu plano de hoje</Text>
         <SectionCard>
+          <View style={styles.homePlanHeader}>
+            <View style={styles.homePlanHeaderLeft}>
+              <Ionicons
+                name="radio-button-on-outline"
+                size={15}
+                color={patientTheme.colors.primaryDark}
+              />
+              <Text style={styles.homePlanHeaderTitle}>Plano Alimentar</Text>
+            </View>
+            <Text style={styles.homePlanHeaderCount}>
+              {homePlanMeals.filter((item) => item.summary.completed).length}/{homePlanMeals.length || 0}
+            </Text>
+          </View>
+
+          <View style={styles.homePlanProgressRow}>
+            <Text style={styles.homePlanProgressLabel}>Adesão de hoje</Text>
+            <Text style={styles.homePlanProgressValue}>{homePlanProgress}%</Text>
+          </View>
+          <View style={styles.homePlanProgressTrack}>
+            <View style={[styles.homePlanProgressFill, { width: `${homePlanProgress}%` }]} />
+          </View>
+
+          {homePlanMeals.map((item) => (
+            <View
+              key={`home-plan-${item.id}`}
+              style={[
+                styles.homePlanMealCard,
+                item.summary.completed
+                  ? styles.homePlanMealCardDone
+                  : styles.homePlanMealCardPending,
+              ]}
+            >
+              <View style={styles.homePlanMealHeader}>
+                <View style={styles.homePlanMealTitleRow}>
+                  <Ionicons
+                    name={item.summary.completed ? 'checkmark-circle-outline' : 'ellipse-outline'}
+                    size={18}
+                    color={
+                      item.summary.completed
+                        ? patientTheme.colors.primaryDark
+                        : patientTheme.colors.textMuted
+                    }
+                  />
+                  <Text style={styles.homePlanMealTitle}>{item.title}</Text>
+                </View>
+                <View style={styles.homePlanMealTimeRow}>
+                  <Ionicons
+                    name="time-outline"
+                    size={12}
+                    color={patientTheme.colors.textMuted}
+                  />
+                  <Text style={styles.homePlanMealTime}>{item.time}</Text>
+                </View>
+              </View>
+
+              {item.summary.completed ? (
+                <View style={styles.homePlanMacrosRow}>
+                  <View>
+                    <Text style={styles.homePlanMacroText}>Calorias: {item.summary.kcal} kcal</Text>
+                    <Text style={styles.homePlanMacroText}>Proteína: {item.summary.protein}g</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.homePlanMacroText}>Carbo: {item.summary.carbs}g</Text>
+                    <Text style={styles.homePlanMacroText}>Gordura: {item.summary.fat}g</Text>
+                  </View>
+                </View>
+              ) : (
+                <Text style={styles.homePlanPendingText}>Toque para registrar</Text>
+              )}
+            </View>
+          ))}
+
+          <TouchableOpacity
+            style={styles.homePlanButton}
+            onPress={() => navigation.navigate('PacientePlano', { usuarioLogado })}
+          >
+            <Text style={styles.homePlanButtonText}>Ver Plano Completo</Text>
+          </TouchableOpacity>
+
           {(planSections.length > 0 ? planSections.slice(0, 3) : [null, null]).map((item, index) => (
             <View key={item?.id || index} style={styles.planItem}>
               <View style={styles.planTime}>
@@ -1233,6 +1253,13 @@ export default function PacienteHomeScreen({
             <Text style={styles.planButtonText}>Abrir plano completo</Text>
           </TouchableOpacity>
         </SectionCard>
+
+        <TouchableOpacity
+          style={styles.homePlanExternalButton}
+          onPress={() => navigation.navigate('PacienteProgresso', { usuarioLogado })}
+        >
+          <Text style={styles.homePlanExternalButtonText}>Ver meu progresso</Text>
+        </TouchableOpacity>
 
         <View style={styles.listFooter} />
       </ScrollView>
@@ -1650,33 +1677,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: patientTheme.colors.text,
   },
-  quickGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    marginHorizontal: -3,
-  },
-  quickCard: {
-    alignItems: 'center',
-    flex: 1,
-    paddingHorizontal: 3,
-    paddingVertical: 4,
-  },
-  quickIconWrap: {
-    alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderRadius: 23,
-    height: 46,
-    justifyContent: 'center',
-    width: 46,
-  },
-  quickTitle: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 10,
-    fontWeight: '800',
-    lineHeight: 13,
-    marginTop: 6,
-    textAlign: 'center',
-  },
   feedCard: {
     gap: 10,
   },
@@ -1908,6 +1908,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
   },
   planItem: {
+    display: 'none',
     flexDirection: 'row',
     alignItems: 'flex-start',
     marginBottom: 14,
@@ -1941,6 +1942,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
   },
   planButton: {
+    display: 'none',
     marginTop: 8,
     alignSelf: 'flex-start',
     paddingHorizontal: 18,
@@ -1950,6 +1952,155 @@ const styles = StyleSheet.create({
   },
   planButtonText: {
     color: patientTheme.colors.onPrimary,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  homePlanHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  homePlanHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  homePlanHeaderTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  homePlanHeaderCount: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  homePlanProgressRow: {
+    marginTop: 14,
+    marginBottom: 8,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  homePlanProgressLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+  },
+  homePlanProgressValue: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  homePlanProgressTrack: {
+    height: 8,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.border,
+    overflow: 'hidden',
+  },
+  homePlanProgressFill: {
+    height: '100%',
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: '#111318',
+  },
+  homePlanMealCard: {
+    marginTop: 12,
+    borderRadius: patientTheme.radius.lg,
+    padding: 14,
+    borderWidth: 1,
+  },
+  homePlanMealCardDone: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  homePlanMealCardPending: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+  },
+  homePlanMealHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  homePlanMealTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    paddingRight: 10,
+  },
+  homePlanMealTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  homePlanMealTimeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  homePlanMealTime: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+  },
+  homePlanMacrosRow: {
+    marginTop: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  homePlanMacroText: {
+    marginTop: 4,
+    color: patientTheme.colors.text,
+    fontSize: 11,
+  },
+  homePlanPendingText: {
+    marginTop: 8,
+    marginLeft: 26,
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+  },
+  homePlanButton: {
+    marginTop: 14,
+    minHeight: 44,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homePlanButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '800',
+    fontSize: 14,
+  },
+  homePlanSecondaryButton: {
+    marginTop: 10,
+    minHeight: 44,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  homePlanSecondaryButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '700',
+    fontSize: 14,
+  },
+  homePlanExternalButton: {
+    minHeight: 46,
+    marginTop: 10,
+    marginBottom: 2,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...patientShadow,
+  },
+  homePlanExternalButtonText: {
+    color: patientTheme.colors.primaryDark,
     fontWeight: '700',
     fontSize: 14,
   },

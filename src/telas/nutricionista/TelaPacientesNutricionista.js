@@ -1,1853 +1,299 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  ActivityIndicator,
-  Platform,
-  Modal,
-  TextInput,
-  KeyboardAvoidingView,
-  StatusBar,
-  RefreshControl,
-} from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../servicos/configSupabase';
-import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+  AvatarBadge,
+  FilterTabs,
+  ProgressBar,
+  RiskBadge,
+  SearchInput,
+  SectionCard,
+  nutriDesktopStyles,
+} from '../../componentes/nutricionista/NutriDesktopUI';
+import { nutritionistPatientsMock } from '../../dados/dadosNutricionistaMock';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
-import {
-  buildPatientClinicalRows,
-  buildPatientDataRows,
-} from '../../utilitarios/camposPerfilPaciente';
-import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
-import MensagemInline from '../../componentes/comum/MensagemInline';
 
-function SectionCard({ children, style }) {
-  return <View style={[styles.sectionCard, style]}>{children}</View>;
-}
-
-function ProfileInfoRow({ label, value }) {
-  return (
-    <View style={styles.profileInfoRow}>
-      <Text style={styles.profileInfoLabel}>{label}</Text>
-      <Text style={styles.profileInfoValue}>{value}</Text>
-    </View>
-  );
-}
-
-function getInitials(name) {
-  return (name || 'Paciente')
-    .split(' ')
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((item) => item[0]?.toUpperCase() || '')
-    .join('');
-}
+const filterItems = [
+  { value: 'Todos', label: 'Todos' },
+  { value: 'Diabetes', label: 'Diabetes' },
+  { value: 'Emagrecimento', label: 'Emagrecimento' },
+  { value: 'Ganho de Massa', label: 'Ganho de Massa' },
+  { value: 'Reeducacao', label: 'Reeducacao' },
+  { value: 'Prioritarios', label: 'Prioritarios' },
+];
 
 export default function GerenciarPacientesStyled({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
+  const [search, setSearch] = useState('');
+  const [activeFilter, setActiveFilter] = useState('Todos');
 
-  const [pacientes, setPacientes] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadingSalvar, setLoadingSalvar] = useState(false);
-  const [loadingExcluirId, setLoadingExcluirId] = useState(null);
-  const [modalVisible, setModalVisible] = useState(false);
-  const [modalExclusaoVisible, setModalExclusaoVisible] = useState(false);
-  const [modalPerfilVisible, setModalPerfilVisible] = useState(false);
-  const [pacienteParaExcluir, setPacienteParaExcluir] = useState(null);
-  const [pacientePerfil, setPacientePerfil] = useState(null);
-  const [perfilVisao, setPerfilVisao] = useState('patient');
-  const [feedbackEdicao, setFeedbackEdicao] = useState(null);
-  const [erroCarregamento, setErroCarregamento] = useState(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [mensagemTopo, setMensagemTopo] = useState(null);
-  const [termoBusca, setTermoBusca] = useState('');
+  const filteredPatients = useMemo(() => {
+    const normalized = String(search || '').toLowerCase().trim();
 
-  const [editandoId, setEditandoId] = useState(null);
-  const [nome, setNome] = useState('');
-  const [cpf, setCpf] = useState('');
-  const [genero, setGenero] = useState('');
-  const [email, setEmail] = useState('');
-  const [telefone, setTelefone] = useState('');
-  const [dataNascimento, setDataNascimento] = useState('');
-  const [cep, setCep] = useState('');
-  const [logradouro, setLogradouro] = useState('');
-  const [numero, setNumero] = useState('');
-  const [bairro, setBairro] = useState('');
-  const [cidade, setCidade] = useState('');
-  const [uf, setUf] = useState('');
+    return nutritionistPatientsMock.filter((patient) => {
+      const matchesSearch =
+        !normalized ||
+        [patient.name, patient.specialtyTag, patient.objective, patient.notes]
+          .some((field) => String(field || '').toLowerCase().includes(normalized));
 
-  const opcoesGenero = ['Masculino', 'Feminino', 'Diverso'];
+      const matchesFilter =
+        activeFilter === 'Todos' ||
+        (activeFilter === 'Diabetes' && patient.objective === 'Diabetes') ||
+        (activeFilter === 'Emagrecimento' && patient.objective === 'Emagrecimento') ||
+        (activeFilter === 'Ganho de Massa' && patient.objective === 'Ganho de Massa') ||
+        (activeFilter === 'Reeducacao' && patient.objective === 'Reeducacao') ||
+        (activeFilter === 'Prioritarios' && (patient.risk === 'Alto' || patient.alerts >= 3));
 
-  const getPacienteId = (paciente) => paciente?.id_paciente_uuid || null;
-
-  const formatarCpf = (valor) => {
-    const numeros = valor.replace(/\D/g, '').slice(0, 11);
-    return numeros
-      .replace(/^(\d{3})(\d)/, '$1.$2')
-      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
-      .replace(/\.(\d{3})(\d)/, '.$1-$2');
-  };
-
-  const formatarCep = (valor) => {
-    const numeros = valor.replace(/\D/g, '').slice(0, 8);
-    return numeros.replace(/^(\d{5})(\d)/, '$1-$2');
-  };
-
-  const formatarDataNascimento = (valor) => {
-    const numeros = String(valor || '').replace(/\D/g, '').slice(0, 8);
-    return numeros
-      .replace(/^(\d{2})(\d)/, '$1/$2')
-      .replace(/^(\d{2})\/(\d{2})(\d)/, '$1/$2/$3');
-  };
-
-  const formatarDataNascimentoBanco = (valor) => {
-    if (!valor) return '';
-
-    const dataSomente = String(valor).match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (dataSomente) {
-      const [, ano, mes, dia] = dataSomente;
-      return `${dia}/${mes}/${ano}`;
-    }
-
-    const data = new Date(valor);
-    if (Number.isNaN(data.getTime())) return '';
-
-    return data.toLocaleDateString('pt-BR', {
-      day: '2-digit',
-      month: '2-digit',
-      year: 'numeric',
+      return matchesSearch && matchesFilter;
     });
-  };
+  }, [search, activeFilter]);
 
-  const converterDataNascimentoParaBanco = (valor) => {
-    const numeros = String(valor || '').replace(/\D/g, '');
+  const summary = useMemo(() => {
+    const total = nutritionistPatientsMock.length;
+    const highRisk = nutritionistPatientsMock.filter((item) => item.risk === 'Alto').length;
+    const withAlerts = nutritionistPatientsMock.filter((item) => item.alerts > 0).length;
+    const avgAdherence = Math.round(
+      nutritionistPatientsMock.reduce((sum, item) => sum + item.adherence, 0) / total
+    );
 
-    if (!numeros) return null;
-    if (numeros.length !== 8) return '';
-
-    const dia = Number(numeros.slice(0, 2));
-    const mes = Number(numeros.slice(2, 4));
-    const ano = Number(numeros.slice(4, 8));
-    const data = new Date(ano, mes - 1, dia);
-
-    if (
-      data.getFullYear() !== ano ||
-      data.getMonth() !== mes - 1 ||
-      data.getDate() !== dia
-    ) {
-      return '';
-    }
-
-    return `${ano}-${String(mes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`;
-  };
-
-  const exibirCpf = (valor) => {
-    const cpfLimpo = String(valor || '').replace(/\D/g, '');
-    if (cpfLimpo.length !== 11) return valor || 'Nao informado';
-    return cpfLimpo
-      .replace(/^(\d{3})(\d)/, '$1.$2')
-      .replace(/^(\d{3})\.(\d{3})(\d)/, '$1.$2.$3')
-      .replace(/\.(\d{3})(\d)/, '.$1-$2');
-  };
-
-  const validarEmail = (valor) => {
-    const regex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return regex.test(valor.trim().toLowerCase());
-  };
-
-  const validarCep = (valor) => valor.replace(/\D/g, '').length === 8;
-
-  const validarCpf = (valor) => {
-    const cpfLimpo = valor.replace(/\D/g, '');
-
-    if (cpfLimpo.length !== 11) return false;
-    if (/^(\d)\1{10}$/.test(cpfLimpo)) return false;
-
-    let soma = 0;
-    for (let i = 0; i < 9; i += 1) {
-      soma += Number(cpfLimpo.charAt(i)) * (10 - i);
-    }
-
-    let resto = (soma * 10) % 11;
-    if (resto === 10) resto = 0;
-    if (resto !== Number(cpfLimpo.charAt(9))) return false;
-
-    soma = 0;
-    for (let i = 0; i < 10; i += 1) {
-      soma += Number(cpfLimpo.charAt(i)) * (11 - i);
-    }
-
-    resto = (soma * 10) % 11;
-    if (resto === 10) resto = 0;
-
-    return resto === Number(cpfLimpo.charAt(10));
-  };
-
-  const limparFormulario = () => {
-    setEditandoId(null);
-    setNome('');
-    setCpf('');
-    setGenero('');
-    setEmail('');
-    setTelefone('');
-    setDataNascimento('');
-    setCep('');
-    setLogradouro('');
-    setNumero('');
-    setBairro('');
-    setCidade('');
-    setUf('');
-    setFeedbackEdicao(null);
-  };
-
-  const fecharModal = () => {
-    setModalVisible(false);
-    limparFormulario();
-  };
-
-  const carregarPacientes = useCallback(async (options = {}) => {
-    const { silent = false } = options;
-    try {
-      if (!silent) {
-        setLoading(true);
-      }
-      setErroCarregamento(null);
-
-      const { data, error } = await supabase
-        .from('paciente')
-        .select('*')
-        .or('excluido.is.null,excluido.eq.false')
-        .order('nome_completo', { ascending: true });
-
-      if (error) throw error;
-
-      setPacientes(data || []);
-    } catch (error) {
-      console.log('Erro ao carregar pacientes:', error);
-      setErroCarregamento(
-        'Não foi possível carregar os pacientes. Verifique a conexão e tente novamente.'
-      );
-    } finally {
-      if (!silent) {
-        setLoading(false);
-      }
-    }
+    return [
+      { id: 's1', label: 'Na carteira', value: total },
+      { id: 's2', label: 'Alto risco', value: highRisk },
+      { id: 's3', label: 'Com alertas', value: withAlerts },
+      { id: 's4', label: 'Adesao media', value: `${avgAdherence}%` },
+    ];
   }, []);
 
-  const onRefreshPacientes = useCallback(async () => {
-    setRefreshing(true);
-    await carregarPacientes({ silent: true });
-    setRefreshing(false);
-  }, [carregarPacientes]);
-
-  useEffect(() => {
-    carregarPacientes();
-
-    const unsubscribe = navigation.addListener('focus', () => {
-      carregarPacientes();
-    });
-
-    return unsubscribe;
-  }, [navigation, carregarPacientes]);
-
-  const abrirModalEdicao = (paciente) => {
-    setFeedbackEdicao(null);
-    setEditandoId(getPacienteId(paciente));
-    setNome(paciente.nome_completo || '');
-    setCpf(formatarCpf(String(paciente.cpf_paciente || '')));
-    setGenero(paciente.sexo_biologico || '');
-    setEmail(paciente.email_pac || '');
-    setTelefone(paciente.telefone || '');
-    setDataNascimento(formatarDataNascimentoBanco(paciente.data_nascimento));
-    setCep(formatarCep(String(paciente.cep || '')));
-    setLogradouro(paciente.logradouro || '');
-    setNumero(paciente.numero || '');
-    setBairro(paciente.bairro || '');
-    setCidade(paciente.cidade || '');
-    setUf((paciente.uf || '').toUpperCase());
-    setModalVisible(true);
-  };
-
-  const buscarEnderecoPorCep = async () => {
-    const cepLimpo = cep.replace(/\D/g, '');
-
-    if (cepLimpo.length !== 8) return;
-
-    try {
-      const response = await fetch(`https://viacep.com.br/ws/${cepLimpo}/json/`);
-      const data = await response.json();
-
-      if (data.erro) {
-        setFeedbackEdicao({
-          tipo: 'erro',
-          texto: 'Não encontramos esse CEP.',
-        });
-        return;
-      }
-
-      setLogradouro(data.logradouro || '');
-      setBairro(data.bairro || '');
-      setCidade(data.localidade || '');
-      setUf((data.uf || '').toUpperCase());
-    } catch (error) {
-      console.log('Erro ao buscar CEP:', error);
-    }
-  };
-
-  const verificarDuplicidadeEdicao = async (idAtual, cpfLimpo, emailLimpo) => {
-    const { data, error } = await supabase
-      .from('paciente')
-      .select('id_paciente_uuid, cpf_paciente, email_pac')
-      .or(`cpf_paciente.eq.${cpfLimpo},email_pac.eq.${emailLimpo}`);
-
-    if (error) throw error;
-
-    const conflitos = (data || []).filter((item) => item.id_paciente_uuid !== idAtual);
-
-    if (conflitos.length > 0) {
-      if (conflitos.some((item) => item.cpf_paciente === cpfLimpo)) {
-        throw new Error('Ja existe outro paciente cadastrado com esse CPF.');
-      }
-
-      if (conflitos.some((item) => item.email_pac === emailLimpo)) {
-        throw new Error('Ja existe outro paciente cadastrado com esse e-mail.');
-      }
-    }
-  };
-
-  const salvarEdicao = async () => {
-    const nomeLimpo = nome.trim();
-    const cpfLimpo = cpf.replace(/\D/g, '');
-    const emailLimpo = email.trim().toLowerCase();
-    const telefoneLimpo = telefone.trim();
-    const dataNascimentoBanco = converterDataNascimentoParaBanco(dataNascimento);
-    const cepLimpo = cep.replace(/\D/g, '');
-    const generoLimpo = genero.trim();
-    const ufLimpo = uf.trim().toUpperCase();
-
-    if (!editandoId) {
-      const mensagem = 'Paciente sem identificador para atualizar.';
-      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      return;
-    }
-
-    if (!nomeLimpo || !cpfLimpo || !emailLimpo) {
-      const mensagem = 'Preencha nome, CPF e e-mail para salvar as alteracoes.';
-      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      return;
-    }
-
-    if (!validarCpf(cpfLimpo)) {
-      const mensagem = 'Digite um CPF valido.';
-      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      return;
-    }
-
-    if (!validarEmail(emailLimpo)) {
-      const mensagem = 'Digite um e-mail valido.';
-      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      return;
-    }
-
-    if (dataNascimento.trim() && !dataNascimentoBanco) {
-      const mensagem = 'Digite uma data de nascimento valida no formato DD/MM/AAAA.';
-      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      return;
-    }
-
-    if (cepLimpo && !validarCep(cepLimpo)) {
-      const mensagem = 'Digite um CEP valido com 8 numeros.';
-      setFeedbackEdicao({ tipo: 'erro', texto: mensagem });
-      return;
-    }
-
-    try {
-      setLoadingSalvar(true);
-      setFeedbackEdicao(null);
-
-      await verificarDuplicidadeEdicao(editandoId, cpfLimpo, emailLimpo);
-
-      const { data, error } = await supabase
-        .from('paciente')
-        .update({
-          nome_completo: nomeLimpo,
-          cpf_paciente: cpfLimpo,
-          sexo_biologico: generoLimpo || null,
-          email_pac: emailLimpo,
-          telefone: telefoneLimpo || null,
-          data_nascimento: dataNascimentoBanco || null,
-          cep: cepLimpo || null,
-          logradouro: logradouro.trim() || null,
-          numero: numero.trim() || null,
-          bairro: bairro.trim() || null,
-          cidade: cidade.trim() || null,
-          uf: ufLimpo || null,
-        })
-        .eq('id_paciente_uuid', editandoId)
-        .select('*')
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data?.id_paciente_uuid) {
-        throw new Error('O banco nao confirmou a atualizacao do paciente.');
-      }
-
-      await registrarLogAuditoria({
-        actor: usuarioLogado,
-        actorType: 'nutricionista',
-        targetPatientId: data.id_paciente_uuid,
-        action: 'paciente_atualizado_por_nutricionista',
-        entity: 'paciente',
-        entityId: data.id_paciente_uuid,
-        origin: 'gestao_pacientes',
-        details: {
-          camposAtualizados: [
-            'nome_completo',
-            'cpf_paciente',
-            'sexo_biologico',
-            'email_pac',
-            'telefone',
-            'data_nascimento',
-            'cep',
-            'logradouro',
-            'numero',
-            'bairro',
-            'cidade',
-            'uf',
-          ],
-        },
-      });
-
-      setPacientes((atual) =>
-        atual.map((item) =>
-          getPacienteId(item) === data.id_paciente_uuid ? data : item
-        )
-      );
-
-      setFeedbackEdicao({ tipo: 'sucesso', texto: 'Paciente atualizado com sucesso.' });
-      fecharModal();
-      await carregarPacientes();
-    } catch (error) {
-      console.log('Erro ao atualizar paciente:', error);
-      setFeedbackEdicao({
-        tipo: 'erro',
-        texto:
-          error.message ||
-          'Não foi possível atualizar o paciente. Verifique a conexão e tente novamente.',
-      });
-    } finally {
-      setLoadingSalvar(false);
-    }
-  };
-
-  const excluirLogicamente = async (paciente) => {
-    const pacienteId = getPacienteId(paciente);
-
-    try {
-      if (!pacienteId) {
-        throw new Error('Paciente sem identificador para exclusao.');
-      }
-
-      setLoadingExcluirId(pacienteId);
-
-      const { data, error } = await supabase
-        .from('paciente')
-        .update({
-          excluido: true,
-          data_exclusao: new Date().toISOString(),
-        })
-        .eq('id_paciente_uuid', pacienteId)
-        .select('id_paciente_uuid, excluido, data_exclusao')
-        .maybeSingle();
-
-      if (error) throw error;
-      if (!data?.id_paciente_uuid || data.excluido !== true) {
-        throw new Error('O banco nao confirmou a exclusao logica do paciente.');
-      }
-
-      await registrarLogAuditoria({
-        actor: usuarioLogado,
-        actorType: 'nutricionista',
-        targetPatientId: data.id_paciente_uuid,
-        action: 'paciente_excluido_logicamente',
-        entity: 'paciente',
-        entityId: data.id_paciente_uuid,
-        origin: 'gestao_pacientes',
-        details: {
-          dataExclusao: data.data_exclusao,
-        },
-      });
-
-      setPacientes((atual) => atual.filter((item) => getPacienteId(item) !== pacienteId));
-      setModalExclusaoVisible(false);
-      setPacienteParaExcluir(null);
-
-      setMensagemTopo({
-        tipo: 'sucesso',
-        texto: 'Paciente excluído logicamente com sucesso.',
-      });
-      carregarPacientes();
-    } catch (error) {
-      console.log('Erro ao excluir paciente:', error);
-      setMensagemTopo({
-        tipo: 'erro',
-        texto:
-          'Não foi possível excluir o paciente. Verifique a conexão e tente novamente.',
-      });
-    } finally {
-      setLoadingExcluirId(null);
-    }
-  };
-
-  const confirmarExclusao = (paciente) => {
-    setPacienteParaExcluir(paciente);
-    setModalExclusaoVisible(true);
-  };
-
-  const abrirModalPerfil = (paciente) => {
-    setPacientePerfil(paciente);
-    setPerfilVisao('patient');
-    setModalPerfilVisible(true);
-  };
-
-  const fecharModalPerfil = () => {
-    setModalPerfilVisible(false);
-    setPacientePerfil(null);
-    setPerfilVisao('patient');
-  };
-
-  const nomeNutri =
-    usuarioLogado?.nome_completo_nutri ||
-    usuarioLogado?.nome_nutri ||
-    'Nutricionista';
-
-  const normalizarBusca = (valor) =>
-    String(valor || '')
-      .normalize('NFD')
-      .replace(/[\u0300-\u036f]/g, '')
-      .toLowerCase()
-      .trim();
-
-  const pacientesFiltrados = useMemo(() => {
-    const busca = normalizarBusca(termoBusca);
-
-    if (!busca) {
-      return pacientes;
-    }
-
-    return pacientes.filter((paciente) => {
-      const camposBusca = [
-        paciente.nome_completo,
-        paciente.email_pac,
-        paciente.cpf_paciente,
-        paciente.telefone,
-        paciente.cidade,
-        paciente.uf,
-      ];
-
-      return camposBusca
-        .map((campo) => normalizarBusca(campo))
-        .some((campo) => campo.includes(busca));
-    });
-  }, [pacientes, termoBusca]);
-
-  const totalPacientes = pacientes.length;
-  const totalCidades = new Set(
-    pacientes
-      .map((item) => `${item.cidade || ''}-${item.uf || ''}`)
-      .filter((item) => item !== '-')
-  ).size;
-  const totalCadastrosCompletos = pacientes.filter(
-    (item) => item.logradouro && item.numero && item.bairro && item.cidade && item.uf
-  ).length;
-  const perfilRows =
-    perfilVisao === 'patient'
-      ? buildPatientDataRows(pacientePerfil || {})
-      : buildPatientClinicalRows(pacientePerfil || {});
-
   return (
-    <SafeAreaView
-      edges={Platform.OS === 'web' ? undefined : []}
-      style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
+    <LayoutNutricionista
+      navigation={navigation}
+      route={route}
+      usuarioLogado={usuarioLogado}
+      title="Pacientes"
+      subtitle="CRM clinico com busca rapida, filtros por objetivo e triagem metabolica."
+      showTabBar={route?.name === 'GerenciarPacientes'}
     >
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={patientTheme.colors.background}
-      />
+      <View style={nutriDesktopStyles.pageGap}>
+        <SearchInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Buscar por nome, objetivo, risco ou observacao"
+        />
 
-      <ScrollView
-        style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
-        contentContainerStyle={[
-          styles.content,
-          Platform.OS === 'web' && styles.webContent,
-        ]}
-        keyboardShouldPersistTaps="handled"
-        showsVerticalScrollIndicator={false}
-        nestedScrollEnabled
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefreshPacientes} />
-        }
-      >
-        {mensagemTopo?.texto ? (
-          <MensagemInline
-            tipo={mensagemTopo.tipo || 'aviso'}
-            texto={mensagemTopo.texto}
-            onFechar={() => setMensagemTopo(null)}
-            autoOcultarMs={mensagemTopo.tipo === 'sucesso' ? 4000 : 0}
-          />
-        ) : null}
-        {!loading && erroCarregamento ? (
-          <EstadoErroCarregamento onTentarNovamente={() => carregarPacientes()} loading={loading} />
-        ) : null}
-        <View style={styles.headerRow}>
-          <View style={styles.headerIconGroup}>
-            <TouchableOpacity style={styles.headerIconButton} onPress={carregarPacientes}>
-              <Ionicons
-                name="refresh-outline"
-                size={20}
-                color={patientTheme.colors.text}
-              />
-            </TouchableOpacity>
-          </View>
+        <View style={styles.summaryGrid}>
+          {summary.map((item) => (
+            <SectionCard key={item.id} style={styles.summaryCard}>
+              <Text style={styles.summaryLabel}>{item.label}</Text>
+              <Text style={styles.summaryValue}>{item.value}</Text>
+            </SectionCard>
+          ))}
         </View>
 
-        <Text style={styles.greeting}>Gerenciar pacientes</Text>
-        <Text style={styles.headerSubtitle}>
-          Carteira ativa de {nomeNutri}. Edite cadastros, revise dados e arquive
-          pacientes com a mesma linguagem visual da experiencia do paciente.
-        </Text>
+        <FilterTabs items={filterItems} active={activeFilter} onChange={setActiveFilter} />
 
-        <SectionCard style={styles.heroCard}>
-          <View style={styles.heroTopRow}>
-            <View style={styles.heroCopy}>
-              <Text style={styles.eyebrow}>Carteira ativa</Text>
-              <Text style={styles.heroValue}>{totalPacientes} pacientes</Text>
-            </View>
-
-            <View style={styles.heroBadge}>
-              <Ionicons
-                name="people-outline"
-                size={18}
-                color={patientTheme.colors.primaryDark}
-              />
-              <Text style={styles.heroBadgeText}>Gestao clinica</Text>
-            </View>
-          </View>
-
-          <Text style={styles.heroHelper}>
-            CRN/UF: {usuarioLogado?.crm_numero || 'Nao informado'}
-          </Text>
-          <Text style={styles.heroHelper}>
-            Cadastros com endereco completo: {totalCadastrosCompletos}
-          </Text>
-
-          <View style={styles.metricRow}>
-            <View style={styles.metricPill}>
-              <Text style={styles.metricLabel}>Ativos</Text>
-              <Text style={styles.metricValue}>{totalPacientes}</Text>
-            </View>
-
-            <View style={styles.metricPill}>
-              <Text style={styles.metricLabel}>Cidades</Text>
-              <Text style={styles.metricValue}>{totalCidades}</Text>
-            </View>
-          </View>
-        </SectionCard>
-
-        <View style={styles.summaryRow}>
-          <SectionCard style={styles.summaryCard}>
-            <Ionicons
-              name="clipboard-outline"
-              size={18}
-              color={patientTheme.colors.primaryDark}
-            />
-            <Text style={styles.summaryLabel}>Prontos para editar</Text>
-            <Text style={styles.summaryValue}>{totalPacientes}</Text>
-          </SectionCard>
-
-          <SectionCard style={styles.summaryCard}>
-            <Ionicons
-              name="location-outline"
-              size={18}
-              color={patientTheme.colors.primaryDark}
-            />
-            <Text style={styles.summaryLabel}>Cidades atendidas</Text>
-            <Text style={styles.summaryValue}>{totalCidades}</Text>
-          </SectionCard>
-
-          <SectionCard style={styles.summaryCard}>
-            <Ionicons
-              name="checkmark-done-outline"
-              size={18}
-              color={patientTheme.colors.primaryDark}
-            />
-            <Text style={styles.summaryLabel}>Cadastros completos</Text>
-            <Text style={styles.summaryValue}>{totalCadastrosCompletos}</Text>
-          </SectionCard>
-        </View>
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Pacientes ativos</Text>
-          <Text style={styles.sectionHelper}>Atualize a lista sempre que precisar.</Text>
-        </View>
-
-        <View style={styles.searchContainer}>
-          <Ionicons name="search-outline" size={20} color={patientTheme.colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            value={termoBusca}
-            onChangeText={setTermoBusca}
-            placeholder="Pesquisar paciente"
-            placeholderTextColor={patientTheme.colors.textMuted}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-          />
-          {termoBusca ? (
+        <View style={styles.patientGrid}>
+          {filteredPatients.map((patient) => (
             <TouchableOpacity
-              style={styles.clearSearchButton}
-              onPress={() => setTermoBusca('')}
-              accessibilityRole="button"
-              accessibilityLabel="Limpar pesquisa"
-            >
-              <Ionicons name="close" size={18} color={patientTheme.colors.textMuted} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-
-        {loading ? (
-          <SectionCard style={styles.loadingCard}>
-            <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-            <Text style={styles.loadingText}>Carregando pacientes...</Text>
-          </SectionCard>
-        ) : pacientes.length === 0 ? (
-          <SectionCard style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Nenhum paciente cadastrado</Text>
-            <Text style={styles.emptyText}>
-              Cadastre um paciente na tela de cadastro para ele aparecer aqui.
-            </Text>
-          </SectionCard>
-        ) : pacientesFiltrados.length === 0 ? (
-          <SectionCard style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Nenhum paciente encontrado</Text>
-            <Text style={styles.emptyText}>
-              Tente buscar por nome, CPF, e-mail, telefone ou cidade.
-            </Text>
-          </SectionCard>
-        ) : (
-          pacientes.map((paciente) => (
-            <TouchableOpacity
-              key={getPacienteId(paciente) || paciente.email_pac || paciente.cpf_paciente}
-              style={[styles.sectionCard, styles.patientCard]}
-              activeOpacity={0.86}
-              onPress={() => abrirModalPerfil(paciente)}
-              accessibilityRole="button"
-              accessibilityLabel={`Abrir perfil de ${
-                paciente.nome_completo || 'paciente'
-              }`}
-            >
-              <View style={styles.patientHeader}>
-                <View style={styles.patientAvatar}>
-                  <Text style={styles.patientAvatarText}>
-                    {getInitials(paciente.nome_completo)}
-                  </Text>
-                </View>
-
-                <View style={styles.patientHeaderCopy}>
-                  <Text style={styles.patientName}>
-                    {paciente.nome_completo || 'Paciente sem nome'}
-                  </Text>
-                  <Text style={styles.patientMeta}>
-                    {paciente.cidade || 'Cidade nao informada'}
-                    {paciente.uf ? ` / ${paciente.uf}` : ''}
-                  </Text>
-                </View>
-
-                <Ionicons
-                  name="chevron-forward"
-                  size={20}
-                  color={patientTheme.colors.textMuted}
-                />
-              </View>
-
-              <View style={styles.infoGrid}>
-                <View style={styles.infoPill}>
-                  <Ionicons
-                    name="card-outline"
-                    size={16}
-                    color={patientTheme.colors.primaryDark}
-                  />
-                  <Text style={styles.infoPillText}>
-                    CPF: {exibirCpf(paciente.cpf_paciente)}
-                  </Text>
-                </View>
-
-                <View style={styles.infoPill}>
-                  <Ionicons
-                    name="person-outline"
-                    size={16}
-                    color={patientTheme.colors.primaryDark}
-                  />
-                  <Text style={styles.infoPillText}>
-                    Genero: {paciente.sexo_biologico || 'Nao informado'}
-                  </Text>
-                </View>
-              </View>
-
-              <Text style={styles.patientInfo}>
-                E-mail: {paciente.email_pac || 'Nao informado'}
-              </Text>
-
-              <View style={styles.addressCard}>
-                <Text style={styles.addressTitle}>Endereco</Text>
-                <Text style={styles.addressText}>
-                  {paciente.logradouro || 'Nao informado'}, {paciente.numero || 's/n'} -{' '}
-                  {paciente.bairro || 'Sem bairro'}
-                </Text>
-                <Text style={styles.addressText}>
-                  {paciente.cidade || 'Sem cidade'} / {paciente.uf || '--'} | CEP:{' '}
-                  {formatarCep(String(paciente.cep || '')) || 'Nao informado'}
-                </Text>
-              </View>
-
-              <View style={styles.actionsRow}>
-                <TouchableOpacity
-                  style={styles.profileButton}
-                  onPress={() => abrirModalPerfil(paciente)}
-                >
-                  <Ionicons
-                    name="document-text-outline"
-                    size={18}
-                    color={patientTheme.colors.primaryDark}
-                  />
-                  <Text style={styles.profileButtonText}>Perfil</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.prontuarioInlineButton}
-                  onPress={() => {
-                    const pacienteId = getPacienteId(paciente);
-                    if (!pacienteId) {
-                      setMensagemTopo({
-                        tipo: 'aviso',
-                        texto: 'Paciente sem identificador para abrir prontuário.',
-                      });
-                      return;
-                    }
-                    navigation.navigate('NutriProntuarioPaciente', {
-                      usuarioLogado,
-                      pacienteId,
-                      paciente,
-                    });
-                  }}
-                >
-                  <Ionicons
-                    name="reader-outline"
-                    size={18}
-                    color={patientTheme.colors.onPrimary}
-                  />
-                  <Text style={styles.prontuarioInlineButtonText}>Prontuário</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.editButton}
-                  onPress={() => abrirModalEdicao(paciente)}
-                >
-                  <Ionicons
-                    name="create-outline"
-                    size={18}
-                    color={patientTheme.colors.text}
-                  />
-                  <Text style={styles.editButtonText}>Editar</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.deleteButton}
-                  onPress={() => confirmarExclusao(paciente)}
-                  disabled={loadingExcluirId === getPacienteId(paciente)}
-                >
-                  {loadingExcluirId === getPacienteId(paciente) ? (
-                    <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                  ) : (
-                    <>
-                      <Ionicons
-                        name="trash-outline"
-                        size={18}
-                        color={patientTheme.colors.onPrimary}
-                      />
-                      <Text style={styles.deleteButtonText}>Excluir</Text>
-                    </>
-                  )}
-                </TouchableOpacity>
-              </View>
-            </TouchableOpacity>
-          ))
-        )}
-      </ScrollView>
-
-      <Modal visible={modalPerfilVisible} transparent animationType="slide">
-        <View style={styles.modalOverlay}>
-          <View style={styles.profileModalContent}>
-            <View style={styles.modalHeader}>
-              <View style={styles.modalHeaderCopy}>
-                <Text style={styles.modalTitle}>Perfil completo</Text>
-                <Text style={styles.modalSubtitle}>
-                  {pacientePerfil?.nome_completo || 'Paciente'} com dados separados para análise.
-                </Text>
-              </View>
-
-              <TouchableOpacity style={styles.closeButton} onPress={fecharModalPerfil}>
-                <Ionicons name="close" size={20} color={patientTheme.colors.text} />
-              </TouchableOpacity>
-            </View>
-
-            <TouchableOpacity
-              style={styles.prontuarioButton}
-              onPress={() => {
-                if (!pacientePerfil?.id_paciente_uuid) {
-                  setMensagemTopo({
-                    tipo: 'aviso',
-                    texto: 'Paciente sem identificador para abrir prontuário.',
-                  });
-                  return;
-                }
-                fecharModalPerfil();
+              key={patient.id}
+              style={[styles.patientCard, patient.risk === 'Alto' && styles.patientCardAlert]}
+              activeOpacity={0.92}
+              onPress={() =>
                 navigation.navigate('NutriProntuarioPaciente', {
                   usuarioLogado,
-                  pacienteId: pacientePerfil.id_paciente_uuid,
-                  paciente: pacientePerfil,
-                });
-              }}
+                  pacienteId: patient.id,
+                })
+              }
             >
-              <Ionicons
-                name="document-text-outline"
-                size={18}
-                color={patientTheme.colors.onPrimary}
+              <View style={styles.patientHeader}>
+                <AvatarBadge name={patient.name} size={48} subtle />
+                <View style={styles.patientCopy}>
+                  <Text style={styles.patientName}>{patient.name}</Text>
+                  <Text style={styles.patientMeta}>
+                    {patient.specialtyTag} · {patient.age} anos · IMC {patient.bmi}
+                  </Text>
+                </View>
+                <RiskBadge risk={`${patient.risk} risco`} />
+              </View>
+
+              <View style={styles.patientTags}>
+                <View style={styles.tagPill}>
+                  <Text style={styles.tagText}>{patient.objective}</Text>
+                </View>
+                {patient.unread ? (
+                  <View style={styles.tagPillGreen}>
+                    <Text style={styles.tagTextGreen}>{patient.unread} mensagens</Text>
+                  </View>
+                ) : null}
+              </View>
+
+              <Text style={styles.patientNote}>{patient.notes}</Text>
+
+              <View style={styles.metricInlineRow}>
+                <Text style={styles.metricInlineLabel}>Adesao</Text>
+                <Text style={styles.metricInlineValue}>{patient.adherence}%</Text>
+              </View>
+              <ProgressBar
+                value={patient.adherence}
+                tone={patient.adherence < 70 ? 'danger' : patient.adherence < 80 ? 'warning' : 'success'}
               />
-              <Text style={styles.prontuarioButtonText}>Abrir prontuário</Text>
+
+              <View style={styles.bottomRow}>
+                <View style={styles.bottomMetric}>
+                  <Text style={styles.bottomMetricLabel}>Alertas</Text>
+                  <Text style={styles.bottomMetricValue}>{patient.alerts}</Text>
+                </View>
+                <View style={styles.bottomMetric}>
+                  <Text style={styles.bottomMetricLabel}>Glicose</Text>
+                  <Text style={styles.bottomMetricValue}>{patient.latestGlucose} mg/dL</Text>
+                </View>
+                <View style={styles.bottomMetric}>
+                  <Text style={styles.bottomMetricLabel}>Ultima atualizacao</Text>
+                  <Text style={styles.bottomMetricValue}>{patient.updatedAt}</Text>
+                </View>
+              </View>
             </TouchableOpacity>
-
-            <View style={styles.profileTabRow}>
-              <TouchableOpacity
-                style={[
-                  styles.profileTabButton,
-                  perfilVisao === 'patient' && styles.profileTabButtonActive,
-                ]}
-                onPress={() => setPerfilVisao('patient')}
-              >
-                <Text
-                  style={[
-                    styles.profileTabText,
-                    perfilVisao === 'patient' && styles.profileTabTextActive,
-                  ]}
-                >
-                  Dados do paciente
-                </Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={[
-                  styles.profileTabButton,
-                  perfilVisao === 'clinical' && styles.profileTabButtonActive,
-                ]}
-                onPress={() => setPerfilVisao('clinical')}
-              >
-                <Text
-                  style={[
-                    styles.profileTabText,
-                    perfilVisao === 'clinical' && styles.profileTabTextActive,
-                  ]}
-                >
-                  Dados clínicos
-                </Text>
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.profileModalScroll}
-              contentContainerStyle={styles.profileModalScrollContent}
-              showsVerticalScrollIndicator={false}
-            >
-              {perfilRows.map((row) => (
-                <ProfileInfoRow
-                  key={`${perfilVisao}-${row.label}`}
-                  label={row.label}
-                  value={row.value}
-                />
-              ))}
-            </ScrollView>
-          </View>
+          ))}
         </View>
-      </Modal>
-
-      <Modal visible={modalVisible} transparent animationType="slide">
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        >
-          <View style={styles.modalContent}>
-            <ScrollView
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="always"
-            >
-              <View style={styles.modalHeader}>
-                <View>
-                  <Text style={styles.modalTitle}>Editar paciente</Text>
-                  <Text style={styles.modalSubtitle}>
-                    Atualize os dados e confirme o cadastro.
-                  </Text>
-                </View>
-
-                <TouchableOpacity style={styles.closeButton} onPress={fecharModal}>
-                  <Ionicons name="close" size={20} color={patientTheme.colors.text} />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.label}>Nome completo</Text>
-              <TextInput
-                style={styles.input}
-                value={nome}
-                onChangeText={setNome}
-                placeholder="Nome completo"
-                placeholderTextColor={patientTheme.colors.textMuted}
-              />
-
-              <Text style={styles.label}>CPF</Text>
-              <TextInput
-                style={styles.input}
-                value={cpf}
-                onChangeText={(valor) => setCpf(formatarCpf(valor))}
-                placeholder="000.000.000-00"
-                placeholderTextColor={patientTheme.colors.textMuted}
-                keyboardType="numeric"
-                maxLength={14}
-              />
-
-              <Text style={styles.label}>Genero</Text>
-              <View style={styles.genderRow}>
-                {opcoesGenero.map((opcao) => {
-                  const ativo = genero === opcao;
-
-                  return (
-                    <TouchableOpacity
-                      key={opcao}
-                      style={[styles.genderButton, ativo && styles.genderButtonActive]}
-                      onPress={() => setGenero(opcao)}
-                    >
-                      <Text
-                        style={[
-                          styles.genderButtonText,
-                          ativo && styles.genderButtonTextActive,
-                        ]}
-                      >
-                        {opcao}
-                      </Text>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-
-              <Text style={styles.label}>E-mail</Text>
-              <TextInput
-                style={styles.input}
-                value={email}
-                onChangeText={setEmail}
-                placeholder="email@exemplo.com"
-                placeholderTextColor={patientTheme.colors.textMuted}
-                autoCapitalize="none"
-                keyboardType="email-address"
-              />
-
-              <Text style={styles.label}>Telefone</Text>
-              <TextInput
-                style={styles.input}
-                value={telefone}
-                onChangeText={setTelefone}
-                placeholder="(00) 00000-0000"
-                placeholderTextColor={patientTheme.colors.textMuted}
-                keyboardType="phone-pad"
-              />
-
-              <Text style={styles.label}>Data de nascimento</Text>
-              <TextInput
-                style={styles.input}
-                value={dataNascimento}
-                onChangeText={(valor) => setDataNascimento(formatarDataNascimento(valor))}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor={patientTheme.colors.textMuted}
-                keyboardType="numeric"
-                maxLength={10}
-              />
-
-              <Text style={styles.label}>CEP</Text>
-              <TextInput
-                style={styles.input}
-                value={cep}
-                onChangeText={(valor) => setCep(formatarCep(valor))}
-                onBlur={buscarEnderecoPorCep}
-                placeholder="00000-000"
-                placeholderTextColor={patientTheme.colors.textMuted}
-                keyboardType="numeric"
-                maxLength={9}
-              />
-
-              <Text style={styles.label}>Logradouro</Text>
-              <TextInput
-                style={styles.input}
-                value={logradouro}
-                onChangeText={setLogradouro}
-                placeholder="Rua, avenida..."
-                placeholderTextColor={patientTheme.colors.textMuted}
-              />
-
-              <Text style={styles.label}>Numero</Text>
-              <TextInput
-                style={styles.input}
-                value={numero}
-                onChangeText={setNumero}
-                placeholder="123"
-                placeholderTextColor={patientTheme.colors.textMuted}
-              />
-
-              <Text style={styles.label}>Bairro</Text>
-              <TextInput
-                style={styles.input}
-                value={bairro}
-                onChangeText={setBairro}
-                placeholder="Bairro"
-                placeholderTextColor={patientTheme.colors.textMuted}
-              />
-
-              <View style={styles.formRow}>
-                <View style={styles.cityContainer}>
-                  <Text style={styles.label}>Cidade</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={cidade}
-                    onChangeText={setCidade}
-                    placeholder="Cidade"
-                    placeholderTextColor={patientTheme.colors.textMuted}
-                  />
-                </View>
-
-                <View style={styles.ufContainer}>
-                  <Text style={styles.label}>UF</Text>
-                  <TextInput
-                    style={styles.input}
-                    value={uf}
-                    onChangeText={(valor) => setUf(valor.toUpperCase())}
-                    placeholder="SP"
-                    placeholderTextColor={patientTheme.colors.textMuted}
-                    autoCapitalize="characters"
-                    maxLength={2}
-                  />
-                </View>
-              </View>
-
-              {feedbackEdicao ? (
-                <View
-                  style={[
-                    styles.feedbackBox,
-                    feedbackEdicao.tipo === 'erro' && styles.feedbackBoxErro,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.feedbackText,
-                      feedbackEdicao.tipo === 'erro' && styles.feedbackTextErro,
-                    ]}
-                  >
-                    {feedbackEdicao.texto}
-                  </Text>
-                </View>
-              ) : null}
-
-              <TouchableOpacity
-                style={styles.saveButton}
-                onPress={salvarEdicao}
-                disabled={loadingSalvar}
-              >
-                {loadingSalvar ? (
-                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                ) : (
-                  <Text style={styles.saveButtonText}>Salvar alteracoes</Text>
-                )}
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.cancelButton} onPress={fecharModal}>
-                <Text style={styles.cancelButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-            </ScrollView>
-          </View>
-        </KeyboardAvoidingView>
-      </Modal>
-
-      <Modal visible={modalExclusaoVisible} transparent animationType="fade">
-        <View style={styles.modalOverlay}>
-          <View style={styles.confirmModalContent}>
-            <Text style={styles.confirmTitle}>Excluir paciente</Text>
-            <Text style={styles.confirmText}>
-              Deseja excluir logicamente {pacienteParaExcluir?.nome_completo || 'este paciente'}?
-            </Text>
-
-            <View style={styles.confirmActions}>
-              <TouchableOpacity
-                style={styles.confirmCancelButton}
-                onPress={() => {
-                  if (loadingExcluirId) return;
-                  setModalExclusaoVisible(false);
-                  setPacienteParaExcluir(null);
-                }}
-              >
-                <Text style={styles.confirmCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.confirmDeleteButton}
-                onPress={() => excluirLogicamente(pacienteParaExcluir)}
-                disabled={
-                  !pacienteParaExcluir ||
-                  loadingExcluirId === getPacienteId(pacienteParaExcluir)
-                }
-              >
-                {loadingExcluirId === getPacienteId(pacienteParaExcluir) ? (
-                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                ) : (
-                  <Text style={styles.confirmDeleteText}>Excluir</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-    </SafeAreaView>
+      </View>
+    </LayoutNutricionista>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: patientTheme.colors.background,
+  summaryGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
   },
-  containerWeb: {
-    minHeight: '100%',
-    overflow: 'visible',
-  },
-  scroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  webScroll: {
-    overflowY: 'visible',
-    overflowX: 'hidden',
-  },
-  content: {
+  summaryCard: {
+    width: Platform.OS === 'web' ? '24%' : '48%',
+    minWidth: 160,
     flexGrow: 1,
-    padding: patientTheme.spacing.screen,
-    paddingBottom: 32,
+    minHeight: 108,
   },
-  webContent: {
-    flexGrow: 0,
-    minHeight: '100%',
+  summaryLabel: {
+    fontSize: 12,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    color: patientTheme.colors.textMuted,
+    fontWeight: '800',
   },
-  sectionCard: {
+  summaryValue: {
+    marginTop: 10,
+    fontSize: 28,
+    fontWeight: '900',
+    color: patientTheme.colors.text,
+  },
+  patientGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  patientCard: {
+    width: Platform.OS === 'web' ? '49%' : '100%',
+    minWidth: 280,
+    flexGrow: 1,
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
-  headerRow: {
-    marginTop: 14,
-    flexDirection: 'row',
-    justifyContent: 'flex-end',
-    alignItems: 'center',
-  },
-  headerIconGroup: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-  },
-  headerIconButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 23,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  greeting: {
-    marginTop: 22,
-    fontSize: 30,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  headerSubtitle: {
-    marginTop: 8,
-    fontSize: 15,
-    lineHeight: 22,
-    color: patientTheme.colors.textMuted,
-  },
-  heroCard: {
-    marginTop: 22,
-  },
-  heroTopRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  heroCopy: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  eyebrow: {
-    fontSize: 13,
-    color: patientTheme.colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.7,
-  },
-  heroValue: {
-    marginTop: 8,
-    fontSize: 34,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  heroBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 20,
-    backgroundColor: patientTheme.colors.primarySoft,
-  },
-  heroBadgeText: {
-    marginLeft: 6,
-    fontSize: 13,
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '700',
-  },
-  heroHelper: {
-    marginTop: 8,
-    color: patientTheme.colors.textMuted,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  metricRow: {
-    marginTop: 18,
-    flexDirection: 'row',
-    gap: 12,
-  },
-  metricPill: {
-    flex: 1,
-    borderRadius: patientTheme.radius.lg,
-    padding: 14,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    ...patientShadow,
-  },
-  metricLabel: {
-    fontSize: 12,
-    color: patientTheme.colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  metricValue: {
-    marginTop: 8,
-    fontSize: 22,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  summaryRow: {
-    marginTop: 16,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  summaryCard: {
-    flex: 1,
-    minHeight: 118,
-  },
-  summaryLabel: {
-    marginTop: 10,
-    fontSize: 13,
-    color: patientTheme.colors.textMuted,
-  },
-  summaryValue: {
-    marginTop: 8,
-    fontSize: 18,
-    color: patientTheme.colors.text,
-    fontWeight: '700',
-  },
-  sectionHeader: {
-    marginTop: 24,
-    marginBottom: 12,
-  },
-  sectionTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  sectionHelper: {
-    marginTop: 6,
-    fontSize: 13,
-    color: patientTheme.colors.textMuted,
-  },
-  searchContainer: {
-    minHeight: 50,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    marginBottom: 14,
-    ...patientShadow,
-  },
-  searchInput: {
-    flex: 1,
-    minHeight: 50,
-    paddingHorizontal: 10,
-    color: patientTheme.colors.text,
-    fontSize: 15,
-  },
-  clearSearchButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: patientTheme.colors.backgroundSoft,
-  },
-  loadingCard: {
-    alignItems: 'center',
-    paddingVertical: 28,
-  },
-  loadingText: {
-    marginTop: 12,
-    color: patientTheme.colors.textMuted,
-  },
-  emptyCard: {
-    alignItems: 'center',
-    paddingVertical: 28,
-  },
-  emptyTitle: {
-    fontSize: 18,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  emptyText: {
-    marginTop: 8,
-    fontSize: 14,
-    lineHeight: 21,
-    color: patientTheme.colors.textMuted,
-    textAlign: 'center',
-  },
-  patientCard: {
-    marginBottom: 12,
+  patientCardAlert: {
+    borderColor: '#f0d2d2',
+    backgroundColor: '#faf5f5',
   },
   patientHeader: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 12,
   },
-  patientAvatar: {
-    width: 48,
-    height: 48,
-    borderRadius: 24,
-    backgroundColor: patientTheme.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 14,
-  },
-  patientAvatarText: {
-    fontSize: 16,
-    fontWeight: '700',
-    color: patientTheme.colors.primaryDark,
-  },
-  patientHeaderCopy: {
+  patientCopy: {
     flex: 1,
-    paddingRight: 12,
+    minWidth: 0,
   },
   patientName: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 17,
+    fontWeight: '900',
     color: patientTheme.colors.text,
   },
   patientMeta: {
     marginTop: 4,
-    fontSize: 13,
     color: patientTheme.colors.textMuted,
-  },
-  infoGrid: {
-    marginTop: 16,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  infoPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primarySoft,
-  },
-  infoPillText: {
-    marginLeft: 8,
-    fontSize: 13,
-    color: patientTheme.colors.text,
-    fontWeight: '600',
-  },
-  patientInfo: {
-    marginTop: 14,
-    fontSize: 14,
-    lineHeight: 20,
-    color: patientTheme.colors.textMuted,
-  },
-  addressCard: {
-    marginTop: 14,
-    borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    padding: 14,
-    ...patientShadow,
-  },
-  addressTitle: {
-    fontSize: 12,
-    fontWeight: '700',
-    color: patientTheme.colors.textMuted,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-  },
-  addressText: {
-    marginTop: 6,
-    fontSize: 14,
-    lineHeight: 20,
-    color: patientTheme.colors.text,
-  },
-  actionsRow: {
-    marginTop: 16,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  profileButton: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    ...patientShadow,
-  },
-  profileButtonText: {
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '700',
-  },
-  prontuarioInlineButton: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  prontuarioInlineButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '900',
-  },
-  editButton: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    ...patientShadow,
-  },
-  editButtonText: {
-    color: patientTheme.colors.text,
-    fontWeight: '700',
-  },
-  deleteButton: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  deleteButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '700',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: patientTheme.colors.overlay,
-    justifyContent: 'center',
-    padding: 20,
-  },
-  modalContent: {
-    maxHeight: '90%',
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
-  },
-  modalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 18,
-  },
-  modalHeaderCopy: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  modalTitle: {
-    fontSize: 22,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  modalSubtitle: {
-    marginTop: 6,
     fontSize: 13,
     lineHeight: 19,
-    color: patientTheme.colors.textMuted,
   },
-  closeButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  profileModalContent: {
-    maxHeight: '90%',
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
-  },
-  prontuarioButton: {
-    marginTop: 10,
-    marginBottom: 14,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-  },
-  prontuarioButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '900',
-  },
-  profileTabRow: {
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    borderRadius: patientTheme.radius.lg,
-    flexDirection: 'row',
-    gap: 8,
-    marginBottom: 14,
-    padding: 6,
-    ...patientShadow,
-  },
-  profileTabButton: {
-    alignItems: 'center',
-    borderRadius: patientTheme.radius.lg,
-    flex: 1,
-    justifyContent: 'center',
-    minHeight: 42,
-    paddingHorizontal: 10,
-  },
-  profileTabButtonActive: {
-    backgroundColor: patientTheme.colors.primaryDark,
-  },
-  profileTabText: {
-    color: patientTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '800',
-    textAlign: 'center',
-  },
-  profileTabTextActive: {
-    color: patientTheme.colors.onPrimary,
-  },
-  profileModalScroll: {
-    maxHeight: 520,
-  },
-  profileModalScrollContent: {
-    gap: 10,
-    paddingBottom: 4,
-  },
-  profileInfoRow: {
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    borderRadius: patientTheme.radius.lg,
-    padding: 14,
-    ...patientShadow,
-  },
-  profileInfoLabel: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    textTransform: 'uppercase',
-  },
-  profileInfoValue: {
-    color: patientTheme.colors.text,
-    fontSize: 15,
-    fontWeight: '600',
-    lineHeight: 21,
-    marginTop: 6,
-  },
-  label: {
-    marginBottom: 6,
-    fontSize: 14,
-    color: patientTheme.colors.text,
-    fontWeight: '600',
-  },
-  input: {
-    borderRadius: patientTheme.radius.lg,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    marginBottom: 14,
-    color: patientTheme.colors.text,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    ...patientShadow,
-  },
-  genderRow: {
+  patientTags: {
+    marginTop: 14,
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 14,
   },
-  genderButton: {
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+  tagPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.background,
     ...patientShadow,
   },
-  genderButtonActive: {
-    backgroundColor: patientTheme.colors.primaryDark,
+  tagPillGreen: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.primarySoft,
   },
-  genderButtonText: {
+  tagText: {
     color: patientTheme.colors.text,
-    fontWeight: '600',
+    fontWeight: '800',
+    fontSize: 12,
   },
-  genderButtonTextActive: {
-    color: patientTheme.colors.onPrimary,
+  tagTextGreen: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '900',
+    fontSize: 12,
   },
-  formRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  cityContainer: {
-    flex: 1,
-  },
-  ufContainer: {
-    width: 84,
-  },
-  feedbackBox: {
-    marginTop: 4,
-    marginBottom: 14,
-    padding: 14,
-    borderRadius: 14,
-    backgroundColor: '#e9fbf3',
-    borderWidth: 1,
-    borderColor: '#4fdfa3',
-  },
-  feedbackBoxErro: {
-    backgroundColor: '#fff1f0',
-    borderColor: '#e57373',
-  },
-  feedbackText: {
-    color: '#256f51',
+  patientNote: {
+    marginTop: 12,
+    color: patientTheme.colors.textMuted,
     lineHeight: 20,
-    fontSize: 14,
-    fontWeight: '600',
   },
-  feedbackTextErro: {
-    color: '#b23a48',
-  },
-  saveButton: {
-    marginTop: 10,
-    minHeight: 52,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  saveButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '700',
-    fontSize: 15,
-  },
-  cancelButton: {
-    marginTop: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 46,
-  },
-  cancelButtonText: {
-    color: patientTheme.colors.textMuted,
-    fontWeight: '700',
-  },
-  confirmModalContent: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 22,
-    ...patientShadow,
-  },
-  confirmTitle: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  confirmText: {
-    marginTop: 10,
-    fontSize: 15,
-    lineHeight: 22,
-    color: patientTheme.colors.textMuted,
-  },
-  confirmActions: {
-    marginTop: 22,
+  metricInlineRow: {
+    marginTop: 16,
+    marginBottom: 8,
     flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  metricInlineLabel: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+  },
+  metricInlineValue: {
+    color: patientTheme.colors.text,
+    fontWeight: '900',
+  },
+  bottomRow: {
+    marginTop: 16,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 10,
   },
-  confirmCancelButton: {
+  bottomMetric: {
     flex: 1,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+    minWidth: 110,
+    padding: 12,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.background,
     ...patientShadow,
   },
-  confirmCancelText: {
+  bottomMetricLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  bottomMetricValue: {
+    marginTop: 6,
     color: patientTheme.colors.text,
-    fontWeight: '700',
-  },
-  confirmDeleteButton: {
-    flex: 1,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  confirmDeleteText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '700',
+    fontWeight: '900',
+    fontSize: 13,
   },
 });

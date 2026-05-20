@@ -1,12 +1,14 @@
 ﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Image,
   KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
   StatusBar,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -16,6 +18,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
+import { supabase } from '../../servicos/configSupabase';
 import {
   fetchPatientById,
   getPatientDisplayName,
@@ -27,6 +30,11 @@ import {
   getOnboardingAnswers,
 } from '../../utilitarios/camposPerfilPaciente';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
+import {
+  ProfileDataSectionCard,
+  ProfileSectionHub,
+  TherapyQuickStrip,
+} from '../../componentes/paciente/PerfilDadosSecoes';
 import {
   getPatientLocalOnboardingData,
   mergePatientOnboardingData,
@@ -42,6 +50,7 @@ import {
   confirmarCodigoValidacaoEmailCadastro,
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
+import { isLibreViewSyncConfigured } from '../../servicos/servicoLibreView';
 
 const EMPTY_PROFILE_FORM = {
   nome_completo: '',
@@ -2233,21 +2242,90 @@ function InfoRow({ label, value }) {
   );
 }
 
-function DrilldownHeader({ title, helper, open, onPress }) {
-  return (
-    <TouchableOpacity activeOpacity={0.78} onPress={onPress} style={styles.drilldownHeader}>
-      <View style={styles.drilldownHeaderCopy}>
-        <Text style={styles.sectionTitle}>{title}</Text>
-        <Text style={styles.sectionHelper}>{helper}</Text>
-      </View>
+function parseAgeFromDate(dateText) {
+  const text = String(dateText || '').trim();
+  if (!text) return null;
 
-      <Ionicons
-        name={open ? 'chevron-up' : 'chevron-down'}
-        size={20}
-        color={patientTheme.colors.primaryDark}
-      />
-    </TouchableOpacity>
-  );
+  let birthDate = null;
+  const brMatch = text.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const isoMatch = text.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (brMatch) {
+    birthDate = new Date(Number(brMatch[3]), Number(brMatch[2]) - 1, Number(brMatch[1]));
+  } else if (isoMatch) {
+    birthDate = new Date(Number(isoMatch[1]), Number(isoMatch[2]) - 1, Number(isoMatch[3]));
+  }
+
+  if (!birthDate || Number.isNaN(birthDate.getTime())) return null;
+
+  const today = new Date();
+  let age = today.getFullYear() - birthDate.getFullYear();
+  const monthDelta = today.getMonth() - birthDate.getMonth();
+
+  if (monthDelta < 0 || (monthDelta === 0 && today.getDate() < birthDate.getDate())) {
+    age -= 1;
+  }
+
+  return age > 0 ? age : null;
+}
+
+function formatHeightSummary(value) {
+  const number = normalizeNumber(value);
+  if (!number) return 'Nao informado';
+  if (number >= 100) {
+    return `${(number / 100).toFixed(2)} m`;
+  }
+  return `${number.toFixed(2)} m`;
+}
+
+function formatWeightSummary(value) {
+  const number = normalizeNumber(value);
+  return number ? `${number.toFixed(1)}kg` : 'Nao informado';
+}
+
+function formatImcSummary(value) {
+  const number = normalizeNumber(value);
+  return number ? String(number.toFixed(1)) : 'Nao informado';
+}
+
+function cleanObjectiveSummary(text) {
+  const raw = String(text || '').trim();
+  if (!raw) return 'Objetivo nao informado';
+
+  const cleaned = raw
+    .replace(/\[GLICNUTRI_APP_META_START\][\s\S]*?\[GLICNUTRI_APP_META_END\]/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  return cleaned || 'Objetivo nao informado';
+}
+
+function buildChipList(text) {
+  return String(text || '')
+    .split(/,|;|\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function getInitials(name) {
+  const parts = String(name || '')
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2);
+
+  if (!parts.length) return 'P';
+  return parts.map((item) => item[0]?.toUpperCase?.() || '').join('');
+}
+
+function computeActiveDays(patient) {
+  const source = patient?.created_at || patient?.createdAt || patient?.data_cadastro || null;
+  if (!source) return 30;
+  const date = new Date(source);
+  if (Number.isNaN(date.getTime())) return 30;
+  const diff = Math.floor((Date.now() - date.getTime()) / (1000 * 60 * 60 * 24));
+  return Math.max(diff, 1);
 }
 
 export default function PacientePerfilScreen({
@@ -2316,6 +2394,13 @@ export default function PacientePerfilScreen({
   const [conditionModalVisible, setConditionModalVisible] = useState(false);
   const [situationModalVisible, setSituationModalVisible] = useState(false);
   const [procedureModalVisible, setProcedureModalVisible] = useState(false);
+  const [notificationPrefs, setNotificationPrefs] = useState({
+    glucoseAlerts: true,
+    mealReminders: true,
+    aiInsights: true,
+    nutritionistMessages: true,
+  });
+  const [loggingOut, setLoggingOut] = useState(false);
   const lastFetchedCepRef = useRef(onlyDigits(usuarioLogado?.cep || '', 8));
   const [profileBolusAppType, setProfileBolusAppType] = useState('refeicao_correcao');
   const [profileBolusMeal, setProfileBolusMeal] = useState('almoco');
@@ -3698,15 +3783,115 @@ export default function PacientePerfilScreen({
     if (fieldKey === 'procedimentos') return setProcedureModalVisible(false);
   }
 
+  async function handleLogout() {
+    try {
+      setLoggingOut(true);
+      const { error } = await supabase.auth.signOut();
+
+      if (error) {
+        console.log('Erro ao sair da conta:', error.message);
+      }
+
+      navigation.reset({
+        index: 0,
+        routes: [{ name: 'Login' }],
+      });
+    } catch (error) {
+      console.log('Erro inesperado ao sair da conta:', error);
+    } finally {
+      setLoggingOut(false);
+    }
+  }
+
   function toggleSection(sectionKey) {
+    setOpenSections((current) => {
+      const willOpen = !current[sectionKey];
+      if (willOpen) {
+        scrollToField(`section-${sectionKey}`, { delay: 140, topOffset: 88 });
+      }
+      return {
+        ...current,
+        [sectionKey]: willOpen,
+      };
+    });
+  }
+
+  function openProfileSection(sectionKey) {
     setOpenSections((current) => ({
       ...current,
-      [sectionKey]: !current[sectionKey],
+      [sectionKey]: true,
     }));
+    scrollToField(`section-${sectionKey}`, { delay: 140, topOffset: 88 });
+  }
+
+  function handleTherapyQuickPress(categoryValue) {
+    openProfileSection('pharmacology');
+    const plan = therapyPlansByCategory[categoryValue];
+    openTherapyEditor(
+      plan || {
+        ...createEmptyTherapyPlan(),
+        categoria_funcional: categoryValue,
+      }
+    );
   }
 
   const sections = useMemo(() => buildPatientProfileSections(paciente || {}), [paciente]);
   const nomePaciente = profileForm.nome_completo || paciente?.nome_completo || fallbackName;
+  const patientInitials = useMemo(() => getInitials(nomePaciente), [nomePaciente]);
+  const ageSummary = useMemo(
+    () => parseAgeFromDate(profileForm.data_nascimento || paciente?.data_nascimento),
+    [profileForm.data_nascimento, paciente?.data_nascimento]
+  );
+  const activeDays = useMemo(() => computeActiveDays(paciente || {}), [paciente]);
+  const objectiveSummary = useMemo(
+    () =>
+      cleanObjectiveSummary(
+        clinicalForm.objetivos || paciente?.objetivo_principal_consulta || 'Objetivo nao informado'
+      )
+        .split(/,|;|\n/)[0]
+        .trim() || 'Objetivo nao informado',
+    [clinicalForm.objetivos, paciente?.objetivo_principal_consulta]
+  );
+  const diabetesSummary = useMemo(
+    () =>
+      clinicalForm.diabetes ||
+      (clinicalForm.diabetes_status === 'Sim' && clinicalForm.diabetes_tipo
+        ? `Diabetes ${clinicalForm.diabetes_tipo}`
+        : clinicalForm.diabetes_status === 'Sim'
+          ? 'Diabetes'
+          : 'Nao informado'),
+    [clinicalForm.diabetes, clinicalForm.diabetes_status, clinicalForm.diabetes_tipo]
+  );
+  const heightSummary = useMemo(() => formatHeightSummary(clinicalForm.altura_cm), [clinicalForm.altura_cm]);
+  const weightSummary = useMemo(() => formatWeightSummary(clinicalForm.peso_atual_kg), [clinicalForm.peso_atual_kg]);
+  const imcSummary = useMemo(() => formatImcSummary(clinicalForm.imc_calculado), [clinicalForm.imc_calculado]);
+  const bloodPressureSummary = useMemo(
+    () =>
+      String(
+        paciente?.pressao_arterial ||
+          paciente?.pressao_arterial_media ||
+          paciente?.pa_media ||
+          'Nao informado'
+      ).trim() || 'Nao informado',
+    [paciente]
+  );
+  const comorbidityChips = useMemo(
+    () => buildChipList(clinicalForm.comorbidades_texto || clinicalForm.condicoes),
+    [clinicalForm.comorbidades_texto, clinicalForm.condicoes]
+  );
+  const nutritionistRouteData = route?.params?.nutricionista || null;
+  const nutritionistName =
+    nutritionistRouteData?.nome_completo_nutri ||
+    paciente?.nome_completo_nutri ||
+    paciente?.nome_nutricionista ||
+    'Nutricionista';
+  const nutritionistInitials = useMemo(() => getInitials(nutritionistName), [nutritionistName]);
+  const nutritionistCrn =
+    nutritionistRouteData?.crm_numero ||
+    paciente?.crm_numero ||
+    paciente?.crn_nutricionista ||
+    '';
+  const libreConnected = isLibreViewSyncConfigured();
   const insulinClinicalFieldKeys = useMemo(
     () => new Set([
       'insulinoterapia_atual',
@@ -3807,6 +3992,52 @@ export default function PacientePerfilScreen({
       }, {}),
     [therapyPlans]
   );
+  const sectionPreviews = useMemo(
+    () => ({
+      patient: [
+        formatPhoneInput(profileForm.telefone) || 'Telefone nao informado',
+        buildCityStateText(profileForm) || 'Endereco nao informado',
+        profileForm.email_pac || paciente?.email_pac || 'E-mail nao informado',
+      ],
+      clinical: [
+        diabetesSummary,
+        `Altura ${heightSummary} • Peso ${weightSummary} • IMC ${imcSummary}`,
+        insulinClinicalSummary || 'Configuracao de insulina pendente',
+      ],
+      pharmacology: PHARMACOLOGY_CATEGORY_OPTIONS.map((option) => {
+        const plan = therapyPlansByCategory[option.value];
+        return plan?.marca
+          ? `${option.label}: ${plan.marca}`
+          : `${option.label}: nao configurada`;
+      }),
+    }),
+    [
+      profileForm,
+      paciente,
+      diabetesSummary,
+      heightSummary,
+      weightSummary,
+      imcSummary,
+      insulinClinicalSummary,
+      therapyPlansByCategory,
+    ]
+  );
+  const sectionBadges = useMemo(
+    () => ({
+      patient: isProfileFormDirty ? 'Nao salvo' : '',
+      clinical: isClinicalFormDirty ? 'Nao salvo' : '',
+      pharmacology: isTherapyFormDirty ? 'Nao salvo' : '',
+    }),
+    [isProfileFormDirty, isClinicalFormDirty, isTherapyFormDirty]
+  );
+  const profileHubItems = useMemo(
+    () => [
+      { key: 'patient', label: 'Contato', icon: 'person-outline' },
+      { key: 'clinical', label: 'Saude', icon: 'pulse-outline' },
+      { key: 'pharmacology', label: 'Insulina', icon: 'medkit-outline' },
+    ],
+    []
+  );
   const heroInlineDetails = useMemo(
     () =>
       [
@@ -3816,6 +4047,26 @@ export default function PacientePerfilScreen({
         buildFullAddressText(profileForm),
       ].filter((item) => String(item || '').trim()),
     [profileForm]
+  );
+  const summaryStats = useMemo(
+    () => [
+      {
+        id: 'age',
+        value: ageSummary || '--',
+        label: 'anos',
+      },
+      {
+        id: 'weight',
+        value: weightSummary === 'Nao informado' ? '--' : weightSummary,
+        label: 'peso atual',
+      },
+      {
+        id: 'days',
+        value: activeDays,
+        label: 'dias ativos',
+      },
+    ],
+    [activeDays, ageSummary, weightSummary]
   );
   const isClinicalSelectFocused = (fieldKey) => {
     if (fieldKey === 'diabetes') return diabetesModalVisible || diabetesTypeModalVisible;
@@ -3936,400 +4187,639 @@ export default function PacientePerfilScreen({
         >
         <SectionCard style={styles.heroCard}>
           <View style={styles.heroHeader}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>
-                {(nomePaciente || 'P').trim().slice(0, 1).toUpperCase()}
-              </Text>
+            <View style={styles.profileAvatarLarge}>
+              {paciente?.foto_url ? (
+                <Image
+                  source={{ uri: paciente.foto_url }}
+                  style={styles.profileAvatarImage}
+                />
+              ) : (
+                <Text style={styles.profileAvatarLargeText}>{patientInitials}</Text>
+              )}
             </View>
 
             <View style={styles.heroCopy}>
               <Text style={styles.heroName}>{nomePaciente}</Text>
               <Text style={styles.heroEmail}>
-                {profileForm.email_pac || paciente?.email_pac || usuarioLogado?.email || 'E-mail nÃ£o informado'}
+                {profileForm.email_pac || paciente?.email_pac || usuarioLogado?.email || 'E-mail nao informado'}
               </Text>
-              {heroInlineDetails.length ? (
-                <Text style={styles.heroInlineDetails} numberOfLines={3}>
-                  {heroInlineDetails.join('  â€¢  ')}
-                </Text>
-              ) : null}
+              <View style={styles.statusPill}>
+                <Text style={styles.statusPillText}>Paciente ativo</Text>
+              </View>
             </View>
           </View>
 
-          <View style={styles.heroBadge}>
-            <Ionicons name="shield-checkmark-outline" size={18} color={patientTheme.colors.primaryDark} />
-            <Text style={styles.heroBadgeText}>Perfil clÃ­nico protegido</Text>
+          <View style={styles.heroDivider} />
+
+          <View style={styles.heroMetricsRow}>
+            {summaryStats.map((item) => (
+              <View key={item.id} style={styles.heroMetricItem}>
+                <Text style={styles.heroMetricValue}>{item.value}</Text>
+                <Text style={styles.heroMetricLabel}>{item.label}</Text>
+              </View>
+            ))}
+          </View>
+
+          {heroInlineDetails.length ? (
+            <Text style={styles.heroInlineDetails} numberOfLines={2}>
+              {heroInlineDetails.join('  •  ')}
+            </Text>
+          ) : null}
+        </SectionCard>
+
+        <SectionCard style={styles.profileSummaryCard}>
+          <Text style={styles.profileSummaryTitle}>Informacoes de saude</Text>
+
+          <View style={styles.summaryInfoGrid}>
+            {[
+              { label: 'Objetivo', value: objectiveSummary },
+              { label: 'Diabetes', value: diabetesSummary },
+              { label: 'Altura', value: heightSummary },
+              { label: 'Peso atual', value: weightSummary },
+              { label: 'IMC', value: imcSummary },
+              { label: 'Pressao arterial', value: bloodPressureSummary },
+            ].map((item) => (
+              <View key={item.label} style={styles.summaryInfoItem}>
+                <Text style={styles.summaryInfoLabel}>{item.label}</Text>
+                <Text style={styles.summaryInfoValue}>{item.value}</Text>
+              </View>
+            ))}
           </View>
         </SectionCard>
 
-        {sections.map((section) => (
-          <SectionCard
-            key={section.key}
-            onLayout={section.key === 'patient' ? registerScrollContainer : undefined}
-            style={styles.profileSection}
-          >
-            <DrilldownHeader
-              title={section.title}
-              helper={section.helper}
-              open={openSections[section.key]}
-              onPress={() => toggleSection(section.key)}
-            />
+        <SectionCard style={styles.profileSummaryCard}>
+          <Text style={styles.profileSummaryTitle}>Comorbidades</Text>
 
-            {openSections[section.key] ? (
-              section.key === 'patient' ? (
-                <View style={styles.editForm} onLayout={registerScrollContainer}>
-                  {PATIENT_PROFILE_FIELDS.map((field) => (
-                    <View
-                      key={field.key}
-                      onLayout={registerFieldLayout(`profile-${field.key}`)}
-                      style={styles.editField}
-                    >
-                      <Text style={styles.infoLabel}>{field.label}</Text>
-                      {field.type === 'select' ? (
-                        <TouchableOpacity
-                          activeOpacity={0.78}
-                          onPress={() => setGenderModalVisible(true)}
-                          style={[
-                            styles.profileInput,
-                            styles.profileSelect,
-                            profileFieldErrors[field.key] ? styles.profileInputError : null,
-                            genderModalVisible ? styles.profileInputFocused : null,
-                          ]}
-                        >
-                          <Text
+          <View style={styles.chipsWrap}>
+            {(comorbidityChips.length ? comorbidityChips : ['Nenhuma informada']).map((item) => (
+              <View
+                key={item}
+                style={[
+                  styles.healthChip,
+                  item === 'Nenhuma informada' ? styles.healthChipMuted : null,
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.healthChipText,
+                    item === 'Nenhuma informada' ? styles.healthChipTextMuted : null,
+                  ]}
+                >
+                  {item}
+                </Text>
+              </View>
+            ))}
+          </View>
+        </SectionCard>
+
+        <TherapyQuickStrip
+          options={PHARMACOLOGY_CATEGORY_OPTIONS}
+          plansByCategory={therapyPlansByCategory}
+          onPressCategory={handleTherapyQuickPress}
+        />
+
+        <SectionCard style={styles.profileDataHubCard}>
+          <Text style={styles.profileSummaryTitle}>Editar seus dados</Text>
+          <Text style={styles.profileDataHubHelper}>
+            Abra apenas o bloco que precisa atualizar. O resumo aparece fechado para consulta rapida.
+          </Text>
+
+          <ProfileSectionHub
+            items={profileHubItems.map((item) => ({
+              ...item,
+              active: Boolean(openSections[item.key]),
+            }))}
+            onSelect={openProfileSection}
+          />
+        </SectionCard>
+
+        <View style={styles.profileSectionsStack}>
+          {sections.map((section) => (
+            <View
+              key={section.key}
+              onLayout={registerFieldLayout(`section-${section.key}`)}
+              style={styles.profileSection}
+            >
+              <ProfileDataSectionCard
+                sectionKey={section.key}
+                title={section.title}
+                helper={section.helper}
+                previewLines={sectionPreviews[section.key] || []}
+                badge={sectionBadges[section.key]}
+                open={openSections[section.key]}
+                onToggle={() => toggleSection(section.key)}
+              >
+                {section.key === 'patient' ? (
+                  <View style={styles.editForm} onLayout={registerScrollContainer}>
+                    {PATIENT_PROFILE_FIELDS.map((field) => (
+                      <View
+                        key={field.key}
+                        onLayout={registerFieldLayout(`profile-${field.key}`)}
+                        style={styles.editField}
+                      >
+                        <Text style={styles.infoLabel}>{field.label}</Text>
+                        {field.type === 'select' ? (
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            onPress={() => setGenderModalVisible(true)}
                             style={[
-                              styles.profileSelectText,
-                              !profileForm[field.key] ? styles.profileSelectPlaceholder : null,
+                              styles.profileInput,
+                              styles.profileSelect,
+                              profileFieldErrors[field.key] ? styles.profileInputError : null,
+                              genderModalVisible ? styles.profileInputFocused : null,
                             ]}
                           >
-                            {profileForm[field.key] || field.placeholder}
-                          </Text>
-                          <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                        </TouchableOpacity>
-                      ) : (
-                        <TextInput
-                          value={profileForm[field.key]}
-                          onBlur={() => blurProfileField(field.key)}
-                          onChangeText={(value) => handleProfileFieldChange(field.key, value)}
-                          onFocus={() => focusProfileField(field.key)}
-                          placeholder={field.placeholder}
-                          placeholderTextColor={patientTheme.colors.textMuted}
-                          keyboardType={field.keyboardType || 'default'}
-                          autoCapitalize={field.autoCapitalize || 'sentences'}
-                          maxLength={field.maxLength}
-                          style={[
-                            styles.profileInput,
-                            profileFieldErrors[field.key] ? styles.profileInputError : null,
-                            focusedProfileField === field.key ? styles.profileInputFocused : null,
-                          ]}
-                        />
-                      )}
-
-                      {profileFieldErrors[field.key] ? (
-                        <Text style={styles.fieldErrorText}>{profileFieldErrors[field.key]}</Text>
-                      ) : null}
-
-                      {field.key === 'cep' && (cepLoading || cepFeedback) ? (
-                        <View style={styles.cepStatus}>
-                          {cepLoading ? (
-                            <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                          ) : null}
-                          {cepFeedback ? (
                             <Text
                               style={[
-                                styles.statusText,
-                                cepFeedback.type === 'error' ? styles.statusTextError : null,
+                                styles.profileSelectText,
+                                !profileForm[field.key] ? styles.profileSelectPlaceholder : null,
                               ]}
                             >
-                              {cepFeedback.message}
+                              {profileForm[field.key] || field.placeholder}
                             </Text>
-                          ) : null}
-                        </View>
-                      ) : null}
-                    </View>
-                  ))}
-
-                  {profileFeedback ? (
-                    <Text
-                      style={[
-                        styles.formFeedback,
-                        profileFeedback.type === 'error' ? styles.formFeedbackError : null,
-                      ]}
-                    >
-                      {profileFeedback.message}
-                    </Text>
-                  ) : null}
-
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    disabled={!isProfileFormDirty || savingProfile}
-                    onPress={saveProfileData}
-                    style={[
-                      styles.saveProfileButton,
-                      (!isProfileFormDirty || savingProfile) && styles.saveProfileButtonDisabled,
-                    ]}
-                  >
-                    {savingProfile ? (
-                      <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                    ) : (
-                      <Text style={styles.saveProfileButtonText}>Salvar dados</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              ) : section.key === 'clinical' ? (
-                <View style={styles.editForm} onLayout={registerScrollContainer}>
-                  {CLINICAL_PROFILE_FIELDS.filter((field) => !insulinClinicalFieldKeys.has(field.key)).map((field) => (
-                    <View
-                      key={field.key}
-                      onLayout={registerFieldLayout(`clinical-${field.key}`)}
-                      style={styles.editField}
-                    >
-                      <Text style={styles.infoLabel}>{field.label}</Text>
-
-                      {field.type === 'diabetes' ? (
-                        <TouchableOpacity
-                          activeOpacity={0.78}
-                          onPress={() => setDiabetesModalVisible(true)}
-                          style={[
-                            styles.profileInput,
-                            styles.profileSelect,
-                            clinicalFieldErrors[field.key] ? styles.profileInputError : null,
-                            isClinicalSelectFocused(field.key) ? styles.profileInputFocused : null,
-                          ]}
-                        >
-                          <Text
+                            <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : (
+                          <TextInput
+                            value={profileForm[field.key]}
+                            onBlur={() => blurProfileField(field.key)}
+                            onChangeText={(value) => handleProfileFieldChange(field.key, value)}
+                            onFocus={() => focusProfileField(field.key)}
+                            placeholder={field.placeholder}
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType={field.keyboardType || 'default'}
+                            autoCapitalize={field.autoCapitalize || 'sentences'}
+                            maxLength={field.maxLength}
                             style={[
-                              styles.profileSelectText,
-                              !clinicalForm[field.key] ? styles.profileSelectPlaceholder : null,
+                              styles.profileInput,
+                              profileFieldErrors[field.key] ? styles.profileInputError : null,
+                              focusedProfileField === field.key ? styles.profileInputFocused : null,
                             ]}
-                          >
-                            {clinicalForm[field.key] || field.placeholder}
-                          </Text>
-                          <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                        </TouchableOpacity>
-                      ) : field.type === 'insulin-category' || field.type === 'insulin-type' || field.type === 'insulin-usage' ? (
-                        <TouchableOpacity
-                          activeOpacity={0.78}
-                          onPress={() => {
-                            if (field.type === 'insulin-category') return setInsulinCategoryModalVisible(true);
-                            if (field.type === 'insulin-type') {
-                              if (!clinicalForm.insulin_category_default) return setInsulinCategoryModalVisible(true);
-                              return setInsulinTypeModalVisible(true);
-                            }
-                            if (!clinicalForm.insulin_category_default) return setInsulinCategoryModalVisible(true);
-                            return setInsulinUsageModalVisible(true);
-                          }}
-                          style={[
-                            styles.profileInput,
-                            styles.profileSelect,
-                            clinicalFieldErrors[field.key] ? styles.profileInputError : null,
-                            isClinicalSelectFocused(field.key) ? styles.profileInputFocused : null,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.profileSelectText,
-                              !clinicalForm[field.key] ? styles.profileSelectPlaceholder : null,
-                            ]}
-                          >
-                            {field.type === 'insulin-category'
-                              ? selectedInsulinCategoryLabel || field.placeholder
-                              : clinicalForm[field.key] || field.placeholder}
-                          </Text>
-                          <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                        </TouchableOpacity>
-                      ) : field.key === 'objetivos' || field.key === 'condicoes' || field.key === 'situacoes' || field.key === 'procedimentos' ? (
-                        <TouchableOpacity
-                          activeOpacity={0.78}
-                          onPress={() => {
-                            if (field.key === 'objetivos') return setObjectiveModalVisible(true);
-                            if (field.key === 'condicoes') return setConditionModalVisible(true);
-                            if (field.key === 'situacoes') return setSituationModalVisible(true);
-                            if (field.key === 'procedimentos') return setProcedureModalVisible(true);
-                          }}
-                          style={[
-                            styles.profileInput,
-                            styles.profileSelect,
-                            clinicalFieldErrors[field.key] ? styles.profileInputError : null,
-                            isClinicalSelectFocused(field.key) ? styles.profileInputFocused : null,
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.profileSelectText,
-                              !clinicalForm[field.key] ? styles.profileSelectPlaceholder : null,
-                            ]}
-                          >
-                            {clinicalForm[field.key] || field.placeholder}
-                          </Text>
-                          <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
-                        </TouchableOpacity>
-                      ) : (
-                        <TextInput
-                          value={clinicalForm[field.key]}
-                          onBlur={() => blurClinicalField(field.key)}
-                          onChangeText={(value) => handleClinicalFieldChange(field.key, value)}
-                          onFocus={() => focusClinicalField(field.key)}
-                          placeholder={field.placeholder}
-                          placeholderTextColor={patientTheme.colors.textMuted}
-                          keyboardType={field.keyboardType || 'default'}
-                          autoCapitalize={field.autoCapitalize || 'sentences'}
-                          editable={!field.readOnly}
-                          multiline={field.multiline}
-                          style={[
-                            styles.profileInput,
-                            field.multiline ? styles.profileTextArea : null,
-                            field.readOnly ? styles.profileInputReadOnly : null,
-                            clinicalFieldErrors[field.key] ? styles.profileInputError : null,
-                            focusedClinicalField === field.key ? styles.profileInputFocused : null,
-                          ]}
-                        />
-                      )}
+                          />
+                        )}
 
-                      {clinicalFieldErrors[field.key] ? (
-                        <Text style={styles.fieldErrorText}>{clinicalFieldErrors[field.key]}</Text>
-                      ) : null}
-                    </View>
-                  ))}
+                        {profileFieldErrors[field.key] ? (
+                          <Text style={styles.fieldErrorText}>{profileFieldErrors[field.key]}</Text>
+                        ) : null}
 
-                  <View
-                    onLayout={registerFieldLayout('clinical-insulin-config')}
-                    style={styles.editField}
-                  >
-                    <Text style={styles.infoLabel}>ConfiguraÃ§Ã£o de insulina</Text>
-                    <TouchableOpacity
-                      activeOpacity={0.78}
-                      onPress={() => setInsulinConfigModalVisible(true)}
-                      style={[
-                        styles.profileInput,
-                        styles.profileSelect,
-                        insulinConfigModalVisible ? styles.profileInputFocused : null,
-                      ]}
-                    >
+                        {field.key === 'cep' && (cepLoading || cepFeedback) ? (
+                          <View style={styles.cepStatus}>
+                            {cepLoading ? (
+                              <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+                            ) : null}
+                            {cepFeedback ? (
+                              <Text
+                                style={[
+                                  styles.statusText,
+                                  cepFeedback.type === 'error' ? styles.statusTextError : null,
+                                ]}
+                              >
+                                {cepFeedback.message}
+                              </Text>
+                            ) : null}
+                          </View>
+                        ) : null}
+                      </View>
+                    ))}
+
+                    {profileFeedback ? (
                       <Text
                         style={[
-                          styles.profileSelectText,
-                          !insulinClinicalSummary ? styles.profileSelectPlaceholder : null,
+                          styles.formFeedback,
+                          profileFeedback.type === 'error' ? styles.formFeedbackError : null,
                         ]}
                       >
-                        {insulinClinicalSummary || 'Toque para configurar a insulina no popup'}
+                        {profileFeedback.message}
                       </Text>
-                      <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
+                    ) : null}
+
+                    <TouchableOpacity
+                      activeOpacity={0.82}
+                      disabled={!isProfileFormDirty || savingProfile}
+                      onPress={saveProfileData}
+                      style={[
+                        styles.saveProfileButton,
+                        (!isProfileFormDirty || savingProfile) && styles.saveProfileButtonDisabled,
+                      ]}
+                    >
+                      {savingProfile ? (
+                        <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                      ) : (
+                        <Text style={styles.saveProfileButtonText}>Salvar dados</Text>
+                      )}
                     </TouchableOpacity>
                   </View>
-
-                  {clinicalFeedback ? (
-                    <Text
-                      style={[
-                        styles.formFeedback,
-                        clinicalFeedback.type === 'error' ? styles.formFeedbackError : null,
-                      ]}
-                    >
-                      {clinicalFeedback.message}
-                    </Text>
-                  ) : null}
-
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    disabled={!isClinicalFormDirty || savingClinical}
-                    onPress={saveClinicalData}
-                    style={[
-                      styles.saveProfileButton,
-                      (!isClinicalFormDirty || savingClinical) && styles.saveProfileButtonDisabled,
-                    ]}
-                  >
-                    {savingClinical ? (
-                      <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                    ) : (
-                      <Text style={styles.saveProfileButtonText}>Salvar dados clÃ­nicos</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              ) : section.key === 'pharmacology' ? (
-                <View style={styles.editForm}>
-                  <Text style={styles.therapyIntroText}>
-                    Toque em basal, bolus ou mista para editar a insulina.
-                  </Text>
-
-                  {PHARMACOLOGY_CATEGORY_OPTIONS.map((option) => {
-                    const plan = therapyPlansByCategory[option.value];
-                    const summary = buildTherapyPlanSummary(plan);
-
-                    return (
-                      <TouchableOpacity
-                        key={option.value}
-                        activeOpacity={0.82}
-                        onPress={() =>
-                          openTherapyEditor(
-                            plan || {
-                              ...createEmptyTherapyPlan(),
-                              categoria_funcional: option.value,
-                            }
-                          )
-                        }
-                        style={styles.therapyFieldCard}
+                ) : section.key === 'clinical' ? (
+                  <View style={styles.editForm} onLayout={registerScrollContainer}>
+                    {CLINICAL_PROFILE_FIELDS.filter((field) => !insulinClinicalFieldKeys.has(field.key)).map((field) => (
+                      <View
+                        key={field.key}
+                        onLayout={registerFieldLayout(`clinical-${field.key}`)}
+                        style={styles.editField}
                       >
-                        <View style={styles.therapyFieldHeader}>
-                          <View style={styles.therapyFieldTitleWrap}>
-                            <Text style={styles.therapyFieldLabel}>{option.label}</Text>
-                            <Text style={styles.therapyFieldDescription}>
-                              {normalizeDisplayText(option.descricao)}
-                            </Text>
-                          </View>
-                          <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.primaryDark} />
-                        </View>
+                        <Text style={styles.infoLabel}>{field.label}</Text>
 
-                        <View style={styles.therapyFieldSummary}>
-                          <Text style={styles.therapyFieldValue}>{normalizeDisplayText(summary.title)}</Text>
-                          <Text style={styles.therapyFieldSubvalue}>
-                            {normalizeDisplayText(summary.subtitle || 'Nenhum plano salvo ainda')}
-                          </Text>
-                          {summary.details.map((detail) => (
-                            <Text key={`${option.value}-${detail}`} style={styles.therapyMetaText}>
-                              {normalizeDisplayText(detail)}
+                        {field.type === 'diabetes' ? (
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            onPress={() => setDiabetesModalVisible(true)}
+                            style={[
+                              styles.profileInput,
+                              styles.profileSelect,
+                              clinicalFieldErrors[field.key] ? styles.profileInputError : null,
+                              isClinicalSelectFocused(field.key) ? styles.profileInputFocused : null,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.profileSelectText,
+                                !clinicalForm[field.key] ? styles.profileSelectPlaceholder : null,
+                              ]}
+                            >
+                              {clinicalForm[field.key] || field.placeholder}
                             </Text>
-                          ))}
-                        </View>
+                            <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : field.type === 'insulin-category' || field.type === 'insulin-type' || field.type === 'insulin-usage' ? (
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            onPress={() => {
+                              if (field.type === 'insulin-category') return setInsulinCategoryModalVisible(true);
+                              if (field.type === 'insulin-type') {
+                                if (!clinicalForm.insulin_category_default) return setInsulinCategoryModalVisible(true);
+                                return setInsulinTypeModalVisible(true);
+                              }
+                              if (!clinicalForm.insulin_category_default) return setInsulinCategoryModalVisible(true);
+                              return setInsulinUsageModalVisible(true);
+                            }}
+                            style={[
+                              styles.profileInput,
+                              styles.profileSelect,
+                              clinicalFieldErrors[field.key] ? styles.profileInputError : null,
+                              isClinicalSelectFocused(field.key) ? styles.profileInputFocused : null,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.profileSelectText,
+                                !clinicalForm[field.key] ? styles.profileSelectPlaceholder : null,
+                              ]}
+                            >
+                              {field.type === 'insulin-category'
+                                ? selectedInsulinCategoryLabel || field.placeholder
+                                : clinicalForm[field.key] || field.placeholder}
+                            </Text>
+                            <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : field.key === 'objetivos' || field.key === 'condicoes' || field.key === 'situacoes' || field.key === 'procedimentos' ? (
+                          <TouchableOpacity
+                            activeOpacity={0.78}
+                            onPress={() => {
+                              if (field.key === 'objetivos') return setObjectiveModalVisible(true);
+                              if (field.key === 'condicoes') return setConditionModalVisible(true);
+                              if (field.key === 'situacoes') return setSituationModalVisible(true);
+                              if (field.key === 'procedimentos') return setProcedureModalVisible(true);
+                            }}
+                            style={[
+                              styles.profileInput,
+                              styles.profileSelect,
+                              clinicalFieldErrors[field.key] ? styles.profileInputError : null,
+                              isClinicalSelectFocused(field.key) ? styles.profileInputFocused : null,
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.profileSelectText,
+                                !clinicalForm[field.key] ? styles.profileSelectPlaceholder : null,
+                              ]}
+                            >
+                              {clinicalForm[field.key] || field.placeholder}
+                            </Text>
+                            <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
+                          </TouchableOpacity>
+                        ) : (
+                          <TextInput
+                            value={clinicalForm[field.key]}
+                            onBlur={() => blurClinicalField(field.key)}
+                            onChangeText={(value) => handleClinicalFieldChange(field.key, value)}
+                            onFocus={() => focusClinicalField(field.key)}
+                            placeholder={field.placeholder}
+                            placeholderTextColor={patientTheme.colors.textMuted}
+                            keyboardType={field.keyboardType || 'default'}
+                            autoCapitalize={field.autoCapitalize || 'sentences'}
+                            editable={!field.readOnly}
+                            multiline={field.multiline}
+                            style={[
+                              styles.profileInput,
+                              field.multiline ? styles.profileTextArea : null,
+                              field.readOnly ? styles.profileInputReadOnly : null,
+                              clinicalFieldErrors[field.key] ? styles.profileInputError : null,
+                              focusedClinicalField === field.key ? styles.profileInputFocused : null,
+                            ]}
+                          />
+                        )}
+
+                        {clinicalFieldErrors[field.key] ? (
+                          <Text style={styles.fieldErrorText}>{clinicalFieldErrors[field.key]}</Text>
+                        ) : null}
+                      </View>
+                    ))}
+
+                    <View
+                      onLayout={registerFieldLayout('clinical-insulin-config')}
+                      style={styles.editField}
+                    >
+                      <Text style={styles.infoLabel}>Configuracao de insulina</Text>
+                      <TouchableOpacity
+                        activeOpacity={0.78}
+                        onPress={() => setInsulinConfigModalVisible(true)}
+                        style={[
+                          styles.profileInput,
+                          styles.profileSelect,
+                          insulinConfigModalVisible ? styles.profileInputFocused : null,
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.profileSelectText,
+                            !insulinClinicalSummary ? styles.profileSelectPlaceholder : null,
+                          ]}
+                        >
+                          {insulinClinicalSummary || 'Toque para configurar a insulina no popup'}
+                        </Text>
+                        <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
                       </TouchableOpacity>
-                    );
-                  })}
+                    </View>
 
-                  {therapyFeedback ? (
-                    <Text
+                    {clinicalFeedback ? (
+                      <Text
+                        style={[
+                          styles.formFeedback,
+                          clinicalFeedback.type === 'error' ? styles.formFeedbackError : null,
+                        ]}
+                      >
+                        {clinicalFeedback.message}
+                      </Text>
+                    ) : null}
+
+                    <TouchableOpacity
+                      activeOpacity={0.82}
+                      disabled={!isClinicalFormDirty || savingClinical}
+                      onPress={saveClinicalData}
                       style={[
-                        styles.formFeedback,
-                        therapyFeedback.type === 'error' ? styles.formFeedbackError : null,
+                        styles.saveProfileButton,
+                        (!isClinicalFormDirty || savingClinical) && styles.saveProfileButtonDisabled,
                       ]}
                     >
-                      {therapyFeedback.message}
+                      {savingClinical ? (
+                        <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                      ) : (
+                        <Text style={styles.saveProfileButtonText}>Salvar dados clinicos</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ) : section.key === 'pharmacology' ? (
+                  <View style={styles.editForm}>
+                    <Text style={styles.therapyIntroText}>
+                      Toque em basal, bolus ou mista para editar a insulina.
                     </Text>
-                  ) : null}
 
-                  <TouchableOpacity
-                    activeOpacity={0.82}
-                    disabled={!isTherapyFormDirty || savingTherapy}
-                    onPress={savePharmacologyData}
-                    style={[
-                      styles.saveProfileButton,
-                      (!isTherapyFormDirty || savingTherapy) && styles.saveProfileButtonDisabled,
-                    ]}
-                  >
-                    {savingTherapy ? (
-                      <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                    ) : (
-                      <Text style={styles.saveProfileButtonText}>Salvar terapia farmacolÃƒÂ³gica</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              ) : (
-                <View style={styles.infoList}>
-                  {section.rows.map((row) => (
-                    <InfoRow key={`${section.key}-${row.label}`} label={row.label} value={row.value} />
-                  ))}
-                </View>
-              )
-            ) : null}
-          </SectionCard>
-        ))}
+                    {PHARMACOLOGY_CATEGORY_OPTIONS.map((option) => {
+                      const plan = therapyPlansByCategory[option.value];
+                      const summary = buildTherapyPlanSummary(plan);
+
+                      return (
+                        <TouchableOpacity
+                          key={option.value}
+                          activeOpacity={0.82}
+                          onPress={() =>
+                            openTherapyEditor(
+                              plan || {
+                                ...createEmptyTherapyPlan(),
+                                categoria_funcional: option.value,
+                              }
+                            )
+                          }
+                          style={styles.therapyFieldCard}
+                        >
+                          <View style={styles.therapyFieldHeader}>
+                            <View style={styles.therapyFieldTitleWrap}>
+                              <Text style={styles.therapyFieldLabel}>{option.label}</Text>
+                              <Text style={styles.therapyFieldDescription}>
+                                {normalizeDisplayText(option.descricao)}
+                              </Text>
+                            </View>
+                            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.primaryDark} />
+                          </View>
+
+                          <View style={styles.therapyFieldSummary}>
+                            <Text style={styles.therapyFieldValue}>{normalizeDisplayText(summary.title)}</Text>
+                            <Text style={styles.therapyFieldSubvalue}>
+                              {normalizeDisplayText(summary.subtitle || 'Nenhum plano salvo ainda')}
+                            </Text>
+                            {summary.details.map((detail) => (
+                              <Text key={`${option.value}-${detail}`} style={styles.therapyMetaText}>
+                                {normalizeDisplayText(detail)}
+                              </Text>
+                            ))}
+                          </View>
+                        </TouchableOpacity>
+                      );
+                    })}
+
+                    {therapyFeedback ? (
+                      <Text
+                        style={[
+                          styles.formFeedback,
+                          therapyFeedback.type === 'error' ? styles.formFeedbackError : null,
+                        ]}
+                      >
+                        {therapyFeedback.message}
+                      </Text>
+                    ) : null}
+
+                    <TouchableOpacity
+                      activeOpacity={0.82}
+                      disabled={!isTherapyFormDirty || savingTherapy}
+                      onPress={savePharmacologyData}
+                      style={[
+                        styles.saveProfileButton,
+                        (!isTherapyFormDirty || savingTherapy) && styles.saveProfileButtonDisabled,
+                      ]}
+                    >
+                      {savingTherapy ? (
+                        <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                      ) : (
+                        <Text style={styles.saveProfileButtonText}>Salvar terapia farmacologica</Text>
+                      )}
+                    </TouchableOpacity>
+                  </View>
+                ) : (
+                  <View style={styles.infoList}>
+                    {section.rows.map((row) => (
+                      <InfoRow key={`${section.key}-${row.label}`} label={row.label} value={row.value} />
+                    ))}
+                  </View>
+                )}
+              </ProfileDataSectionCard>
+            </View>
+          ))}
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.82}
+          onPress={() =>
+            navigation.navigate('PacientePerfilNutricionista', {
+              usuarioLogado,
+              nutricionista: nutritionistRouteData || undefined,
+            })
+          }
+          style={styles.nutritionistCard}
+        >
+          <View style={styles.nutritionistAvatar}>
+            <Text style={styles.nutritionistAvatarText}>{nutritionistInitials}</Text>
+          </View>
+          <View style={styles.nutritionistCopy}>
+            <Text style={styles.nutritionistName}>{nutritionistName}</Text>
+            <Text style={styles.nutritionistMeta}>
+              Nutricionista{nutritionistCrn ? ` • CRN ${nutritionistCrn}` : ''}
+            </Text>
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+        </TouchableOpacity>
+
+        <SectionCard style={styles.profileSummaryCard}>
+          <Text style={styles.profileSummaryTitle}>Configuracoes</Text>
+
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={() => navigation.navigate('PacienteAssistente', { usuarioLogado })}
+            style={styles.settingsRow}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="help-circle-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Ajuda e suporte</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+          </TouchableOpacity>
+        </SectionCard>
+
+        <SectionCard style={styles.profileSummaryCard}>
+          <Text style={styles.profileSummaryTitle}>Preferencias de notificacao</Text>
+
+          {[
+            {
+              key: 'glucoseAlerts',
+              title: 'Alertas de glicemia',
+              helper: 'Avisos de picos e quedas',
+            },
+            {
+              key: 'mealReminders',
+              title: 'Lembretes de refeicao',
+              helper: 'Horarios do plano alimentar',
+            },
+            {
+              key: 'aiInsights',
+              title: 'Insights de IA',
+              helper: 'Recomendacoes personalizadas',
+            },
+            {
+              key: 'nutritionistMessages',
+              title: 'Mensagens do nutricionista',
+              helper: 'Comunicacao com o profissional',
+            },
+          ].map((item) => (
+            <View key={item.key} style={styles.preferenceRow}>
+              <View style={styles.preferenceCopy}>
+                <Text style={styles.preferenceTitle}>{item.title}</Text>
+                <Text style={styles.preferenceHelper}>{item.helper}</Text>
+              </View>
+              <Switch
+                value={notificationPrefs[item.key]}
+                onValueChange={(value) =>
+                  setNotificationPrefs((current) => ({
+                    ...current,
+                    [item.key]: value,
+                  }))
+                }
+                trackColor={{
+                  false: patientTheme.colors.border,
+                  true: patientTheme.colors.primary,
+                }}
+                thumbColor={patientTheme.colors.surfaceMuted}
+              />
+            </View>
+          ))}
+        </SectionCard>
+
+        <SectionCard style={styles.integrationCard}>
+          <Text style={styles.profileSummaryTitle}>Integracao FreeStyle Libre</Text>
+
+          <View style={styles.integrationHeader}>
+            <View>
+              <Text style={styles.integrationLabel}>Status</Text>
+              <Text style={styles.integrationHelper}>
+                {libreConnected ? 'Sincronizacao disponivel no app.' : 'Integração ainda nao configurada.'}
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.integrationBadge,
+                libreConnected ? styles.integrationBadgeConnected : styles.integrationBadgePending,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.integrationBadgeText,
+                  libreConnected
+                    ? styles.integrationBadgeTextConnected
+                    : styles.integrationBadgeTextPending,
+                ]}
+              >
+                {libreConnected ? 'Conectado' : 'Pendente'}
+              </Text>
+            </View>
+          </View>
+
+          <TouchableOpacity
+            activeOpacity={0.82}
+            onPress={() => navigation.navigate('PacienteMonitoramento', { usuarioLogado })}
+            style={styles.integrationButton}
+          >
+            <Text style={styles.integrationButtonText}>
+              {libreConnected ? 'Abrir monitoramento' : 'Configurar conexao'}
+            </Text>
+          </TouchableOpacity>
+        </SectionCard>
+
+        <View style={styles.privacyFootnoteCard}>
+          <Text style={styles.privacyFootnoteText}>
+            Seus dados sao protegidos de acordo com o padrao de seguranca do app.
+          </Text>
+          <TouchableOpacity activeOpacity={0.78} onPress={() => openProfileSection('clinical')}>
+            <Text style={styles.privacyFootnoteLink}>Ver dados clinicos completos</Text>
+          </TouchableOpacity>
+        </View>
+
+        <TouchableOpacity
+          activeOpacity={0.82}
+          disabled={loggingOut}
+          onPress={handleLogout}
+          style={styles.logoutButton}
+        >
+          {loggingOut ? (
+            <ActivityIndicator color={patientTheme.colors.danger} />
+          ) : (
+            <>
+              <Ionicons name="log-out-outline" size={16} color={patientTheme.colors.danger} />
+              <Text style={styles.logoutButtonText}>Sair da conta</Text>
+            </>
+          )}
+        </TouchableOpacity>
+
+        <Text style={styles.profileVersionText}>GlicNutri v1.0.0 • © 2026</Text>
+
+
 
         <View style={styles.footerSpace} />
         </ScrollView>
@@ -5957,11 +6447,33 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     marginTop: 0,
-    padding: 14,
+    padding: 18,
+  },
+  profileSummaryCard: {
+    marginTop: 14,
   },
   heroHeader: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     flexDirection: 'row',
+  },
+  profileAvatarLarge: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: 32,
+    height: 64,
+    justifyContent: 'center',
+    marginRight: 16,
+    overflow: 'hidden',
+    width: 64,
+  },
+  profileAvatarImage: {
+    height: '100%',
+    width: '100%',
+  },
+  profileAvatarLargeText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 24,
+    fontWeight: '800',
   },
   avatar: {
     alignItems: 'center',
@@ -5979,23 +6491,27 @@ const styles = StyleSheet.create({
   },
   heroCopy: {
     flex: 1,
+    minWidth: 0,
+    paddingTop: 2,
   },
   heroName: {
     color: patientTheme.colors.text,
-    fontSize: 17,
+    fontSize: 18,
     fontWeight: '800',
+    lineHeight: 22,
   },
   heroEmail: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 3,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
   },
   heroInlineDetails: {
     color: patientTheme.colors.textMuted,
     fontSize: 12,
-    lineHeight: 17,
-    marginTop: 2,
+    lineHeight: 18,
+    marginTop: 12,
+    textAlign: 'center',
   },
   heroBadge: {
     alignItems: 'center',
@@ -6013,8 +6529,299 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginLeft: 6,
   },
-  profileSection: {
+  statusPill: {
+    alignSelf: 'flex-start',
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: patientTheme.radius.pill,
+    marginTop: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+  },
+  statusPillText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  heroDivider: {
+    height: 1,
+    backgroundColor: patientTheme.colors.border,
     marginTop: 16,
+    marginBottom: 14,
+  },
+  heroMetricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+  },
+  heroMetricItem: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 62,
+    paddingHorizontal: 6,
+  },
+  heroMetricValue: {
+    color: patientTheme.colors.text,
+    fontSize: 21,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  heroMetricLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    marginTop: 4,
+    textAlign: 'center',
+  },
+  profileSection: {
+    marginTop: 12,
+  },
+  profileSectionsStack: {
+    gap: 12,
+    marginTop: 12,
+  },
+  profileDataHubCard: {
+    marginTop: 14,
+  },
+  profileDataHubHelper: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 4,
+  },
+  profileSummaryTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 14,
+  },
+  summaryInfoGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'space-between',
+    rowGap: 10,
+  },
+  summaryInfoItem: {
+    width: '48%',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    minHeight: 74,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    justifyContent: 'center',
+  },
+  summaryInfoLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    marginBottom: 6,
+    lineHeight: 15,
+  },
+  summaryInfoValue: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 19,
+  },
+  chipsWrap: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  healthChip: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  healthChipMuted: {
+    backgroundColor: patientTheme.colors.surface,
+  },
+  healthChipText: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  healthChipTextMuted: {
+    color: patientTheme.colors.textMuted,
+  },
+  nutritionistCard: {
+    alignItems: 'center',
+    backgroundColor: '#fbf5ff',
+    borderColor: '#ead8ff',
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    flexDirection: 'row',
+    marginTop: 14,
+    padding: patientTheme.spacing.card,
+  },
+  nutritionistAvatar: {
+    alignItems: 'center',
+    backgroundColor: '#a020f0',
+    borderRadius: 20,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  nutritionistAvatarText: {
+    color: '#ffffff',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  nutritionistCopy: {
+    flex: 1,
+    paddingHorizontal: 12,
+  },
+  nutritionistName: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  nutritionistMeta: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    marginTop: 3,
+  },
+  settingsRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 48,
+    paddingVertical: 6,
+  },
+  settingsRowLeft: {
+    alignItems: 'center',
+    flexDirection: 'row',
+  },
+  settingsRowText: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+    marginLeft: 12,
+  },
+  preferenceRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    paddingVertical: 10,
+  },
+  preferenceCopy: {
+    flex: 1,
+    paddingRight: 16,
+  },
+  preferenceTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  preferenceHelper: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 3,
+  },
+  integrationCard: {
+    marginTop: 14,
+    backgroundColor: '#edf5ff',
+    borderColor: '#bcd9ff',
+    borderWidth: 1,
+  },
+  integrationHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+  },
+  integrationLabel: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  integrationHelper: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    marginTop: 4,
+  },
+  integrationBadge: {
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  integrationBadgeConnected: {
+    backgroundColor: '#14c85a',
+  },
+  integrationBadgePending: {
+    backgroundColor: '#ffffff',
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
+  },
+  integrationBadgeText: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  integrationBadgeTextConnected: {
+    color: '#ffffff',
+  },
+  integrationBadgeTextPending: {
+    color: patientTheme.colors.textMuted,
+  },
+  integrationButton: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 42,
+  },
+  integrationButtonText: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  privacyFootnoteCard: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.lg,
+    marginTop: 14,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  privacyFootnoteText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 16,
+    textAlign: 'center',
+  },
+  privacyFootnoteLink: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  logoutButton: {
+    alignItems: 'center',
+    borderColor: '#f0b8b8',
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    marginTop: 14,
+    minHeight: 46,
+  },
+  logoutButtonText: {
+    color: patientTheme.colors.danger,
+    fontSize: 14,
+    fontWeight: '700',
+    marginLeft: 8,
+  },
+  profileVersionText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    marginTop: 14,
+    textAlign: 'center',
   },
   drilldownHeader: {
     alignItems: 'center',
