@@ -282,20 +282,20 @@ export function buildPatientProfileSections(patient) {
   return [
     {
       key: 'patient',
-      title: 'Dados do paciente',
-      helper: 'Identificação e contato.',
+      title: 'Identificação e contato',
+      helper: 'Nome, documentos, telefone e endereço para consultas e lembretes.',
       rows: buildPatientDataRows(patient),
     },
     {
       key: 'clinical',
-      title: 'Dados clínicos',
-      helper: 'Informações nutricionais, clínicas e respostas do onboarding.',
+      title: 'Saúde, metas e rotina',
+      helper: 'Diabetes, medidas corporais, objetivos e histórico clínico do onboarding.',
       rows: buildPatientClinicalRows(patient),
     },
     {
       key: 'pharmacology',
-      title: 'Terapia Farmacológica',
-      helper: 'Insulinas, doses e horários.',
+      title: 'Terapia com insulina',
+      helper: 'Basal, bolus e mista — marcas, doses e horários do dia.',
       rows: buildPatientPharmacologyRows(patient),
     },
   ];

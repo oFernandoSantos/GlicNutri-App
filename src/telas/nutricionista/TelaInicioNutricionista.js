@@ -1,672 +1,321 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useMemo } from 'react';
+import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
-  View,
-  Text,
-  TouchableOpacity,
-  StyleSheet,
-  ScrollView,
-  Platform,
-  StatusBar,
-  ActivityIndicator,
-  RefreshControl,
-} from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { supabase } from '../../servicos/configSupabase';
+  ActionCard,
+  AvatarBadge,
+  MetricCard,
+  ProgressBar,
+  RiskBadge,
+  SectionCard,
+  nutriDesktopStyles,
+} from '../../componentes/nutricionista/NutriDesktopUI';
+import {
+  nutritionistDesktopMetrics,
+  nutritionistPatientsMock,
+  nutritionistQuickActions,
+  nutritionistRecentUpdates,
+} from '../../dados/dadosNutricionistaMock';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
-import NutricionistaDrawer from '../../componentes/nutricionista/MenuNutricionista';
-import BarraAbasNutricionista, {
-  NUTRI_TAB_BAR_HEIGHT,
-  NUTRI_TAB_BAR_SPACE,
-} from '../../componentes/nutricionista/BarraAbasNutricionista';
-import { fetchNutriDashboard } from '../../servicos/servicoDashboardNutri';
-import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
-import MensagemInline from '../../componentes/comum/MensagemInline';
-
-function SectionCard({ children, style }) {
-  return <View style={[styles.sectionCard, style]}>{children}</View>;
-}
-
-function getRiskTone(risk) {
-  if (risk === 'Alto Risco') {
-    return {
-      backgroundColor: '#fff1f1',
-      textColor: '#c35a5a',
-    };
-  }
-
-  if (risk === 'Medio Risco') {
-    return {
-      backgroundColor: '#fff8e8',
-      textColor: '#b5842f',
-    };
-  }
-
-  return {
-    backgroundColor: '#eefaf4',
-    textColor: '#3c9a67',
-  };
-}
 
 export default function NutricionistaHomeDashboardScreen({ route, navigation }) {
   const { usuarioLogado } = route.params || {};
-  const showTabBar = route?.name === 'HomeNutricionista';
-  const [menuVisible, setMenuVisible] = useState(false);
-  const [loadingLogout, setLoadingLogout] = useState(false);
-  const [loadingDashboard, setLoadingDashboard] = useState(true);
-  const [dashboardErro, setDashboardErro] = useState(null);
-  const [refreshingDash, setRefreshingDash] = useState(false);
-  const [mensagemTopo, setMensagemTopo] = useState(null);
-  const [dashboard, setDashboard] = useState({
-    patientsCount: 0,
-    consultsTodayCount: 0,
-    upcomingConsults: [],
-    recentPatients: [],
-    lastUpdatedAt: null,
-  });
 
-  const nomeNutri =
-    usuarioLogado?.nome_completo_nutri ||
-    usuarioLogado?.nome_nutri ||
-    'Nutricionista';
-
-  const crnNutri = usuarioLogado?.crm_numero || '12345';
-
-  const menuPills = useMemo(
-    () => [
-      { label: 'Agenda', route: 'NutricionistaAgenda' },
-      { label: 'Gerenciamento de Pacientes', route: 'GerenciarPacientes' },
-      { label: 'Início', route: 'HomeNutricionista' },
-      { label: 'Mensagens', route: 'NutricionistaMensagens' },
-      { label: 'Relatorios', route: 'NutricionistaRelatorios' },
-    ],
-    []
-  );
-
-  async function handleLogout() {
-    try {
-      setMenuVisible(false);
-      setLoadingLogout(true);
-
-      const { error } = await supabase.auth.signOut();
-
-      if (error) {
-        console.log('Erro ao encerrar sessao:', error.message);
-      }
-
-      navigation.reset({
-        index: 0,
-        routes: [{ name: 'Login' }],
-      });
-    } catch (error) {
-      console.log('Erro inesperado no logout:', error);
-      setMensagemTopo({
-        tipo: 'erro',
-        texto:
-          'Não foi possível sair da conta. Verifique a conexão e tente novamente.',
-      });
-    } finally {
-      setLoadingLogout(false);
-    }
-  }
-
-  function handleNavigate(routeName) {
-    navigation.navigate(routeName, { usuarioLogado });
-  }
-
-  const loadDashboard = useCallback(
-    async (options = {}) => {
-      const { silent = false } = options;
-      try {
-        if (!silent) {
-          setLoadingDashboard(true);
-        }
-        setDashboardErro(null);
-        const data = await fetchNutriDashboard(usuarioLogado);
-        setDashboard({
-          patientsCount: data.patientsCount || 0,
-          consultsTodayCount: data.consultsTodayCount || 0,
-          upcomingConsults: data.upcomingConsults || [],
-          recentPatients: data.recentPatients || [],
-          lastUpdatedAt: data.lastUpdatedAt || new Date().toISOString(),
-        });
-      } catch (error) {
-        console.log('Erro ao carregar dashboard nutri:', error);
-        setDashboardErro(
-          'Não foi possível carregar o painel. Verifique a conexão e tente novamente.'
-        );
-      } finally {
-        if (!silent) {
-          setLoadingDashboard(false);
-        }
-      }
-    },
-    [usuarioLogado]
-  );
-
-  const onRefreshDashboard = useCallback(async () => {
-    setRefreshingDash(true);
-    await loadDashboard({ silent: true });
-    setRefreshingDash(false);
-  }, [loadDashboard]);
-
-  useEffect(() => {
-    navigation.setOptions({
-      readerOnMenuPress: () => setMenuVisible(true),
-      readerMenuDisabled: loadingLogout,
-      readerMenuLoading: loadingLogout,
-    });
-  }, [navigation, loadingLogout]);
-
-  useEffect(() => {
-    loadDashboard();
-    const unsubscribe = navigation.addListener('focus', () => loadDashboard());
-    return unsubscribe;
-  }, [navigation, loadDashboard]);
+  const priorityPatients = useMemo(() => {
+    return [...nutritionistPatientsMock]
+      .sort((a, b) => {
+        if (b.alerts !== a.alerts) return b.alerts - a.alerts;
+        return a.adherence - b.adherence;
+      })
+      .slice(0, 4);
+  }, []);
 
   return (
-    <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
-      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
-
-      {menuVisible ? (
-        <NutricionistaDrawer
-          visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
-          onNavigate={handleNavigate}
-          onLogout={handleLogout}
-          currentRoute={route?.name || 'HomeNutricionista'}
-          userName={`Dra. ${nomeNutri}`}
-          userSubtitle={`CRN ${crnNutri}`}
-        />
-      ) : null}
-
-      <ScrollView
-        style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
-        contentContainerStyle={[
-          styles.scrollContent,
-          showTabBar && styles.scrollContentWithTabBar,
-          Platform.OS === 'web' && styles.webScrollContent,
-        ]}
-        showsVerticalScrollIndicator={false}
-        keyboardShouldPersistTaps="handled"
-        nestedScrollEnabled
-        refreshControl={
-          <RefreshControl refreshing={refreshingDash} onRefresh={onRefreshDashboard} />
-        }
-      >
-        {mensagemTopo?.texto ? (
-          <MensagemInline
-            tipo={mensagemTopo.tipo || 'erro'}
-            texto={mensagemTopo.texto}
-            onFechar={() => setMensagemTopo(null)}
-          />
-        ) : null}
-        {!loadingDashboard && dashboardErro ? (
-          <EstadoErroCarregamento
-            onTentarNovamente={() => loadDashboard()}
-            loading={loadingDashboard}
-          />
-        ) : null}
-        <View style={styles.headerRow}>
-          <View style={styles.headerCopy}>
-            <Text style={styles.greeting}>{`Dra. ${nomeNutri}`}</Text>
-            <Text style={styles.headerSubtitle}>{`CRN ${crnNutri}`}</Text>
-          </View>
-        </View>
-
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.menuPills}
-        >
-          {menuPills.map((item) => {
-            const ativo = item.route === 'HomeNutricionista';
-
-            return (
-              <TouchableOpacity
-                key={item.route}
-                style={[styles.menuPill, ativo && styles.menuPillActive]}
-                onPress={() => handleNavigate(item.route)}
-              >
-                <Text style={[styles.menuPillText, ativo && styles.menuPillTextActive]}>
-                  {item.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-
-        <View style={styles.indicatorsGrid}>
-          <SectionCard style={styles.indicatorCard}>
-            <View style={styles.indicatorIconWrap}>
-              <Ionicons name="people-outline" size={18} color={patientTheme.colors.primaryDark} />
-            </View>
-            <Text style={styles.indicatorLabel}>Total pacientes</Text>
-            <Text style={styles.indicatorValue}>{dashboard.patientsCount}</Text>
-          </SectionCard>
-
-          <SectionCard style={styles.indicatorCard}>
-            <View style={styles.indicatorIconWrap}>
-              <Ionicons name="calendar-outline" size={18} color={patientTheme.colors.primaryDark} />
-            </View>
-            <Text style={styles.indicatorLabel}>Consultas hoje</Text>
-            <Text style={styles.indicatorValue}>{dashboard.consultsTodayCount}</Text>
-          </SectionCard>
-        </View>
-
-        <Text style={styles.sectionTitle}>Atalhos</Text>
-        <View style={styles.shortcutsGrid}>
-          {[
-            {
-              id: 'agenda',
-              title: 'Agenda',
-              subtitle: `${dashboard.consultsTodayCount} consulta(s) hoje`,
-              helper: 'Gerencie slots e atendimentos',
-              icon: 'calendar-outline',
-              route: 'NutricionistaAgenda',
-            },
-            {
-              id: 'pacientes',
-              title: 'Pacientes',
-              subtitle: `${dashboard.patientsCount} na carteira`,
-              helper: 'Acesse prontuários rapidamente',
-              icon: 'people-outline',
-              route: 'GerenciarPacientes',
-            },
-          ].map((item) => (
-            <TouchableOpacity
+    <LayoutNutricionista
+      navigation={navigation}
+      route={route}
+      usuarioLogado={usuarioLogado}
+      title="Dashboard da clinica"
+      subtitle="Gestao rapida da carteira, risco metabolico e proximas acoes do dia."
+      showTabBar={route?.name === 'HomeNutricionista'}
+    >
+      <View style={nutriDesktopStyles.pageGap}>
+        <View style={styles.metricGrid}>
+          {nutritionistDesktopMetrics.map((item) => (
+            <MetricCard
               key={item.id}
-              style={styles.shortcutCard}
-              onPress={() => handleNavigate(item.route)}
-            >
-              <View style={styles.shortcutIconWrap}>
-                <Ionicons name={item.icon} size={22} color={patientTheme.colors.primaryDark} />
-              </View>
-              <Text style={styles.shortcutTitle}>{item.title}</Text>
-              <Text style={styles.shortcutSubtitle}>{item.subtitle}</Text>
-              <Text style={styles.shortcutHelper}>{item.helper}</Text>
-            </TouchableOpacity>
+              icon={item.icon}
+              label={item.label}
+              value={item.value}
+              helper={item.helper}
+              tone={item.tone}
+              style={styles.metricCell}
+            />
           ))}
         </View>
 
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Próximas consultas</Text>
-          <TouchableOpacity onPress={() => handleNavigate('NutricionistaAgenda')}>
-            <Text style={styles.sectionAction}>Ver agenda</Text>
-          </TouchableOpacity>
+        <View>
+          <Text style={nutriDesktopStyles.sectionTitle}>Acoes rapidas</Text>
+          <Text style={nutriDesktopStyles.sectionHelper}>
+            Acesse os pontos mais usados da rotina sem navegar por varios niveis.
+          </Text>
         </View>
 
-        {loadingDashboard ? (
-          <SectionCard style={styles.loadingCard}>
-            <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-            <Text style={styles.loadingText}>Carregando consultas...</Text>
-          </SectionCard>
-        ) : dashboard.upcomingConsults.length ? (
-          dashboard.upcomingConsults.map((item) => (
-            <TouchableOpacity
+        <View style={styles.actionsRow}>
+          {nutritionistQuickActions.map((item) => (
+            <ActionCard
               key={item.id}
-              style={styles.updateCard}
-              onPress={() =>
-                navigation.navigate('NutriConsultaNutri', {
-                  usuarioLogado,
-                  consultaId: item.id,
-                  pacienteId: item.paciente_id,
-                  scheduledAt: item.scheduled_at,
-                })
-              }
-            >
-              <View style={styles.updateTopRow}>
-                <Text style={styles.updateName}>
-                  {item?.paciente?.nome_completo || 'Paciente'}
-                </Text>
-                <Text style={styles.updateTime}>
-                  {item.scheduled_at
-                    ? new Date(item.scheduled_at).toLocaleString('pt-BR', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })
-                    : '--'}
-                </Text>
-              </View>
-              <View style={styles.updateMetaRow}>
-                <View style={[styles.riskBadge, { backgroundColor: '#eefaf4' }]}>
-                  <Text style={[styles.riskBadgeText, { color: '#3c9a67' }]}>
-                    {String(item.status || 'scheduled')}
-                  </Text>
-                </View>
-                {item.motivo ? (
-                  <Text style={styles.updateInlineText}>{item.motivo}</Text>
-                ) : null}
-              </View>
-            </TouchableOpacity>
-          ))
-        ) : (
-          <SectionCard style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Sem consultas próximas</Text>
-            <Text style={styles.emptyText}>Assim que pacientes agendarem, aparecem aqui.</Text>
-          </SectionCard>
-        )}
-
-        <View style={styles.sectionHeader}>
-          <Text style={styles.sectionTitle}>Pacientes recentes</Text>
-          <TouchableOpacity onPress={() => handleNavigate('GerenciarPacientes')}>
-            <Text style={styles.sectionAction}>Ver Todos</Text>
-          </TouchableOpacity>
+              icon={item.icon}
+              title={item.title}
+              subtitle={item.subtitle}
+              helper={item.helper}
+              onPress={() => navigation.navigate(item.route, { usuarioLogado })}
+            />
+          ))}
         </View>
 
-        {loadingDashboard ? (
-          <SectionCard style={styles.loadingCard}>
-            <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-            <Text style={styles.loadingText}>Carregando pacientes...</Text>
-          </SectionCard>
-        ) : dashboard.recentPatients.length ? (
-          dashboard.recentPatients.map((p) => (
-            <TouchableOpacity
-              key={p.id_paciente_uuid}
-              style={styles.updateCard}
-              onPress={() =>
-                navigation.navigate('NutriProntuarioPaciente', {
-                  usuarioLogado,
-                  pacienteId: p.id_paciente_uuid,
-                  paciente: p,
-                })
-              }
-            >
-              <View style={styles.updateTopRow}>
-                <Text style={styles.updateName}>{p.nome_completo || 'Paciente'}</Text>
-                <Text style={styles.updateTime}>
-                  {p.data_hora_ultima_atualizacao
-                    ? new Date(p.data_hora_ultima_atualizacao).toLocaleString('pt-BR', {
-                        dateStyle: 'short',
-                        timeStyle: 'short',
-                      })
-                    : '--'}
-                </Text>
-              </View>
-              <View style={styles.updateMetaRow}>
-                <Text style={styles.updateInlineText}>{p.email_pac || ''}</Text>
-              </View>
-            </TouchableOpacity>
-          ))
-        ) : (
-          <SectionCard style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Sem pacientes</Text>
-            <Text style={styles.emptyText}>Cadastre pacientes para aparecerem aqui.</Text>
-          </SectionCard>
-        )}
+        <View style={nutriDesktopStyles.desktopRow}>
+          <View style={styles.mainColumn}>
+            <Text style={nutriDesktopStyles.sectionTitle}>Pacientes prioritarios</Text>
+            <Text style={nutriDesktopStyles.sectionHelper}>
+              Ordenados por alerta clinico e menor adesao recente.
+            </Text>
 
-        <View style={styles.listFooter} />
-      </ScrollView>
+            <View style={styles.priorityList}>
+              {priorityPatients.map((patient) => (
+                <TouchableOpacity
+                  key={patient.id}
+                  style={[
+                    styles.priorityCard,
+                    patient.risk === 'Alto' && styles.priorityCardAlert,
+                  ]}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    navigation.navigate('NutriProntuarioPaciente', {
+                      usuarioLogado,
+                      pacienteId: patient.id,
+                    })
+                  }
+                >
+                  <View style={styles.priorityHeader}>
+                    <View style={styles.priorityIdentity}>
+                      <AvatarBadge name={patient.name} size={52} />
+                      <View style={styles.priorityCopy}>
+                        <View style={styles.priorityTopRow}>
+                          <Text style={styles.priorityName}>{patient.name}</Text>
+                          <RiskBadge risk={`${patient.risk} risco`} />
+                        </View>
+                        <Text style={styles.priorityMeta}>
+                          {patient.specialtyTag} · IMC {patient.bmi} · {patient.age} anos
+                        </Text>
+                        <Text style={styles.priorityNote}>{patient.notes}</Text>
+                      </View>
+                    </View>
+                  </View>
 
-      {showTabBar ? (
-        <BarraAbasNutricionista
-          navigation={navigation}
-          rotaAtual={route?.name || 'HomeNutricionista'}
-          usuarioLogado={usuarioLogado}
-        />
-      ) : null}
-    </View>
+                  <View style={styles.priorityStats}>
+                    <View style={styles.priorityPill}>
+                      <Text style={styles.priorityPillLabel}>Alertas</Text>
+                      <Text style={styles.priorityPillValue}>{patient.alerts}</Text>
+                    </View>
+                    <View style={styles.priorityPill}>
+                      <Text style={styles.priorityPillLabel}>Glicose atual</Text>
+                      <Text style={styles.priorityPillValue}>{patient.latestGlucose} mg/dL</Text>
+                    </View>
+                    <View style={styles.priorityPill}>
+                      <Text style={styles.priorityPillLabel}>Consulta</Text>
+                      <Text style={styles.priorityPillValue}>{patient.appointmentTime}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.adherenceBlock}>
+                    <View style={styles.adherenceRow}>
+                      <Text style={styles.adherenceLabel}>Adesao geral</Text>
+                      <Text style={styles.adherenceValue}>{patient.adherence}%</Text>
+                    </View>
+                    <ProgressBar
+                      value={patient.adherence}
+                      tone={patient.adherence < 70 ? 'danger' : patient.adherence < 80 ? 'warning' : 'success'}
+                    />
+                    <Text style={styles.adherenceHint}>{patient.trendText}</Text>
+                  </View>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+
+          <View style={styles.sideColumn}>
+            <Text style={nutriDesktopStyles.sectionTitle}>Atualizacoes recentes</Text>
+            <Text style={nutriDesktopStyles.sectionHelper}>
+              Pacientes que preencheram o app ou responderam hoje.
+            </Text>
+
+            <SectionCard style={styles.timelineCard}>
+              {nutritionistRecentUpdates.map((item, index) => (
+                <View key={item.id} style={[styles.timelineItem, index !== nutritionistRecentUpdates.length - 1 && styles.timelineItemBorder]}>
+                  <View style={styles.timelineTimeWrap}>
+                    <Text style={styles.timelineTime}>{item.time}</Text>
+                  </View>
+                  <View style={styles.timelineContent}>
+                    <Text style={styles.timelineTitle}>{item.title}</Text>
+                    <Text style={styles.timelineDetail}>{item.detail}</Text>
+                  </View>
+                </View>
+              ))}
+            </SectionCard>
+          </View>
+        </View>
+      </View>
+    </LayoutNutricionista>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    minHeight: 0,
-    backgroundColor: patientTheme.colors.background,
-  },
-  containerWeb: {
-    minHeight: '100%',
-    overflow: 'visible',
-  },
-  scroll: {
-    flex: 1,
-    minHeight: 0,
-  },
-  scrollContent: {
-    flexGrow: 1,
-    padding: patientTheme.spacing.screen,
-    paddingBottom: 32,
-  },
-  scrollContentWithTabBar: {
-    paddingBottom: NUTRI_TAB_BAR_HEIGHT + 32 + NUTRI_TAB_BAR_SPACE,
-  },
-  webScroll: {
-    overflowY: 'visible',
-    overflowX: 'hidden',
-  },
-  webScrollContent: {
-    flexGrow: 1,
-    minHeight: '100%',
-  },
-  sectionCard: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
-  },
-  headerRow: {
-    marginTop: 14,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-  },
-  headerCopy: {
-    flex: 1,
-    paddingRight: 12,
-  },
-  greeting: {
-    fontSize: 30,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  headerSubtitle: {
-    marginTop: 8,
-    fontSize: 15,
-    lineHeight: 22,
-    color: patientTheme.colors.textMuted,
-  },
-  headerActions: {
-    alignItems: 'flex-end',
-    gap: 10,
-  },
-  menuPills: {
-    paddingVertical: 18,
-    gap: 10,
-  },
-  menuPill: {
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
-    ...patientShadow,
-  },
-  menuPillActive: {
-    backgroundColor: patientTheme.colors.primarySoft,
-  },
-  menuPillText: {
-    color: patientTheme.colors.textMuted,
-    fontWeight: '700',
-  },
-  menuPillTextActive: {
-    color: patientTheme.colors.primaryDark,
-  },
-  indicatorsGrid: {
+  metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    justifyContent: 'space-between',
     gap: 12,
   },
-  indicatorCard: {
-    width: '48%',
-    minHeight: 132,
+  metricCell: {
+    width: Platform.OS === 'web' ? '24%' : '48%',
+    minWidth: 180,
+    flexGrow: 1,
   },
-  indicatorIconWrap: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: patientTheme.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  indicatorLabel: {
-    marginTop: 14,
-    fontSize: 13,
-    color: patientTheme.colors.textMuted,
-  },
-  indicatorValue: {
-    marginTop: 8,
-    fontSize: 28,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  sectionTitle: {
-    marginTop: 24,
-    marginBottom: 12,
-    fontSize: 20,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  shortcutsGrid: {
+  actionsRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
     gap: 12,
   },
-  shortcutCard: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
+  mainColumn: {
+    flex: 1.2,
   },
-  shortcutIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: patientTheme.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  sideColumn: {
+    flex: 0.82,
   },
-  shortcutTitle: {
+  priorityList: {
     marginTop: 14,
-    fontSize: 16,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  shortcutSubtitle: {
-    marginTop: 6,
-    fontSize: 15,
-    color: patientTheme.colors.text,
-  },
-  shortcutHelper: {
-    marginTop: 6,
-    fontSize: 13,
-    lineHeight: 19,
-    color: patientTheme.colors.textMuted,
+    gap: 12,
   },
   priorityCard: {
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    borderWidth: 1.5,
-    borderColor: '#f6dede',
-  },
-  priorityHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-  },
-  priorityName: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  priorityAction: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  riskBadge: {
-    alignSelf: 'flex-start',
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: patientTheme.radius.pill,
-  },
-  riskBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  priorityMetrics: {
-    marginTop: 16,
-    flexDirection: 'row',
-    gap: 10,
-  },
-  priorityMetricPill: {
-    flex: 1,
-    borderRadius: patientTheme.radius.lg,
-    padding: 14,
-    backgroundColor: '#ffffff',
-  },
-  priorityMetricLabel: {
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.6,
-    color: patientTheme.colors.textMuted,
-  },
-  priorityMetricValue: {
-    marginTop: 8,
-    fontSize: 22,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  priorityUpdate: {
-    marginTop: 16,
-    fontSize: 13,
-    color: patientTheme.colors.textMuted,
-  },
-  sectionHeader: {
-    marginTop: 24,
-    marginBottom: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  sectionAction: {
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '700',
-  },
-  updateCard: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    padding: 16,
-    marginBottom: 10,
+    padding: patientTheme.spacing.card,
     ...patientShadow,
   },
-  updateTopRow: {
+  priorityCardAlert: {
+    borderColor: '#f0d2d2',
+    backgroundColor: '#faf5f5',
+  },
+  priorityHeader: {
+    gap: 12,
+  },
+  priorityIdentity: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  priorityCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  priorityTopRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  priorityName: {
+    flex: 1,
+    fontSize: 18,
+    fontWeight: '900',
+    color: patientTheme.colors.text,
+  },
+  priorityMeta: {
+    marginTop: 6,
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+  },
+  priorityNote: {
+    marginTop: 8,
+    color: patientTheme.colors.textMuted,
+    lineHeight: 20,
+  },
+  priorityStats: {
+    marginTop: 16,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  priorityPill: {
+    flex: 1,
+    minWidth: 120,
+    backgroundColor: patientTheme.colors.background,
+    borderRadius: patientTheme.radius.lg,
+    padding: 12,
+    ...patientShadow,
+  },
+  priorityPillLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+  },
+  priorityPillValue: {
+    marginTop: 6,
+    color: patientTheme.colors.text,
+    fontWeight: '900',
+  },
+  adherenceBlock: {
+    marginTop: 16,
+    gap: 8,
+  },
+  adherenceRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  updateName: {
-    fontSize: 16,
+  adherenceLabel: {
+    color: patientTheme.colors.textMuted,
     fontWeight: '700',
+  },
+  adherenceValue: {
     color: patientTheme.colors.text,
+    fontWeight: '900',
   },
-  updateTime: {
-    fontSize: 13,
+  adherenceHint: {
     color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
   },
-  updateMetaRow: {
-    marginTop: 12,
+  timelineCard: {
+    marginTop: 14,
+  },
+  timelineItem: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 8,
+    gap: 12,
+    paddingVertical: 12,
   },
-  updateInlineText: {
+  timelineItemBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: patientTheme.colors.border,
+  },
+  timelineTimeWrap: {
+    width: 56,
+  },
+  timelineTime: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '900',
     fontSize: 13,
-    color: patientTheme.colors.textMuted,
   },
-  listFooter: {
-    height: 8,
+  timelineContent: {
+    flex: 1,
+  },
+  timelineTitle: {
+    color: patientTheme.colors.text,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  timelineDetail: {
+    marginTop: 6,
+    color: patientTheme.colors.textMuted,
+    lineHeight: 20,
   },
 });

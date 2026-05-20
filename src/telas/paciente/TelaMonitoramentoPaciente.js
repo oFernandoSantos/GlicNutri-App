@@ -2594,13 +2594,13 @@ export default function PacienteMonitoramentoScreen({
       <View style={[styles.currentCard, { backgroundColor: latestStatus.cardColor }]}>
         <View style={styles.currentHeader}>
           <View>
-            <Text style={[styles.currentEyebrow, styles.currentCardWhiteText]}>
+            <Text style={[styles.currentEyebrow, { color: latestStatus.mutedTextColor }]}>
               Glicose Agora
             </Text>
-            <Text style={[styles.currentValue, styles.currentCardWhiteText]}>
+            <Text style={[styles.currentValue, { color: latestStatus.textColor }]}>
               {latestReading ? `${latestReading.value} mg/dL` : '-- mg/dL'}
             </Text>
-            <Text style={[styles.currentTime, styles.currentCardWhiteText]}>
+            <Text style={[styles.currentTime, { color: latestStatus.mutedTextColor }]}>
               {latestReading
                 ? `Última leitura às ${String(latestReading.time).slice(0, 5)}`
                 : 'Sem leitura registrada'}
@@ -2608,8 +2608,8 @@ export default function PacienteMonitoramentoScreen({
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: latestStatus.badgeColor }]}>
-            <Ionicons name="alert-circle-outline" size={14} color="#ffffff" />
-            <Text style={[styles.statusPillText, styles.currentCardWhiteText]}>
+            <Ionicons name="alert-circle-outline" size={14} color={latestStatus.textColor} />
+            <Text style={[styles.statusPillText, { color: latestStatus.textColor }]}>
               {latestStatus.label}
             </Text>
           </View>

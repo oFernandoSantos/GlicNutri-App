@@ -203,6 +203,22 @@ function buildCurrentTimeString() {
   return new Date().toTimeString().slice(0, 8);
 }
 
+function getNormalizedSupabaseErrorMessage(error) {
+  return String(error?.message || error?.details || error?.hint || '').trim().toLowerCase();
+}
+
+function isRowLevelSecurityError(error) {
+  const message = getNormalizedSupabaseErrorMessage(error);
+  const code = String(error?.code || '').trim().toLowerCase();
+
+  return (
+    code === '42501' ||
+    message.includes('row-level security') ||
+    message.includes('violates row-level security policy') ||
+    message.includes('permission denied')
+  );
+}
+
 function buildUuid() {
   if (globalThis?.crypto?.randomUUID) {
     return globalThis.crypto.randomUUID();
@@ -921,7 +937,7 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
     console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
   }
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('registro_medicacao')
     .select([
       'id_registro_medicacao_uuid',
@@ -942,6 +958,32 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
     .order('data', { ascending: false })
     .order('hora', { ascending: false })
     .limit(limit);
+
+  if (String(error?.message || '').toLowerCase().includes('id_registro_legado')) {
+    const retry = await supabase
+      .from('registro_medicacao')
+      .select([
+        'id_registro_medicacao_uuid',
+        'id_paciente_uuid',
+        'tipo_registro',
+        'descricao',
+        'nome_medicamento',
+        'unidade_medida',
+        'quantidade',
+        'data',
+        'hora',
+        'dias_tratamento',
+        'uso_continuo',
+        'observacao',
+      ].join(', '))
+      .eq('id_paciente_uuid', patientId)
+      .order('data', { ascending: false })
+      .order('hora', { ascending: false })
+      .limit(limit);
+
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.log('Erro ao buscar medicacoes:', error.message);
@@ -1142,8 +1184,7 @@ export async function addMedicationEntry(patientId, entry) {
     id_registro_legado: normalizedLegacyId,
   };
 
-  const { data: rpcData, error: rpcError } = await supabase.rpc(
-    'registrar_medicacao_paciente',
+  const rpcAttempts = [
     {
       p_id_paciente_uuid: patientId,
       p_tipo_registro: fallbackPayload.tipo_registro,
@@ -1157,8 +1198,67 @@ export async function addMedicationEntry(patientId, entry) {
       p_uso_continuo: fallbackPayload.uso_continuo,
       p_observacao: fallbackPayload.observacao,
       p_id_registro_legado: fallbackPayload.id_registro_legado,
+    },
+    {
+      p_id_paciente_uuid: patientId,
+      p_tipo_registro: fallbackPayload.tipo_registro,
+      p_descricao: fallbackPayload.descricao,
+      p_nome_medicamento: fallbackPayload.nome_medicamento,
+      p_unidade_medida: fallbackPayload.unidade_medida,
+      p_quantidade: fallbackPayload.quantidade,
+      p_data: fallbackPayload.data,
+      p_hora: fallbackPayload.hora,
+      p_dias_tratamento: fallbackPayload.dias_tratamento,
+      p_uso_continuo: fallbackPayload.uso_continuo,
+      p_observacao: fallbackPayload.observacao,
+    },
+    {
+      p_id_paciente_uuid: patientId,
+      p_tipo_registro: fallbackPayload.tipo_registro,
+      p_descricao: fallbackPayload.descricao,
+      p_nome_medicamento: fallbackPayload.nome_medicamento,
+      p_unidade_medida: fallbackPayload.unidade_medida,
+      p_quantidade: fallbackPayload.quantidade,
+      p_data: fallbackPayload.data,
+      p_hora: fallbackPayload.hora,
+      p_dias_tratamento: fallbackPayload.dias_tratamento,
+      p_uso_continuo: fallbackPayload.uso_continuo,
+    },
+    {
+      p_id_paciente_uuid: patientId,
+      p_tipo_registro: fallbackPayload.tipo_registro,
+      p_descricao: fallbackPayload.descricao,
+      p_nome_medicamento: fallbackPayload.nome_medicamento,
+      p_unidade_medida: fallbackPayload.unidade_medida,
+      p_quantidade: fallbackPayload.quantidade,
+      p_data: fallbackPayload.data,
+      p_hora: fallbackPayload.hora,
+    },
+  ];
+
+  let rpcData = null;
+  let rpcError = null;
+
+  for (const rpcParams of rpcAttempts) {
+    const response = await supabase.rpc('registrar_medicacao_paciente', rpcParams);
+    rpcData = response.data;
+    rpcError = response.error;
+
+    if (!rpcError) {
+      break;
     }
-  );
+
+    const rpcAttemptMessage = String(rpcError?.message || '').toLowerCase();
+    const isSignatureMismatch =
+      rpcAttemptMessage.includes('could not find the function') ||
+      rpcAttemptMessage.includes('function public.registrar_medicacao_paciente') ||
+      rpcAttemptMessage.includes('no function matches') ||
+      rpcAttemptMessage.includes('schema cache');
+
+    if (!isSignatureMismatch) {
+      break;
+    }
+  }
 
   if (!rpcError) {
     const saved = Array.isArray(rpcData) ? rpcData[0] : rpcData;
@@ -1167,6 +1267,106 @@ export async function addMedicationEntry(patientId, entry) {
       ...saved,
     });
 
+      try {
+        await registrarLogAuditoria({
+          actor: entry?.actor || null,
+          targetPatientId: patientId,
+          action: normalizedEntry.medicationKind === 'insulin'
+            ? 'insulina_cadastrada'
+            : 'medicacao_cadastrada',
+          entity: 'registro_medicacao',
+          entityId: savedEntry.databaseId || savedEntry.id,
+          origin: entry?.auditSource || 'monitoramento_manual',
+          details: {
+            tipoRegistro: normalizedEntry.medicationKind,
+            nome: savedEntry.medicineName || '',
+            quantidade: savedEntry.medicineQuantity || '',
+            unidade: savedEntry.medicineUnit || '',
+            data: savedEntry.date,
+            hora: savedEntry.time,
+          },
+        });
+      } catch (auditError) {
+        console.log('Auditoria de medicacao falhou apos salvar por RPC:', auditError);
+      }
+
+      return savedEntry;
+    }
+
+  const rpcMessage = String(rpcError?.message || '').toLowerCase();
+  const rpcMissing =
+    rpcMessage.includes('could not find the function') ||
+    rpcMessage.includes('schema cache') ||
+    rpcMessage.includes('registrar_medicacao_paciente');
+
+  if (!rpcMissing) {
+    console.log('RPC de medicacao falhou; tentando insert direto:', rpcError?.message);
+  }
+
+  let insertPayload = { ...fallbackPayload };
+  let selectFields = [
+    'id_registro_medicacao_uuid',
+    'id_paciente_uuid',
+    'tipo_registro',
+    'descricao',
+    'nome_medicamento',
+    'unidade_medida',
+    'quantidade',
+    'data',
+    'hora',
+    'dias_tratamento',
+    'uso_continuo',
+    'observacao',
+    'id_registro_legado',
+  ];
+
+  let { data, error } = await supabase
+    .from('registro_medicacao')
+    .insert([insertPayload])
+    .select(selectFields.join(', '))
+    .maybeSingle();
+
+  if (String(error?.message || '').toLowerCase().includes('id_registro_legado')) {
+    const payloadWithoutLegacyId = { ...insertPayload };
+    delete payloadWithoutLegacyId.id_registro_legado;
+    selectFields = selectFields.filter((field) => field !== 'id_registro_legado');
+
+    const retry = await supabase
+      .from('registro_medicacao')
+      .insert([payloadWithoutLegacyId])
+      .select(selectFields.join(', '))
+      .maybeSingle();
+
+    insertPayload = payloadWithoutLegacyId;
+    data = retry.data;
+    error = retry.error;
+  }
+
+  if (error) {
+    if (isRowLevelSecurityError(error)) {
+      console.log(
+        'Insert direto de medicacao bloqueado por RLS; mantendo registro no appState local:',
+        error.message
+      );
+
+      return normalizeMedicationEntry(
+        {
+          ...insertPayload,
+          id: insertPayload.id_registro_legado || insertPayload.id_registro_medicacao_uuid,
+        },
+        'local_shadow'
+      );
+    }
+
+    throw error;
+  }
+
+  const savedEntry = buildMedicationEntryFromPayload({
+    ...insertPayload,
+    ...data,
+  });
+
+  try {
     await registrarLogAuditoria({
       actor: entry?.actor || null,
       targetPatientId: patientId,
@@ -1185,67 +1385,9 @@ export async function addMedicationEntry(patientId, entry) {
         hora: savedEntry.time,
       },
     });
-
-    return savedEntry;
+  } catch (auditError) {
+    console.log('Auditoria de medicacao falhou apos insert direto:', auditError);
   }
-
-  const rpcMessage = String(rpcError?.message || '').toLowerCase();
-  const rpcMissing =
-    rpcMessage.includes('could not find the function') ||
-    rpcMessage.includes('schema cache') ||
-    rpcMessage.includes('registrar_medicacao_paciente');
-
-  if (!rpcMissing) {
-    console.log('RPC de medicacao falhou; tentando insert direto:', rpcError?.message);
-  }
-
-  const { data, error } = await supabase
-    .from('registro_medicacao')
-    .insert([fallbackPayload])
-    .select([
-      'id_registro_medicacao_uuid',
-      'id_paciente_uuid',
-      'tipo_registro',
-      'descricao',
-      'nome_medicamento',
-      'unidade_medida',
-      'quantidade',
-      'data',
-      'hora',
-      'dias_tratamento',
-      'uso_continuo',
-      'observacao',
-      'id_registro_legado',
-    ].join(', '))
-    .maybeSingle();
-
-  if (error) {
-    throw error;
-  }
-
-  const savedEntry = buildMedicationEntryFromPayload({
-    ...fallbackPayload,
-    ...data,
-  });
-
-  await registrarLogAuditoria({
-    actor: entry?.actor || null,
-    targetPatientId: patientId,
-    action: normalizedEntry.medicationKind === 'insulin'
-      ? 'insulina_cadastrada'
-      : 'medicacao_cadastrada',
-    entity: 'registro_medicacao',
-    entityId: savedEntry.databaseId || savedEntry.id,
-    origin: entry?.auditSource || 'monitoramento_manual',
-    details: {
-      tipoRegistro: normalizedEntry.medicationKind,
-      nome: savedEntry.medicineName || '',
-      quantidade: savedEntry.medicineQuantity || '',
-      unidade: savedEntry.medicineUnit || '',
-      data: savedEntry.date,
-      hora: savedEntry.time,
-    },
-  });
 
   return savedEntry;
 }
