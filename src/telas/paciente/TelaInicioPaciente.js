@@ -27,9 +27,11 @@ import {
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getLatestGlucose,
   getPatientDisplayName,
   getPatientId,
+  isPatientExperienceCacheFresh,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { syncGooglePatientRecord } from '../../servicos/sincronizarPacienteGoogle';
@@ -682,35 +684,8 @@ export default function PacienteHomeScreen({
 
   const nomeBaseUsuario = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
 
-  const carregarDados = useCallback(async function carregarDados() {
-    try {
-      setLoading(true);
-      if (!canResolvePatient) {
-        setPaciente({
-          nome_completo: nomeBaseUsuario,
-          email_pac: usuarioLogado?.email || null,
-        });
-        setAppState(createDefaultAppState());
-        setClinicalObjective('');
-        setGlucoseReadings([]);
-        return;
-      }
-
-      let experience = await fetchPatientExperience(idPaciente, {
-        patientContext: usuarioLogado,
-      });
-
-      if (!experience.patient && usuarioLogado?.id) {
-        const pacienteSincronizado = await syncGooglePatientRecord(usuarioLogado);
-
-        if (pacienteSincronizado?.id_paciente_uuid) {
-          experience = {
-            ...experience,
-            patient: pacienteSincronizado,
-          };
-        }
-      }
-
+  const aplicarExperience = useCallback(
+    function aplicarExperience(experience) {
       setPaciente(
         experience.patient || {
           ...usuarioLogado,
@@ -735,13 +710,67 @@ export default function PacienteHomeScreen({
         experience.patient?.id_paciente_uuid || idPaciente,
         mergedReadings
       );
+    },
+    [idPaciente, nomeBaseUsuario, usuarioLogado]
+  );
+
+  const carregarDados = useCallback(async function carregarDados(options = {}) {
+    const forceRefresh = options.forceRefresh === true;
+    const showLoading = options.showLoading !== false;
+
+    try {
+      if (!canResolvePatient) {
+        setPaciente({
+          nome_completo: nomeBaseUsuario,
+          email_pac: usuarioLogado?.email || null,
+        });
+        setAppState(createDefaultAppState());
+        setClinicalObjective('');
+        setGlucoseReadings([]);
+        return;
+      }
+
+      if (!forceRefresh) {
+        const cachedExperience = getCachedPatientExperience(idPaciente, {
+          patientContext: usuarioLogado,
+        });
+
+        if (cachedExperience) {
+          aplicarExperience(cachedExperience);
+          return;
+        }
+      }
+
+      if (showLoading) {
+        setLoading(true);
+      }
+
+      let experience = await fetchPatientExperience(idPaciente, {
+        patientContext: usuarioLogado,
+        forceRefresh,
+      });
+
+      if (!experience.patient && usuarioLogado?.id) {
+        const pacienteSincronizado = await syncGooglePatientRecord(usuarioLogado);
+
+        if (pacienteSincronizado?.id_paciente_uuid) {
+          experience = {
+            ...experience,
+            patient: pacienteSincronizado,
+          };
+        }
+      }
+
+      aplicarExperience(experience);
     } catch (error) {
       console.log('Erro ao carregar dados:', error);
     } finally {
-      setLoading(false);
+      if (showLoading) {
+        setLoading(false);
+      }
       setRefreshing(false);
     }
-  }, [canResolvePatient, idPaciente, nomeBaseUsuario, usuarioLogado]);
+  }, [aplicarExperience, canResolvePatient, idPaciente, nomeBaseUsuario, usuarioLogado]);
 
   async function persistirAppState(nextState) {
     if (!canResolvePatient) {
@@ -791,8 +820,13 @@ export default function PacienteHomeScreen({
 
   useFocusEffect(
     useCallback(() => {
-      carregarDados();
-    }, [carregarDados])
+      carregarDados({
+        forceRefresh: false,
+        showLoading: !isPatientExperienceCacheFresh(idPaciente, {
+          patientContext: usuarioLogado,
+        }),
+      });
+    }, [carregarDados, idPaciente, usuarioLogado])
   );
 
   const nomeUsuario = paciente?.nome_completo || nomeBaseUsuario;
@@ -818,7 +852,7 @@ export default function PacienteHomeScreen({
 
   const onRefresh = () => {
     setRefreshing(true);
-    carregarDados();
+    carregarDados({ forceRefresh: true, showLoading: false });
   };
 
   const latestGlucose = getLatestGlucose(glucoseReadings);

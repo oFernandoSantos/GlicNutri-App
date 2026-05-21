@@ -4,6 +4,19 @@ import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoog
 import { mergeCachedGlucoseReadings } from './centralGlicose';
 import { replaceCachedPatientAppState } from './centralAppState';
 import {
+  fetchCachedPatientExperience,
+  fetchCachedPatientProfile,
+  invalidatePatientExperienceCache,
+} from './cacheExperienciaPaciente';
+
+export {
+  getCachedPatientExperience,
+  getCachedPatientProfile,
+  invalidatePatientExperienceCache,
+  isPatientExperienceCacheFresh,
+  isPatientProfileCacheFresh,
+} from './cacheExperienciaPaciente';
+import {
   mealPlanSections,
   nutritionistThread,
 } from '../dados/dadosExperienciaPaciente';
@@ -638,23 +651,28 @@ async function resolvePatientRecord({
 }
 
 export async function fetchPatientById(patientId, options = {}) {
-  return await resolvePatientRecord({
-    patientId,
-    patientContext: options.patientContext,
-    currentPatient: options.currentPatient,
-    allowGoogleSync: true,
-  });
+  return fetchCachedPatientProfile(patientId, options, () =>
+    resolvePatientRecord({
+      patientId,
+      patientContext: options.patientContext,
+      currentPatient: options.currentPatient,
+      allowGoogleSync: options.allowGoogleSync !== false,
+    })
+  );
 }
 
-export async function fetchPatientExperience(patientId, options = {}) {
+async function loadPatientExperience(patientId, options = {}) {
   const patient = await fetchPatientById(patientId, options);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
   const normalizedAppState = normalizeAppState(parsed.appState);
+  const glucoseLimit = options.glucoseLimit ?? 120;
+  const medicationLimit = options.medicationLimit ?? 120;
+  const mealLimit = options.mealLimit ?? 120;
   const [glucoseReadings, databaseMedicationEntries, databaseMealEntries] = await Promise.all([
-    fetchGlucoseReadings(effectivePatientId),
-    fetchMedicationEntries(effectivePatientId),
-    fetchMealEntries(effectivePatientId),
+    fetchGlucoseReadings(effectivePatientId, glucoseLimit),
+    fetchMedicationEntries(effectivePatientId, medicationLimit),
+    fetchMealEntries(effectivePatientId, mealLimit),
   ]);
   const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
     (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
@@ -697,6 +715,12 @@ export async function fetchPatientExperience(patientId, options = {}) {
   };
 }
 
+export async function fetchPatientExperience(patientId, options = {}) {
+  return fetchCachedPatientExperience(patientId, options, () =>
+    loadPatientExperience(patientId, options)
+  );
+}
+
 export async function savePatientAppState({
   patientId,
   objectiveText,
@@ -717,9 +741,12 @@ export async function savePatientAppState({
     throw new Error('Paciente sem identificador valido para salvar.');
   }
 
-  const storedPatientState = extractObjectiveAndAppState(
+  const storedObjectiveBundle = extractObjectiveAndAppState(
     resolvedPatient?.objetivo_principal_consulta
-  ).appState;
+  );
+  const storedPatientState = storedObjectiveBundle.appState;
+  const nextObjectiveText =
+    String(objectiveText || '').trim() || String(storedObjectiveBundle.objectiveText || '').trim();
   const normalized = normalizeAppState(appState);
   const normalizedWithHiddenPreserved = {
     ...normalized,
@@ -744,7 +771,7 @@ export async function savePatientAppState({
 
   const patch = {
     objetivo_principal_consulta: serializeObjectiveAndAppState(
-      objectiveText,
+      nextObjectiveText,
       normalizedWithHiddenPreserved
     ),
     qualidade_sono_media: mapSleepToLabel(normalizedWithHiddenPreserved.wellness.selectedSleep),
@@ -787,11 +814,12 @@ export async function savePatientAppState({
   });
 
   replaceCachedPatientAppState(data.id_paciente_uuid, normalizedWithHiddenPreserved);
+  invalidatePatientExperienceCache(data.id_paciente_uuid);
 
   return {
     patient: sanitizeSensitivePatientData(data),
     appState: normalizedWithHiddenPreserved,
-    clinicalObjective: objectiveText,
+    clinicalObjective: nextObjectiveText,
   };
 }
 
@@ -844,7 +872,18 @@ export async function updatePatientProfile({
     },
   });
 
+  invalidatePatientExperienceCache(data.id_paciente_uuid);
+
   return sanitizeSensitivePatientData(data);
+}
+
+function isRpcFunctionMissing(error, functionName) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('could not find the function') ||
+    message.includes('schema cache') ||
+    message.includes(String(functionName || '').toLowerCase())
+  );
 }
 
 export async function fetchGlucoseReadings(patientId, limit = 120) {
@@ -862,16 +901,10 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
-    rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
+    return mergeCachedGlucoseReadings(rpcData.map(normalizeGlucoseReadingRow)).slice(0, limit);
   }
 
-  const rpcMessage = String(rpcError?.message || '').toLowerCase();
-  const rpcMissing =
-    rpcMessage.includes('could not find the function') ||
-    rpcMessage.includes('schema cache') ||
-    rpcMessage.includes('listar_glicemias_manuais_paciente');
-
-  if (rpcError && !rpcMissing) {
+  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
     console.log('Erro ao buscar glicemia por RPC:', rpcError.message);
   }
 
@@ -922,18 +955,12 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
-    rpcEntries = rpcData.map((item, index) =>
-      normalizeMedicationEntry(item, 'database', index)
-    );
+    return rpcData
+      .map((item, index) => normalizeMedicationEntry(item, 'database', index))
+      .slice(0, limit);
   }
 
-  const rpcMessage = String(rpcError?.message || '').toLowerCase();
-  const rpcMissing =
-    rpcMessage.includes('could not find the function') ||
-    rpcMessage.includes('schema cache') ||
-    rpcMessage.includes('listar_medicacoes_paciente');
-
-  if (rpcError && !rpcMissing) {
+  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
     console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
   }
 
@@ -1067,16 +1094,11 @@ export async function addGlucoseReading(patientId, value, options = {}) {
       },
     });
 
+    invalidatePatientExperienceCache(patientId);
     return savedReading;
   }
 
-  const rpcMessage = String(rpcError?.message || '').toLowerCase();
-  const rpcMissing =
-    rpcMessage.includes('could not find the function') ||
-    rpcMessage.includes('schema cache') ||
-    rpcMessage.includes('registrar_glicemia_manual_paciente');
-
-  if (!rpcMissing) {
+  if (!isRpcFunctionMissing(rpcError, 'registrar_glicemia_manual_paciente')) {
     console.log('RPC de glicemia falhou; tentando insert direto:', rpcError?.message);
   }
 
@@ -1125,6 +1147,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
         tipoGlicemia: fallbackReading.glucoseType || '',
       },
     });
+    invalidatePatientExperienceCache(patientId);
     return fallbackReading;
   }
 
@@ -1151,6 +1174,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     },
   });
 
+  invalidatePatientExperienceCache(patientId);
   return savedReading;
 }
 
@@ -1290,16 +1314,11 @@ export async function addMedicationEntry(patientId, entry) {
         console.log('Auditoria de medicacao falhou apos salvar por RPC:', auditError);
       }
 
+      invalidatePatientExperienceCache(patientId);
       return savedEntry;
     }
 
-  const rpcMessage = String(rpcError?.message || '').toLowerCase();
-  const rpcMissing =
-    rpcMessage.includes('could not find the function') ||
-    rpcMessage.includes('schema cache') ||
-    rpcMessage.includes('registrar_medicacao_paciente');
-
-  if (!rpcMissing) {
+  if (rpcError && !isRpcFunctionMissing(rpcError, 'registrar_medicacao_paciente')) {
     console.log('RPC de medicacao falhou; tentando insert direto:', rpcError?.message);
   }
 
@@ -1389,6 +1408,7 @@ export async function addMedicationEntry(patientId, entry) {
     console.log('Auditoria de medicacao falhou apos insert direto:', auditError);
   }
 
+  invalidatePatientExperienceCache(patientId);
   return savedEntry;
 }
 

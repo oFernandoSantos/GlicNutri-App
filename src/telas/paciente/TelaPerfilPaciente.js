@@ -16,23 +16,27 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useFocusEffect } from '@react-navigation/native';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { supabase } from '../../servicos/configSupabase';
 import {
+  extractObjectiveAndAppState,
   fetchPatientById,
   getPatientDisplayName,
   getPatientId,
+  isPatientProfileCacheFresh,
   updatePatientProfile,
 } from '../../servicos/servicoDadosPaciente';
 import {
+  buildPatientHealthInfoRows,
   buildPatientProfileSections,
   getOnboardingAnswers,
 } from '../../utilitarios/camposPerfilPaciente';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import {
+  IntroHealthOverviewCard,
   ProfileDataSectionCard,
-  ProfileSectionHub,
   TherapyQuickStrip,
 } from '../../componentes/paciente/PerfilDadosSecoes';
 import {
@@ -67,7 +71,7 @@ const EMPTY_PROFILE_FORM = {
   uf: '',
 };
 
-const GENDER_OPTIONS = ['Masculino', 'Feminino', 'NÃ£o binÃ¡rio', 'Prefiro nÃ£o informar'];
+const GENDER_OPTIONS = ['Masculino', 'Feminino', 'Não binário', 'Prefiro não informar'];
 const DIABETES_TYPE_OPTIONS = ['Tipo 1', 'Tipo 2', 'Lada', 'Mody', 'Gestacional', 'Outros Tipos'];
 const INSULIN_CATEGORY_OPTIONS = [
   { id: 'basal', label: 'Insulina basal' },
@@ -574,10 +578,10 @@ const THERAPY_WEEKDAY_OPTIONS = [
   { label: 'Domingo', value: 'Domingo' },
 ];
 const INSULIN_USAGE_OPTIONS = {
-  basal: ['Rotina da manha', 'Rotina da noite', 'Semanal', 'Outro horario fixo'],
-  prandial: ['Antes da refeicao', 'Correcao', 'Antes da refeicao e correcao'],
-  premixed: ['Antes da refeicao', 'Rotina prescrita', 'Outro horario fixo'],
-  inhaled: ['Antes da refeicao', 'Correcao', 'Antes da refeicao e correcao'],
+  basal: ['Rotina da manhã', 'Rotina da noite', 'Semanal', 'Outro horário fixo'],
+  prandial: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
+  premixed: ['Antes da refeição', 'Rotina prescrita', 'Outro horário fixo'],
+  inhaled: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
 };
 const PHARMACOLOGY_CATEGORY_OPTIONS = [
   {
@@ -657,7 +661,7 @@ const PHARMACOLOGY_PRESENTATION_OPTIONS = [
 ];
 const PHARMACOLOGY_VIA_OPTIONS = [
   { label: 'Subcutânea', value: 'subcutanea' },
-  { label: 'InalatÃ³ria', value: 'inalatoria' },
+  { label: 'Inalatória', value: 'inalatoria' },
 ];
 const PHARMACOLOGY_SCALE_OPTIONS = [
   { label: '0,25', value: '0,25', descricao: 'Escala de dose com incremento de 0,25 unidade' },
@@ -666,14 +670,14 @@ const PHARMACOLOGY_SCALE_OPTIONS = [
   { label: '2', value: '2', descricao: 'Escala de dose com incremento de 2 unidades' },
 ];
 const PHARMACOLOGY_ACTION_PROFILE = {
-  inalavel: { inicio_acao: 'muito rÃ¡pido', pico: 'curto', duracao: 'curta' },
-  ultrarrapida: { inicio_acao: 'muito rÃ¡pido', pico: 'rÃ¡pido', duracao: 'curta' },
-  rapida: { inicio_acao: 'rÃ¡pido', pico: 'presente', duracao: 'curta' },
-  intermediaria: { inicio_acao: 'moderado', pico: 'presente', duracao: 'intermediÃ¡ria' },
+  inalavel: { inicio_acao: 'muito rápido', pico: 'curto', duracao: 'curta' },
+  ultrarrapida: { inicio_acao: 'muito rápido', pico: 'rápido', duracao: 'curta' },
+  rapida: { inicio_acao: 'rápido', pico: 'presente', duracao: 'curta' },
+  intermediaria: { inicio_acao: 'moderado', pico: 'presente', duracao: 'intermediária' },
   longa: { inicio_acao: 'lento', pico: 'baixo ou sem pico definido', duracao: 'longa' },
   ultralonga: { inicio_acao: 'lento', pico: 'sem pico importante', duracao: 'muito longa' },
   semanal: { inicio_acao: 'lento', pico: 'sem pico importante', duracao: 'semanal' },
-  premisturada: { inicio_acao: 'variÃ¡vel', pico: 'presente', duracao: 'mista' },
+  premisturada: { inicio_acao: 'variável', pico: 'presente', duracao: 'mista' },
 };
 const PHARMACOLOGY_STATUS_OPTIONS = [
   { label: 'Ativo', value: 'ativo' },
@@ -943,52 +947,52 @@ function isValidTime24h(value) {
 const ONBOARDING_OBJECTIVE_OPTIONS = [
   'Perder peso',
   'Ganhar peso',
-  'Melhorar a alimentaÃ§Ã£o',
+  'Melhorar a alimentação',
   'Controle do diabetes',
-  'Controle da hipertensÃ£o arterial',
+  'Controle da hipertensão arterial',
   'Melhorar o colesterol',
-  'Cuidar da saÃºde mental',
+  'Cuidar da saúde mental',
   'Melhorar a qualidade de vida',
-  'Cuidar de condiÃ§Ãµes de saÃºde',
+  'Cuidar de condições de saúde',
 ];
 
 const ONBOARDING_CONDITION_OPTIONS = [
   'Colesterol alto',
   'Diabetes',
-  'DoenÃ§as cardiovasculares',
-  'DoenÃ§a hepÃ¡tica (fÃ­gado)',
-  'DoenÃ§as renais',
+  'Doenças cardiovasculares',
+  'Doença hepática (fígado)',
+  'Doenças renais',
   'Obesidade',
-  'SÃ­ndrome dos ovÃ¡rios policÃ­sticos',
+  'Síndrome dos ovários policísticos',
   'Tireoide',
-  'TriglicerÃ­deos altos',
-  'NÃ£o possuo',
+  'Triglicerídeos altos',
+  'Não possuo',
 ];
 
 const ONBOARDING_SITUATION_OPTIONS = [
   'Acidente vascular cerebral (AVC)',
-  'CandidÃ­ase recorrente',
-  'Infarto prÃ©vio',
-  'Neuropatia diabÃ©tica',
-  'PÃ© diabÃ©tico',
-  'Retinopatia diabÃ©tica',
-  'Ãšlcera em alguma parte do corpo',
-  'NÃ£o tive',
+  'Candidíase recorrente',
+  'Infarto prévio',
+  'Neuropatia diabética',
+  'Pé diabético',
+  'Retinopatia diabética',
+  'Úlcera em alguma parte do corpo',
+  'Não tive',
 ];
 
 const ONBOARDING_PROCEDURE_OPTIONS = [
-  'AmputaÃ§Ã£o de membro',
-  'Cateterismo prÃ©vio',
-  'Cirurgia de revascularizaÃ§Ã£o (ponte de safena)',
+  'Amputação de membro',
+  'Cateterismo prévio',
+  'Cirurgia de revascularização (ponte de safena)',
   'Portador de marcapasso',
-  'NÃ£o realizei',
+  'Não realizei',
   'Outros',
 ];
 
 const ONBOARDING_OBJECTIVE_MAX = 3;
-const ONBOARDING_CONDITION_NONE = 'NÃ£o possuo';
-const ONBOARDING_SITUATION_NONE = 'NÃ£o tive';
-const ONBOARDING_PROCEDURE_NONE = 'NÃ£o realizei';
+const ONBOARDING_CONDITION_NONE = 'Não possuo';
+const ONBOARDING_SITUATION_NONE = 'Não tive';
+const ONBOARDING_PROCEDURE_NONE = 'Não realizei';
 
 const EMPTY_CLINICAL_FORM = {
   objetivos: '',
@@ -1059,7 +1063,7 @@ const PATIENT_PROFILE_FIELDS = [
   },
   {
     key: 'sexo_biologico',
-    label: 'GÃªnero',
+    label: 'Gênero',
     placeholder: 'Selecione',
     type: 'select',
   },
@@ -1079,7 +1083,7 @@ const PATIENT_PROFILE_FIELDS = [
   },
   {
     key: 'numero',
-    label: 'NÃºmero',
+    label: 'Número',
     placeholder: 'Ex: 123',
     keyboardType: 'numeric',
   },
@@ -1114,20 +1118,20 @@ const CLINICAL_PROFILE_FIELDS = [
   },
   {
     key: 'condicoes',
-    label: 'CondiÃ§Ãµes clÃ­nicas',
+    label: 'Condições clínicas',
     placeholder: 'Ex: Colesterol alto, Diabetes',
     multiline: true,
   },
   {
     key: 'situacoes',
-    label: 'ComplicaÃ§Ãµes clÃ­nicas',
-    placeholder: 'Ex: Neuropatia diabÃ©tica',
+    label: 'Complicações clínicas',
+    placeholder: 'Ex: Neuropatia diabética',
     multiline: true,
   },
   {
     key: 'procedimentos',
-    label: 'Procedimentos clÃ­nicos',
-    placeholder: 'Ex: Cateterismo prÃ©vio',
+    label: 'Procedimentos clínicos',
+    placeholder: 'Ex: Cateterismo prévio',
     multiline: true,
   },
   {
@@ -1145,17 +1149,17 @@ const CLINICAL_PROFILE_FIELDS = [
   {
     key: 'insulinoterapia_atual',
     label: 'Uso de insulina',
-    placeholder: 'Ex: Basal e ultrarrapida, bomba de insulina, nao usa, em ajuste',
+    placeholder: 'Ex: Basal e ultrarrápida, bomba de insulina, não usa, em ajuste',
     multiline: true,
   },
   {
     key: 'nivel_atividade_fisica_atual',
-    label: 'Atividade fÃ­sica atual',
+    label: 'Atividade física atual',
     placeholder: 'Ex: Caminhada 3x por semana',
   },
   {
     key: 'qualidade_sono_media',
-    label: 'Qualidade mÃ©dia do sono',
+    label: 'Qualidade média do sono',
     placeholder: 'Ex: Boa',
   },
   {
@@ -1187,13 +1191,13 @@ const CLINICAL_PROFILE_FIELDS = [
   {
     key: 'comorbidades_texto',
     label: 'Comorbidades',
-    placeholder: 'Ex: HipertensÃ£o arterial',
+    placeholder: 'Ex: Hipertensão arterial',
     multiline: true,
   },
   {
     key: 'historico_familiar_doencas',
-    label: 'HistÃ³rico familiar/doenÃ§as',
-    placeholder: 'Ex: Diabetes na famÃ­lia',
+    label: 'Histórico familiar/doenças',
+    placeholder: 'Ex: Diabetes na família',
     multiline: true,
   },
 ];
@@ -1971,7 +1975,7 @@ function buildPharmacologyPatch(plans, patient) {
 
 function inferDiabetesStatus(onboarding, patient) {
   if (onboarding?.diabetes_status) return onboarding.diabetes_status;
-  if (onboarding?.diabetes === 'NÃ£o' || onboarding?.diabetes === 'Sim') return onboarding.diabetes;
+  if (onboarding?.diabetes === 'Não' || onboarding?.diabetes === 'Sim') return onboarding.diabetes;
   if (onboarding?.tipo_diabetes || onboarding?.diabetes_tipo) return 'Sim';
 
   const clinicalText = [
@@ -1986,7 +1990,7 @@ function inferDiabetesStatus(onboarding, patient) {
 }
 
 function buildDiabetesDisplay(status, type) {
-  if (status === 'NÃ£o') return 'NÃ£o';
+  if (status === 'Não') return 'Não';
   if (status === 'Sim' && type) return `Sim - ${type}`;
   if (status === 'Sim') return 'Sim';
   return '';
@@ -1994,6 +1998,8 @@ function buildDiabetesDisplay(status, type) {
 
 function buildEditableClinicalForm(patient) {
   const onboarding = getOnboardingAnswers(patient);
+  const onboardingGoals = listToText(onboarding?.objetivos);
+  const resolvedObjective = resolvePatientObjectiveText(patient, onboarding);
   const diabetesStatus = inferDiabetesStatus(onboarding, patient);
   const diabetesType = onboarding?.tipo_diabetes || onboarding?.diabetes_tipo || '';
   const insulinProfiles = onboarding?.insulin_profiles || {};
@@ -2014,7 +2020,7 @@ function buildEditableClinicalForm(patient) {
 
   return {
     ...EMPTY_CLINICAL_FORM,
-    objetivos: listToText(onboarding?.objetivos) || String(patient?.objetivo_principal_consulta || '').trim(),
+    objetivos: normalizeObjectiveValue(onboardingGoals || resolvedObjective),
     condicoes: listToText(onboarding?.condicoes) || String(patient?.comorbidades_texto || '').trim(),
     situacoes: listToText(onboarding?.situacoes),
     procedimentos: listToText(onboarding?.procedimentos),
@@ -2080,13 +2086,13 @@ function validateClinicalField(fieldKey, form) {
     case 'altura_cm': {
       const height = normalizeNumber(value);
       return value && (!height || height < 50 || height > 260)
-        ? 'Digite uma altura vÃ¡lida em cm.'
+        ? 'Digite uma altura válida em cm.'
         : '';
     }
     case 'peso_atual_kg': {
       const weight = normalizeNumber(value);
       return value && (!weight || weight < 2 || weight > 500)
-        ? 'Digite um peso vÃ¡lido em kg.'
+        ? 'Digite um peso válido em kg.'
         : '';
     }
     default:
@@ -2111,7 +2117,7 @@ function buildClinicalPatch(form, patient) {
   const condicoes =
     form.diabetes_status === 'Sim' && !hasDiabetesCondition
       ? [...rawConditions, 'Diabetes']
-      : form.diabetes_status === 'NÃ£o'
+      : form.diabetes_status === 'Não'
         ? rawConditions.filter((item) => item.toLowerCase() !== 'diabetes')
         : rawConditions;
   const onboarding = {
@@ -2181,10 +2187,10 @@ function validateProfileField(fieldKey, form) {
     case 'nome_completo':
       return value && value.split(/\s+/).length < 2 ? 'Informe nome e sobrenome.' : '';
     case 'cpf_paciente':
-      return value && !isValidCpf(value) ? 'Digite um CPF vÃ¡lido.' : '';
+      return value && !isValidCpf(value) ? 'Digite um CPF válido.' : '';
     case 'email_pac':
       return value && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.toLowerCase())
-        ? 'Digite um e-mail vÃ¡lido.'
+        ? 'Digite um e-mail válido.'
         : '';
     case 'telefone': {
       const phoneDigits = onlyDigits(value, 11);
@@ -2194,11 +2200,11 @@ function validateProfileField(fieldKey, form) {
     }
     case 'data_nascimento':
       return value && normalizeDateForSave(value) === undefined
-        ? 'Digite uma data vÃ¡lida no formato DD/MM/AAAA.'
+        ? 'Digite uma data válida no formato DD/MM/AAAA.'
         : '';
     case 'cep': {
       const cepDigits = onlyDigits(value, 8);
-      return cepDigits && cepDigits.length !== 8 ? 'Digite um CEP com 8 dÃ­gitos.' : '';
+      return cepDigits && cepDigits.length !== 8 ? 'Digite um CEP com 8 dígitos.' : '';
     }
     case 'uf':
       return value && value.length !== 2 ? 'Digite a UF com 2 letras.' : '';
@@ -2271,7 +2277,7 @@ function parseAgeFromDate(dateText) {
 
 function formatHeightSummary(value) {
   const number = normalizeNumber(value);
-  if (!number) return 'Nao informado';
+  if (!number) return 'Não informado';
   if (number >= 100) {
     return `${(number / 100).toFixed(2)} m`;
   }
@@ -2280,24 +2286,48 @@ function formatHeightSummary(value) {
 
 function formatWeightSummary(value) {
   const number = normalizeNumber(value);
-  return number ? `${number.toFixed(1)}kg` : 'Nao informado';
+  return number ? `${number.toFixed(1)} kg` : 'Não informado';
 }
 
 function formatImcSummary(value) {
   const number = normalizeNumber(value);
-  return number ? String(number.toFixed(1)) : 'Nao informado';
+  return number ? String(number.toFixed(1)) : 'Não informado';
 }
 
 function cleanObjectiveSummary(text) {
   const raw = String(text || '').trim();
-  if (!raw) return 'Objetivo nao informado';
+  if (!raw) return 'Objetivo não informado';
 
   const cleaned = raw
     .replace(/\[GLICNUTRI_APP_META_START\][\s\S]*?\[GLICNUTRI_APP_META_END\]/gi, '')
     .replace(/\s+/g, ' ')
     .trim();
 
-  return cleaned || 'Objetivo nao informado';
+  return cleaned || 'Objetivo não informado';
+}
+
+function resolvePatientObjectiveText(patient, onboarding = getOnboardingAnswers(patient)) {
+  const parsedObjective = extractObjectiveAndAppState(
+    patient?.objetivo_principal_consulta || ''
+  ).objectiveText;
+  const onboardingObjective = listToText(onboarding?.objetivos);
+  const cleanedPatientObjective = cleanObjectiveSummary(patient?.objetivo_principal_consulta || '');
+
+  return (
+    String(parsedObjective || '').trim() ||
+    String(onboardingObjective || '').trim() ||
+    (cleanedPatientObjective !== 'Objetivo não informado' ? cleanedPatientObjective : '')
+  );
+}
+
+function normalizeObjectiveValue(value) {
+  const text = String(value || '').trim();
+
+  if (!text || text === 'Objetivo não informado') {
+    return '';
+  }
+
+  return text;
 }
 
 function buildChipList(text) {
@@ -2306,6 +2336,49 @@ function buildChipList(text) {
     .map((item) => item.trim())
     .filter(Boolean)
     .slice(0, 6);
+}
+
+function buildComorbidityChips(patient, form) {
+  const onboarding = getOnboardingAnswers(patient);
+  const rawItems = [
+    ...splitListText(form?.comorbidades_texto),
+    ...splitListText(form?.condicoes),
+    ...ensureArray(onboarding?.condicoes),
+  ]
+    .map((item) => normalizeDisplayText(item))
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (String(form?.diabetes_status || '').trim() === 'Sim') {
+    const diabetesLabel = String(form?.diabetes_tipo || '').trim()
+      ? `Diabetes ${String(form.diabetes_tipo).trim()}`
+      : 'Diabetes';
+    rawItems.push(diabetesLabel);
+  }
+
+  const uniqueItems = [];
+  const seen = new Set();
+
+  rawItems.forEach((item) => {
+    const lower = item.toLowerCase();
+
+    if (
+      !item ||
+      lower === 'não possuo' ||
+      lower === 'nao possuo' ||
+      lower === 'nenhuma' ||
+      lower === 'nenhuma informada'
+    ) {
+      return;
+    }
+
+    if (!seen.has(lower)) {
+      seen.add(lower);
+      uniqueItems.push(item);
+    }
+  });
+
+  return uniqueItems.slice(0, 6);
 }
 
 function getInitials(name) {
@@ -2402,6 +2475,7 @@ export default function PacientePerfilScreen({
   });
   const [loggingOut, setLoggingOut] = useState(false);
   const lastFetchedCepRef = useRef(onlyDigits(usuarioLogado?.cep || '', 8));
+  const latestPatientRef = useRef(usuarioLogado || null);
   const [profileBolusAppType, setProfileBolusAppType] = useState('refeicao_correcao');
   const [profileBolusMeal, setProfileBolusMeal] = useState('almoco');
   const [profileBolusGlucose, setProfileBolusGlucose] = useState('');
@@ -2417,6 +2491,8 @@ export default function PacientePerfilScreen({
     registerFieldLayout,
     scrollToField,
   } = useKeyboardAwareScroll({ topOffset: 95 });
+
+  latestPatientRef.current = paciente;
 
   const profileBolusSuggestion = useMemo(() => {
     if (!therapyEditorVisible || therapyDraft.categoria_funcional !== 'bolus') return null;
@@ -2487,46 +2563,46 @@ export default function PacientePerfilScreen({
     }
   }, [therapyEditorVisible, therapyDraft.categoria_funcional, profileBolusSuggestion, profileBolusDoseEdited]);
 
-  useEffect(() => {
-    let active = true;
+  const carregarPerfil = React.useCallback(async (options = {}) => {
+    const forceRefresh = options.forceRefresh === true;
+    const showLoading = options.showLoading !== false;
 
-    async function carregarPerfil() {
-      try {
+    try {
+      if (showLoading) {
         setLoading(true);
-
-        const registro = await fetchPatientById(patientId, {
-          patientContext: usuarioLogado,
-          currentPatient: paciente,
-        });
-        const onboardingLocal = await getPatientLocalOnboardingData(registro || usuarioLogado);
-        const registroComOnboarding = mergePatientOnboardingData(
-          registro || usuarioLogado || null,
-          onboardingLocal
-        );
-
-        if (active) {
-          setPaciente(registroComOnboarding || usuarioLogado || null);
-        }
-      } catch (error) {
-        console.log('Erro ao carregar perfil do paciente:', error);
-
-        if (active) {
-          const onboardingLocal = await getPatientLocalOnboardingData(usuarioLogado);
-          setPaciente(mergePatientOnboardingData(usuarioLogado, onboardingLocal) || usuarioLogado || null);
-        }
-      } finally {
-        if (active) {
-          setLoading(false);
-        }
       }
+
+      const registro = await fetchPatientById(patientId, {
+        patientContext: usuarioLogado,
+        currentPatient: latestPatientRef.current,
+        forceRefresh,
+      });
+      const onboardingLocal = await getPatientLocalOnboardingData(registro || usuarioLogado);
+      const registroComOnboarding = mergePatientOnboardingData(
+        registro || usuarioLogado || null,
+        onboardingLocal
+      );
+
+      setPaciente(registroComOnboarding || usuarioLogado || null);
+    } catch (error) {
+      console.log('Erro ao carregar perfil do paciente:', error);
+
+      const onboardingLocal = await getPatientLocalOnboardingData(usuarioLogado);
+      setPaciente(mergePatientOnboardingData(usuarioLogado, onboardingLocal) || usuarioLogado || null);
+    } finally {
+      setLoading(false);
     }
-
-    carregarPerfil();
-
-    return () => {
-      active = false;
-    };
   }, [patientId, usuarioLogado]);
+
+  useFocusEffect(
+    React.useCallback(() => {
+      carregarPerfil({
+        forceRefresh: false,
+        showLoading: !isPatientProfileCacheFresh(patientId),
+      });
+      return undefined;
+    }, [carregarPerfil, patientId])
+  );
 
   useEffect(() => {
     const basalOption = findBasalProfileOption(clinicalForm.basal_insulin_type);
@@ -2587,7 +2663,7 @@ export default function PacientePerfilScreen({
         if (!active) return;
 
         if (data.erro) {
-          setCepFeedback({ type: 'error', message: 'CEP nÃ£o encontrado.' });
+          setCepFeedback({ type: 'error', message: 'CEP não encontrado.' });
           return;
         }
 
@@ -2602,12 +2678,12 @@ export default function PacientePerfilScreen({
             uf: (data.uf || current.uf).toUpperCase(),
           };
         });
-        setCepFeedback({ type: 'success', message: 'EndereÃ§o preenchido pelo CEP.' });
+        setCepFeedback({ type: 'success', message: 'Endereço preenchido pelo CEP.' });
       } catch (error) {
         console.log('Erro ao buscar CEP:', error);
 
         if (active) {
-          setCepFeedback({ type: 'error', message: 'NÃ£o foi possÃ­vel buscar esse CEP agora.' });
+          setCepFeedback({ type: 'error', message: 'Não foi possível buscar esse CEP agora.' });
         }
       } finally {
         if (active) {
@@ -2709,7 +2785,7 @@ export default function PacientePerfilScreen({
       console.log('Erro ao salvar dados do paciente:', error);
       setProfileFeedback({
         type: 'error',
-        message: 'NÃ£o foi possÃ­vel salvar os dados agora. Tente novamente.',
+        message: 'Não foi possível salvar os dados agora. Tente novamente.',
       });
     } finally {
       setSavingProfile(false);
@@ -2736,7 +2812,7 @@ export default function PacientePerfilScreen({
         setEmailVerificationError('');
       }
     } catch (error) {
-      const message = error?.message || 'NÃ£o foi possÃ­vel enviar o cÃ³digo de validaÃ§Ã£o.';
+      const message = error?.message || 'Não foi possível enviar o código de validação.';
       setEmailVerificationError(message);
       setProfileFeedback({ type: 'error', message });
     } finally {
@@ -2773,13 +2849,13 @@ export default function PacientePerfilScreen({
     const emailToVerify = emailPendingVerification || currentEmail;
 
     if (code.length !== 6) {
-      setEmailVerificationError('Digite o cÃ³digo de 6 dÃ­gitos enviado por e-mail.');
+      setEmailVerificationError('Digite o código de 6 dígitos enviado por e-mail.');
       return;
     }
 
     if (currentEmail !== emailToVerify) {
       setEmailVerificationError(
-        'O e-mail do formulÃ¡rio mudou. Solicite um novo cÃ³digo para validar o e-mail atual.'
+        'O e-mail do formulário mudou. Solicite um novo código para validar o e-mail atual.'
       );
       return;
     }
@@ -2802,7 +2878,7 @@ export default function PacientePerfilScreen({
       await persistProfileData();
     } catch (error) {
       setEmailVerificationError(
-        error?.message || 'CÃ³digo invÃ¡lido. Confira o cÃ³digo enviado por e-mail.'
+        error?.message || 'Código inválido. Confira o código enviado por e-mail.'
       );
     } finally {
       setEmailVerificationLoading(false);
@@ -2850,7 +2926,7 @@ export default function PacientePerfilScreen({
     if (hasProfileErrors(errors)) {
       setClinicalFeedback({
         type: 'error',
-        message: 'Revise os campos clÃ­nicos destacados antes de salvar.',
+        message: 'Revise os campos clínicos destacados antes de salvar.',
       });
       return false;
     }
@@ -2873,12 +2949,12 @@ export default function PacientePerfilScreen({
       });
 
       setPaciente(updatedPatient);
-      setClinicalFeedback({ type: 'success', message: 'Dados clÃ­nicos atualizados com sucesso.' });
+      setClinicalFeedback({ type: 'success', message: 'Dados clínicos atualizados com sucesso.' });
     } catch (error) {
-      console.log('Erro ao salvar dados clÃ­nicos do paciente:', error);
+      console.log('Erro ao salvar dados clínicos do paciente:', error);
       setClinicalFeedback({
         type: 'error',
-        message: 'NÃ£o foi possÃ­vel salvar os dados clÃ­nicos agora. Tente novamente.',
+        message: 'Não foi possível salvar os dados clínicos agora. Tente novamente.',
       });
     } finally {
       setSavingClinical(false);
@@ -3483,7 +3559,7 @@ export default function PacientePerfilScreen({
     setFocusedTherapyField('');
   }
 
-  function saveTherapyDraftLocally() {
+  async function saveTherapyDraftLocally() {
     if (!therapyDraft.categoria_funcional) {
       setTherapyFeedback({ type: 'error', message: 'Selecione a categoria funcional.' });
       return;
@@ -3601,8 +3677,41 @@ export default function PacientePerfilScreen({
       );
       return [...withoutCategory, nextPlan];
     });
-    setTherapyFeedback(null);
-    closeTherapyEditor();
+
+    try {
+      setSavingTherapy(true);
+      setTherapyFeedback(null);
+
+      const nextPlans = [
+        ...therapyPlans.filter(
+          (item) =>
+            item.id !== nextPlan.id && item.categoria_funcional !== nextPlan.categoria_funcional
+        ),
+        nextPlan,
+      ];
+
+      const updatedPatient = await updatePatientProfile({
+        patientId,
+        currentPatient: paciente,
+        patientContext: usuarioLogado,
+        patch: buildPharmacologyPatch(nextPlans, paciente || {}),
+      });
+
+      const nextSavedPlans = buildEditablePharmacologyPlans(updatedPatient || {});
+      setPaciente(updatedPatient);
+      setTherapyPlans(nextSavedPlans);
+      setSavedTherapyPlans(nextSavedPlans);
+      setTherapyFeedback({ type: 'success', message: 'Plano de insulina salvo com sucesso.' });
+      closeTherapyEditor();
+    } catch (error) {
+      console.log('Erro ao salvar plano de insulina:', error);
+      setTherapyFeedback({
+        type: 'error',
+        message: 'Não foi possível salvar o plano de insulina agora. Tente novamente.',
+      });
+    } finally {
+      setSavingTherapy(false);
+    }
   }
 
   function removeTherapyPlan(planId) {
@@ -3638,12 +3747,12 @@ export default function PacientePerfilScreen({
       setPaciente(updatedPatient);
       setTherapyPlans(nextSavedPlans);
       setSavedTherapyPlans(nextSavedPlans);
-      setTherapyFeedback({ type: 'success', message: 'Terapia farmacolÃ³gica atualizada com sucesso.' });
+      setTherapyFeedback({ type: 'success', message: 'Terapia farmacológica atualizada com sucesso.' });
     } catch (error) {
-      console.log('Erro ao salvar terapia farmacolÃ³gica:', error);
+      console.log('Erro ao salvar terapia farmacológica:', error);
       setTherapyFeedback({
         type: 'error',
-        message: 'NÃ£o foi possÃ­vel salvar a terapia farmacolÃ³gica agora. Tente novamente.',
+        message: 'Não foi possível salvar a terapia farmacológica agora. Tente novamente.',
       });
     } finally {
       setSavingTherapy(false);
@@ -3651,15 +3760,15 @@ export default function PacientePerfilScreen({
   }
 
   function selectDiabetesStatus(status) {
-    if (status === 'NÃ£o') {
+    if (status === 'Não') {
       const condicoes = splitListText(clinicalForm.condicoes)
         .filter((item) => item.toLowerCase() !== 'diabetes')
         .join(', ');
       const nextForm = {
         ...clinicalForm,
         condicoes,
-        diabetes: 'NÃ£o',
-        diabetes_status: 'NÃ£o',
+        diabetes: 'Não',
+        diabetes_status: 'Não',
         diabetes_tipo: '',
       };
 
@@ -3824,8 +3933,19 @@ export default function PacientePerfilScreen({
     scrollToField(`section-${sectionKey}`, { delay: 140, topOffset: 88 });
   }
 
+  function openNotificationPreferences() {
+    navigation.navigate('PacientePerfilNotificacoes', { usuarioLogado });
+  }
+
+  function openPrivacyAndSecurity() {
+    navigation.navigate('PacientePerfilPrivacidade', { usuarioLogado });
+  }
+
+  function openLibreIntegration() {
+    navigation.navigate('PacientePerfilIntegracao', { usuarioLogado });
+  }
+
   function handleTherapyQuickPress(categoryValue) {
-    openProfileSection('pharmacology');
     const plan = therapyPlansByCategory[categoryValue];
     openTherapyEditor(
       plan || {
@@ -3843,15 +3963,6 @@ export default function PacientePerfilScreen({
     [profileForm.data_nascimento, paciente?.data_nascimento]
   );
   const activeDays = useMemo(() => computeActiveDays(paciente || {}), [paciente]);
-  const objectiveSummary = useMemo(
-    () =>
-      cleanObjectiveSummary(
-        clinicalForm.objetivos || paciente?.objetivo_principal_consulta || 'Objetivo nao informado'
-      )
-        .split(/,|;|\n/)[0]
-        .trim() || 'Objetivo nao informado',
-    [clinicalForm.objetivos, paciente?.objetivo_principal_consulta]
-  );
   const diabetesSummary = useMemo(
     () =>
       clinicalForm.diabetes ||
@@ -3859,7 +3970,7 @@ export default function PacientePerfilScreen({
         ? `Diabetes ${clinicalForm.diabetes_tipo}`
         : clinicalForm.diabetes_status === 'Sim'
           ? 'Diabetes'
-          : 'Nao informado'),
+          : 'Não informado'),
     [clinicalForm.diabetes, clinicalForm.diabetes_status, clinicalForm.diabetes_tipo]
   );
   const heightSummary = useMemo(() => formatHeightSummary(clinicalForm.altura_cm), [clinicalForm.altura_cm]);
@@ -3871,15 +3982,43 @@ export default function PacientePerfilScreen({
         paciente?.pressao_arterial ||
           paciente?.pressao_arterial_media ||
           paciente?.pa_media ||
-          'Nao informado'
-      ).trim() || 'Nao informado',
+          'Não informado'
+      ).trim() || 'Não informado',
     [paciente]
   );
-  const comorbidityChips = useMemo(
-    () => buildChipList(clinicalForm.comorbidades_texto || clinicalForm.condicoes),
-    [clinicalForm.comorbidades_texto, clinicalForm.condicoes]
+  const healthInfoRows = useMemo(
+    () =>
+      buildPatientHealthInfoRows(paciente || {}, clinicalForm, {
+        diabetes: diabetesSummary,
+        height: heightSummary,
+        imc: imcSummary,
+        bloodPressure: bloodPressureSummary,
+      }),
+    [paciente, clinicalForm, diabetesSummary, heightSummary, imcSummary, bloodPressureSummary]
   );
   const nutritionistRouteData = route?.params?.nutricionista || null;
+  const profileRouteName = route?.name || 'PacientePerfil';
+  const profileScreenMode =
+    profileRouteName === 'PacientePerfilContato'
+      ? 'patient'
+      : profileRouteName === 'PacientePerfilSaude'
+        ? 'clinical'
+        : profileRouteName === 'PacientePerfilNotificacoes'
+          ? 'notifications'
+          : profileRouteName === 'PacientePerfilPrivacidade'
+            ? 'privacy'
+            : profileRouteName === 'PacientePerfilIntegracao'
+              ? 'integration'
+              : profileRouteName === 'PacientePerfilInsulinas'
+                ? 'insulins'
+              : 'overview';
+  const isOverviewProfile = profileScreenMode === 'overview';
+  const isPatientProfileEditor = profileScreenMode === 'patient';
+  const isClinicalProfileEditor = profileScreenMode === 'clinical';
+  const isNotificationProfileScreen = profileScreenMode === 'notifications';
+  const isPrivacyProfileScreen = profileScreenMode === 'privacy';
+  const isIntegrationProfileScreen = profileScreenMode === 'integration';
+  const isInsulinsProfileScreen = profileScreenMode === 'insulins';
   const nutritionistName =
     nutritionistRouteData?.nome_completo_nutri ||
     paciente?.nome_completo_nutri ||
@@ -3907,6 +4046,27 @@ export default function PacientePerfilScreen({
     ]),
     []
   );
+  const visibleProfileSections = useMemo(() => {
+    if (isPatientProfileEditor) {
+      return sections.filter((section) => section.key === 'patient');
+    }
+
+    if (isClinicalProfileEditor) {
+      return sections.filter((section) => section.key === 'clinical');
+    }
+
+    return [];
+  }, [isClinicalProfileEditor, isPatientProfileEditor, sections]);
+
+  useEffect(() => {
+    if (isPatientProfileEditor) {
+      setOpenSections((current) => ({ ...current, patient: true }));
+    }
+
+    if (isClinicalProfileEditor) {
+      setOpenSections((current) => ({ ...current, clinical: true }));
+    }
+  }, [isClinicalProfileEditor, isPatientProfileEditor]);
   const activeInsulinCategoryId = activeInsulinProfileKey === 'basal' ? 'basal' : 'prandial';
   const selectedInsulinTypeOptions =
     activeInsulinProfileKey === 'basal'
@@ -3995,48 +4155,20 @@ export default function PacientePerfilScreen({
   const sectionPreviews = useMemo(
     () => ({
       patient: [
-        formatPhoneInput(profileForm.telefone) || 'Telefone nao informado',
-        buildCityStateText(profileForm) || 'Endereco nao informado',
-        profileForm.email_pac || paciente?.email_pac || 'E-mail nao informado',
+        formatPhoneInput(profileForm.telefone) || 'Telefone não informado',
+        buildCityStateText(profileForm) || 'Endereço não informado',
+        profileForm.email_pac || paciente?.email_pac || 'E-mail não informado',
       ],
-      clinical: [
-        diabetesSummary,
-        `Altura ${heightSummary} • Peso ${weightSummary} • IMC ${imcSummary}`,
-        insulinClinicalSummary || 'Configuracao de insulina pendente',
-      ],
-      pharmacology: PHARMACOLOGY_CATEGORY_OPTIONS.map((option) => {
-        const plan = therapyPlansByCategory[option.value];
-        return plan?.marca
-          ? `${option.label}: ${plan.marca}`
-          : `${option.label}: nao configurada`;
-      }),
+      clinical: healthInfoRows.map((row) => `${row.label}: ${row.value}`),
     }),
-    [
-      profileForm,
-      paciente,
-      diabetesSummary,
-      heightSummary,
-      weightSummary,
-      imcSummary,
-      insulinClinicalSummary,
-      therapyPlansByCategory,
-    ]
+    [profileForm, paciente, healthInfoRows]
   );
   const sectionBadges = useMemo(
     () => ({
-      patient: isProfileFormDirty ? 'Nao salvo' : '',
-      clinical: isClinicalFormDirty ? 'Nao salvo' : '',
-      pharmacology: isTherapyFormDirty ? 'Nao salvo' : '',
+      patient: isProfileFormDirty ? 'Não salvo' : '',
+      clinical: isClinicalFormDirty ? 'Não salvo' : '',
     }),
-    [isProfileFormDirty, isClinicalFormDirty, isTherapyFormDirty]
-  );
-  const profileHubItems = useMemo(
-    () => [
-      { key: 'patient', label: 'Contato', icon: 'person-outline' },
-      { key: 'clinical', label: 'Saude', icon: 'pulse-outline' },
-      { key: 'pharmacology', label: 'Insulina', icon: 'medkit-outline' },
-    ],
-    []
+    [isProfileFormDirty, isClinicalFormDirty]
   );
   const heroInlineDetails = useMemo(
     () =>
@@ -4057,7 +4189,7 @@ export default function PacientePerfilScreen({
       },
       {
         id: 'weight',
-        value: weightSummary === 'Nao informado' ? '--' : weightSummary,
+        value: weightSummary === 'Não informado' ? '--' : weightSummary,
         label: 'peso atual',
       },
       {
@@ -4092,7 +4224,7 @@ export default function PacientePerfilScreen({
     if (!plan) {
       return {
         title: 'Nenhum plano configurado',
-        subtitle: 'Toque para preencher o formulÃ¡rio dessa insulina.',
+        subtitle: 'Toque para preencher o formulário dessa insulina.',
         details: [],
       };
     }
@@ -4185,6 +4317,8 @@ export default function PacientePerfilScreen({
           nestedScrollEnabled
           showsVerticalScrollIndicator={false}
         >
+        {isOverviewProfile ? (
+        <>
         <SectionCard style={styles.heroCard}>
           <View style={styles.heroHeader}>
             <View style={styles.profileAvatarLarge}>
@@ -4201,7 +4335,7 @@ export default function PacientePerfilScreen({
             <View style={styles.heroCopy}>
               <Text style={styles.heroName}>{nomePaciente}</Text>
               <Text style={styles.heroEmail}>
-                {profileForm.email_pac || paciente?.email_pac || usuarioLogado?.email || 'E-mail nao informado'}
+                {profileForm.email_pac || paciente?.email_pac || usuarioLogado?.email || 'E-mail não informado'}
               </Text>
               <View style={styles.statusPill}>
                 <Text style={styles.statusPillText}>Paciente ativo</Text>
@@ -4227,74 +4361,53 @@ export default function PacientePerfilScreen({
           ) : null}
         </SectionCard>
 
-        <SectionCard style={styles.profileSummaryCard}>
-          <Text style={styles.profileSummaryTitle}>Informacoes de saude</Text>
-
-          <View style={styles.summaryInfoGrid}>
-            {[
-              { label: 'Objetivo', value: objectiveSummary },
-              { label: 'Diabetes', value: diabetesSummary },
-              { label: 'Altura', value: heightSummary },
-              { label: 'Peso atual', value: weightSummary },
-              { label: 'IMC', value: imcSummary },
-              { label: 'Pressao arterial', value: bloodPressureSummary },
-            ].map((item) => (
-              <View key={item.label} style={styles.summaryInfoItem}>
-                <Text style={styles.summaryInfoLabel}>{item.label}</Text>
-                <Text style={styles.summaryInfoValue}>{item.value}</Text>
-              </View>
-            ))}
+        <TouchableOpacity
+          activeOpacity={0.82}
+          onPress={() =>
+            navigation.navigate('PacientePerfilNutricionista', {
+              usuarioLogado,
+              nutricionista: nutritionistRouteData || undefined,
+            })
+          }
+          style={styles.nutritionistCard}
+        >
+          <View style={styles.nutritionistAvatar}>
+            <Text style={styles.nutritionistAvatarText}>{nutritionistInitials}</Text>
           </View>
-        </SectionCard>
-
-        <SectionCard style={styles.profileSummaryCard}>
-          <Text style={styles.profileSummaryTitle}>Comorbidades</Text>
-
-          <View style={styles.chipsWrap}>
-            {(comorbidityChips.length ? comorbidityChips : ['Nenhuma informada']).map((item) => (
-              <View
-                key={item}
-                style={[
-                  styles.healthChip,
-                  item === 'Nenhuma informada' ? styles.healthChipMuted : null,
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.healthChipText,
-                    item === 'Nenhuma informada' ? styles.healthChipTextMuted : null,
-                  ]}
-                >
-                  {item}
-                </Text>
-              </View>
-            ))}
+          <View style={styles.nutritionistCopy}>
+            <Text style={styles.nutritionistName}>{nutritionistName}</Text>
+            <Text style={styles.nutritionistMeta}>
+              Nutricionista{nutritionistCrn ? ` • CRN ${nutritionistCrn}` : ''}
+            </Text>
           </View>
-        </SectionCard>
+          <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+        </TouchableOpacity>
+
+        <IntroHealthOverviewCard rows={healthInfoRows} />
 
         <TherapyQuickStrip
           options={PHARMACOLOGY_CATEGORY_OPTIONS}
           plansByCategory={therapyPlansByCategory}
           onPressCategory={handleTherapyQuickPress}
         />
+        </>
+        ) : null}
 
-        <SectionCard style={styles.profileDataHubCard}>
-          <Text style={styles.profileSummaryTitle}>Editar seus dados</Text>
-          <Text style={styles.profileDataHubHelper}>
-            Abra apenas o bloco que precisa atualizar. O resumo aparece fechado para consulta rapida.
-          </Text>
+        {isInsulinsProfileScreen ? (
+        <TherapyQuickStrip
+          options={PHARMACOLOGY_CATEGORY_OPTIONS}
+          plansByCategory={therapyPlansByCategory}
+          onPressCategory={handleTherapyQuickPress}
+        />
+        ) : null}
 
-          <ProfileSectionHub
-            items={profileHubItems.map((item) => ({
-              ...item,
-              active: Boolean(openSections[item.key]),
-            }))}
-            onSelect={openProfileSection}
-          />
-        </SectionCard>
+        {isClinicalProfileEditor ? (
+          <IntroHealthOverviewCard rows={healthInfoRows} />
+        ) : null}
 
+        {visibleProfileSections.length ? (
         <View style={styles.profileSectionsStack}>
-          {sections.map((section) => (
+          {visibleProfileSections.map((section) => (
             <View
               key={section.key}
               onLayout={registerFieldLayout(`section-${section.key}`)}
@@ -4304,10 +4417,11 @@ export default function PacientePerfilScreen({
                 sectionKey={section.key}
                 title={section.title}
                 helper={section.helper}
-                previewLines={sectionPreviews[section.key] || []}
+                previewLines={isOverviewProfile ? sectionPreviews[section.key] || [] : []}
                 badge={sectionBadges[section.key]}
-                open={openSections[section.key]}
-                onToggle={() => toggleSection(section.key)}
+                open={isOverviewProfile ? openSections[section.key] : true}
+                onToggle={isOverviewProfile ? () => toggleSection(section.key) : undefined}
+                hideHeader={!isOverviewProfile}
               >
                 {section.key === 'patient' ? (
                   <View style={styles.editForm} onLayout={registerScrollContainer}>
@@ -4392,22 +4506,6 @@ export default function PacientePerfilScreen({
                         {profileFeedback.message}
                       </Text>
                     ) : null}
-
-                    <TouchableOpacity
-                      activeOpacity={0.82}
-                      disabled={!isProfileFormDirty || savingProfile}
-                      onPress={saveProfileData}
-                      style={[
-                        styles.saveProfileButton,
-                        (!isProfileFormDirty || savingProfile) && styles.saveProfileButtonDisabled,
-                      ]}
-                    >
-                      {savingProfile ? (
-                        <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                      ) : (
-                        <Text style={styles.saveProfileButtonText}>Salvar dados</Text>
-                      )}
-                    </TouchableOpacity>
                   </View>
                 ) : section.key === 'clinical' ? (
                   <View style={styles.editForm} onLayout={registerScrollContainer}>
@@ -4529,14 +4627,13 @@ export default function PacientePerfilScreen({
                       onLayout={registerFieldLayout('clinical-insulin-config')}
                       style={styles.editField}
                     >
-                      <Text style={styles.infoLabel}>Configuracao de insulina</Text>
+                      <Text style={styles.infoLabel}>Configuração de insulina</Text>
                       <TouchableOpacity
                         activeOpacity={0.78}
-                        onPress={() => setInsulinConfigModalVisible(true)}
+                        onPress={() => navigation.navigate('PacientePerfilInsulinas', { usuarioLogado })}
                         style={[
                           styles.profileInput,
                           styles.profileSelect,
-                          insulinConfigModalVisible ? styles.profileInputFocused : null,
                         ]}
                       >
                         <Text
@@ -4545,7 +4642,7 @@ export default function PacientePerfilScreen({
                             !insulinClinicalSummary ? styles.profileSelectPlaceholder : null,
                           ]}
                         >
-                          {insulinClinicalSummary || 'Toque para configurar a insulina no popup'}
+                          {insulinClinicalSummary || 'Toque para abrir insulinas em uso'}
                         </Text>
                         <Ionicons name="chevron-down" size={19} color={patientTheme.colors.textMuted} />
                       </TouchableOpacity>
@@ -4561,98 +4658,6 @@ export default function PacientePerfilScreen({
                         {clinicalFeedback.message}
                       </Text>
                     ) : null}
-
-                    <TouchableOpacity
-                      activeOpacity={0.82}
-                      disabled={!isClinicalFormDirty || savingClinical}
-                      onPress={saveClinicalData}
-                      style={[
-                        styles.saveProfileButton,
-                        (!isClinicalFormDirty || savingClinical) && styles.saveProfileButtonDisabled,
-                      ]}
-                    >
-                      {savingClinical ? (
-                        <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                      ) : (
-                        <Text style={styles.saveProfileButtonText}>Salvar dados clinicos</Text>
-                      )}
-                    </TouchableOpacity>
-                  </View>
-                ) : section.key === 'pharmacology' ? (
-                  <View style={styles.editForm}>
-                    <Text style={styles.therapyIntroText}>
-                      Toque em basal, bolus ou mista para editar a insulina.
-                    </Text>
-
-                    {PHARMACOLOGY_CATEGORY_OPTIONS.map((option) => {
-                      const plan = therapyPlansByCategory[option.value];
-                      const summary = buildTherapyPlanSummary(plan);
-
-                      return (
-                        <TouchableOpacity
-                          key={option.value}
-                          activeOpacity={0.82}
-                          onPress={() =>
-                            openTherapyEditor(
-                              plan || {
-                                ...createEmptyTherapyPlan(),
-                                categoria_funcional: option.value,
-                              }
-                            )
-                          }
-                          style={styles.therapyFieldCard}
-                        >
-                          <View style={styles.therapyFieldHeader}>
-                            <View style={styles.therapyFieldTitleWrap}>
-                              <Text style={styles.therapyFieldLabel}>{option.label}</Text>
-                              <Text style={styles.therapyFieldDescription}>
-                                {normalizeDisplayText(option.descricao)}
-                              </Text>
-                            </View>
-                            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.primaryDark} />
-                          </View>
-
-                          <View style={styles.therapyFieldSummary}>
-                            <Text style={styles.therapyFieldValue}>{normalizeDisplayText(summary.title)}</Text>
-                            <Text style={styles.therapyFieldSubvalue}>
-                              {normalizeDisplayText(summary.subtitle || 'Nenhum plano salvo ainda')}
-                            </Text>
-                            {summary.details.map((detail) => (
-                              <Text key={`${option.value}-${detail}`} style={styles.therapyMetaText}>
-                                {normalizeDisplayText(detail)}
-                              </Text>
-                            ))}
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-
-                    {therapyFeedback ? (
-                      <Text
-                        style={[
-                          styles.formFeedback,
-                          therapyFeedback.type === 'error' ? styles.formFeedbackError : null,
-                        ]}
-                      >
-                        {therapyFeedback.message}
-                      </Text>
-                    ) : null}
-
-                    <TouchableOpacity
-                      activeOpacity={0.82}
-                      disabled={!isTherapyFormDirty || savingTherapy}
-                      onPress={savePharmacologyData}
-                      style={[
-                        styles.saveProfileButton,
-                        (!isTherapyFormDirty || savingTherapy) && styles.saveProfileButtonDisabled,
-                      ]}
-                    >
-                      {savingTherapy ? (
-                        <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                      ) : (
-                        <Text style={styles.saveProfileButtonText}>Salvar terapia farmacologica</Text>
-                      )}
-                    </TouchableOpacity>
                   </View>
                 ) : (
                   <View style={styles.infoList}>
@@ -4665,31 +4670,72 @@ export default function PacientePerfilScreen({
             </View>
           ))}
         </View>
+        ) : null}
 
-        <TouchableOpacity
-          activeOpacity={0.82}
-          onPress={() =>
-            navigation.navigate('PacientePerfilNutricionista', {
-              usuarioLogado,
-              nutricionista: nutritionistRouteData || undefined,
-            })
-          }
-          style={styles.nutritionistCard}
-        >
-          <View style={styles.nutritionistAvatar}>
-            <Text style={styles.nutritionistAvatarText}>{nutritionistInitials}</Text>
-          </View>
-          <View style={styles.nutritionistCopy}>
-            <Text style={styles.nutritionistName}>{nutritionistName}</Text>
-            <Text style={styles.nutritionistMeta}>
-              Nutricionista{nutritionistCrn ? ` • CRN ${nutritionistCrn}` : ''}
-            </Text>
-          </View>
-          <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
-        </TouchableOpacity>
-
+        {isOverviewProfile ? (
+        <>
         <SectionCard style={styles.profileSummaryCard}>
           <Text style={styles.profileSummaryTitle}>Configuracoes</Text>
+
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={() => navigation.navigate('PacientePerfilContato', { usuarioLogado })}
+            style={styles.settingsRow}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="person-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Identificação e contato</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={() => navigation.navigate('PacientePerfilSaude', { usuarioLogado })}
+            style={styles.settingsRow}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="pulse-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Saúde, metas e rotina</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={openNotificationPreferences}
+            style={styles.settingsRow}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="notifications-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Notificações</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={openPrivacyAndSecurity}
+            style={styles.settingsRow}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="shield-checkmark-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Privacidade e seguranca</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={openLibreIntegration}
+            style={styles.settingsRow}
+          >
+            <View style={styles.settingsRowLeft}>
+              <Ionicons name="sync-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Integração do sensor</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+          </TouchableOpacity>
 
           <TouchableOpacity
             activeOpacity={0.78}
@@ -4703,9 +4749,13 @@ export default function PacientePerfilScreen({
             <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
           </TouchableOpacity>
         </SectionCard>
+        </>
+        ) : null}
 
+        {isNotificationProfileScreen ? (
+        <View onLayout={registerFieldLayout('preferences-card')}>
         <SectionCard style={styles.profileSummaryCard}>
-          <Text style={styles.profileSummaryTitle}>Preferencias de notificacao</Text>
+          <Text style={styles.profileSummaryTitle}>Preferências de notificação</Text>
 
           {[
             {
@@ -4715,8 +4765,8 @@ export default function PacientePerfilScreen({
             },
             {
               key: 'mealReminders',
-              title: 'Lembretes de refeicao',
-              helper: 'Horarios do plano alimentar',
+              title: 'Lembretes de refeição',
+              helper: 'Horários do plano alimentar',
             },
             {
               key: 'aiInsights',
@@ -4751,15 +4801,19 @@ export default function PacientePerfilScreen({
             </View>
           ))}
         </SectionCard>
+        </View>
+        ) : null}
 
+        {isIntegrationProfileScreen ? (
+        <View onLayout={registerFieldLayout('integration-card')}>
         <SectionCard style={styles.integrationCard}>
-          <Text style={styles.profileSummaryTitle}>Integracao FreeStyle Libre</Text>
+          <Text style={styles.profileSummaryTitle}>Integração FreeStyle Libre</Text>
 
           <View style={styles.integrationHeader}>
             <View>
               <Text style={styles.integrationLabel}>Status</Text>
               <Text style={styles.integrationHelper}>
-                {libreConnected ? 'Sincronizacao disponivel no app.' : 'Integração ainda nao configurada.'}
+                {libreConnected ? 'Sincronização disponível no app.' : 'Integração ainda não configurada.'}
               </Text>
             </View>
             <View
@@ -4787,20 +4841,28 @@ export default function PacientePerfilScreen({
             style={styles.integrationButton}
           >
             <Text style={styles.integrationButtonText}>
-              {libreConnected ? 'Abrir monitoramento' : 'Configurar conexao'}
+              {libreConnected ? 'Abrir monitoramento' : 'Configurar conexão'}
             </Text>
           </TouchableOpacity>
         </SectionCard>
+        </View>
+        ) : null}
 
-        <View style={styles.privacyFootnoteCard}>
+        {isPrivacyProfileScreen ? (
+        <View onLayout={registerFieldLayout('privacy-card')} style={styles.privacyFootnoteCard}>
           <Text style={styles.privacyFootnoteText}>
-            Seus dados sao protegidos de acordo com o padrao de seguranca do app.
+            Seus dados são protegidos de acordo com o padrão de segurança do app.
           </Text>
-          <TouchableOpacity activeOpacity={0.78} onPress={() => openProfileSection('clinical')}>
-            <Text style={styles.privacyFootnoteLink}>Ver dados clinicos completos</Text>
+          <TouchableOpacity
+            activeOpacity={0.78}
+            onPress={() => navigation.navigate('PacientePerfilSaude', { usuarioLogado })}
+          >
+            <Text style={styles.privacyFootnoteLink}>Ver dados clínicos completos</Text>
           </TouchableOpacity>
         </View>
+        ) : null}
 
+        {isOverviewProfile ? (
         <TouchableOpacity
           activeOpacity={0.82}
           disabled={loggingOut}
@@ -4811,18 +4873,66 @@ export default function PacientePerfilScreen({
             <ActivityIndicator color={patientTheme.colors.danger} />
           ) : (
             <>
-              <Ionicons name="log-out-outline" size={16} color={patientTheme.colors.danger} />
+              <Ionicons name="log-out-outline" size={16} color="#e45454" />
               <Text style={styles.logoutButtonText}>Sair da conta</Text>
             </>
           )}
         </TouchableOpacity>
+        ) : null}
 
+        {isOverviewProfile ? (
         <Text style={styles.profileVersionText}>GlicNutri v1.0.0 • © 2026</Text>
+        ) : null}
 
 
 
-        <View style={styles.footerSpace} />
+        <View
+          style={[
+            styles.footerSpace,
+            isClinicalProfileEditor || isPatientProfileEditor ? styles.footerSpaceFloatingButton : null,
+          ]}
+        />
         </ScrollView>
+
+        {isClinicalProfileEditor || isPatientProfileEditor ? (
+          <View
+            style={[
+              styles.floatingSaveBar,
+              Platform.OS === 'web' ? styles.floatingSaveBarWeb : null,
+            ]}
+          >
+            <TouchableOpacity
+              activeOpacity={0.82}
+              disabled={
+                isPatientProfileEditor
+                  ? !isProfileFormDirty || savingProfile
+                  : !isClinicalFormDirty || savingClinical
+              }
+              onPress={isPatientProfileEditor ? saveProfileData : saveClinicalData}
+              style={[
+                styles.saveProfileButton,
+                styles.floatingSaveButton,
+                (
+                  isPatientProfileEditor
+                    ? !isProfileFormDirty || savingProfile
+                    : !isClinicalFormDirty || savingClinical
+                ) && styles.saveProfileButtonDisabled,
+              ]}
+            >
+              {isPatientProfileEditor ? (
+                savingProfile ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Text style={styles.saveProfileButtonText}>Salvar dados</Text>
+                )
+              ) : savingClinical ? (
+                <ActivityIndicator color={patientTheme.colors.onPrimary} />
+              ) : (
+                <Text style={styles.saveProfileButtonText}>Salvar dados clínicos</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        ) : null}
       </KeyboardAvoidingView>
 
       <Modal
@@ -4835,8 +4945,8 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>GÃªnero</Text>
-                <Text style={styles.emailModalText}>Como vocÃª se identifica?</Text>
+                <Text style={styles.emailModalTitle}>Gênero</Text>
+                <Text style={styles.emailModalText}>Como você se identifica?</Text>
 
                 {GENDER_OPTIONS.map((option) => (
                   <TouchableOpacity
@@ -4868,9 +4978,9 @@ export default function PacientePerfilScreen({
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
                 <Text style={styles.emailModalTitle}>Diabetes</Text>
-                <Text style={styles.emailModalText}>VocÃª possui diagnÃ³stico de diabetes?</Text>
+                <Text style={styles.emailModalText}>Você possui diagnóstico de diabetes?</Text>
 
-                {['NÃ£o', 'Sim'].map((option) => (
+                {['Não', 'Sim'].map((option) => (
                   <TouchableOpacity
                     key={option}
                     activeOpacity={0.78}
@@ -4900,7 +5010,7 @@ export default function PacientePerfilScreen({
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
                 <Text style={styles.emailModalTitle}>Tipo de diabetes</Text>
-                <Text style={styles.emailModalText}>Selecione o diagnÃ³stico informado.</Text>
+                <Text style={styles.emailModalText}>Selecione o diagnóstico informado.</Text>
 
                 {DIABETES_TYPE_OPTIONS.map((option) => (
                   <TouchableOpacity
@@ -5683,7 +5793,7 @@ export default function PacientePerfilScreen({
                       onBlur={() => blurClinicalField('insulinoterapia_atual')}
                       onChangeText={(value) => handleClinicalFieldChange('insulinoterapia_atual', value)}
                       onFocus={() => focusClinicalField('insulinoterapia_atual')}
-                      placeholder="Ex: Basal e ultrarrapida, bomba, nao usa"
+                      placeholder="Ex: Basal e ultrarrápida, bomba, não usa"
                       placeholderTextColor={patientTheme.colors.textMuted}
                       multiline
                       style={[
@@ -6089,7 +6199,7 @@ export default function PacientePerfilScreen({
               <View style={styles.genderModalCard}>
                 <Text style={styles.emailModalTitle}>Dispositivo da basal</Text>
                 <Text style={styles.emailModalText}>
-                  Selecione o dispositivo compatÃ­vel com a basal configurada.
+                  Selecione o dispositivo compatível com a basal configurada.
                 </Text>
 
                 {activeBasalDeviceOptions.map((option) => (
@@ -6158,7 +6268,7 @@ export default function PacientePerfilScreen({
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
                 <Text style={styles.emailModalTitle}>Objetivos nutricionais</Text>
-                <Text style={styles.emailModalText}>Selecione atÃ© 3 objetivos.</Text>
+                <Text style={styles.emailModalText}>Selecione até 3 objetivos.</Text>
                 {ONBOARDING_OBJECTIVE_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.objetivos).includes(option);
                   return (
@@ -6197,8 +6307,8 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>CondiÃ§Ãµes clÃ­nicas</Text>
-                <Text style={styles.emailModalText}>Selecione as condiÃ§Ãµes que se aplicam.</Text>
+                <Text style={styles.emailModalTitle}>Condições clínicas</Text>
+                <Text style={styles.emailModalText}>Selecione as condições que se aplicam.</Text>
                 {ONBOARDING_CONDITION_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.condicoes).includes(option);
                   return (
@@ -6237,8 +6347,8 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>SituaÃ§Ãµes clÃ­nicas</Text>
-                <Text style={styles.emailModalText}>Selecione as situaÃ§Ãµes que jÃ¡ ocorreram.</Text>
+                <Text style={styles.emailModalTitle}>Situações clínicas</Text>
+                <Text style={styles.emailModalText}>Selecione as situações que já ocorreram.</Text>
                 {ONBOARDING_SITUATION_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.situacoes).includes(option);
                   return (
@@ -6277,7 +6387,7 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Procedimentos clÃ­nicos</Text>
+                <Text style={styles.emailModalTitle}>Procedimentos clínicos</Text>
                 <Text style={styles.emailModalText}>Selecione procedimentos relevantes.</Text>
                 {ONBOARDING_PROCEDURE_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.procedimentos).includes(option);
@@ -6322,9 +6432,9 @@ export default function PacientePerfilScreen({
             <View style={styles.modalOverlay}>
               <TouchableWithoutFeedback onPress={() => {}}>
                 <View style={styles.emailModalCard}>
-                  <Text style={styles.emailModalTitle}>CÃ³digo enviado</Text>
+                  <Text style={styles.emailModalTitle}>Código enviado</Text>
                   <Text style={styles.emailModalText}>
-                    Digite o cÃ³digo de 6 dÃ­gitos enviado para{' '}
+                    Digite o código de 6 dígitos enviado para{' '}
                     {emailPendingVerification || getNormalizedProfileEmail()}.
                   </Text>
 
@@ -6339,7 +6449,7 @@ export default function PacientePerfilScreen({
                       const code = value.replace(/\D/g, '').slice(0, 6);
                       setEmailVerificationCode(code);
                       setEmailVerificationError(
-                        code && code.length < 6 ? 'Digite os 6 dÃ­gitos enviados por e-mail.' : ''
+                        code && code.length < 6 ? 'Digite os 6 dígitos enviados por e-mail.' : ''
                       );
                     }}
                     placeholder="000000"
@@ -6376,7 +6486,7 @@ export default function PacientePerfilScreen({
                     {emailVerificationLoading ? (
                       <ActivityIndicator color={patientTheme.colors.primaryDark} />
                     ) : (
-                      <Text style={styles.emailModalSecondaryButtonText}>Reenviar cÃ³digo</Text>
+                      <Text style={styles.emailModalSecondaryButtonText}>Reenviar código</Text>
                     )}
                   </TouchableOpacity>
 
@@ -6579,15 +6689,6 @@ const styles = StyleSheet.create({
     gap: 12,
     marginTop: 12,
   },
-  profileDataHubCard: {
-    marginTop: 14,
-  },
-  profileDataHubHelper: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 4,
-  },
   profileSummaryTitle: {
     color: patientTheme.colors.text,
     fontSize: 17,
@@ -6595,33 +6696,28 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   summaryInfoGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    justifyContent: 'space-between',
-    rowGap: 10,
+    gap: 12,
   },
   summaryInfoItem: {
-    width: '48%',
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
-    minHeight: 74,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    justifyContent: 'center',
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    minHeight: 28,
   },
   summaryInfoLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
-    marginBottom: 6,
-    lineHeight: 15,
+    flex: 1,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingRight: 12,
   },
   summaryInfoValue: {
     color: patientTheme.colors.text,
     fontSize: 14,
     fontWeight: '700',
-    lineHeight: 19,
+    lineHeight: 20,
+    maxWidth: '56%',
+    textAlign: 'right',
   },
   chipsWrap: {
     flexDirection: 'row',
@@ -6649,24 +6745,25 @@ const styles = StyleSheet.create({
   },
   nutritionistCard: {
     alignItems: 'center',
-    backgroundColor: '#fbf5ff',
-    borderColor: '#ead8ff',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
     borderWidth: 1,
     flexDirection: 'row',
     marginTop: 14,
     padding: patientTheme.spacing.card,
+    ...patientShadow,
   },
   nutritionistAvatar: {
     alignItems: 'center',
-    backgroundColor: '#a020f0',
+    backgroundColor: patientTheme.colors.primarySoft,
     borderRadius: 20,
     height: 40,
     justifyContent: 'center',
     width: 40,
   },
   nutritionistAvatarText: {
-    color: '#ffffff',
+    color: patientTheme.colors.primaryDark,
     fontSize: 14,
     fontWeight: '800',
   },
@@ -6686,6 +6783,8 @@ const styles = StyleSheet.create({
   },
   settingsRow: {
     alignItems: 'center',
+    borderBottomColor: patientTheme.colors.border,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     minHeight: 48,
@@ -6703,6 +6802,8 @@ const styles = StyleSheet.create({
   },
   preferenceRow: {
     alignItems: 'center',
+    borderBottomColor: patientTheme.colors.border,
+    borderBottomWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     paddingVertical: 10,
@@ -6724,8 +6825,8 @@ const styles = StyleSheet.create({
   },
   integrationCard: {
     marginTop: 14,
-    backgroundColor: '#edf5ff',
-    borderColor: '#bcd9ff',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
     borderWidth: 1,
   },
   integrationHeader: {
@@ -6750,7 +6851,7 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   integrationBadgeConnected: {
-    backgroundColor: '#14c85a',
+    backgroundColor: patientTheme.colors.primaryDark,
   },
   integrationBadgePending: {
     backgroundColor: '#ffffff',
@@ -6784,10 +6885,13 @@ const styles = StyleSheet.create({
   privacyFootnoteCard: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
     marginTop: 14,
     paddingHorizontal: 16,
     paddingVertical: 14,
+    ...patientShadow,
   },
   privacyFootnoteText: {
     color: patientTheme.colors.textMuted,
@@ -6803,19 +6907,17 @@ const styles = StyleSheet.create({
   },
   logoutButton: {
     alignItems: 'center',
-    borderColor: '#f0b8b8',
-    borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
     flexDirection: 'row',
+    gap: 8,
     justifyContent: 'center',
     marginTop: 14,
-    minHeight: 46,
+    minHeight: 28,
+    paddingVertical: 2,
   },
   logoutButtonText: {
-    color: patientTheme.colors.danger,
+    color: '#e45454',
     fontSize: 14,
-    fontWeight: '700',
-    marginLeft: 8,
+    fontWeight: '800',
   },
   profileVersionText: {
     color: patientTheme.colors.textMuted,
@@ -6979,6 +7081,23 @@ const styles = StyleSheet.create({
   saveProfileButtonText: {
     color: patientTheme.colors.onPrimary,
     fontWeight: '800',
+  },
+  floatingSaveBar: {
+    position: 'absolute',
+    left: patientTheme.spacing.screen,
+    right: patientTheme.spacing.screen,
+    bottom: 16,
+    zIndex: 20,
+  },
+  floatingSaveBarWeb: {
+    position: 'fixed',
+    zIndex: 900,
+  },
+  floatingSaveButton: {
+    minHeight: 54,
+    flexDirection: 'row',
+    gap: 8,
+    ...patientShadow,
   },
   measurementChoiceList: {
     flexDirection: 'row',
@@ -7375,6 +7494,9 @@ const styles = StyleSheet.create({
   },
   footerSpace: {
     height: 10,
+  },
+  footerSpaceFloatingButton: {
+    height: 104,
   },
   modalKeyboard: {
     flex: 1,

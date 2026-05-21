@@ -278,6 +278,159 @@ export function buildPatientPharmacologyRows(patient) {
   });
 }
 
+function splitListItems(value) {
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+
+  return String(value || '')
+    .split(/,|;|\n/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function isIgnoredOnboardingOption(value) {
+  const lower = String(value || '').trim().toLowerCase();
+  return (
+    lower === 'não possuo' ||
+    lower === 'nao possuo' ||
+    lower === 'não tive' ||
+    lower === 'nao tive' ||
+    lower === 'não realizei' ||
+    lower === 'nao realizei'
+  );
+}
+
+function uniqueListItems(items) {
+  const seen = new Set();
+
+  return items.filter((item) => {
+    const key = item.toLowerCase();
+
+    if (!item || seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+    return true;
+  });
+}
+
+function cleanObjectiveItemsFromText(text) {
+  const cleaned = cleanObjectiveText(text);
+  if (!cleaned || cleaned === MISSING_VALUE) return [];
+
+  return splitListItems(cleaned);
+}
+
+export function buildPatientIntroHealthOverview(patient, clinicalForm = {}) {
+  const onboarding = getOnboardingAnswers(patient);
+
+  const objectiveItems = uniqueListItems([
+    ...splitListItems(onboarding?.objetivos),
+    ...splitListItems(clinicalForm?.objetivos),
+    ...cleanObjectiveItemsFromText(patient?.objetivo_principal_consulta),
+  ]);
+
+  const healthItems = uniqueListItems([
+    ...splitListItems(onboarding?.condicoes),
+    ...splitListItems(clinicalForm?.condicoes),
+    ...splitListItems(clinicalForm?.comorbidades_texto),
+    ...splitListItems(patient?.comorbidades_texto),
+    ...splitListItems(onboarding?.situacoes),
+    ...splitListItems(clinicalForm?.situacoes),
+  ]).filter((item) => !isIgnoredOnboardingOption(item));
+
+  const diabetesStatus = String(clinicalForm?.diabetes_status || onboarding?.diabetes_status || '').trim();
+  const diabetesType = String(clinicalForm?.diabetes_tipo || onboarding?.diabetes_tipo || onboarding?.tipo_diabetes || '').trim();
+  const diabetesLabel = String(clinicalForm?.diabetes || '').trim();
+
+  if (diabetesLabel && !healthItems.some((item) => item.toLowerCase().includes('diabetes'))) {
+    healthItems.unshift(diabetesLabel);
+  } else if (diabetesStatus === 'Sim') {
+    healthItems.unshift(diabetesType ? `Diabetes ${diabetesType}` : 'Diabetes');
+  }
+
+  const activity =
+    String(clinicalForm?.nivel_atividade_fisica_atual || patient?.nivel_atividade_fisica_atual || '').trim();
+  const sleep = String(clinicalForm?.qualidade_sono_media || patient?.qualidade_sono_media || '').trim();
+  const routineParts = [activity, sleep].filter(Boolean);
+
+  const metaItems = objectiveItems.slice(0, 3);
+
+  return {
+    objetivo: objectiveItems[0] || MISSING_VALUE,
+    meta: metaItems.length ? metaItems.join(', ') : MISSING_VALUE,
+    metaItems,
+    saude: healthItems.length ? healthItems.join(', ') : MISSING_VALUE,
+    saudeItems: healthItems.slice(0, 6),
+    rotina: routineParts.length ? routineParts.join(' • ') : MISSING_VALUE,
+    rotinaItems: routineParts,
+    atividade: activity || MISSING_VALUE,
+    sono: sleep || MISSING_VALUE,
+  };
+}
+
+function formatDiabetesObjectiveValue(patient, clinicalForm, formattedDiabetes) {
+  const onboarding = getOnboardingAnswers(patient);
+  const diabetesType = String(
+    clinicalForm?.diabetes_tipo || onboarding?.diabetes_tipo || onboarding?.tipo_diabetes || ''
+  ).trim();
+
+  if (diabetesType) {
+    if (/^diabetes\s/i.test(diabetesType)) {
+      return diabetesType;
+    }
+
+    if (/^tipo\s/i.test(diabetesType)) {
+      return `Diabetes ${diabetesType}`;
+    }
+
+    return `Diabetes Tipo ${diabetesType}`;
+  }
+
+  const diabetesLabel = String(formattedDiabetes || clinicalForm?.diabetes || '').trim();
+  if (diabetesLabel && diabetesLabel !== MISSING_VALUE && diabetesLabel !== 'Não') {
+    return diabetesLabel;
+  }
+
+  const overview = buildPatientIntroHealthOverview(patient, clinicalForm);
+  return overview.objetivo;
+}
+
+function formatObjectiveDisplay(patient, clinicalForm) {
+  const overview = buildPatientIntroHealthOverview(patient, clinicalForm);
+  const objectiveValue = String(overview.objetivo || '').trim();
+
+  return objectiveValue && objectiveValue !== MISSING_VALUE ? objectiveValue : MISSING_VALUE;
+}
+
+function formatBloodPressureDisplay(value) {
+  const text = String(value || '').trim();
+  if (!text || text === MISSING_VALUE) return MISSING_VALUE;
+  if (/mmhg/i.test(text)) return text;
+  if (/^\d+\s*\/\s*\d+/.test(text)) return `${text} mmHg`;
+  return text;
+}
+
+export function buildPatientHealthInfoRows(patient, clinicalForm = {}, formatted = {}) {
+  return [
+    {
+      label: 'Objetivo',
+      value: formatDiabetesObjectiveValue(patient, clinicalForm, formatted.diabetes),
+    },
+    { label: 'Altura', value: formatted.height || MISSING_VALUE },
+    { label: 'IMC', value: formatted.imc || MISSING_VALUE },
+    {
+      label: 'Pressão Arterial',
+      value: formatBloodPressureDisplay(formatted.bloodPressure),
+    },
+  ].map((row) => ({
+    label: row.label,
+    value: String(row.value || '').trim() || MISSING_VALUE,
+  }));
+}
+
 export function buildPatientProfileSections(patient) {
   return [
     {

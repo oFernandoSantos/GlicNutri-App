@@ -237,6 +237,31 @@ function buildMonthlySummary(appState, glucoseReadings, weeklyAdherence) {
   ];
 }
 
+function buildTodayMealRecords(mealEntries) {
+  const entries = Array.isArray(mealEntries) ? mealEntries : [];
+  const today = new Date().toISOString().slice(0, 10);
+  const todayEntries = entries
+    .filter((entry) => entry?.date === today)
+    .sort((a, b) => String(a?.time || '').localeCompare(String(b?.time || '')));
+
+  return todayEntries.slice(0, 4).map((entry, index) => {
+    const foods = Array.isArray(entry?.foods) ? entry.foods : [];
+    const foodSummary = foods
+      .map((item) => item?.name || item?.alimento || item?.title || '')
+      .filter(Boolean)
+      .slice(0, 4)
+      .join(', ');
+
+    return {
+      id: entry?.id || `meal-record-${index}`,
+      time: String(entry?.time || entry?.hora || '--:--').slice(0, 5),
+      title: entry?.mealLabel || entry?.mealTypeLabel || entry?.typeLabel || entry?.title || 'Refeição',
+      summary: foodSummary || 'Registro alimentar do dia',
+      calories: Math.round(Number(entry?.calories || entry?.kcal || 0)) || 0,
+    };
+  });
+}
+
 function WeightChart({ points }) {
   const chartHeight = 154;
   const [chartWidth, setChartWidth] = useState(0);
@@ -420,6 +445,10 @@ export default function PacienteProgressoScreen({
     () => buildMonthlySummary(appState, glucoseReadings, weeklyAdherence),
     [appState, glucoseReadings, weeklyAdherence]
   );
+  const todayMealRecords = useMemo(
+    () => buildTodayMealRecords(appState?.mealEntries),
+    [appState?.mealEntries]
+  );
 
   return (
     <PatientScreenLayout
@@ -462,7 +491,7 @@ export default function PacienteProgressoScreen({
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Evolucao de peso</Text>
+              <Text style={styles.sectionTitle}>Sua evolução</Text>
               <View style={styles.badgeSoft}>
                 <Text style={styles.badgeSoftText}>{formatSignedWeight(weightSeries.loss)}</Text>
               </View>
@@ -486,6 +515,40 @@ export default function PacienteProgressoScreen({
             </View>
 
             <WeightChart points={weightSeries.points} />
+          </View>
+
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Registro de hoje</Text>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>
+                  {todayMealRecords.length} refeiç{todayMealRecords.length === 1 ? 'ão' : 'ões'}
+                </Text>
+              </View>
+            </View>
+
+            {todayMealRecords.length ? (
+              <View style={styles.todayMealsList}>
+                {todayMealRecords.map((item) => (
+                  <View key={item.id} style={styles.todayMealCard}>
+                    <View style={styles.todayMealTimeBlock}>
+                      <Text style={styles.todayMealTimeLabel}>Horário</Text>
+                      <Text style={styles.todayMealTimeValue}>{item.time}</Text>
+                    </View>
+
+                    <View style={styles.todayMealCopy}>
+                      <Text style={styles.todayMealTitle}>{item.title}</Text>
+                      <Text style={styles.todayMealSummary}>{item.summary}</Text>
+                      <View style={styles.todayMealBadge}>
+                        <Text style={styles.todayMealBadgeText}>{item.calories} kcal</Text>
+                      </View>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : (
+              <Text style={styles.emptyMealText}>Nenhum registro alimentar feito hoje.</Text>
+            )}
           </View>
 
           <View style={styles.sectionCard}>
@@ -789,6 +852,67 @@ const styles = StyleSheet.create({
     fontSize: 13,
     marginTop: 12,
     textAlign: 'center',
+  },
+  todayMealsList: {
+    gap: 10,
+  },
+  todayMealCard: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    flexDirection: 'row',
+    padding: 14,
+  },
+  todayMealTimeBlock: {
+    width: 52,
+    marginRight: 10,
+  },
+  todayMealTimeLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  todayMealTimeValue: {
+    color: patientTheme.colors.text,
+    fontSize: 22,
+    fontWeight: '700',
+    lineHeight: 24,
+  },
+  todayMealCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  todayMealTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  todayMealSummary: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 4,
+  },
+  todayMealBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: '#ffffff',
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  todayMealBadgeText: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  emptyMealText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 18,
   },
   glycemicTrackHeader: {
     alignItems: 'center',

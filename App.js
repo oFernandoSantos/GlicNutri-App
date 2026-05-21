@@ -580,6 +580,30 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
+              <Stack.Screen name="PacientePerfilContato" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfilSaude" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfilNotificacoes" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfilPrivacidade" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfilIntegracao" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacientePerfilInsulinas" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
               <Stack.Screen name="PacientePrevisaoML" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <TelaPrevisaoMl {...getPacienteProps(props)} />)}
               </Stack.Screen>
