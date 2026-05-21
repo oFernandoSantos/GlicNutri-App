@@ -13,6 +13,7 @@ import {
 import {
   getNutritionistId,
   listPatientsByNutritionist,
+  unlinkPatientNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
@@ -31,6 +32,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [activeFilter, setActiveFilter] = useState('Todos');
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [unlinkingPatientId, setUnlinkingPatientId] = useState('');
   const [loadError, setLoadError] = useState('');
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
 
@@ -93,6 +95,25 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       { id: 's4', label: 'Adesao media', value: `${avgAdherence}%` },
     ];
   }, [patients]);
+
+  async function handleDesvincularPaciente(patient) {
+    try {
+      setUnlinkingPatientId(patient.id);
+      setLoadError('');
+      await unlinkPatientNutritionist({
+        pacienteId: patient.id,
+        nutricionistaId,
+        actor: usuarioLogado,
+        origin: 'nutricionista',
+      });
+      await loadPatients();
+    } catch (error) {
+      console.log('Erro ao desvincular paciente:', error);
+      setLoadError(error?.message || 'Nao foi possivel desvincular o paciente.');
+    } finally {
+      setUnlinkingPatientId('');
+    }
+  }
 
   return (
     <LayoutNutricionista
@@ -178,6 +199,19 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                     <Text style={styles.tagTextGreen}>{patient.unread} mensagens</Text>
                   </View>
                 ) : null}
+                <TouchableOpacity
+                  style={styles.unlinkPill}
+                  activeOpacity={0.9}
+                  disabled={unlinkingPatientId === patient.id}
+                  onPress={(event) => {
+                    event?.stopPropagation?.();
+                    handleDesvincularPaciente(patient);
+                  }}
+                >
+                  <Text style={styles.unlinkPillText}>
+                    {unlinkingPatientId === patient.id ? 'Removendo...' : 'Desvincular'}
+                  </Text>
+                </TouchableOpacity>
               </View>
 
               <Text style={styles.patientNote}>{patient.notes}</Text>
@@ -330,6 +364,19 @@ const styles = StyleSheet.create({
   },
   tagTextGreen: {
     color: patientTheme.colors.primaryDark,
+    fontWeight: '900',
+    fontSize: 12,
+  },
+  unlinkPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: '#f0d2d2',
+    backgroundColor: '#fff7f7',
+  },
+  unlinkPillText: {
+    color: '#9f3d3d',
     fontWeight: '900',
     fontSize: 12,
   },

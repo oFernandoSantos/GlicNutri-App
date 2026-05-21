@@ -19,13 +19,18 @@ import {
   CartaoAgendamento,
 } from '../../componentes/agendamento/uiAgendamento';
 import { patientTheme } from '../../temas/temaVisualPaciente';
-import { getPatientId } from '../../servicos/servicoDadosPaciente';
+import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
 import { formatValorConsulta } from '../../servicos/servicoGoogleMeet';
 import {
   createConsulta,
   listConsultasByNutricionista,
   updateConsultaSchedule,
 } from '../../servicos/servicoConsultas';
+import { createFollowUpRequest } from '../../servicos/servicoSolicitacoesAcompanhamento';
+import {
+  isPatientLinkedToNutritionist,
+  unlinkPatientNutritionist,
+} from '../../servicos/servicoVinculosNutricionista';
 import {
   generateSlotsForNextDays,
   listNutriAvailability,
@@ -76,9 +81,14 @@ export default function PacientePerfilNutricionistaScreen({
   const isEditing = Boolean(consultaEdicao?.id);
   const [nutricionista, setNutricionista] = useState(nutricionistaBase);
 
-  const [agendaVisible, setAgendaVisible] = useState(Boolean(route?.params?.openSchedulePopup));
+  const [agendaVisible, setAgendaVisible] = useState(Boolean(isEditing && route?.params?.openSchedulePopup));
   const [loadingAgenda, setLoadingAgenda] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
+  const [solicitando, setSolicitando] = useState(false);
+  const [desvinculando, setDesvinculando] = useState(false);
+  const [linkedToNutri, setLinkedToNutri] = useState(false);
+  const [linkedNutritionistId, setLinkedNutritionistId] = useState(null);
+  const [feedback, setFeedback] = useState('');
   const [slots, setSlots] = useState([]);
   const [selectedDayKey, setSelectedDayKey] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -217,13 +227,116 @@ export default function PacientePerfilNutricionistaScreen({
   }, [agendaVisible, carregarAgenda]);
 
   useEffect(() => {
-    if (route?.params?.openSchedulePopup) {
+    let active = true;
+
+    async function carregarVinculo() {
+      if (!nutricionista?.id_nutricionista_uuid || !patientId) {
+        setLinkedToNutri(false);
+        return;
+      }
+
+      try {
+        const pacienteAtual = await fetchPatientById(patientId, {
+          currentPatient: usuarioLogado,
+          patientContext: usuarioLogado,
+        }).catch(() => null);
+        const currentLinkedId = pacienteAtual?.id_nutricionista_uuid || null;
+        const linked = await isPatientLinkedToNutritionist({
+          pacienteId: patientId,
+          nutricionistaId: nutricionista.id_nutricionista_uuid,
+        });
+        if (active) {
+          setLinkedNutritionistId(currentLinkedId);
+          setLinkedToNutri(linked);
+        }
+      } catch (error) {
+        console.log('Erro ao verificar vinculo com nutricionista:', error);
+        if (active) {
+          setLinkedNutritionistId(null);
+          setLinkedToNutri(false);
+        }
+      }
+    }
+
+    carregarVinculo();
+
+    return () => {
+      active = false;
+    };
+  }, [nutricionista?.id_nutricionista_uuid, patientId]);
+
+  useEffect(() => {
+    if (isEditing && route?.params?.openSchedulePopup) {
       setAgendaVisible(true);
     }
-  }, [route?.params?.openSchedulePopup]);
+  }, [isEditing, route?.params?.openSchedulePopup]);
 
   function handleAbrirAgenda() {
     setAgendaVisible(true);
+  }
+
+  async function handleSolicitarAcompanhamento() {
+    if (!nutricionista?.id_nutricionista_uuid || !patientId) {
+      setFeedback('Nao foi possivel identificar o paciente ou nutricionista.');
+      return;
+    }
+
+    if (
+      linkedNutritionistId &&
+      linkedNutritionistId !== nutricionista.id_nutricionista_uuid
+    ) {
+      setFeedback(
+        'Voce ja possui um nutricionista vinculado. Desvincule o acompanhamento atual antes de solicitar outro.'
+      );
+      return;
+    }
+
+    try {
+      setSolicitando(true);
+      setFeedback('');
+      const result = await createFollowUpRequest({
+        nutricionistaId: nutricionista.id_nutricionista_uuid,
+        pacienteId: patientId,
+        mensagem: `${tipoConsulta} · ${convenio} · ${especialidade}`,
+        actor: usuarioLogado,
+      });
+
+      setFeedback(
+        result?.message ||
+          'Solicitacao enviada. O nutricionista precisa aprovar o acompanhamento antes do agendamento.'
+      );
+      if (result?.alreadyLinked) setLinkedToNutri(true);
+    } catch (error) {
+      console.log('Erro ao solicitar acompanhamento:', error);
+      setFeedback(error?.message || 'Nao foi possivel enviar a solicitacao. Tente novamente.');
+    } finally {
+      setSolicitando(false);
+    }
+  }
+
+  async function handleDesvincularAcompanhamento() {
+    if (!nutricionista?.id_nutricionista_uuid || !patientId) {
+      setFeedback('Nao foi possivel identificar o acompanhamento para desvincular.');
+      return;
+    }
+
+    try {
+      setDesvinculando(true);
+      setFeedback('');
+      await unlinkPatientNutritionist({
+        pacienteId: patientId,
+        nutricionistaId: nutricionista.id_nutricionista_uuid,
+        actor: usuarioLogado,
+        origin: 'paciente',
+      });
+      setLinkedToNutri(false);
+      setFeedback('Acompanhamento encerrado. Voce pode solicitar novamente quando precisar.');
+    } catch (error) {
+      console.log('Erro ao desvincular acompanhamento:', error);
+      setFeedback(error?.message || 'Nao foi possivel desvincular o acompanhamento.');
+    } finally {
+      setDesvinculando(false);
+    }
   }
 
   function handleFecharAgenda() {
@@ -269,13 +382,18 @@ export default function PacientePerfilNutricionistaScreen({
         });
         return;
       }
+      if (!linkedToNutri) {
+        setErroAgenda(
+          'Solicite o acompanhamento primeiro. Depois da aprovacao do nutricionista, o agendamento fica liberado.'
+        );
+        return;
+      }
+
       await createConsulta({
         nutricionistaId: nutricionista.id_nutricionista_uuid,
         pacienteId: patientId,
         scheduledAt: selectedSlot.scheduledAt,
-        motivo: [observacoes.trim(), `${tipoConsulta} · ${convenio} · ${especialidade}`]
-          .filter(Boolean)
-          .join(' · '),
+        motivo,
         tipoConsulta,
         convenio,
         especialidade,
@@ -418,11 +536,30 @@ export default function PacientePerfilNutricionistaScreen({
           </View>
         </CartaoAgendamento>
 
+        {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
+
         <BotaoAgendamento
-          label="Agendar horário"
-          icon="calendar-outline"
-          onPress={handleAbrirAgenda}
+          label={
+            isEditing
+              ? 'Editar horario'
+              : linkedToNutri
+                ? 'Agendar consulta'
+                : 'Solicitar acompanhamento'
+          }
+          icon={isEditing || linkedToNutri ? 'calendar-outline' : 'person-add-outline'}
+          onPress={isEditing || linkedToNutri ? handleAbrirAgenda : handleSolicitarAcompanhamento}
+          loading={solicitando}
         />
+
+        {linkedToNutri && !isEditing ? (
+          <BotaoAgendamento
+            label="Desvincular nutricionista"
+            icon="close-circle-outline"
+            variant="ghost"
+            onPress={handleDesvincularAcompanhamento}
+            loading={desvinculando}
+          />
+        ) : null}
       </ScrollView>
 
       <Modal visible={agendaVisible} transparent animationType="fade" onRequestClose={handleFecharAgenda}>
@@ -687,6 +824,12 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     lineHeight: 22,
     fontWeight: '600',
+  },
+  feedbackText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '800',
+    lineHeight: 20,
+    paddingHorizontal: 4,
   },
   tags: {
     flexDirection: 'row',

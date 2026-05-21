@@ -17,12 +17,18 @@ import {
   getNutritionistId,
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
+import {
+  listFollowUpRequestsByNutritionist,
+  updateFollowUpRequestStatus,
+} from '../../servicos/servicoSolicitacoesAcompanhamento';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
 export default function NutricionistaHomeDashboardScreen({ route, navigation }) {
   const { usuarioLogado } = route.params || {};
   const [patients, setPatients] = useState([]);
+  const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [respondingRequestId, setRespondingRequestId] = useState('');
   const [loadError, setLoadError] = useState('');
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
 
@@ -30,8 +36,12 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     try {
       setLoading(true);
       setLoadError('');
-      const items = await listPatientsByNutritionist(nutricionistaId);
+      const [items, pendingRequests] = await Promise.all([
+        listPatientsByNutritionist(nutricionistaId),
+        listFollowUpRequestsByNutritionist(nutricionistaId, { status: 'pending' }),
+      ]);
       setPatients(items || []);
+      setRequests(pendingRequests || []);
     } catch (error) {
       console.log('Erro ao carregar pacientes vinculados na home:', error);
       setLoadError('Nao foi possivel carregar sua carteira de pacientes.');
@@ -48,6 +58,24 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     const unsubscribe = navigation.addListener('focus', loadPatients);
     return unsubscribe;
   }, [navigation, loadPatients]);
+
+  async function handleResponderSolicitacao(request, status) {
+    try {
+      setRespondingRequestId(request.id);
+      await updateFollowUpRequestStatus({
+        requestId: request.id,
+        nutricionistaId,
+        status,
+        actor: usuarioLogado,
+      });
+      await loadPatients();
+    } catch (error) {
+      console.log('Erro ao responder solicitacao de acompanhamento:', error);
+      setLoadError(error?.message || 'Nao foi possivel responder a solicitacao.');
+    } finally {
+      setRespondingRequestId('');
+    }
+  }
 
   const metrics = useMemo(() => {
     const total = patients.length;
@@ -166,6 +194,74 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
           ))}
         </View>
 
+        <View>
+          <Text style={nutriDesktopStyles.sectionTitle}>Solicitacoes de acompanhamento</Text>
+          <Text style={nutriDesktopStyles.sectionHelper}>
+            Aprove o paciente antes de liberar o acompanhamento e os proximos agendamentos.
+          </Text>
+
+          <View style={styles.requestList}>
+            {loading ? (
+              <SectionCard style={styles.emptyCard}>
+                <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                <Text style={styles.emptyText}>Carregando solicitacoes...</Text>
+              </SectionCard>
+            ) : null}
+
+            {!loading && !requests.length ? (
+              <SectionCard style={styles.emptyCard}>
+                <Text style={styles.emptyTitle}>Nenhuma solicitacao pendente</Text>
+                <Text style={styles.emptyText}>
+                  Novos pedidos de acompanhamento dos pacientes aparecerao aqui.
+                </Text>
+              </SectionCard>
+            ) : null}
+
+            {requests.map((request) => {
+              const paciente = request.paciente || {};
+              const pacienteNome =
+                paciente.nome_completo || paciente.nome_pac || paciente.email_pac || 'Paciente';
+              const responding = respondingRequestId === request.id;
+
+              return (
+                <SectionCard key={request.id} style={styles.requestCard}>
+                  <View style={styles.requestIdentity}>
+                    <AvatarBadge name={pacienteNome} size={44} />
+                    <View style={styles.requestCopy}>
+                      <Text style={styles.requestName}>{pacienteNome}</Text>
+                      <Text style={styles.requestMeta}>{paciente.email_pac || 'Email nao informado'}</Text>
+                      {request.mensagem ? (
+                        <Text style={styles.requestMessage}>{request.mensagem}</Text>
+                      ) : null}
+                    </View>
+                  </View>
+
+                  <View style={styles.requestActions}>
+                    <TouchableOpacity
+                      style={[styles.requestButton, styles.requestButtonPrimary]}
+                      activeOpacity={0.9}
+                      disabled={responding}
+                      onPress={() => handleResponderSolicitacao(request, 'approved')}
+                    >
+                      <Text style={styles.requestButtonPrimaryText}>
+                        {responding ? 'Salvando...' : 'Acompanhar'}
+                      </Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={styles.requestButton}
+                      activeOpacity={0.9}
+                      disabled={responding}
+                      onPress={() => handleResponderSolicitacao(request, 'rejected')}
+                    >
+                      <Text style={styles.requestButtonText}>Recusar</Text>
+                    </TouchableOpacity>
+                  </View>
+                </SectionCard>
+              );
+            })}
+          </View>
+        </View>
+
         <View style={nutriDesktopStyles.desktopRow}>
           <View style={styles.mainColumn}>
             <Text style={nutriDesktopStyles.sectionTitle}>Pacientes prioritarios</Text>
@@ -194,7 +290,7 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
                 <SectionCard style={styles.emptyCard}>
                   <Text style={styles.emptyTitle}>Nenhum paciente vinculado</Text>
                   <Text style={styles.emptyText}>
-                    Quando um paciente agendar consulta com voce, ele aparecera neste painel.
+                    Quando um paciente solicitar e voce aprovar o acompanhamento, ele aparecera neste painel.
                   </Text>
                 </SectionCard>
               ) : null}
@@ -286,7 +382,7 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
                   <View style={styles.timelineContent}>
                     <Text style={styles.timelineTitle}>Sem pacientes vinculados</Text>
                     <Text style={styles.timelineDetail}>
-                      A lista sera preenchida automaticamente pelos agendamentos dos pacientes.
+                      A lista sera preenchida automaticamente pelos acompanhamentos aprovados.
                     </Text>
                   </View>
                 </View>
@@ -323,6 +419,61 @@ const styles = StyleSheet.create({
   priorityList: {
     marginTop: 14,
     gap: 12,
+  },
+  requestList: {
+    marginTop: 14,
+    gap: 12,
+  },
+  requestCard: {
+    gap: 14,
+  },
+  requestIdentity: {
+    flexDirection: 'row',
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  requestCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  requestName: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  requestMeta: {
+    marginTop: 4,
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+  },
+  requestMessage: {
+    marginTop: 8,
+    color: patientTheme.colors.textMuted,
+    lineHeight: 20,
+  },
+  requestActions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  requestButton: {
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  requestButtonPrimary: {
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  requestButtonText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '900',
+  },
+  requestButtonPrimaryText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '900',
   },
   emptyCard: {
     alignItems: 'flex-start',

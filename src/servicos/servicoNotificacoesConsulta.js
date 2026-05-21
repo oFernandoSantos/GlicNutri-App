@@ -1,5 +1,16 @@
 import { supabase } from './configSupabase';
 
+function isMissingNotificationTableError(error) {
+  const code = String(error?.code || '');
+  const message = String(error?.message || '').toLowerCase();
+
+  return (
+    code === 'PGRST205' ||
+    message.includes('consulta_notificacao') ||
+    message.includes('could not find the table')
+  );
+}
+
 export async function criarNotificacaoConsulta({
   consultaId,
   destinatarioTipo,
@@ -26,7 +37,13 @@ export async function criarNotificacaoConsulta({
     .select('*')
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) {
+    if (isMissingNotificationTableError(error)) {
+      console.log('Tabela consulta_notificacao nao encontrada. Aplique a migration de notificacoes.');
+      return null;
+    }
+    throw error;
+  }
   return data;
 }
 
@@ -51,7 +68,10 @@ export async function listarNotificacoesConsulta({
   }
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) {
+    if (isMissingNotificationTableError(error)) return [];
+    throw error;
+  }
   return data || [];
 }
 
@@ -74,7 +94,10 @@ export async function marcarNotificacoesComoLidas({
   }
 
   const { error } = await query;
-  if (error) throw error;
+  if (error) {
+    if (isMissingNotificationTableError(error)) return;
+    throw error;
+  }
 }
 
 export function subscribeNotificacoesConsulta({
