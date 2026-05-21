@@ -18,6 +18,7 @@ export function isGoogleUser(user) {
 
 export function buildGooglePatientFallback(user) {
   const placeholderCpf = buildGoogleCpfPlaceholder(user);
+  const placeholderPassword = `GOOGLE-${user?.id || placeholderCpf}-${Date.now()}`;
 
   return {
     id_paciente_uuid: user?.id || null,
@@ -28,6 +29,7 @@ export function buildGooglePatientFallback(user) {
       'Paciente',
     email_pac: user?.email?.toLowerCase() || null,
     cpf_paciente: placeholderCpf,
+    senha_pac: placeholderPassword,
     sexo_biologico: 'Nao informado',
     cep: '00000000',
     logradouro: 'Login Google',
@@ -102,6 +104,7 @@ export async function syncGooglePatientRecord(user) {
         nome_completo: pacienteExistente.nome_completo || fallback.nome_completo,
         email_pac: pacienteExistente.email_pac || fallback.email_pac,
         cpf_paciente: pacienteExistente.cpf_paciente || fallback.cpf_paciente,
+        senha_pac: pacienteExistente.senha_pac || fallback.senha_pac,
         sexo_biologico: pacienteExistente.sexo_biologico || fallback.sexo_biologico,
         cep: pacienteExistente.cep || fallback.cep,
         logradouro: pacienteExistente.logradouro || fallback.logradouro,

@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import {
   AvatarBadge,
@@ -10,6 +10,16 @@ import {
   TrendChartCard,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import { getNutritionistPatientById, nutritionistPatientsMock } from '../../dados/dadosNutricionistaMock';
+import { fetchPatientById } from '../../servicos/servicoDadosPaciente';
+import {
+  disableOtherMealPlansForPatient,
+  fetchActiveMealPlanForPatient,
+  upsertMealPlan,
+} from '../../servicos/servicoPlanoAlimentar';
+import {
+  getNutritionistId,
+  isPatientLinkedToNutritionist,
+} from '../../servicos/servicoVinculosNutricionista';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
 const detailTabs = [
@@ -20,41 +30,304 @@ const detailTabs = [
   { value: 'personal', label: 'Dados Pessoais' },
 ];
 
+function calculateAge(value) {
+  const birth = value ? new Date(value) : null;
+  if (!birth || Number.isNaN(birth.getTime())) return '--';
+  const now = new Date();
+  let age = now.getFullYear() - birth.getFullYear();
+  const monthDiff = now.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && now.getDate() < birth.getDate())) age -= 1;
+  return age >= 0 ? age : '--';
+}
+
+function normalizePatientForProntuario(patient) {
+  if (!patient) return null;
+  const raw = patient.raw || patient;
+  const name = patient.name || raw.nome_completo || raw.nome_pac || raw.email_pac || 'Paciente';
+  const objective =
+    patient.objective ||
+    raw.objetivo_principal ||
+    raw.objetivo ||
+    raw.diagnostico_principal ||
+    'Acompanhamento';
+  const latestGlucose = patient.latestGlucose || raw.glicemia_atual || raw.ultima_glicemia_mgdl || '--';
+
+  return {
+    ...patient,
+    id: patient.id || raw.id_paciente_uuid,
+    name,
+    age: patient.age || calculateAge(raw.data_nascimento),
+    bmi: patient.bmi || raw.imc_atual || raw.imc || '--',
+    specialtyTag: patient.specialtyTag || objective,
+    risk: patient.risk || 'Baixo',
+    latestGlucose,
+    trendText: patient.trendText || 'Acompanhe a evolucao pelos registros do paciente.',
+    adherence: Number(patient.adherence || raw.adesao_percentual || 78),
+    alerts: Number(patient.alerts || 0),
+    notes: patient.notes || raw.observacoes || 'Paciente vinculado ao acompanhamento nutricional.',
+    glucose12h: patient.glucose12h || [],
+    planMeals: patient.planMeals || [],
+    goals: patient.goals || [
+      { id: 'goal-glicose', label: 'Controle glicemico', progress: 70 },
+      { id: 'goal-plano', label: 'Plano alimentar', progress: 65 },
+    ],
+    recommendations: patient.recommendations || ['Revisar registros recentes', 'Ajustar metas na consulta'],
+    comorbidities: patient.comorbidities || [raw.condicoes_saude || 'Nao informado'],
+    medications: patient.medications || [raw.medicamentos_uso_continuo || 'Nao informado'],
+    personalData: patient.personalData || {
+      email: raw.email_pac || 'Nao informado',
+      phone: raw.telefone || raw.telefone_paciente || 'Nao informado',
+      city: raw.cidade || 'Nao informado',
+    },
+  };
+}
+
 export default function TelaProntuarioPacienteNutri({ navigation, route }) {
-  const { pacienteId, paciente } = route.params || {};
+  const { pacienteId, paciente, usuarioLogado } = route.params || {};
+  const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+  const [patientRecord, setPatientRecord] = useState(null);
+  const [loadingPatient, setLoadingPatient] = useState(false);
+  const [activeMealPlan, setActiveMealPlan] = useState(null);
+  const [loadingPlan, setLoadingPlan] = useState(false);
+  const [savingPlan, setSavingPlan] = useState(false);
+  const [planMessage, setPlanMessage] = useState(null);
+  const [linkedToNutri, setLinkedToNutri] = useState(false);
   const [activeTab, setActiveTab] = useState('overview');
+  const [planTitle, setPlanTitle] = useState('Plano alimentar');
   const [mealTitle, setMealTitle] = useState('');
   const [mealTime, setMealTime] = useState('');
+  const [mealObjective, setMealObjective] = useState('');
+  const [mealFoods, setMealFoods] = useState('');
+  const [mealSubstitutions, setMealSubstitutions] = useState('');
   const [mealSummary, setMealSummary] = useState('');
   const [extraMeals, setExtraMeals] = useState([]);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadPatient() {
+      if (paciente || !pacienteId) {
+        setPatientRecord(null);
+        return;
+      }
+
+      try {
+        setLoadingPatient(true);
+        const data = await fetchPatientById(pacienteId);
+        if (active) setPatientRecord(data || null);
+      } catch (error) {
+        console.log('Erro ao carregar paciente do prontuario:', error);
+        if (active) setPatientRecord(null);
+      } finally {
+        if (active) setLoadingPatient(false);
+      }
+    }
+
+    loadPatient();
+
+    return () => {
+      active = false;
+    };
+  }, [paciente, pacienteId]);
+
   const currentPatient = useMemo(() => {
-    return (
+    return normalizePatientForProntuario(
       paciente ||
+      patientRecord ||
       getNutritionistPatientById(pacienteId) ||
       nutritionistPatientsMock[0]
     );
-  }, [pacienteId, paciente]);
+  }, [pacienteId, paciente, patientRecord]);
 
   const allMeals = useMemo(() => {
     return [...(currentPatient?.planMeals || []), ...extraMeals];
   }, [currentPatient, extraMeals]);
 
-  function addMeal() {
-    if (!mealTitle.trim() || !mealTime.trim() || !mealSummary.trim()) return;
+  useEffect(() => {
+    let active = true;
+    const effectivePacienteId = currentPatient?.id || pacienteId;
 
-    setExtraMeals((current) => [
-      ...current,
-      {
-        id: `extra-${current.length + 1}`,
-        title: mealTitle.trim(),
-        time: mealTime.trim(),
-        summary: mealSummary.trim(),
-      },
-    ]);
+    async function loadPlan() {
+      if (!effectivePacienteId || !nutricionistaId) {
+        setActiveMealPlan(null);
+        setLinkedToNutri(false);
+        return;
+      }
+
+      try {
+        setLoadingPlan(true);
+        setPlanMessage(null);
+        const [vinculado, plano] = await Promise.all([
+          isPatientLinkedToNutritionist({
+            pacienteId: effectivePacienteId,
+            nutricionistaId,
+          }),
+          fetchActiveMealPlanForPatient(effectivePacienteId),
+        ]);
+
+        if (!active) return;
+        setLinkedToNutri(vinculado);
+        setActiveMealPlan(plano || null);
+        setPlanTitle(plano?.titulo || 'Plano alimentar');
+        const refeicoes = Array.isArray(plano?.metas?.planSections)
+          ? plano.metas.planSections
+          : Array.isArray(plano?.metas?.refeicoes)
+            ? plano.metas.refeicoes
+            : [];
+        setExtraMeals(refeicoes);
+      } catch (error) {
+        console.log('Erro ao carregar plano alimentar:', error);
+        if (active) setPlanMessage({ tipo: 'erro', texto: 'Nao foi possivel carregar o plano alimentar.' });
+      } finally {
+        if (active) setLoadingPlan(false);
+      }
+    }
+
+    loadPlan();
+
+    return () => {
+      active = false;
+    };
+  }, [currentPatient?.id, pacienteId, nutricionistaId]);
+
+  function addMeal() {
+    const draftMeal = buildDraftMeal(extraMeals.length);
+    if (!draftMeal) return;
+
+    setExtraMeals((current) => [...current, draftMeal]);
+    clearMealDraft();
+  }
+
+  function buildDraftMeal(index = extraMeals.length) {
+    if (!mealTitle.trim() || !mealTime.trim() || !mealSummary.trim()) return null;
+
+    const foods = mealFoods
+      .split(',')
+      .map((item) => item.trim())
+      .filter(Boolean);
+    const substitutions = mealSubstitutions
+      .split('\n')
+      .map((line) => {
+        const [anchor, rawOptions] = line.split(':');
+        const options = String(rawOptions || '')
+          .split(',')
+          .map((item) => item.trim())
+          .filter(Boolean);
+        return {
+          anchor: String(anchor || '').trim(),
+          options,
+        };
+      })
+      .filter((item) => item.anchor && item.options.length);
+
+    return {
+      id: `extra-${index + 1}`,
+      title: mealTitle.trim(),
+      time: mealTime.trim(),
+      objective: mealObjective.trim() || mealSummary.trim(),
+      foods: foods.length ? foods : [mealSummary.trim()],
+      substitutions,
+      summary: mealSummary.trim(),
+    };
+  }
+
+  function clearMealDraft() {
     setMealTitle('');
     setMealTime('');
+    setMealObjective('');
+    setMealFoods('');
+    setMealSubstitutions('');
     setMealSummary('');
+  }
+
+  function buildPlanDescription(meals) {
+    return meals
+      .map((meal) => {
+        const foods = Array.isArray(meal.foods) ? meal.foods.join(', ') : meal.summary || '';
+        return `${meal.time || '--:--'} - ${meal.title || 'Refeicao'}: ${foods}`;
+      })
+      .join('\n');
+  }
+
+  function normalizePlanSections(meals) {
+    return meals.map((meal, index) => ({
+      id: meal.id || `meal-${index + 1}`,
+      title: meal.title || 'Refeicao',
+      time: meal.time || '--:--',
+      objective: meal.objective || meal.summary || '',
+      foods: Array.isArray(meal.foods) && meal.foods.length
+        ? meal.foods
+        : [meal.summary || 'Orientacao alimentar'],
+      substitutions: Array.isArray(meal.substitutions) ? meal.substitutions : [],
+      summary: meal.summary || '',
+    }));
+  }
+
+  async function saveMealPlan() {
+    const effectivePacienteId = currentPatient?.id || pacienteId;
+    const draftMeal = buildDraftMeal(allMeals.length);
+    const mealsToSave = draftMeal ? [...allMeals, draftMeal] : allMeals;
+
+    if (!linkedToNutri) {
+      setPlanMessage({
+        tipo: 'erro',
+        texto: 'Este paciente nao esta vinculado ao seu perfil de nutricionista.',
+      });
+      return;
+    }
+
+    if (!mealsToSave.length) {
+      setPlanMessage({ tipo: 'erro', texto: 'Adicione ao menos uma refeicao ao plano.' });
+      return;
+    }
+
+    try {
+      setSavingPlan(true);
+      setPlanMessage(null);
+      const planSections = normalizePlanSections(mealsToSave);
+      const saved = await upsertMealPlan({
+        id: activeMealPlan?.id,
+        nutricionistaId,
+        pacienteId: effectivePacienteId,
+        titulo: planTitle,
+        descricao: buildPlanDescription(planSections),
+        metas: {
+          planSections,
+          refeicoes: planSections,
+          totalRefeicoes: planSections.length,
+        },
+        ativo: true,
+        actor: usuarioLogado,
+      });
+
+      await disableOtherMealPlansForPatient({
+        pacienteId: effectivePacienteId,
+        exceptId: saved?.id,
+        actor: usuarioLogado,
+      });
+
+      setActiveMealPlan(saved);
+      setExtraMeals(Array.isArray(saved?.metas?.planSections) ? saved.metas.planSections : planSections);
+      if (draftMeal) clearMealDraft();
+      setPlanMessage({ tipo: 'sucesso', texto: 'Plano alimentar salvo para este paciente.' });
+    } catch (error) {
+      console.log('Erro ao salvar plano alimentar:', error);
+      setPlanMessage({
+        tipo: 'erro',
+        texto: error?.message || 'Nao foi possivel salvar o plano alimentar.',
+      });
+    } finally {
+      setSavingPlan(false);
+    }
+  }
+
+  if (loadingPatient && !currentPatient) {
+    return (
+      <View style={styles.emptyWrap}>
+        <ActivityIndicator color={patientTheme.colors.primaryDark} />
+        <Text style={styles.emptyTitle}>Carregando paciente...</Text>
+      </View>
+    );
   }
 
   if (!currentPatient) {
@@ -129,6 +402,42 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
               <Text style={styles.sectionTitle}>Plano alimentar atual</Text>
               <Text style={styles.sectionHelper}>Refine refeicoes e horarios diretamente no prontuario.</Text>
 
+              {loadingPlan ? (
+                <View style={styles.inlineStatus}>
+                  <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                  <Text style={styles.inlineStatusText}>Carregando plano...</Text>
+                </View>
+              ) : null}
+
+              {planMessage ? (
+                <View style={[styles.messageBox, planMessage.tipo === 'erro' && styles.messageBoxError]}>
+                  <Text
+                    style={[
+                      styles.messageText,
+                      planMessage.tipo === 'erro' && styles.messageTextError,
+                    ]}
+                  >
+                    {planMessage.texto}
+                  </Text>
+                </View>
+              ) : null}
+
+              {!linkedToNutri && !loadingPlan ? (
+                <View style={styles.messageBoxError}>
+                  <Text style={styles.messageTextError}>
+                    Este paciente nao esta vinculado ao seu perfil. O plano so pode ser criado para pacientes vinculados.
+                  </Text>
+                </View>
+              ) : null}
+
+              <TextInput
+                style={[styles.input, styles.planTitleInput]}
+                value={planTitle}
+                onChangeText={setPlanTitle}
+                placeholder="Titulo do plano"
+                placeholderTextColor={patientTheme.colors.textMuted}
+              />
+
               <View style={styles.mealList}>
                 {allMeals.map((meal) => (
                   <View key={meal.id} style={styles.mealCard}>
@@ -136,10 +445,33 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
                       <Text style={styles.mealTime}>{meal.time}</Text>
                       <Text style={styles.mealTitle}>{meal.title}</Text>
                     </View>
-                    <Text style={styles.mealSummary}>{meal.summary}</Text>
+                    <Text style={styles.mealSummary}>{meal.objective || meal.summary}</Text>
+                    {Array.isArray(meal.foods) && meal.foods.length ? (
+                      <Text style={styles.mealSummary}>Alimentos: {meal.foods.join(', ')}</Text>
+                    ) : null}
+                    {Array.isArray(meal.substitutions) && meal.substitutions.length ? (
+                      <Text style={styles.mealSummary}>
+                        Substituicoes: {meal.substitutions.map((item) => `${item.anchor}: ${item.options.join(', ')}`).join(' | ')}
+                      </Text>
+                    ) : null}
                   </View>
                 ))}
               </View>
+
+              <TouchableOpacity
+                style={[styles.primaryButton, (!linkedToNutri || savingPlan) && styles.buttonDisabled]}
+                onPress={saveMealPlan}
+                disabled={!linkedToNutri || savingPlan}
+              >
+                {savingPlan ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Ionicons name="save-outline" size={18} color={patientTheme.colors.onPrimary} />
+                )}
+                <Text style={styles.primaryButtonText}>
+                  {activeMealPlan?.id ? 'Atualizar plano alimentar' : 'Salvar plano alimentar'}
+                </Text>
+              </TouchableOpacity>
             </SectionCard>
 
             <SectionCard>
@@ -162,6 +494,33 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
               </View>
               <TextInput
                 style={[styles.input, styles.inputMultiline]}
+                value={mealObjective}
+                onChangeText={setMealObjective}
+                placeholder="Objetivo da refeicao"
+                placeholderTextColor={patientTheme.colors.textMuted}
+                multiline
+                textAlignVertical="top"
+              />
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                value={mealFoods}
+                onChangeText={setMealFoods}
+                placeholder="Alimentos separados por virgula"
+                placeholderTextColor={patientTheme.colors.textMuted}
+                multiline
+                textAlignVertical="top"
+              />
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
+                value={mealSubstitutions}
+                onChangeText={setMealSubstitutions}
+                placeholder="Substituicoes, uma por linha. Ex.: Arroz integral: quinoa, batata-doce"
+                placeholderTextColor={patientTheme.colors.textMuted}
+                multiline
+                textAlignVertical="top"
+              />
+              <TextInput
+                style={[styles.input, styles.inputMultiline]}
                 value={mealSummary}
                 onChangeText={setMealSummary}
                 placeholder="Descreva o que foi proposto para essa refeicao"
@@ -172,6 +531,22 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
               <TouchableOpacity style={styles.primaryButton} onPress={addMeal}>
                 <Ionicons name="add-circle-outline" size={18} color={patientTheme.colors.onPrimary} />
                 <Text style={styles.primaryButtonText}>Adicionar refeicao</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.primaryButton,
+                  styles.secondarySaveButton,
+                  (!linkedToNutri || savingPlan) && styles.buttonDisabled,
+                ]}
+                onPress={saveMealPlan}
+                disabled={!linkedToNutri || savingPlan}
+              >
+                {savingPlan ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Ionicons name="save-outline" size={18} color={patientTheme.colors.onPrimary} />
+                )}
+                <Text style={styles.primaryButtonText}>Salvar plano</Text>
               </TouchableOpacity>
             </SectionCard>
           </View>
@@ -360,6 +735,43 @@ const styles = StyleSheet.create({
   mealList: {
     gap: 10,
   },
+  inlineStatus: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  inlineStatusText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+  },
+  messageBox: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: patientTheme.radius.lg,
+    marginBottom: 12,
+    padding: 12,
+  },
+  messageBoxError: {
+    backgroundColor: '#fff2f2',
+    borderColor: '#f0d2d2',
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    marginBottom: 12,
+    padding: 12,
+  },
+  messageText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  messageTextError: {
+    color: '#c55b5b',
+    fontWeight: '800',
+    lineHeight: 20,
+  },
+  planTitleInput: {
+    marginBottom: 12,
+  },
   mealCard: {
     padding: 14,
     borderRadius: patientTheme.radius.lg,
@@ -416,6 +828,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
+  },
+  buttonDisabled: {
+    opacity: 0.55,
+  },
+  secondarySaveButton: {
+    marginTop: 8,
   },
   primaryButtonText: {
     color: patientTheme.colors.onPrimary,

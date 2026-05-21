@@ -1,5 +1,6 @@
 import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
+import { isPatientLinkedToNutritionist } from './servicoVinculosNutricionista';
 
 export async function fetchActiveMealPlanForPatient(pacienteId) {
   if (!pacienteId) return null;
@@ -46,6 +47,11 @@ export async function upsertMealPlan({
   if (!nutricionistaId) throw new Error('Nutricionista sem identificador para salvar plano.');
   if (!pacienteId) throw new Error('Paciente sem identificador para salvar plano.');
 
+  const vinculado = await isPatientLinkedToNutritionist({ pacienteId, nutricionistaId });
+  if (!vinculado) {
+    throw new Error('Este paciente nao esta vinculado ao nutricionista logado.');
+  }
+
   const payload = {
     ...(id ? { id } : null),
     nutricionista_id: nutricionistaId,
@@ -58,11 +64,16 @@ export async function upsertMealPlan({
     ativo: Boolean(ativo),
   };
 
-  const { data, error } = await supabase
-    .from('plano_alimentar')
-    .upsert([payload], { onConflict: 'id' })
-    .select('*')
-    .maybeSingle();
+  const query = id
+    ? supabase
+        .from('plano_alimentar')
+        .update(payload)
+        .eq('id', id)
+    : supabase
+        .from('plano_alimentar')
+        .insert([payload]);
+
+  const { data, error } = await query.select('*').maybeSingle();
 
   if (error) throw error;
 

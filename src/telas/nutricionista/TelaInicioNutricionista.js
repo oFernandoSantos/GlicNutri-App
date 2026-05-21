@@ -1,5 +1,5 @@
-import React, { useMemo } from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
   ActionCard,
@@ -11,24 +11,116 @@ import {
   nutriDesktopStyles,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import {
-  nutritionistDesktopMetrics,
-  nutritionistPatientsMock,
   nutritionistQuickActions,
-  nutritionistRecentUpdates,
 } from '../../dados/dadosNutricionistaMock';
+import {
+  getNutritionistId,
+  listPatientsByNutritionist,
+} from '../../servicos/servicoVinculosNutricionista';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
 export default function NutricionistaHomeDashboardScreen({ route, navigation }) {
   const { usuarioLogado } = route.params || {};
+  const [patients, setPatients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+
+  const loadPatients = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const items = await listPatientsByNutritionist(nutricionistaId);
+      setPatients(items || []);
+    } catch (error) {
+      console.log('Erro ao carregar pacientes vinculados na home:', error);
+      setLoadError('Nao foi possivel carregar sua carteira de pacientes.');
+    } finally {
+      setLoading(false);
+    }
+  }, [nutricionistaId]);
+
+  useEffect(() => {
+    loadPatients();
+  }, [loadPatients]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', loadPatients);
+    return unsubscribe;
+  }, [navigation, loadPatients]);
+
+  const metrics = useMemo(() => {
+    const total = patients.length;
+    const highRisk = patients.filter((patient) => patient.risk === 'Alto').length;
+    const withAlerts = patients.filter((patient) => Number(patient.alerts || 0) > 0).length;
+    const avgAdherence = total
+      ? Math.round(
+          patients.reduce((sum, patient) => sum + Number(patient.adherence || 0), 0) / total
+        )
+      : 0;
+
+    return [
+      {
+        id: 'patients-linked',
+        icon: 'people-outline',
+        label: 'Pacientes vinculados',
+        value: total,
+        helper: 'Carteira associada ao seu perfil',
+        tone: 'default',
+      },
+      {
+        id: 'high-risk',
+        icon: 'warning-outline',
+        label: 'Alto risco',
+        value: highRisk,
+        helper: 'Pacientes que pedem atencao',
+        tone: highRisk ? 'danger' : 'default',
+      },
+      {
+        id: 'alerts',
+        icon: 'notifications-outline',
+        label: 'Com alertas',
+        value: withAlerts,
+        helper: 'Registros com sinal de acompanhamento',
+        tone: withAlerts ? 'danger' : 'default',
+      },
+      {
+        id: 'adherence',
+        icon: 'checkmark-circle-outline',
+        label: 'Adesao media',
+        value: `${avgAdherence}%`,
+        helper: 'Media da sua carteira vinculada',
+        tone: 'default',
+      },
+    ];
+  }, [patients]);
 
   const priorityPatients = useMemo(() => {
-    return [...nutritionistPatientsMock]
+    return [...patients]
       .sort((a, b) => {
         if (b.alerts !== a.alerts) return b.alerts - a.alerts;
         return a.adherence - b.adherence;
       })
       .slice(0, 4);
-  }, []);
+  }, [patients]);
+
+  const recentUpdates = useMemo(() => {
+    return [...patients]
+      .sort((a, b) =>
+        String(b.nextConsultaAt || b.lastConsultaAt || b.updatedAt || '').localeCompare(
+          String(a.nextConsultaAt || a.lastConsultaAt || a.updatedAt || '')
+        )
+      )
+      .slice(0, 5)
+      .map((patient) => ({
+        id: patient.id,
+        time: patient.appointmentTime || patient.updatedAt || '--',
+        title: patient.name,
+        detail: patient.nextConsultaAt
+          ? `Proxima consulta: ${patient.appointmentTime}`
+          : patient.notes || 'Paciente vinculado ao seu acompanhamento.',
+      }));
+  }, [patients]);
 
   return (
     <LayoutNutricionista
@@ -41,7 +133,7 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
     >
       <View style={nutriDesktopStyles.pageGap}>
         <View style={styles.metricGrid}>
-          {nutritionistDesktopMetrics.map((item) => (
+          {metrics.map((item) => (
             <MetricCard
               key={item.id}
               icon={item.icon}
@@ -82,6 +174,31 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
             </Text>
 
             <View style={styles.priorityList}>
+              {loading ? (
+                <SectionCard style={styles.emptyCard}>
+                  <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                  <Text style={styles.emptyText}>Carregando pacientes vinculados...</Text>
+                </SectionCard>
+              ) : null}
+
+              {!loading && loadError ? (
+                <SectionCard style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>{loadError}</Text>
+                  <TouchableOpacity style={styles.retryButton} onPress={loadPatients}>
+                    <Text style={styles.retryButtonText}>Tentar novamente</Text>
+                  </TouchableOpacity>
+                </SectionCard>
+              ) : null}
+
+              {!loading && !loadError && !priorityPatients.length ? (
+                <SectionCard style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Nenhum paciente vinculado</Text>
+                  <Text style={styles.emptyText}>
+                    Quando um paciente agendar consulta com voce, ele aparecera neste painel.
+                  </Text>
+                </SectionCard>
+              ) : null}
+
               {priorityPatients.map((patient) => (
                 <TouchableOpacity
                   key={patient.id}
@@ -94,6 +211,7 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
                     navigation.navigate('NutriProntuarioPaciente', {
                       usuarioLogado,
                       pacienteId: patient.id,
+                      paciente: patient,
                     })
                   }
                 >
@@ -120,7 +238,9 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
                     </View>
                     <View style={styles.priorityPill}>
                       <Text style={styles.priorityPillLabel}>Glicose atual</Text>
-                      <Text style={styles.priorityPillValue}>{patient.latestGlucose} mg/dL</Text>
+                      <Text style={styles.priorityPillValue}>
+                        {patient.latestGlucose === '--' ? '--' : `${patient.latestGlucose} mg/dL`}
+                      </Text>
                     </View>
                     <View style={styles.priorityPill}>
                       <Text style={styles.priorityPillLabel}>Consulta</Text>
@@ -151,8 +271,8 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
             </Text>
 
             <SectionCard style={styles.timelineCard}>
-              {nutritionistRecentUpdates.map((item, index) => (
-                <View key={item.id} style={[styles.timelineItem, index !== nutritionistRecentUpdates.length - 1 && styles.timelineItemBorder]}>
+              {recentUpdates.length ? recentUpdates.map((item, index) => (
+                <View key={item.id} style={[styles.timelineItem, index !== recentUpdates.length - 1 && styles.timelineItemBorder]}>
                   <View style={styles.timelineTimeWrap}>
                     <Text style={styles.timelineTime}>{item.time}</Text>
                   </View>
@@ -161,7 +281,16 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation }) 
                     <Text style={styles.timelineDetail}>{item.detail}</Text>
                   </View>
                 </View>
-              ))}
+              )) : (
+                <View style={styles.timelineItem}>
+                  <View style={styles.timelineContent}>
+                    <Text style={styles.timelineTitle}>Sem pacientes vinculados</Text>
+                    <Text style={styles.timelineDetail}>
+                      A lista sera preenchida automaticamente pelos agendamentos dos pacientes.
+                    </Text>
+                  </View>
+                </View>
+              )}
             </SectionCard>
           </View>
         </View>
@@ -194,6 +323,30 @@ const styles = StyleSheet.create({
   priorityList: {
     marginTop: 14,
     gap: 12,
+  },
+  emptyCard: {
+    alignItems: 'flex-start',
+    gap: 10,
+  },
+  emptyTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  retryButton: {
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  retryButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '900',
   },
   priorityCard: {
     backgroundColor: patientTheme.colors.surface,

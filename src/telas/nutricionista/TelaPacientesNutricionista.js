@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
   AvatarBadge,
@@ -10,7 +10,10 @@ import {
   SectionCard,
   nutriDesktopStyles,
 } from '../../componentes/nutricionista/NutriDesktopUI';
-import { nutritionistPatientsMock } from '../../dados/dadosNutricionistaMock';
+import {
+  getNutritionistId,
+  listPatientsByNutritionist,
+} from '../../servicos/servicoVinculosNutricionista';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
 const filterItems = [
@@ -26,11 +29,38 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
   const [search, setSearch] = useState('');
   const [activeFilter, setActiveFilter] = useState('Todos');
+  const [patients, setPatients] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+
+  const loadPatients = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const items = await listPatientsByNutritionist(nutricionistaId);
+      setPatients(items || []);
+    } catch (error) {
+      console.log('Erro ao carregar pacientes vinculados:', error);
+      setLoadError('Nao foi possivel carregar os pacientes vinculados.');
+    } finally {
+      setLoading(false);
+    }
+  }, [nutricionistaId]);
+
+  useEffect(() => {
+    loadPatients();
+  }, [loadPatients]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', loadPatients);
+    return unsubscribe;
+  }, [navigation, loadPatients]);
 
   const filteredPatients = useMemo(() => {
     const normalized = String(search || '').toLowerCase().trim();
 
-    return nutritionistPatientsMock.filter((patient) => {
+    return patients.filter((patient) => {
       const matchesSearch =
         !normalized ||
         [patient.name, patient.specialtyTag, patient.objective, patient.notes]
@@ -46,15 +76,15 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
 
       return matchesSearch && matchesFilter;
     });
-  }, [search, activeFilter]);
+  }, [patients, search, activeFilter]);
 
   const summary = useMemo(() => {
-    const total = nutritionistPatientsMock.length;
-    const highRisk = nutritionistPatientsMock.filter((item) => item.risk === 'Alto').length;
-    const withAlerts = nutritionistPatientsMock.filter((item) => item.alerts > 0).length;
-    const avgAdherence = Math.round(
-      nutritionistPatientsMock.reduce((sum, item) => sum + item.adherence, 0) / total
-    );
+    const total = patients.length;
+    const highRisk = patients.filter((item) => item.risk === 'Alto').length;
+    const withAlerts = patients.filter((item) => item.alerts > 0).length;
+    const avgAdherence = total
+      ? Math.round(patients.reduce((sum, item) => sum + Number(item.adherence || 0), 0) / total)
+      : 0;
 
     return [
       { id: 's1', label: 'Na carteira', value: total },
@@ -62,7 +92,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       { id: 's3', label: 'Com alertas', value: withAlerts },
       { id: 's4', label: 'Adesao media', value: `${avgAdherence}%` },
     ];
-  }, []);
+  }, [patients]);
 
   return (
     <LayoutNutricionista
@@ -91,6 +121,29 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
 
         <FilterTabs items={filterItems} active={activeFilter} onChange={setActiveFilter} />
 
+        {loading ? (
+          <SectionCard style={styles.loadingCard}>
+            <ActivityIndicator color={patientTheme.colors.primaryDark} />
+            <Text style={styles.emptyText}>Carregando pacientes vinculados...</Text>
+          </SectionCard>
+        ) : loadError ? (
+          <SectionCard style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>{loadError}</Text>
+            <TouchableOpacity style={styles.retryButton} onPress={loadPatients}>
+              <Text style={styles.retryButtonText}>Tentar novamente</Text>
+            </TouchableOpacity>
+          </SectionCard>
+        ) : null}
+
+        {!loading && !loadError && !filteredPatients.length ? (
+          <SectionCard style={styles.emptyCard}>
+            <Text style={styles.emptyTitle}>Nenhum paciente vinculado</Text>
+            <Text style={styles.emptyText}>
+              Quando um paciente agendar uma consulta com voce, ele aparecera aqui.
+            </Text>
+          </SectionCard>
+        ) : null}
+
         <View style={styles.patientGrid}>
           {filteredPatients.map((patient) => (
             <TouchableOpacity
@@ -101,6 +154,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
                 navigation.navigate('NutriProntuarioPaciente', {
                   usuarioLogado,
                   pacienteId: patient.id,
+                  paciente: patient,
                 })
               }
             >
@@ -188,6 +242,34 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 12,
+  },
+  loadingCard: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  emptyCard: {
+    gap: 10,
+  },
+  emptyTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+    lineHeight: 20,
+  },
+  retryButton: {
+    alignSelf: 'flex-start',
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  retryButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '900',
   },
   patientCard: {
     width: Platform.OS === 'web' ? '49%' : '100%',
