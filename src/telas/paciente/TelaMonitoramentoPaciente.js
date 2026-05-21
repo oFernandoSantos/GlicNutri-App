@@ -1377,7 +1377,7 @@ export default function PacienteMonitoramentoScreen({
     [bolusSuggestion, bolusOverlapAlerts, bolusSafetyAlerts]
   );
 
-  const loadMonitoringData = useCallback(async () => {
+  const loadMonitoringData = useCallback(async (options = {}) => {
     try {
       setLoadError(null);
 
@@ -1389,6 +1389,7 @@ export default function PacienteMonitoramentoScreen({
 
       const experience = await fetchPatientExperience(patientId, {
         patientContext: usuarioLogado,
+        forceRefresh: options.forceRefresh === true,
       });
 
       const mergedReadings = mergeCachedGlucoseReadings(
@@ -1437,7 +1438,7 @@ export default function PacienteMonitoramentoScreen({
 
   const onRefreshMonitoramento = useCallback(async () => {
     setRefreshing(true);
-    await loadMonitoringData();
+    await loadMonitoringData({ forceRefresh: true });
     setRefreshing(false);
   }, [loadMonitoringData]);
 
@@ -2231,6 +2232,7 @@ export default function PacienteMonitoramentoScreen({
 
       const updatedReadings = await fetchPatientExperience(activePatientId, {
         patientContext: usuarioLogado,
+        forceRefresh: true,
       });
       const mergedReadings = mergeCachedGlucoseReadings(
         updatedReadings.glucoseReadings,
@@ -2520,6 +2522,7 @@ export default function PacienteMonitoramentoScreen({
         const refreshedExperience = await fetchPatientExperience(activePatientId, {
           patientContext: usuarioLogado,
           currentPatient: patient,
+          forceRefresh: true,
         });
 
         setPatient(refreshedExperience.patient);

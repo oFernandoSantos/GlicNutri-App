@@ -74,6 +74,26 @@ function parseJsonMaybe(value) {
   }
 }
 
+function hasFilledValue(value) {
+  if (Array.isArray(value)) return value.length > 0;
+  if (value && typeof value === 'object') return Object.keys(value).length > 0;
+  return String(value || '').trim().length > 0;
+}
+
+function mergeOnboardingAnswers(patientAnswers, localAnswers) {
+  const patientData = parseJsonMaybe(patientAnswers) || {};
+  const localData = parseJsonMaybe(localAnswers) || {};
+  const merged = { ...localData, ...patientData };
+
+  Object.keys(localData).forEach((key) => {
+    if (!hasFilledValue(patientData[key]) && hasFilledValue(localData[key])) {
+      merged[key] = localData[key];
+    }
+  });
+
+  return Object.keys(merged).length ? merged : null;
+}
+
 function hasCompletedOnboardingData(usuario) {
   const onboardingAnswers = parseJsonMaybe(usuario?.onboarding_respostas);
 
@@ -111,22 +131,25 @@ export async function getPatientLocalOnboardingData(usuario) {
 export function mergePatientOnboardingData(patient, onboardingData) {
   if (!onboardingData) return patient || null;
 
+  const mergedOnboarding = mergeOnboardingAnswers(patient?.onboarding_respostas, onboardingData);
+  const mergedProfilePatch = buildProfilePatchFromOnboarding(mergedOnboarding || onboardingData);
+
   return {
     ...(patient || {}),
-    onboarding_respostas: patient?.onboarding_respostas || onboardingData,
+    onboarding_respostas: mergedOnboarding || onboardingData,
     onboarding_concluido_em:
-      patient?.onboarding_concluido_em || onboardingData.completedAt || null,
+      patient?.onboarding_concluido_em || mergedOnboarding?.completedAt || onboardingData.completedAt || null,
     objetivo_principal_consulta:
       patient?.objetivo_principal_consulta ||
-      buildProfilePatchFromOnboarding(onboardingData).objetivo_principal_consulta ||
+      mergedProfilePatch.objetivo_principal_consulta ||
       null,
     comorbidades_texto:
       patient?.comorbidades_texto ||
-      buildProfilePatchFromOnboarding(onboardingData).comorbidades_texto ||
+      mergedProfilePatch.comorbidades_texto ||
       null,
     historico_familiar_doencas:
       patient?.historico_familiar_doencas ||
-      buildProfilePatchFromOnboarding(onboardingData).historico_familiar_doencas ||
+      mergedProfilePatch.historico_familiar_doencas ||
       null,
   };
 }
