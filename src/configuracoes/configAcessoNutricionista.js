@@ -1,4 +1,4 @@
-const fallbackCodes = ['GLICNUTRI-NUTRI'];
+const fallbackCodes = ['GLICNUTRI-EMPRESA'];
 
 function parseCodes(rawValue) {
   if (!rawValue) {
