@@ -117,7 +117,12 @@ export default function PacientePlanoScreen({
     };
   }, [patientId, canResolvePatient, usuarioLogado]);
 
-  const planSections = appState.planSections || [];
+  const planSections = useMemo(() => {
+    const savedSections = mealPlan?.metas?.planSections || mealPlan?.metas?.refeicoes;
+    return Array.isArray(savedSections) && savedSections.length
+      ? savedSections
+      : appState.planSections || [];
+  }, [appState.planSections, mealPlan]);
   const todayMeals = useMemo(
     () =>
       planSections.map((section, index) => ({

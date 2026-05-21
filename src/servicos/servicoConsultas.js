@@ -7,7 +7,9 @@ import {
   normalizeGoogleMeetUrl,
   resolveMeetLink,
 } from './servicoGoogleMeet';
+import { fetchPatientById } from './servicoDadosPaciente';
 import { criarNotificacaoConsulta } from './servicoNotificacoesConsulta';
+import { ensurePatientNutritionistLink } from './servicoVinculosNutricionista';
 
 export function normalizeConsultaStatus(value) {
   const status = String(value || '').trim().toLowerCase();
@@ -153,9 +155,19 @@ export async function createConsulta({
   if (!pacienteId) throw new Error('Paciente sem identificador para agendar.');
   if (!scheduledAt) throw new Error('Horario nao informado para agendamento.');
 
+  const pacienteResolvido = await fetchPatientById(pacienteId, {
+    currentPatient: actor,
+    patientContext: actor,
+  });
+  const pacienteIdConfirmado = pacienteResolvido?.id_paciente_uuid || null;
+
+  if (!pacienteIdConfirmado) {
+    throw new Error('Paciente nao encontrado no banco de dados para agendar consulta.');
+  }
+
   const payload = {
     nutricionista_id: nutricionistaId,
-    paciente_id: pacienteId,
+    paciente_id: pacienteIdConfirmado,
     scheduled_at: scheduledAt,
     status: 'scheduled',
     motivo: motivo ? String(motivo).trim() : null,
@@ -186,7 +198,7 @@ export async function createConsulta({
     ) {
       const fallbackPayload = {
         nutricionista_id: nutricionistaId,
-        paciente_id: pacienteId,
+        paciente_id: pacienteIdConfirmado,
         scheduled_at: scheduledAt,
         status: 'scheduled',
         motivo: [
@@ -206,6 +218,13 @@ export async function createConsulta({
       } catch (notifyError) {
         console.log('Erro ao notificar agendamento:', notifyError);
       }
+      await ensurePatientNutritionistLink({
+        pacienteId: pacienteIdConfirmado,
+        nutricionistaId,
+        consultaId: withMeet?.id,
+        actor,
+        origin,
+      });
       return withMeet;
     }
     throw error;
@@ -229,17 +248,27 @@ export async function createConsulta({
   }
 
   if (consulta?.id) {
+    await ensurePatientNutritionistLink({
+      pacienteId: pacienteIdConfirmado,
+      nutricionistaId,
+      consultaId: consulta.id,
+      actor,
+      origin,
+    });
+
     try {
       await registrarLogAuditoria({
         actor: actor || null,
         actorType: actor?.tipo_perfil || null,
-        targetPatientId: pacienteId,
+        targetPatientId: pacienteIdConfirmado,
         action: 'consulta_agendada',
         entity: 'consulta',
         entityId: consulta.id,
         origin,
         details: {
           nutricionistaId,
+          pacienteIdOriginal: pacienteId,
+          pacienteIdConfirmado,
           scheduledAt,
           status: consulta.status,
           meetLink: consulta.meet_link,

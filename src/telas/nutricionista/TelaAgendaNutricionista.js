@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
@@ -9,24 +9,110 @@ import {
   SectionCard,
   nutriDesktopStyles,
 } from '../../componentes/nutricionista/NutriDesktopUI';
+import { updateConsultaStatus } from '../../servicos/servicoConsultas';
 import {
-  getNutritionistPatientById,
-  nutritionistScheduleDays,
-  nutritionistScheduleSummary,
-} from '../../dados/dadosNutricionistaMock';
+  getNutritionistId,
+  listConsultasNutricionistaComPaciente,
+} from '../../servicos/servicoVinculosNutricionista';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+
+function startOfDay(offset = 0) {
+  const date = new Date();
+  date.setDate(date.getDate() + offset);
+  date.setHours(0, 0, 0, 0);
+  return date;
+}
+
+function endOfDay(offset = 0) {
+  const date = startOfDay(offset);
+  date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function formatConsultaTime(value) {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '--:--';
+  return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+}
+
+function statusLabel(value) {
+  const labels = {
+    scheduled: 'Agendada',
+    confirmed: 'Confirmada',
+    cancelled: 'Cancelada',
+    done: 'Finalizada',
+    no_show: 'Ausente',
+  };
+  return labels[value] || value || 'Agendada';
+}
 
 export default function TelaAgendaNutricionista({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
   const [selectedDay, setSelectedDay] = useState('hoje');
-  const [localStatus, setLocalStatus] = useState({});
+  const [consultas, setConsultas] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
+  const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+
+  const loadAgenda = useCallback(async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const items = await listConsultasNutricionistaComPaciente(nutricionistaId, {
+        from: startOfDay(0).toISOString(),
+        to: endOfDay(1).toISOString(),
+        limit: 120,
+      });
+      setConsultas(items || []);
+    } catch (error) {
+      console.log('Erro ao carregar agenda do nutricionista:', error);
+      setLoadError('Nao foi possivel carregar a agenda.');
+    } finally {
+      setLoading(false);
+    }
+  }, [nutricionistaId]);
+
+  useEffect(() => {
+    loadAgenda();
+  }, [loadAgenda]);
+
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('focus', loadAgenda);
+    return unsubscribe;
+  }, [navigation, loadAgenda]);
 
   const dayItems = useMemo(() => {
-    return nutritionistScheduleDays[selectedDay] || [];
-  }, [selectedDay]);
+    const targetStart = selectedDay === 'amanha' ? startOfDay(1) : startOfDay(0);
+    const targetEnd = selectedDay === 'amanha' ? endOfDay(1) : endOfDay(0);
+    return consultas.filter((consulta) => {
+      const time = new Date(consulta.scheduled_at || 0).getTime();
+      return time >= targetStart.getTime() && time <= targetEnd.getTime();
+    });
+  }, [consultas, selectedDay]);
 
-  function updateStatus(consultaId, nextStatus) {
-    setLocalStatus((current) => ({ ...current, [consultaId]: nextStatus }));
+  const summary = useMemo(() => {
+    const hoje = consultas.filter((consulta) => {
+      const time = new Date(consulta.scheduled_at || 0).getTime();
+      return time >= startOfDay(0).getTime() && time <= endOfDay(0).getTime();
+    });
+    const confirmadas = hoje.filter((consulta) => consulta.status === 'confirmed').length;
+    const pendentes = hoje.filter((consulta) => consulta.status === 'scheduled').length;
+
+    return [
+      { id: 's1', label: 'Hoje', value: hoje.length, helper: 'Consultas agendadas' },
+      { id: 's2', label: 'Confirmadas', value: confirmadas, helper: 'Prontas para atendimento' },
+      { id: 's3', label: 'Pendentes', value: pendentes, helper: 'Aguardando confirmacao' },
+    ];
+  }, [consultas]);
+
+  async function updateStatus(consultaId, nextStatus) {
+    await updateConsultaStatus({
+      consultaId,
+      status: nextStatus,
+      actor: usuarioLogado,
+      origin: 'agenda_nutricionista',
+    });
+    await loadAgenda();
   }
 
   return (
@@ -40,7 +126,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     >
       <View style={nutriDesktopStyles.pageGap}>
         <View style={styles.summaryRow}>
-          {nutritionistScheduleSummary.map((item) => (
+          {summary.map((item) => (
             <SectionCard key={item.id} style={styles.summaryCard}>
               <Text style={styles.summaryLabel}>{item.label}</Text>
               <Text style={styles.summaryValue}>{item.value}</Text>
@@ -67,46 +153,73 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
         />
 
         <View style={styles.consultList}>
+          {loading ? (
+            <SectionCard style={styles.loadingCard}>
+              <ActivityIndicator color={patientTheme.colors.primaryDark} />
+              <Text style={styles.emptyText}>Carregando agenda...</Text>
+            </SectionCard>
+          ) : null}
+
+          {!loading && loadError ? (
+            <SectionCard style={styles.loadingCard}>
+              <Text style={styles.emptyTitle}>{loadError}</Text>
+              <TouchableOpacity style={styles.secondaryAction} onPress={loadAgenda}>
+                <Text style={styles.secondaryActionText}>Tentar novamente</Text>
+              </TouchableOpacity>
+            </SectionCard>
+          ) : null}
+
+          {!loading && !loadError && !dayItems.length ? (
+            <SectionCard style={styles.loadingCard}>
+              <Text style={styles.emptyTitle}>Sem consultas neste dia</Text>
+              <Text style={styles.emptyText}>Os agendamentos dos pacientes aparecerao aqui.</Text>
+            </SectionCard>
+          ) : null}
+
           {dayItems.map((consulta) => {
-            const patient = getNutritionistPatientById(consulta.patientId);
-            const status = localStatus[consulta.id] || consulta.status;
+            const patient = consulta.paciente || {};
+            const patientName =
+              patient.nome_completo || patient.nome_pac || patient.email_pac || 'Paciente';
+            const status = consulta.status || 'scheduled';
 
             return (
               <SectionCard key={consulta.id} style={styles.consultCard}>
                 <View style={styles.consultTop}>
                   <View style={styles.consultIdentity}>
-                    <AvatarBadge name={consulta.patientName} size={48} subtle />
+                    <AvatarBadge name={patientName} size={48} subtle />
                     <View style={styles.consultCopy}>
-                      <Text style={styles.consultName}>{consulta.patientName}</Text>
+                      <Text style={styles.consultName}>{patientName}</Text>
                       <Text style={styles.consultMeta}>
-                        {consulta.type} · {consulta.mode}
+                        {consulta.tipo_consulta || 'Teleconsulta'} - Google Meet
                       </Text>
-                      {patient ? <Text style={styles.consultMetaSecondary}>{patient.specialtyTag}</Text> : null}
+                      <Text style={styles.consultMetaSecondary}>
+                        {patient.email_pac || consulta.motivo || 'Paciente vinculado'}
+                      </Text>
                     </View>
                   </View>
 
                   <View style={styles.consultSide}>
-                    <Text style={styles.consultTime}>{consulta.time}</Text>
-                    <RiskBadge risk={status} />
+                    <Text style={styles.consultTime}>{formatConsultaTime(consulta.scheduled_at)}</Text>
+                    <RiskBadge risk={statusLabel(status)} />
                   </View>
                 </View>
 
-                {patient ? (
-                  <View style={styles.contextBox}>
-                    <View style={styles.contextItem}>
-                      <Text style={styles.contextLabel}>Glicose</Text>
-                      <Text style={styles.contextValue}>{patient.latestGlucose} mg/dL</Text>
-                    </View>
-                    <View style={styles.contextItem}>
-                      <Text style={styles.contextLabel}>Adesao</Text>
-                      <Text style={styles.contextValue}>{patient.adherence}%</Text>
-                    </View>
-                    <View style={styles.contextItem}>
-                      <Text style={styles.contextLabel}>Alertas</Text>
-                      <Text style={styles.contextValue}>{patient.alerts}</Text>
-                    </View>
+                <View style={styles.contextBox}>
+                  <View style={styles.contextItem}>
+                    <Text style={styles.contextLabel}>Status</Text>
+                    <Text style={styles.contextValue}>{statusLabel(status)}</Text>
                   </View>
-                ) : null}
+                  <View style={styles.contextItem}>
+                    <Text style={styles.contextLabel}>Convenio</Text>
+                    <Text style={styles.contextValue}>{consulta.convenio || 'Particular'}</Text>
+                  </View>
+                  <View style={styles.contextItem}>
+                    <Text style={styles.contextLabel}>Paciente</Text>
+                    <Text style={styles.contextValue}>
+                      {patient.id_paciente_uuid ? 'Vinculado' : 'Sem cadastro'}
+                    </Text>
+                  </View>
+                </View>
 
                 <View style={styles.actionRow}>
                   <TouchableOpacity
@@ -115,7 +228,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
                       navigation.navigate('NutriConsultaNutri', {
                         usuarioLogado,
                         consultaId: consulta.id,
-                        pacienteId: consulta.patientId,
+                        pacienteId: consulta.paciente_id,
                       })
                     }
                     activeOpacity={0.9}
@@ -126,7 +239,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
 
                   <TouchableOpacity
                     style={styles.secondaryAction}
-                    onPress={() => updateStatus(consulta.id, 'Confirmada')}
+                    onPress={() => updateStatus(consulta.id, 'confirmed')}
                     activeOpacity={0.9}
                   >
                     <Ionicons name="checkmark-circle-outline" size={18} color={patientTheme.colors.primaryDark} />
@@ -135,7 +248,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
 
                   <TouchableOpacity
                     style={styles.cancelAction}
-                    onPress={() => updateStatus(consulta.id, 'Cancelada')}
+                    onPress={() => updateStatus(consulta.id, 'cancelled')}
                     activeOpacity={0.9}
                   >
                     <Ionicons name="close-circle-outline" size={18} color="#c55b5b" />
@@ -180,6 +293,20 @@ const styles = StyleSheet.create({
   },
   consultList: {
     gap: 12,
+  },
+  loadingCard: {
+    alignItems: 'center',
+    gap: 10,
+  },
+  emptyTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '900',
+  },
+  emptyText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+    lineHeight: 20,
   },
   consultCard: {
     gap: 14,

@@ -1,6 +1,28 @@
 import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
 
+const DEFAULT_AVAILABILITY_ROWS = [
+  { weekday: 1, start_time: '08:00', end_time: '12:00', slot_minutes: 30, active: true },
+  { weekday: 1, start_time: '14:00', end_time: '18:00', slot_minutes: 30, active: true },
+  { weekday: 2, start_time: '08:00', end_time: '12:00', slot_minutes: 30, active: true },
+  { weekday: 2, start_time: '14:00', end_time: '18:00', slot_minutes: 30, active: true },
+  { weekday: 3, start_time: '08:00', end_time: '12:00', slot_minutes: 30, active: true },
+  { weekday: 3, start_time: '14:00', end_time: '18:00', slot_minutes: 30, active: true },
+  { weekday: 4, start_time: '08:00', end_time: '12:00', slot_minutes: 30, active: true },
+  { weekday: 4, start_time: '14:00', end_time: '18:00', slot_minutes: 30, active: true },
+  { weekday: 5, start_time: '08:00', end_time: '12:00', slot_minutes: 30, active: true },
+  { weekday: 5, start_time: '14:00', end_time: '18:00', slot_minutes: 30, active: true },
+];
+
+function buildDefaultAvailability(nutricionistaId) {
+  return DEFAULT_AVAILABILITY_ROWS.map((row, index) => ({
+    ...row,
+    id: `default-${nutricionistaId}-${index}`,
+    nutricionista_id: nutricionistaId,
+    is_default: true,
+  }));
+}
+
 function normalizeWeekday(value) {
   const weekday = Number(value);
   if (!Number.isFinite(weekday)) return 0;
@@ -34,7 +56,7 @@ export async function listNutriAvailability(nutricionistaId) {
     .order('start_time', { ascending: true });
 
   if (error) throw error;
-  return data || [];
+  return data?.length ? data : buildDefaultAvailability(nutricionistaId);
 }
 
 export async function upsertNutriAvailability({
