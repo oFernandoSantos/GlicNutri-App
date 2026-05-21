@@ -32,7 +32,7 @@ import {
   TIPOS_CONSULTA_OPCOES,
 } from '../../constantes/especialidadesTeleconsulta';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
-import { getPatientId } from '../../servicos/servicoDadosPaciente';
+import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
 import { listNutritionists } from '../../servicos/servicoNutricionistas';
 import {
   generateSlotsForNextDays,
@@ -46,6 +46,7 @@ import {
   listConsultasByPaciente,
   updateConsultaStatus,
 } from '../../servicos/servicoConsultas';
+import { isPatientLinkedToNutritionist } from '../../servicos/servicoVinculosNutricionista';
 import { formatValorConsulta, resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import {
   listarNotificacoesConsulta,
@@ -129,6 +130,7 @@ export default function PacienteAgendamentosScreen({
 
   const [nutricionistas, setNutricionistas] = useState([]);
   const [consultasPaciente, setConsultasPaciente] = useState([]);
+  const [linkedNutricionistaId, setLinkedNutricionistaId] = useState(null);
   const [selectedNutri, setSelectedNutri] = useState(null);
   const [slots, setSlots] = useState([]);
   const [selectedDayKey, setSelectedDayKey] = useState('');
@@ -221,17 +223,26 @@ export default function PacienteAgendamentosScreen({
   const loadBase = useCallback(async () => {
     try {
       setLoadError(null);
-      const [nutris, cons] = await Promise.all([
+      const [nutris, cons, pacienteAtual] = await Promise.all([
         listNutritionists({ limit: 80 }),
         patientId ? listConsultasByPaciente(patientId, { limit: 120 }) : Promise.resolve([]),
+        patientId
+          ? fetchPatientById(patientId, {
+              currentPatient: usuarioLogado,
+              patientContext: usuarioLogado,
+            }).catch(() => null)
+          : Promise.resolve(null),
       ]);
+      const linkedId = pacienteAtual?.id_nutricionista_uuid || null;
 
       setNutricionistas(nutris || []);
       setConsultasPaciente(cons || []);
+      setLinkedNutricionistaId(linkedId);
 
       const routeNutriId = route?.params?.selectedNutriId;
-      if (routeNutriId) {
-        const found = (nutris || []).find((n) => n.id_nutricionista_uuid === routeNutriId);
+      const preferredNutriId = linkedId || routeNutriId;
+      if (preferredNutriId) {
+        const found = (nutris || []).find((n) => n.id_nutricionista_uuid === preferredNutriId);
         if (found) setSelectedNutri(found);
       } else {
         setSelectedNutri((prev) => {
@@ -254,7 +265,13 @@ export default function PacienteAgendamentosScreen({
       console.log('Erro ao carregar agendamento:', error);
       setLoadError('Nao foi possivel carregar os profissionais. Verifique a conexao e tente novamente.');
     }
-  }, [patientId, route?.params?.selectedNutriId, route?.params?.tipoConsulta, route?.params?.convenio]);
+  }, [
+    patientId,
+    route?.params?.selectedNutriId,
+    route?.params?.tipoConsulta,
+    route?.params?.convenio,
+    usuarioLogado,
+  ]);
 
   const loadSlots = useCallback(async () => {
     if (!selectedNutri?.id_nutricionista_uuid) {
@@ -386,7 +403,7 @@ export default function PacienteAgendamentosScreen({
     }
 
     return list;
-  }, [nutricionistas, filterParams, ordenacao]);
+  }, [nutricionistas, filterParams, ordenacao, linkedNutricionistaId]);
 
   useEffect(() => {
     let active = true;
@@ -600,6 +617,20 @@ export default function PacienteAgendamentosScreen({
 
     try {
       setConfirming(true);
+      const linked = await isPatientLinkedToNutritionist({
+        pacienteId: patientId,
+        nutricionistaId: selectedNutri.id_nutricionista_uuid,
+      });
+
+      if (!linked) {
+        setMensagem({
+          tipo: 'aviso',
+          texto:
+            'Solicite o acompanhamento primeiro. Depois que o nutricionista aprovar, o agendamento fica liberado.',
+        });
+        return;
+      }
+
       const saved = await createConsulta({
         nutricionistaId: selectedNutri.id_nutricionista_uuid,
         pacienteId: patientId,
@@ -901,7 +932,7 @@ export default function PacienteAgendamentosScreen({
           onPress={() => setActiveSection('agendar')}
         >
           <Text style={[styles.segmentedText, activeSection === 'agendar' && styles.segmentedTextActive]}>
-            Agendar
+            Nutricionistas
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -985,7 +1016,9 @@ export default function PacienteAgendamentosScreen({
                 {disponibilidadeDireta ? 'Outros profissionais' : 'Profissionais disponiveis'}
               </Text>
               <Text style={styles.sectionSubtitle}>
-                {loadingNutrisDisponiveis
+                {linkedNutricionistaId
+                  ? 'Voce pode visualizar outros perfis, mas so troca de nutricionista apos desvincular o atual.'
+                  : loadingNutrisDisponiveis
                   ? 'Verificando disponibilidade real...'
                   : `${filteredNutris.length} resultado(s) para teleconsulta`}
               </Text>
@@ -1021,6 +1054,7 @@ export default function PacienteAgendamentosScreen({
             const rating = ratingReal;
             const totalAvaliacoes = totalAvaliacoesReal;
             const expAnos = expAnosReal;
+            const isLinkedNutri = linkedNutricionistaId === nutri.id_nutricionista_uuid;
             const bioPreview =
               nutri.bio_resumo ||
               'Especialista em teleconsulta com foco em estratégias nutricionais personalizadas.';
@@ -1035,9 +1069,16 @@ export default function PacienteAgendamentosScreen({
             return (
               <CartaoAgendamento
                 key={nutri.id_nutricionista_uuid}
-                style={styles.proCard}
+                style={[styles.proCard, isLinkedNutri && styles.proCardLinked]}
                 onPress={abrirPerfil}
               >
+                {isLinkedNutri ? (
+                  <View style={styles.linkedBadge}>
+                    <Ionicons name="checkmark-circle" size={15} color={patientTheme.colors.primaryDark} />
+                    <Text style={styles.linkedBadgeText}>Nutricionista vinculado</Text>
+                  </View>
+                ) : null}
+
                 <View style={styles.proRow}>
                   <AvatarProfissional
                     name={nutri.nome_completo_nutri}
@@ -1101,8 +1142,8 @@ export default function PacienteAgendamentosScreen({
 
                 <View style={styles.proActions}>
                   <BotaoAgendamento
-                    label="Agendar Consulta"
-                    icon="calendar-outline"
+                    label={isLinkedNutri ? 'Ver acompanhamento' : 'Ver Perfil'}
+                    icon={isLinkedNutri ? 'checkmark-circle-outline' : 'person-circle-outline'}
                     onPress={(event) => {
                       event?.stopPropagation?.();
                       navigation.navigate('PacientePerfilNutricionista', {
@@ -1110,7 +1151,7 @@ export default function PacienteAgendamentosScreen({
                         nutricionista: nutri,
                         tipoConsulta,
                         convenio,
-                        openSchedulePopup: true,
+                        openSchedulePopup: false,
                       });
                     }}
                     style={styles.proScheduleBtn}
@@ -1686,6 +1727,29 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderRadius: 18,
     padding: 16,
+  },
+  proCardLinked: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+    borderWidth: 1,
+  },
+  linkedBadge: {
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.primaryDark,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    flexDirection: 'row',
+    gap: 6,
+    marginBottom: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+  },
+  linkedBadgeText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '900',
   },
   proRow: {
     flexDirection: 'row',

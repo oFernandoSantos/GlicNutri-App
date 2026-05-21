@@ -55,6 +55,7 @@ import {
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
 import { isLibreViewSyncConfigured } from '../../servicos/servicoLibreView';
+import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 
 const EMPTY_PROFILE_FORM = {
   nome_completo: '',
@@ -2411,6 +2412,7 @@ export default function PacientePerfilScreen({
   const fallbackName = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
 
   const [paciente, setPaciente] = useState(usuarioLogado || null);
+  const [linkedNutritionist, setLinkedNutritionist] = useState(null);
   const [loading, setLoading] = useState(true);
   const [openSections, setOpenSections] = useState({
     patient: false,
@@ -2601,8 +2603,34 @@ export default function PacientePerfilScreen({
         showLoading: !isPatientProfileCacheFresh(patientId),
       });
       return undefined;
-    }, [carregarPerfil, patientId])
+  }, [carregarPerfil, patientId])
   );
+
+  useEffect(() => {
+    let active = true;
+    const nutricionistaId = paciente?.id_nutricionista_uuid || null;
+
+    async function carregarNutricionistaVinculado() {
+      if (!nutricionistaId) {
+        setLinkedNutritionist(null);
+        return;
+      }
+
+      try {
+        const nutri = await getNutritionistById(nutricionistaId);
+        if (active) setLinkedNutritionist(nutri || null);
+      } catch (error) {
+        console.log('Erro ao carregar nutricionista vinculado no perfil:', error);
+        if (active) setLinkedNutritionist(null);
+      }
+    }
+
+    carregarNutricionistaVinculado();
+
+    return () => {
+      active = false;
+    };
+  }, [paciente?.id_nutricionista_uuid]);
 
   useEffect(() => {
     const basalOption = findBasalProfileOption(clinicalForm.basal_insulin_type);
@@ -3996,7 +4024,7 @@ export default function PacientePerfilScreen({
       }),
     [paciente, clinicalForm, diabetesSummary, heightSummary, imcSummary, bloodPressureSummary]
   );
-  const nutritionistRouteData = route?.params?.nutricionista || null;
+  const nutritionistRouteData = linkedNutritionist || route?.params?.nutricionista || null;
   const profileRouteName = route?.name || 'PacientePerfil';
   const profileScreenMode =
     profileRouteName === 'PacientePerfilContato'
@@ -4030,6 +4058,9 @@ export default function PacientePerfilScreen({
     paciente?.crm_numero ||
     paciente?.crn_nutricionista ||
     '';
+  const hasLinkedNutritionist = Boolean(
+    paciente?.id_nutricionista_uuid && nutritionistRouteData?.id_nutricionista_uuid
+  );
   const libreConnected = isLibreViewSyncConfigured();
   const insulinClinicalFieldKeys = useMemo(
     () => new Set([
@@ -4364,10 +4395,15 @@ export default function PacientePerfilScreen({
         <TouchableOpacity
           activeOpacity={0.82}
           onPress={() =>
-            navigation.navigate('PacientePerfilNutricionista', {
-              usuarioLogado,
-              nutricionista: nutritionistRouteData || undefined,
-            })
+            hasLinkedNutritionist
+              ? navigation.navigate('PacientePerfilNutricionista', {
+                  usuarioLogado,
+                  nutricionista: nutritionistRouteData,
+                })
+              : navigation.navigate('PacienteAgendamentos', {
+                  usuarioLogado,
+                  activeSection: 'agendar',
+                })
           }
           style={styles.nutritionistCard}
         >
@@ -4377,8 +4413,13 @@ export default function PacientePerfilScreen({
           <View style={styles.nutritionistCopy}>
             <Text style={styles.nutritionistName}>{nutritionistName}</Text>
             <Text style={styles.nutritionistMeta}>
-              Nutricionista{nutritionistCrn ? ` • CRN ${nutritionistCrn}` : ''}
+              {hasLinkedNutritionist
+                ? `Nutricionista vinculado${nutritionistCrn ? ` • CRN ${nutritionistCrn}` : ''}`
+                : 'Nenhum nutricionista vinculado'}
             </Text>
+            {!hasLinkedNutritionist ? (
+              <Text style={styles.nutritionistHint}>Toque para escolher um profissional.</Text>
+            ) : null}
           </View>
           <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
         </TouchableOpacity>
@@ -6780,6 +6821,12 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontSize: 12,
     marginTop: 3,
+  },
+  nutritionistHint: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 5,
   },
   settingsRow: {
     alignItems: 'center',

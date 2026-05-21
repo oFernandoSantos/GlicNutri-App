@@ -201,13 +201,10 @@ export async function listPatientsByNutritionist(nutricionistaId, { limit = 200 
   ]);
 
   const patientMeta = new Map();
-  const patientsFromJoin = [];
   const now = Date.now();
 
   consultas.forEach((consulta) => {
     if (!consulta?.paciente_id || consulta.status === 'cancelled') return;
-
-    if (consulta.paciente) patientsFromJoin.push(consulta.paciente);
 
     const current = patientMeta.get(consulta.paciente_id) || {};
     const scheduledAt = consulta.scheduled_at || null;
@@ -227,15 +224,12 @@ export async function listPatientsByNutritionist(nutricionistaId, { limit = 200 
     });
   });
 
-  const joinedIds = patientsFromJoin.map((patient) => patient?.id_paciente_uuid);
   const directIds = directPatients.map((patient) => patient?.id_paciente_uuid);
-  const missingIds = uniq([...patientMeta.keys()]).filter(
-    (id) => !joinedIds.includes(id) && !directIds.includes(id)
-  );
+  const missingIds = [];
   const fetchedPatients = await fetchPatientsByIds(missingIds);
 
   const byId = new Map();
-  [...patientsFromJoin, ...directPatients, ...fetchedPatients].forEach((patient) => {
+  [...directPatients, ...fetchedPatients].forEach((patient) => {
     if (patient?.id_paciente_uuid) byId.set(patient.id_paciente_uuid, patient);
   });
 
@@ -264,14 +258,56 @@ export async function isPatientLinkedToNutritionist({ pacienteId, nutricionistaI
     throw direct.error;
   }
 
-  const { data, error } = await supabase
-    .from('consulta')
-    .select('id')
+  return false;
+}
+
+export async function unlinkPatientNutritionist({
+  pacienteId,
+  nutricionistaId,
+  actor,
+  origin = 'desvinculo_manual',
+}) {
+  if (!pacienteId || !nutricionistaId) {
+    throw new Error('Paciente ou nutricionista sem identificador para desvincular.');
+  }
+
+  const { error } = await supabase
+    .from('paciente')
+    .update({
+      id_nutricionista_uuid: null,
+      data_hora_ultima_atualizacao: new Date().toISOString(),
+    })
+    .eq('id_paciente_uuid', pacienteId)
+    .eq('id_nutricionista_uuid', nutricionistaId);
+
+  const message = String(error?.message || '').toLowerCase();
+  if (error && !message.includes('id_nutricionista_uuid')) {
+    throw error;
+  }
+
+  await supabase
+    .from('solicitacao_acompanhamento_nutri')
+    .update({ status: 'cancelled' })
     .eq('paciente_id', pacienteId)
     .eq('nutricionista_id', nutricionistaId)
-    .neq('status', 'cancelled')
-    .limit(1);
+    .eq('status', 'pending');
 
-  if (error) throw error;
-  return Boolean((data || [])[0]?.id);
+  try {
+    await registrarLogAuditoria({
+      actor: actor || null,
+      actorType: actor?.tipo_perfil || null,
+      targetPatientId: pacienteId,
+      action: 'paciente_nutricionista_desvinculado',
+      entity: 'paciente',
+      entityId: pacienteId,
+      origin,
+      details: {
+        nutricionistaId,
+      },
+    });
+  } catch (auditError) {
+    console.log('Auditoria de desvinculo paciente/nutricionista falhou:', auditError);
+  }
+
+  return true;
 }
