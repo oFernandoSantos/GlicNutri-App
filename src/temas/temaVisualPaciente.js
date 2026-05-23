@@ -1,33 +1,33 @@
+import { brand, radius, spacing } from './designSystem';
+
+/** Autocuidado diário — fundo claro, verde da marca, alertas com contraste WCAG-friendly. */
 export const patientTheme = {
   colors: {
-    background: '#ffffff',
-    backgroundSoft: '#ffffff',
-    surface: '#f4f4f4',
-    surfaceMuted: '#ffffff',
-    primary: '#4fdfa3',
-    primaryDark: '#4fdfa3',
-    primarySoft: '#e8fff5',
-    surfaceBorder: '#f4f4f4',
-    onPrimary: '#ffffff',
-    text: '#2f3438',
-    textMuted: '#686d71',
-    border: '#d9e0e7',
-    warning: '#f4c86c',
-    info: '#8bc4ff',
-    danger: '#ef9a9a',
-    success: '#4fdfa3',
+    background: brand.white,
+    backgroundSoft: brand.white,
+    surface: brand.surface,
+    surfaceMuted: brand.white,
+    primary: brand.green,
+    primaryDark: brand.green,
+    primarySoft: brand.greenSoft,
+    surfaceBorder: brand.surface,
+    onPrimary: brand.white,
+    text: brand.slate,
+    textMuted: brand.slateMuted,
+    border: brand.border,
+    warning: brand.warning,
+    warningSoft: brand.warningSoft,
+    info: brand.info,
+    infoSoft: brand.infoSoft,
+    danger: brand.danger,
+    dangerSoft: brand.dangerSoft,
+    success: brand.success,
+    successSoft: brand.successSoft,
     shadow: 'rgba(79, 223, 163, 0)',
     overlay: 'rgba(29, 35, 43, 0.38)',
   },
-  radius: {
-    lg: 18,
-    xl: 24,
-    pill: 999,
-  },
-  spacing: {
-    screen: 20,
-    card: 18,
-  },
+  radius,
+  spacing,
 };
 
 export const patientShadow = {

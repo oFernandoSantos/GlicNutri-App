@@ -5,6 +5,8 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Alert,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
@@ -15,6 +17,7 @@ import {
   getPatientDisplayName,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import { exportPatientProgressReport } from '../../servicos/servicoRelatorioPaciente';
 
 const WEEKLY_FALLBACK = [84, 91, 78, 88, 67, 72, 58];
 const WEIGHT_LABELS = ['01/03', '05/03', '10/03', '15/03', '20/03', '25/03', '29/03'];
@@ -449,6 +452,41 @@ export default function PacienteProgressoScreen({
     () => buildTodayMealRecords(appState?.mealEntries),
     [appState?.mealEntries]
   );
+  const [exportingReport, setExportingReport] = useState(false);
+
+  async function handleExportProgress() {
+    try {
+      setExportingReport(true);
+      const result = await exportPatientProgressReport({
+        patientName: getPatientDisplayName(patient || usuarioLogado),
+        generatedAt: new Date().toLocaleString('pt-BR'),
+        weightSeries,
+        weeklyAdherence,
+        glycemicMetrics,
+        monthlySummary: {
+          adherenceAverage,
+          activeDays: new Set((appState?.mealEntries || []).map((entry) => entry?.date).filter(Boolean))
+            .size,
+          summaryItems: monthlySummary,
+        },
+        achievements,
+        mealEntries: appState?.mealEntries || [],
+        glucoseReadings,
+      });
+      if (result?.ok) {
+        Alert.alert(
+          'Relatorio exportado',
+          Platform.OS === 'web'
+            ? 'O arquivo foi baixado.'
+            : 'Use o compartilhamento para salvar o relatorio completo.'
+        );
+      }
+    } catch (error) {
+      Alert.alert('Exportacao', error?.message || 'Nao foi possivel exportar o relatorio.');
+    } finally {
+      setExportingReport(false);
+    }
+  }
 
   return (
     <PatientScreenLayout
@@ -467,6 +505,20 @@ export default function PacienteProgressoScreen({
 
       {!loading ? (
         <>
+          <TouchableOpacity
+            style={styles.exportButton}
+            onPress={handleExportProgress}
+            disabled={exportingReport}
+            activeOpacity={0.9}
+          >
+            {exportingReport ? (
+              <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+            ) : (
+              <Ionicons name="download-outline" size={18} color={patientTheme.colors.primaryDark} />
+            )}
+            <Text style={styles.exportButtonText}>Baixar relatorio completo</Text>
+          </TouchableOpacity>
+
           <View style={styles.metricsRow}>
             <View style={[styles.topMetricCard, styles.topMetricCardPrimary]}>
               <Ionicons
@@ -690,6 +742,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 10,
   },
+  exportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  exportButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 14,
+    fontWeight: '700',
+  },
   metricsRow: {
     flexDirection: 'row',
     gap: 12,
@@ -701,10 +771,11 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.lg,
     padding: 16,
     ...patientShadow,
+    borderColor: 'transparent',
+    borderWidth: 0,
   },
   topMetricCardPrimary: {
     backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.border,
   },
   topMetricValue: {
     color: patientTheme.colors.primaryDark,

@@ -2,7 +2,7 @@ import React from 'react';
 import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 
 export const NUTRI_TAB_BAR_HEIGHT = 64;
 export const NUTRI_TAB_BAR_SPACE = 14;

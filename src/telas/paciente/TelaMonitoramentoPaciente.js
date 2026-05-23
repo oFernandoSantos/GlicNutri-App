@@ -30,6 +30,7 @@ import {
 import {
   fetchLibreViewReadings,
   isLibreViewSyncConfigured,
+  parseLibreViewExportText,
 } from '../../servicos/servicoLibreView';
 import { buscarMedicamentosAnvisa } from '../../servicos/servicoMedicamentosAnvisa';
 import {
@@ -1251,6 +1252,9 @@ export default function PacienteMonitoramentoScreen({
   const [savingGlucose, setSavingGlucose] = useState(false);
   const [savingMedication, setSavingMedication] = useState(false);
   const [syncingLibreView, setSyncingLibreView] = useState(false);
+  const [libreViewImportVisible, setLibreViewImportVisible] = useState(false);
+  const [libreViewImporting, setLibreViewImporting] = useState(false);
+  const [libreViewImportText, setLibreViewImportText] = useState('');
   const [newGlucoseValue, setNewGlucoseValue] = useState('');
   const [manualChoiceVisible, setManualChoiceVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
@@ -2192,12 +2196,115 @@ export default function PacienteMonitoramentoScreen({
     );
   }
 
+  async function importLibreViewReadings(readings, sourceLabel = 'libreview_import') {
+    const newReadings = readings.filter((reading) => !isKnownReading(reading, glucoseReadings));
+
+    for (const reading of newReadings) {
+      await addGlucoseReading(activePatientId, reading.value, {
+        date: reading.date,
+        time: reading.time,
+        actor: patient || usuarioLogado,
+        auditSource: sourceLabel,
+      });
+    }
+
+    const updatedReadings = await fetchPatientExperience(activePatientId, {
+      patientContext: usuarioLogado,
+      forceRefresh: true,
+    });
+    const mergedReadings = mergeCachedGlucoseReadings(
+      updatedReadings.glucoseReadings,
+      getCachedGlucoseReadings(activePatientId)
+    );
+
+    setPatient(updatedReadings.patient || patient);
+    setObjectiveText(updatedReadings.clinicalObjective || objectiveText);
+    setAppState(updatedReadings.appState);
+    setGlucoseReadings(mergedReadings);
+    replaceCachedGlucoseReadings(activePatientId, mergedReadings);
+
+    return newReadings;
+  }
+
+  function handlePickLibreViewFile() {
+    if (Platform.OS !== 'web' || typeof document === 'undefined') {
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'No celular, copie e cole o CSV exportado do LibreView no campo abaixo.',
+      });
+      return;
+    }
+
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv,.txt,text/csv,text/plain';
+    input.onchange = () => {
+      const [file] = Array.from(input.files || []);
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => setLibreViewImportText(String(reader.result || ''));
+      reader.readAsText(file);
+    };
+    input.click();
+  }
+
+  async function handleImportLibreViewText() {
+    if (!activePatientId) {
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Paciente sem identificador para importar o LibreView.',
+      });
+      return;
+    }
+
+    const parsedReadings = parseLibreViewExportText(libreViewImportText);
+
+    if (!parsedReadings.length) {
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Nao encontramos leituras validas no conteudo do LibreView.',
+      });
+      return;
+    }
+
+    try {
+      setLibreViewImporting(true);
+      const newReadings = await importLibreViewReadings(parsedReadings, 'libreview_csv_import');
+      setLibreViewImportVisible(false);
+      setLibreViewImportText('');
+      setAvisoUsuario({
+        tipo: 'sucesso',
+        texto: newReadings.length
+          ? `LibreView: ${newReadings.length} leitura(s) importada(s) do arquivo.`
+          : 'Importacao concluida: nenhuma leitura nova encontrada.',
+      });
+    } catch (error) {
+      console.log('Erro ao importar LibreView:', error);
+      setAvisoUsuario({
+        tipo: 'erro',
+        texto: 'Nao foi possivel importar o arquivo do LibreView agora.',
+      });
+      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Importacao LibreView', error, {
+        usuario: patient || usuarioLogado,
+        complemento: 'Falha ao importar CSV/texto do LibreView',
+      });
+    } finally {
+      setLibreViewImporting(false);
+    }
+  }
+
   async function handleSyncLibreView() {
     if (!activePatientId) {
       setAvisoUsuario({
         tipo: 'aviso',
         texto: 'Paciente sem identificador para sincronizar o LibreView.',
       });
+      return;
+    }
+
+    if (!isLibreViewSyncConfigured()) {
+      setLibreViewImportVisible(true);
       return;
     }
 
@@ -2753,6 +2860,72 @@ export default function PacienteMonitoramentoScreen({
           </>
         )}
       </TouchableOpacity>
+
+      <Modal
+        visible={libreViewImportVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setLibreViewImportVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            style={styles.libreViewImportKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.libreViewImportCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Importar LibreView</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => setLibreViewImportVisible(false)}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalText}>
+                Cole o CSV exportado do LibreView ou, no web, escolha o arquivo para importar as
+                leituras no cadastro do paciente.
+              </Text>
+
+              <View style={styles.libreViewImportActions}>
+                <TouchableOpacity
+                  style={styles.libreViewImportFileButton}
+                  onPress={handlePickLibreViewFile}
+                >
+                  <Ionicons name="document-outline" size={18} color={patientTheme.colors.text} />
+                  <Text style={styles.libreViewImportFileButtonText}>Escolher arquivo</Text>
+                </TouchableOpacity>
+              </View>
+
+              <TextInput
+                style={styles.libreViewImportInput}
+                multiline
+                value={libreViewImportText}
+                onChangeText={setLibreViewImportText}
+                placeholder="Cole aqui o conteudo CSV/texto exportado do LibreView..."
+                placeholderTextColor={patientTheme.colors.textMuted}
+                textAlignVertical="top"
+              />
+
+              <TouchableOpacity
+                style={[
+                  styles.libreViewImportSubmitButton,
+                  (!libreViewImportText.trim() || libreViewImporting) && styles.buttonDisabled,
+                ]}
+                onPress={handleImportLibreViewText}
+                disabled={!libreViewImportText.trim() || libreViewImporting}
+              >
+                {libreViewImporting ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Text style={styles.libreViewImportSubmitButtonText}>Importar leituras</Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
 
       <Modal
         visible={manualChoiceVisible}
@@ -4304,6 +4477,62 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     textAlign: 'center',
+  },
+  libreViewImportKeyboard: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  libreViewImportCard: {
+    width: '100%',
+    maxWidth: 460,
+    backgroundColor: '#ffffff',
+    borderRadius: patientTheme.radius.xl,
+    padding: patientTheme.spacing.card,
+    ...patientShadow,
+  },
+  libreViewImportActions: {
+    marginTop: 14,
+  },
+  libreViewImportFileButton: {
+    minHeight: 44,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.surface,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  libreViewImportFileButtonText: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  libreViewImportInput: {
+    marginTop: 12,
+    minHeight: 180,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: '#ffffff',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    color: patientTheme.colors.text,
+  },
+  libreViewImportSubmitButton: {
+    marginTop: 14,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  libreViewImportSubmitButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 14,
+    fontWeight: '800',
   },
   libreSensorIconOuter: {
     alignItems: 'center',

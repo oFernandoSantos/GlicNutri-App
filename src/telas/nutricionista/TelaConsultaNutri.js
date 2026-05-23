@@ -7,7 +7,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import MensagemInline from '../../componentes/comum/MensagemInline';
@@ -150,7 +150,9 @@ export default function TelaConsultaNutri({ navigation, route }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     ...patientShadow,
@@ -159,7 +161,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     ...patientShadow,

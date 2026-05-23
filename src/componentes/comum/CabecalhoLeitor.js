@@ -115,6 +115,7 @@ export default function ReaderTopo({ navigation, route, options }) {
   const isAuthBack = AUTH_BACK_ROUTES.has(route?.name);
   const hideCenteredTitle = isLogin || isAuthBack;
   const isPatientHome = route?.name === 'HomePaciente';
+  const isNutriHome = route?.name === 'HomeNutricionista';
   const isAdminHome = route?.name === 'AdminHome';
   const isAdminContext = isAdminLogin || isAdminHome || ADMIN_ROUTES.has(route?.name);
   const menuAction = options?.readerOnMenuPress;
@@ -132,6 +133,7 @@ export default function ReaderTopo({ navigation, route, options }) {
   const backAction = options?.readerBackAction;
   const hasNotifications = notificationCount > 0;
   const shouldShowNotificationButton = Boolean(notificationAction) && !isAdminContext;
+  const shouldShowMenuButton = Boolean(menuAction) && (isHome || isAdminContext);
 
   function handleBack() {
     if (backAction) {
@@ -179,7 +181,7 @@ export default function ReaderTopo({ navigation, route, options }) {
             <Text style={[styles.brandText, isAdminContext && styles.brandTextAdmin]} numberOfLines={1}>
               GlicNutri
             </Text>
-          ) : isPatientHome || (isAdminContext && menuAction) ? (
+          ) : shouldShowMenuButton ? (
             <TouchableOpacity
               activeOpacity={0.78}
               accessibilityLabel="Abrir menu"
@@ -283,29 +285,6 @@ export default function ReaderTopo({ navigation, route, options }) {
                   </Text>
                 </View>
               ) : null}
-            </TouchableOpacity>
-          ) : isHome && !isAdminHome ? (
-            <TouchableOpacity
-              activeOpacity={0.78}
-              accessibilityLabel="Abrir menu"
-              accessibilityRole="button"
-              disabled={menuDisabled || menuLoading}
-              onPress={menuAction}
-              style={[
-                styles.readerButton,
-                isAdminContext && styles.readerButtonAdmin,
-                (menuDisabled || menuLoading) && styles.readerButtonDisabled,
-              ]}
-            >
-              {menuLoading ? (
-                <ActivityIndicator size="small" color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary} />
-              ) : (
-                <Ionicons
-                  name="menu-outline"
-                  size={22}
-                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
-                />
-              )}
             </TouchableOpacity>
           ) : null}
         </View>

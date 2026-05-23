@@ -15,16 +15,10 @@ import {
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
 import { fetchActiveMealPlanForPatient } from '../../servicos/servicoPlanoAlimentar';
-
-const weeklyAdherenceMock = [
-  { id: 'seg', label: 'S', value: 85 },
-  { id: 'ter', label: 'T', value: 92 },
-  { id: 'qua', label: 'Q', value: 78 },
-  { id: 'qui', label: 'Q', value: 88 },
-  { id: 'sex', label: 'S', value: 65 },
-  { id: 'sab', label: 'S', value: 70 },
-  { id: 'dom', label: 'D', value: 55 },
-];
+import {
+  averageAdherence,
+  buildWeeklyAdherenceFromMeals,
+} from '../../utilitarios/adesaoNutricional';
 
 function getAdherenceTone(value) {
   if (value >= 80) return patientTheme.colors.success;
@@ -149,9 +143,15 @@ export default function PacientePlanoScreen({
     ? Math.round((completedMeals / mergedMeals.length) * 100)
     : 0;
   const totalKcal = mergedMeals.reduce((sum, meal) => sum + meal.summary.kcal, 0);
-  const weeklyAverage = Math.round(
-    weeklyAdherenceMock.reduce((sum, item) => sum + item.value, 0) / weeklyAdherenceMock.length
-  );
+  const targetMeals = Math.max(mergedMeals.length || planSections.length || 3, 3);
+  const weeklyAdherence = useMemo(() => {
+    const { items, hasRealData } = buildWeeklyAdherenceFromMeals(
+      appState?.mealEntries,
+      targetMeals
+    );
+    return { items, hasRealData };
+  }, [appState?.mealEntries, targetMeals]);
+  const weeklyAverage = averageAdherence(weeklyAdherence.items);
   const planDurationWeeks = 12;
   const patientName =
     patient?.nome_completo?.split(' ')[0] ||
@@ -171,7 +171,10 @@ export default function PacientePlanoScreen({
   }
 
   function openFoodRegister() {
-    navigation.navigate('RegistroRefeicaoIA', { usuarioLogado });
+    navigation.navigate('RegistroRefeicaoIA', {
+      usuarioLogado,
+      openMealTimingChoice: true,
+    });
   }
 
   return (
@@ -323,10 +326,15 @@ export default function PacientePlanoScreen({
           </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Adesão Semanal</Text>
+            <Text style={styles.sectionTitle}>Adesão semanal</Text>
+            <Text style={styles.sectionHint}>
+              {weeklyAdherence.hasRealData
+                ? 'Calculada a partir das refeições registradas nos últimos 7 dias.'
+                : 'Registre refeições para acompanhar sua adesão semanal ao plano.'}
+            </Text>
 
             <View style={styles.weekBarsRow}>
-              {weeklyAdherenceMock.map((item) => (
+              {weeklyAdherence.items.map((item) => (
                 <View key={item.id} style={styles.weekBarItem}>
                   <View style={styles.weekBarTrack}>
                     <View
@@ -404,7 +412,7 @@ export default function PacientePlanoScreen({
             style={styles.ctaButton}
             activeOpacity={0.9}
             onPress={() =>
-              navigation.navigate('PacientePerfilNutricionista', {
+              navigation.navigate('PacienteChatNutricionista', {
                 usuarioLogado,
               })
             }
@@ -523,6 +531,12 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '800',
     color: patientTheme.colors.text,
+  },
+  sectionHint: {
+    marginTop: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    color: patientTheme.colors.textMuted,
   },
   progressHeader: {
     flexDirection: 'row',
@@ -731,6 +745,7 @@ const styles = StyleSheet.create({
   },
   ctaButton: {
     marginTop: 16,
+    marginBottom: 20,
     minHeight: 52,
     borderRadius: patientTheme.radius.pill,
     backgroundColor: patientTheme.colors.primaryDark,

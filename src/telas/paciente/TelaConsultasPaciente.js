@@ -26,6 +26,7 @@ import {
   EsqueletoAgendamento,
 } from '../../componentes/agendamento/uiAgendamento';
 import MensagemInline from '../../componentes/comum/MensagemInline';
+import { ConsultaStatusBadge } from '../../componentes/comum/ui';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import {
   CONVENIOS_OPCOES,
@@ -462,11 +463,17 @@ export default function PacienteAgendamentosScreen({
     };
   }, [filteredNutrisBase, quickFilter, dateFromKey, dateToKey]);
 
-  const filteredNutris = useMemo(
-    () =>
-      filteredNutrisBase.filter((nutri) => nutrisComAgendaIds.has(nutri.id_nutricionista_uuid)),
-    [filteredNutrisBase, nutrisComAgendaIds]
-  );
+  const filteredNutris = useMemo(() => {
+    const availableNutris = filteredNutrisBase.filter((nutri) =>
+      nutrisComAgendaIds.has(nutri.id_nutricionista_uuid)
+    );
+
+    return [...availableNutris].sort((a, b) => {
+      const aLinked = a.id_nutricionista_uuid === linkedNutricionistaId ? 1 : 0;
+      const bLinked = b.id_nutricionista_uuid === linkedNutricionistaId ? 1 : 0;
+      return bLinked - aLinked;
+    });
+  }, [filteredNutrisBase, nutrisComAgendaIds, linkedNutricionistaId]);
 
   const calendarDays = useMemo(() => groupSlotsByDay(slots), [slots]);
 
@@ -709,7 +716,7 @@ export default function PacienteAgendamentosScreen({
   }
 
   function handleEditarConsulta(item, nutri) {
-    navigation.navigate('PacientePerfilNutricionista', {
+    navigation.push('PacientePerfilNutricionista', {
       usuarioLogado,
       nutricionista: nutri,
       tipoConsulta: item.tipo_consulta || tipoConsulta,
@@ -771,7 +778,9 @@ export default function PacienteAgendamentosScreen({
           onFechar={() => setMensagem(null)}
           autoOcultarMs={mensagem.tipo === 'sucesso' ? 5000 : 0}
         />
-      ) : activeSection === 'consultas' ? (
+      ) : null}
+
+      {!mensagem?.texto && activeSection === 'consultas' ? (
         <>
           <CampoBuscaAgendamento
             value={consultasSearchQuery}
@@ -1059,7 +1068,7 @@ export default function PacienteAgendamentosScreen({
               nutri.bio_resumo ||
               'Especialista em teleconsulta com foco em estratégias nutricionais personalizadas.';
             const abrirPerfil = () =>
-              navigation.navigate('PacientePerfilNutricionista', {
+              navigation.push('PacientePerfilNutricionista', {
                 usuarioLogado,
                 nutricionista: nutri,
                 tipoConsulta,
@@ -1146,7 +1155,7 @@ export default function PacienteAgendamentosScreen({
                     icon={isLinkedNutri ? 'checkmark-circle-outline' : 'person-circle-outline'}
                     onPress={(event) => {
                       event?.stopPropagation?.();
-                      navigation.navigate('PacientePerfilNutricionista', {
+                      navigation.push('PacientePerfilNutricionista', {
                         usuarioLogado,
                         nutricionista: nutri,
                         tipoConsulta,
@@ -1171,7 +1180,7 @@ export default function PacienteAgendamentosScreen({
             </CartaoAgendamento>
           ) : null}
 
-          {!disponibilidadeDireta && showCalendar ? (
+          {false ? (
             <>
               <View style={styles.sectionHeaderRow}>
                 <View>
@@ -1206,165 +1215,6 @@ export default function PacienteAgendamentosScreen({
 
             </>
           ) : null}
-
-          {false ? (
-            <>
-          <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
-            <View>
-              <Text style={styles.sectionTitle}>Minhas consultas</Text>
-              <Text style={styles.sectionSubtitle}>Acompanhe links e horarios confirmados</Text>
-            </View>
-          </View>
-
-          {proximasConsultas.length ? (
-            proximasConsultas.map((item) => {
-              const nutri =
-                nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
-                null;
-              const meetLink = resolveMeetLink({ consulta: item, nutricionista: nutri });
-
-              return (
-                <CartaoAgendamento key={item.id} style={styles.bookingCard}>
-                  <Text style={styles.bookingTitle}>{formatConsultaDateTime(item.scheduled_at)}</Text>
-                  <Text style={styles.bookingMeta}>
-                    {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio} · {item.status}
-                  </Text>
-                  {meetLink ? (
-                    <BotaoAgendamento
-                      label="Entrar no Google Meet"
-                      icon="videocam-outline"
-                      variant="ghost"
-                      onPress={() => handleAbrirMeet(item, nutri)}
-                      style={styles.meetBtn}
-                    />
-                  ) : null}
-                </CartaoAgendamento>
-              );
-            })
-          ) : (
-            <CartaoAgendamento style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Sem consultas agendadas</Text>
-              <Text style={styles.emptyText}>
-                Escolha um profissional acima para reservar seu primeiro horario.
-              </Text>
-            </CartaoAgendamento>
-          )}
-        </>
-      ) : null}
-
-      {!loading && !loadError && activeSection === 'consultas' && false ? (
-        <>
-          <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
-            <View>
-              <Text style={styles.sectionTitle}>Próximas consultas</Text>
-              <Text style={styles.sectionSubtitle}>Edite horário ou cancele quando precisar</Text>
-            </View>
-          </View>
-
-          {proximasConsultas.length ? (
-            proximasConsultas.map((item) => {
-              const nutri =
-                nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
-                null;
-              const meetLink = resolveMeetLink({ consulta: item, nutricionista: nutri });
-
-              return (
-                <CartaoAgendamento key={`next-${item.id}`} style={styles.bookingCard}>
-                  <View style={styles.bookingTopRow}>
-                    <AvatarProfissional
-                      name={nutri?.nome_completo_nutri || 'Profissional'}
-                      size={48}
-                      imageUri={getNutriAvatarUri(nutri)}
-                    />
-                    <View style={styles.bookingBody}>
-                      <Text style={styles.bookingName}>
-                        {nutri?.nome_completo_nutri || 'Profissional'}
-                      </Text>
-                      <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
-                      <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
-                      <Text style={styles.bookingMeta}>
-                        {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.bookingActions}>
-                    <BotaoAgendamento
-                      label="Editar"
-                      variant="ghost"
-                      onPress={() => handleEditarConsulta(item, nutri)}
-                      style={styles.bookingActionSecondary}
-                    />
-                    <BotaoAgendamento
-                      label="Cancelar"
-                      variant="ghost"
-                      onPress={() => handleCancelarConsulta(item, nutri)}
-                      style={styles.bookingActionSecondary}
-                    />
-                    {meetLink ? (
-                      <BotaoAgendamento
-                        label="Entrar"
-                        icon="videocam-outline"
-                        onPress={() => handleAbrirMeet(item, nutri)}
-                        style={styles.bookingActionPrimary}
-                      />
-                    ) : null}
-                  </View>
-                </CartaoAgendamento>
-              );
-            })
-          ) : (
-            <CartaoAgendamento style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Sem consultas agendadas</Text>
-              <Text style={styles.emptyText}>Suas Próximas teleconsultas vão aparecer aqui.</Text>
-            </CartaoAgendamento>
-          )}
-
-          <View style={styles.sectionHeaderRow}>
-            <View>
-              <Text style={styles.sectionTitle}>Consultas anteriores</Text>
-              <Text style={styles.sectionSubtitle}>Histórico recente de atendimentos</Text>
-            </View>
-          </View>
-
-          {consultasAnteriores.length ? (
-            consultasAnteriores.map((item) => {
-              const nutri =
-                nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
-                null;
-
-              return (
-                <CartaoAgendamento key={`past-${item.id}`} style={styles.bookingCardPast}>
-                  <View style={styles.bookingTopRow}>
-                    <AvatarProfissional
-                      name={nutri?.nome_completo_nutri || 'Profissional'}
-                      size={44}
-                      imageUri={getNutriAvatarUri(nutri)}
-                    />
-                    <View style={styles.bookingBody}>
-                      <Text style={styles.bookingName}>
-                        {nutri?.nome_completo_nutri || 'Profissional'}
-                      </Text>
-                      <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
-                      <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
-                      <Text style={styles.bookingMeta}>
-                        {item.tipo_consulta || 'Teleconsulta'} · {item.status || 'finalizada'}
-                      </Text>
-                    </View>
-                  </View>
-                </CartaoAgendamento>
-              );
-            })
-          ) : (
-            <CartaoAgendamento style={styles.emptyCard}>
-              <Text style={styles.emptyTitle}>Sem histórico recente</Text>
-              <Text style={styles.emptyText}>
-                As consultas concluídas e canceladas aparecem nesta seção.
-              </Text>
-            </CartaoAgendamento>
-          )}
-        </>
-      ) : null}
 
       {!loading && !loadError && activeSection === 'consultas' ? (
         <>
@@ -1401,6 +1251,7 @@ export default function PacienteAgendamentosScreen({
                           <Text style={styles.bookingMeta}>
                             {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
                           </Text>
+                          <ConsultaStatusBadge status={item.status} style={styles.bookingStatusBadge} />
                         </View>
                       </View>
 
@@ -1895,6 +1746,9 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 4,
+  },
+  bookingStatusBadge: {
+    marginTop: 8,
   },
   bookingActions: {
     flexDirection: 'row',

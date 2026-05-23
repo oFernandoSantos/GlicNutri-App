@@ -94,11 +94,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 10,
     borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     ...patientShadow,
   },
   menuPillActive: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.background,
   },
   menuPillText: {
     color: patientTheme.colors.textMuted,
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
   },
   sectionCard: {
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     ...patientShadow,

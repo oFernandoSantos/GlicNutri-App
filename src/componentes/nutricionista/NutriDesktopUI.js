@@ -1,7 +1,7 @@
 import React from 'react';
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 
 export function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -233,8 +233,10 @@ export const nutriDesktopStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
@@ -342,7 +344,7 @@ const styles = StyleSheet.create({
   actionCard: {
     flex: 1,
     minHeight: 164,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     ...patientShadow,
@@ -386,7 +388,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     ...patientShadow,
@@ -410,7 +412,7 @@ const styles = StyleSheet.create({
   searchWrap: {
     minHeight: 52,
     borderRadius: 999,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
@@ -467,7 +469,7 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 48,
     height: 118,
-    backgroundColor: '#eef2f4',
+    backgroundColor: patientTheme.colors.border,
     borderRadius: 20,
     justifyContent: 'flex-end',
     overflow: 'hidden',

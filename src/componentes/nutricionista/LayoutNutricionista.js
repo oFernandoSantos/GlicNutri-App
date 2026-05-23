@@ -5,7 +5,7 @@ import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
 } from './BarraAbasNutricionista';
-import { patientTheme } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 
 export default function LayoutNutricionista({
   navigation,
