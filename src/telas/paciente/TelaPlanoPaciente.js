@@ -404,7 +404,7 @@ export default function PacientePlanoScreen({
             style={styles.ctaButton}
             activeOpacity={0.9}
             onPress={() =>
-              navigation.navigate('PacientePerfilNutricionista', {
+              navigation.navigate('PacienteChatNutricionista', {
                 usuarioLogado,
               })
             }
