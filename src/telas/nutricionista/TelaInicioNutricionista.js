@@ -11,7 +11,7 @@ import {
 import { nutritionistQuickActions } from '../../dados/dadosNutricionistaMock';
 import {
   buildNutritionistThreadPreview,
-  fetchNutritionistChatSummariesByPatientIds,
+  fetchNutritionistChatInbox,
 } from '../../servicos/servicoDadosPaciente';
 import { listNutritionistClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
 import {
@@ -118,14 +118,12 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
       let unreadTotal = 0;
 
       if (patientIds.length) {
-        const summaries = await fetchNutritionistChatSummariesByPatientIds(
-          patientIds,
-          nutricionistaId
-        ).catch(() => []);
+        const summaries = await fetchNutritionistChatInbox(patientIds, nutricionistaId).catch(
+          () => []
+        );
 
         unreadTotal = summaries.reduce((sum, summary) => {
-          const preview = buildNutritionistThreadPreview(summary.thread || []);
-          return sum + Number(preview.unread || 0);
+          return sum + Number(summary?.preview?.unread || 0);
         }, 0);
       }
 
