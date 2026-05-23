@@ -701,10 +701,11 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.lg,
     padding: 16,
     ...patientShadow,
+    borderColor: 'transparent',
+    borderWidth: 0,
   },
   topMetricCardPrimary: {
     backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.border,
   },
   topMetricValue: {
     color: patientTheme.colors.primaryDark,

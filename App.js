@@ -44,6 +44,7 @@ import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacienteProgressoScreen from './src/telas/paciente/TelaProgressoPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
+import PacienteChatNutricionistaScreen from './src/telas/paciente/TelaChatNutricionistaPaciente';
 import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
 import TelaPrevisaoMl from './src/telas/paciente/TelaPrevisaoMl';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
@@ -570,6 +571,12 @@ export default function App() {
 
               <Stack.Screen name="PacientePlano" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacientePlanoScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteChatNutricionista" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(props, <PacienteChatNutricionistaScreen {...getPacienteProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen name="PacienteProgresso" options={readerScreenOptions}>
