@@ -28,6 +28,10 @@ import {
   salvarSessaoAdmin,
   sanitizeAdminUser,
 } from '../../servicos/servicoAdmin';
+import {
+  limparSessaoNutricionista,
+  salvarSessaoNutricionista,
+} from '../../servicos/servicoSessaoNutricionista';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
@@ -378,6 +382,7 @@ export default function TelaLogin({ navigation, route, session }) {
       }
 
       await limparSessaoAdmin();
+      await limparSessaoNutricionista();
 
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
@@ -447,6 +452,15 @@ export default function TelaLogin({ navigation, route, session }) {
         details: { metodo: 'email_senha' },
       });
 
+      let usuarioSessao = usuario;
+
+      if (role === 'Nutricionista') {
+        usuarioSessao = await salvarSessaoNutricionista(usuario);
+        if (route?.params?.onNutriLogin) {
+          route.params.onNutriLogin(usuarioSessao);
+        }
+      }
+
       const rotaDestino =
         role === 'Paciente' && !(await hasPatientOnboardingSeen(usuario))
           ? 'PacienteOnboarding'
@@ -459,7 +473,7 @@ export default function TelaLogin({ navigation, route, session }) {
         routes: [
           {
             name: rotaDestino,
-            params: { usuarioLogado: usuario },
+            params: { usuarioLogado: usuarioSessao },
           },
         ],
       });

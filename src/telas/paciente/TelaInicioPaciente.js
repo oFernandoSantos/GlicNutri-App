@@ -46,6 +46,7 @@ import {
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
 import MensagemInline from '../../componentes/comum/MensagemInline';
+import { listPatientClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
 
 function padDatePart(value) {
   return String(value).padStart(2, '0');
@@ -665,6 +666,7 @@ export default function PacienteHomeScreen({
   const [clinicalObjective, setClinicalObjective] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
   const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [clinicalAlerts, setClinicalAlerts] = useState([]);
 
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
 
@@ -714,6 +716,24 @@ export default function PacienteHomeScreen({
     [idPaciente, nomeBaseUsuario, usuarioLogado]
   );
 
+  const carregarAlertasClinicos = useCallback(async function carregarAlertasClinicos(patientUuid) {
+    if (!patientUuid) {
+      setClinicalAlerts([]);
+      return;
+    }
+
+    try {
+      const alerts = await listPatientClinicalAlerts(patientUuid, {
+        onlyUnread: false,
+        limit: 20,
+      });
+      setClinicalAlerts(alerts || []);
+    } catch (error) {
+      console.log('Erro ao carregar alertas clinicos do paciente:', error);
+      setClinicalAlerts([]);
+    }
+  }, []);
+
   const carregarDados = useCallback(async function carregarDados(options = {}) {
     const forceRefresh = options.forceRefresh === true;
     const showLoading = options.showLoading !== false;
@@ -727,6 +747,7 @@ export default function PacienteHomeScreen({
         setAppState(createDefaultAppState());
         setClinicalObjective('');
         setGlucoseReadings([]);
+        setClinicalAlerts([]);
         return;
       }
 
@@ -737,6 +758,9 @@ export default function PacienteHomeScreen({
 
         if (cachedExperience) {
           aplicarExperience(cachedExperience);
+          await carregarAlertasClinicos(
+            cachedExperience.patient?.id_paciente_uuid || idPaciente
+          );
           return;
         }
       }
@@ -762,6 +786,9 @@ export default function PacienteHomeScreen({
       }
 
       aplicarExperience(experience);
+      await carregarAlertasClinicos(
+        experience.patient?.id_paciente_uuid || idPaciente
+      );
     } catch (error) {
       console.log('Erro ao carregar dados:', error);
     } finally {
@@ -770,7 +797,14 @@ export default function PacienteHomeScreen({
       }
       setRefreshing(false);
     }
-  }, [aplicarExperience, canResolvePatient, idPaciente, nomeBaseUsuario, usuarioLogado]);
+  }, [
+    aplicarExperience,
+    canResolvePatient,
+    carregarAlertasClinicos,
+    idPaciente,
+    nomeBaseUsuario,
+    usuarioLogado,
+  ]);
 
   async function persistirAppState(nextState) {
     if (!canResolvePatient) {
@@ -893,6 +927,20 @@ export default function PacienteHomeScreen({
   );
   const allNotificationItems = useMemo(
     () => {
+      const clinicalNotifications = (clinicalAlerts || []).map((alert) => {
+        const createdAt = alert?.created_at ? new Date(alert.created_at) : new Date();
+
+        return {
+          id: `clinical-${alert.id}`,
+          title: alert.titulo || 'Alerta clinico',
+          text: alert.mensagem || '',
+          date: formatNotificationDate(createdAt),
+          time: formatNotificationTime(createdAt),
+          notificationKey: `clinical-${alert.id}`,
+          optionLabel: alert.severidade === 'danger' ? 'Urgente' : 'Clinico',
+        };
+      });
+
       const guidedNotifications = (appState?.patientNotifications || []).map((item) => {
         const createdAt = item?.createdAt ? new Date(item.createdAt) : new Date();
 
@@ -922,9 +970,9 @@ export default function PacienteHomeScreen({
         };
       });
 
-      return [...guidedNotifications, ...insightNotifications];
+      return [...clinicalNotifications, ...guidedNotifications, ...insightNotifications];
     },
-    [appState?.patientNotifications, insights, notificationBaseTime]
+    [appState?.patientNotifications, clinicalAlerts, insights, notificationBaseTime]
   );
   const notificationItems = useMemo(
     () =>

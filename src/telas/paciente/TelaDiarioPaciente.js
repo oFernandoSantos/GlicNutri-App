@@ -23,12 +23,6 @@ import {
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
 
-const mealKindStyle = {
-  icon: 'restaurant-outline',
-  color: patientTheme.colors.primaryDark,
-  bg: patientTheme.colors.primarySoft,
-};
-
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
 const NUTRIENT_BASE = {
   calories: 0,
@@ -216,6 +210,16 @@ function buildProgress(value, target) {
   return Math.max(0, Math.min(value / target, 1));
 }
 
+function buildMealDescription(entry) {
+  const rawText = String(entry?.description || entry?.aiNote || '').trim();
+
+  if (!rawText) {
+    return 'Sem descricao informada.';
+  }
+
+  return rawText;
+}
+
 export default function PacienteDiarioScreen({ navigation, route, usuarioLogado: usuarioProp }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const { width: windowWidth } = useWindowDimensions();
@@ -349,6 +353,20 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     () => selectedNutritionEntries.filter((entry) => entry.mode === 'photo').length,
     [selectedNutritionEntries]
   );
+  const todayTimelineEntries = useMemo(() => {
+    const today = new Date();
+    today.setHours(12, 0, 0, 0);
+
+    return timelineEntries.filter((entry) => {
+      const entryDate = parseEntryDate(entry.date);
+
+      if (!entryDate) {
+        return true;
+      }
+
+      return calculateDayDifference(today, entryDate) === 0;
+    });
+  }, [timelineEntries]);
   const selectedLastMealTime = selectedNutritionEntries[0]?.time || '--:--';
   const summaryCards = useMemo(
     () => [
@@ -600,70 +618,49 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         </View>
       </View>
 
-      <View style={styles.sectionHeaderRow}>
-        <Text style={styles.sectionTitle}>Linha do tempo alimentar</Text>
-        <View style={styles.sectionPill}>
-          <Ionicons name="time-outline" size={14} color={patientTheme.colors.primaryDark} />
-          <Text style={styles.sectionPillText}>Mais recente primeiro</Text>
+      <View style={styles.mealLogCard}>
+        <View style={styles.mealLogHeader}>
+          <Text style={styles.mealLogTitle}>Registro de Hoje</Text>
+          <View style={styles.mealLogBadge}>
+            <Text style={styles.mealLogBadgeText}>
+              {todayTimelineEntries.length} {todayTimelineEntries.length === 1 ? 'refeicao' : 'refeicoes'}
+            </Text>
+          </View>
         </View>
-      </View>
 
-      <View style={styles.timelineCard}>
         {loading ? (
           <View style={styles.emptyState}>
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
             <Text style={styles.emptyStateText}>Carregando seus registros...</Text>
           </View>
-        ) : timelineEntries.length > 0 ? (
-          timelineEntries.map((entry, index) => {
-            const meta = mealKindStyle;
-            const nutrition = estimateNutritionFromMeal(entry);
-            const nutritionSummaryLine = [
-              `${Math.round(nutrition.calories)} kcal`,
-              `${Math.round(nutrition.carbs)} g carboidratos`,
-              `${Math.round(nutrition.protein)} g proteinas`,
-              `${Math.round(nutrition.fat)} g gorduras`,
-            ].join(', ');
-            const entryModeLabel = entry.mode === 'photo' ? 'Com IA' : 'Registro manual';
+        ) : todayTimelineEntries.length > 0 ? (
+          <View style={styles.mealLogList}>
+            {todayTimelineEntries.map((entry) => {
+              const nutrition = estimateNutritionFromMeal(entry);
+              const description = buildMealDescription(entry);
 
-            return (
-              <View key={entry.id} style={styles.timelineRow}>
-                <View style={styles.timeColumn}>
-                  <Text style={styles.timeText}>{entry.time}</Text>
-                  {index < timelineEntries.length - 1 ? <View style={styles.timeLine} /> : null}
-                </View>
+              return (
+                <View key={entry.id} style={styles.mealLogEntry}>
+                  <View style={styles.mealLogTimeBlock}>
+                    <Text style={styles.mealLogTimeLabel}>Horario</Text>
+                    <Text style={styles.mealLogTimeValue}>{entry.time || '--:--'}</Text>
+                  </View>
 
-                <View style={[styles.kindIcon, { backgroundColor: meta.bg }]}>
-                  <Ionicons name={meta.icon} size={18} color={meta.color} />
-                </View>
-
-                <View style={styles.timelineContent}>
-                  <View style={styles.timelineEntryCard}>
-                    <View style={styles.timelineHeaderRow}>
-                      <Text style={styles.timelineTitle}>{entry.title}</Text>
-                      <View style={styles.noteTag}>
-                        <Text style={styles.noteTagText}>{entryModeLabel}</Text>
-                      </View>
-                    </View>
-
-                    <Text style={styles.timelineDescription}>{entry.description}</Text>
-
-                    <View style={styles.timelineMetaRow}>
-                      <Text style={styles.deltaText}>
-                        {nutrition.carbs
-                          ? `${Math.round(nutrition.carbs)} g de carboidratos`
-                          : 'Macros estimados abaixo'}
+                  <View style={styles.mealLogContent}>
+                    <Text style={styles.mealLogEntryTitle}>{entry.title || 'Refeicao registrada'}</Text>
+                    <Text style={styles.mealLogEntryDescription} numberOfLines={2}>
+                      {description}
+                    </Text>
+                    <View style={styles.mealCaloriesBadge}>
+                      <Text style={styles.mealCaloriesBadgeText}>
+                        {Math.round(nutrition.calories)} kcal
                       </Text>
                     </View>
-
-                    <Text style={styles.timelineNutritionSummary}>{nutritionSummaryLine}</Text>
-
-                    <Text style={styles.aiFeedback}>{entry.aiNote}</Text>
                   </View>
                 </View>
-              </View>
-            );
-          })
+              );
+            })}
+          </View>
         ) : emptyTimeline ? (
           <View style={styles.emptyState}>
             <View style={styles.emptyIllustration}>
@@ -1021,129 +1018,92 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: '#5fcf95',
   },
-  sectionHeaderRow: {
-    marginBottom: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  sectionTitle: {
+  mealLogCard: {
     marginTop: 24,
-    fontSize: 20,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
-  },
-  sectionPill: {
-    marginTop: 24,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primarySoft,
-  },
-  sectionPillText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  timelineCard: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: 26,
     padding: patientTheme.spacing.card,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     ...patientShadow,
   },
-  timelineRow: {
+  mealLogHeader: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    paddingBottom: 18,
-  },
-  timeColumn: {
-    width: 50,
     alignItems: 'center',
-  },
-  timeText: {
-    fontSize: 12,
-    color: patientTheme.colors.textMuted,
-    fontWeight: '600',
-  },
-  timeLine: {
-    marginTop: 8,
-    width: 2,
-    flex: 1,
-    minHeight: 64,
-    backgroundColor: patientTheme.colors.border,
-  },
-  kindIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 12,
-  },
-  timelineContent: {
-    flex: 1,
-    paddingBottom: 4,
-  },
-  timelineEntryCard: {
-    borderRadius: 22,
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    padding: 14,
-  },
-  timelineHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
     justifyContent: 'space-between',
     gap: 10,
   },
-  timelineTitle: {
-    fontSize: 16,
-    fontWeight: '700',
+  mealLogTitle: {
     color: patientTheme.colors.text,
-    flex: 1,
+    fontSize: 18,
+    fontWeight: '700',
   },
-  timelineDescription: {
-    marginTop: 6,
-    fontSize: 14,
-    lineHeight: 20,
-    color: patientTheme.colors.textMuted,
-  },
-  timelineMetaRow: {
-    marginTop: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  noteTag: {
+  mealLogBadge: {
     paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 14,
+    paddingVertical: 5,
+    borderRadius: 10,
     backgroundColor: patientTheme.colors.primarySoft,
   },
-  noteTagText: {
+  mealLogBadgeText: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
   },
-  deltaText: {
+  mealLogList: {
+    marginTop: 14,
+    gap: 10,
+  },
+  mealLogEntry: {
+    backgroundColor: '#f8fbf9',
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  mealLogTimeBlock: {
+    width: 56,
+    alignItems: 'flex-start',
+  },
+  mealLogTimeLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    marginBottom: 2,
+  },
+  mealLogTimeValue: {
     color: patientTheme.colors.text,
-    fontSize: 13,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  mealLogContent: {
+    flex: 1,
+  },
+  mealLogEntryTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 15,
     fontWeight: '700',
   },
-  timelineNutritionSummary: {
-    marginTop: 10,
+  mealLogEntryDescription: {
+    marginTop: 4,
     color: patientTheme.colors.textMuted,
     fontSize: 12,
-    lineHeight: 18,
+    lineHeight: 17,
   },
-  aiFeedback: {
-    marginTop: 10,
-    fontSize: 13,
-    lineHeight: 19,
-    color: patientTheme.colors.textMuted,
+  mealCaloriesBadge: {
+    alignSelf: 'flex-start',
+    marginTop: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+  },
+  mealCaloriesBadgeText: {
+    color: patientTheme.colors.text,
+    fontSize: 11,
+    fontWeight: '700',
   },
   emptyState: {
     alignItems: 'center',

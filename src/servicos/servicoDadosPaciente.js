@@ -20,6 +20,17 @@ import {
   mealPlanSections,
   nutritionistThread,
 } from '../dados/dadosExperienciaPaciente';
+import {
+  fetchPacienteAppStateFromTable,
+  savePacienteAppStateToTable,
+} from './servicoPacienteAppState';
+import {
+  fetchChatThreadFromDatabase,
+  migrateLegacyThreadToDatabase,
+  resolveNutricionistaIdForPatient,
+  sendChatMessage,
+} from './servicoMensagensChat';
+import { syncGlucoseAlertsForPatient } from './servicoAlertasClinicos';
 
 const META_START = '[GLICNUTRI_APP_META_START]';
 const META_END = '[GLICNUTRI_APP_META_END]';
@@ -77,6 +88,41 @@ export function createDefaultAppState() {
       selectedSleep: 'good',
       selectedStress: 2,
     },
+  };
+}
+
+export function normalizeNutritionistThreadEntry(
+  item,
+  { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
+) {
+  const role = item?.role === 'nutri' ? 'nutri' : 'user';
+  return {
+    id: item?.id || `thread-${role}-${Date.now()}`,
+    author:
+      String(item?.author || '').trim() ||
+      (role === 'nutri' ? nutritionistName : patientName),
+    role,
+    time: String(item?.time || '').trim(),
+    text: String(item?.text || '').trim(),
+  };
+}
+
+export function buildNutritionistThreadPreview(thread = []) {
+  const normalized = ensureArray(thread)
+    .map((item) => normalizeNutritionistThreadEntry(item))
+    .filter((item) => item.text);
+  const lastMessage = normalized[normalized.length - 1] || null;
+  let unread = 0;
+
+  for (let index = normalized.length - 1; index >= 0; index -= 1) {
+    if (normalized[index]?.role !== 'user') break;
+    unread += 1;
+  }
+
+  return {
+    lastMessage: lastMessage?.text || 'Sem mensagens ainda.',
+    lastMessageAt: lastMessage?.time || '',
+    unread,
   };
 }
 
@@ -665,7 +711,36 @@ async function loadPatientExperience(patientId, options = {}) {
   const patient = await fetchPatientById(patientId, options);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
-  const normalizedAppState = normalizeAppState(parsed.appState);
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const mergedLegacyState = tableAppState
+    ? { ...parsed.appState, ...tableAppState }
+    : parsed.appState;
+  const nutricionistaId = await resolveNutricionistaIdForPatient(
+    effectivePatientId,
+    patient?.id_nutricionista_uuid
+  );
+  const patientName = getPatientDisplayName(patient || options.patientContext);
+  let chatThread = await fetchChatThreadFromDatabase({
+    pacienteId: effectivePatientId,
+    nutricionistaId,
+    patientName,
+    nutritionistName: 'Nutricionista',
+  });
+  if (chatThread === null) {
+    chatThread = ensureArray(mergedLegacyState.nutritionistThread);
+  } else if (!chatThread.length && ensureArray(mergedLegacyState.nutritionistThread).length) {
+    const migrated = await migrateLegacyThreadToDatabase({
+      pacienteId: effectivePatientId,
+      nutricionistaId,
+      legacyThread: mergedLegacyState.nutritionistThread,
+      patientName,
+    });
+    chatThread = migrated === null ? mergedLegacyState.nutritionistThread : migrated || [];
+  }
+  const normalizedAppState = normalizeAppState({
+    ...mergedLegacyState,
+    nutritionistThread: chatThread,
+  });
   const glucoseLimit = options.glucoseLimit ?? 120;
   const medicationLimit = options.medicationLimit ?? 120;
   const mealLimit = options.mealLimit ?? 120;
@@ -703,6 +778,14 @@ async function loadPatientExperience(patientId, options = {}) {
         (entry) => !normalizedAppState.hiddenGlucoseReadingIds.includes(entry?.id)
       );
 
+  if (effectivePatientId && !options.skipAlertSync) {
+    syncGlucoseAlertsForPatient({
+      pacienteId: effectivePatientId,
+      nutricionistaId,
+      glucoseReadings: visibleGlucoseReadings,
+    }).catch((error) => console.log('Sync alertas glicemia:', error));
+  }
+
   return {
     patient,
     clinicalObjective: parsed.objectiveText,
@@ -712,6 +795,7 @@ async function loadPatientExperience(patientId, options = {}) {
       medicationEntries: visibleMedicationEntries,
     },
     glucoseReadings: visibleGlucoseReadings,
+    nutricionistaId,
   };
 }
 
@@ -719,6 +803,156 @@ export async function fetchPatientExperience(patientId, options = {}) {
   return fetchCachedPatientExperience(patientId, options, () =>
     loadPatientExperience(patientId, options)
   );
+}
+
+export async function fetchPatientNutritionistChat(patientId, options = {}) {
+  const experience = await fetchPatientExperience(patientId, options);
+  return {
+    ...experience,
+    thread: ensureArray(experience?.appState?.nutritionistThread).length
+      ? experience.appState.nutritionistThread
+      : createDefaultAppState().nutritionistThread,
+  };
+}
+
+export async function fetchNutritionistChatSummariesByPatientIds(patientIds = [], nutricionistaId = null) {
+  const resolvedIds = uniqueValues(patientIds);
+  if (!resolvedIds.length) return [];
+
+  const { data: patients, error } = await supabase
+    .from('paciente')
+    .select('id_paciente_uuid, nome_completo, email_pac, objetivo_principal_consulta, id_nutricionista_uuid')
+    .in('id_paciente_uuid', resolvedIds);
+
+  if (error) throw error;
+
+  const resolvedNutriId =
+    nutricionistaId ||
+    patients?.find((item) => item?.id_nutricionista_uuid)?.id_nutricionista_uuid ||
+    null;
+
+  let messagesByPatient = new Map();
+
+  if (resolvedNutriId) {
+    try {
+      const { data: messages, error: messagesError } = await supabase
+        .from('mensagem_chat')
+        .select('*')
+        .in('paciente_id', resolvedIds)
+        .eq('nutricionista_id', resolvedNutriId)
+        .order('created_at', { ascending: true });
+
+      if (!messagesError) {
+        (messages || []).forEach((row) => {
+          const list = messagesByPatient.get(row.paciente_id) || [];
+          list.push(row);
+          messagesByPatient.set(row.paciente_id, list);
+        });
+      }
+    } catch (chatError) {
+      console.log('Chat summaries indisponivel (tabela/RPC):', chatError);
+    }
+  }
+
+  return Promise.all(
+    (patients || []).map(async (patient) => {
+      const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+      const tableState = await fetchPacienteAppStateFromTable(patient.id_paciente_uuid);
+      const patientName = patient?.nome_completo || patient?.email_pac || 'Paciente';
+      const nutriId = patient.id_nutricionista_uuid || resolvedNutriId;
+      let thread = [];
+
+      const rows = messagesByPatient.get(patient.id_paciente_uuid) || [];
+      if (rows.length) {
+        thread = rows.map((row) =>
+          normalizeNutritionistThreadEntry(
+            {
+              id: row.id,
+              role: row.autor_role === 'nutricionista' ? 'nutri' : 'user',
+              author: row.autor_role === 'nutricionista' ? 'Nutricionista' : patientName,
+              time: new Date(row.created_at).toLocaleTimeString('pt-BR', {
+                hour: '2-digit',
+                minute: '2-digit',
+              }),
+              text: row.texto,
+            },
+            { nutritionistName: 'Nutricionista', patientName }
+          )
+        );
+      } else {
+        const legacy = tableState?.nutritionistThread || parsed?.appState?.nutritionistThread || [];
+        thread = await migrateLegacyThreadToDatabase({
+          pacienteId: patient.id_paciente_uuid,
+          nutricionistaId: nutriId,
+          legacyThread: legacy,
+          patientName,
+        });
+        if (thread === null) thread = ensureArray(legacy);
+      }
+
+      return {
+        patient,
+        clinicalObjective: parsed.objectiveText,
+        appState: normalizeAppState({ ...(tableState || parsed.appState), nutritionistThread: thread }),
+        thread: thread.length ? thread : createDefaultAppState().nutritionistThread,
+      };
+    })
+  );
+}
+
+export async function savePatientNutritionistChat({
+  patientId,
+  thread,
+  actor,
+  patientContext,
+  newMessage,
+}) {
+  const effectivePatientId = patientId || getPatientId(patientContext || actor);
+  const nutricionistaId = await resolveNutricionistaIdForPatient(
+    effectivePatientId,
+    actor?.id_nutricionista_uuid
+  );
+
+  if (newMessage?.text && effectivePatientId && nutricionistaId) {
+    const sent = await sendChatMessage({
+      pacienteId: effectivePatientId,
+      nutricionistaId,
+      autorRole: newMessage.role === 'nutri' ? 'nutricionista' : 'paciente',
+      texto: newMessage.text,
+      nutritionistName: newMessage.nutritionistName || 'Nutricionista',
+      patientName: newMessage.patientName || getPatientDisplayName(patientContext || actor),
+    });
+
+    if (sent) {
+      const experience = await fetchPatientExperience(effectivePatientId, {
+        patientContext: patientContext || actor || null,
+        skipAlertSync: true,
+      });
+      const nextThread = [...ensureArray(experience.appState.nutritionistThread), sent];
+      return {
+        ...experience,
+        appState: { ...experience.appState, nutritionistThread: nextThread },
+      };
+    }
+  }
+
+  const experience = await fetchPatientExperience(patientId, {
+    patientContext: patientContext || actor || null,
+    skipAlertSync: true,
+  });
+
+  const nextState = {
+    ...experience.appState,
+    nutritionistThread: ensureArray(thread),
+  };
+
+  return savePatientAppState({
+    patientId,
+    objectiveText: experience.clinicalObjective,
+    appState: nextState,
+    currentPatient: null,
+    patientContext: patientContext || actor || null,
+  });
 }
 
 export async function savePatientAppState({
@@ -769,11 +1003,17 @@ export async function savePatientAppState({
     currentPatient?.nivel_atividade_fisica_atual ||
     null;
 
+  const stateForTable = prepareAppStateForStorage({
+    ...normalizedWithHiddenPreserved,
+    nutritionistThread: [],
+  });
+
+  const tableSaved = await savePacienteAppStateToTable(effectivePatientId, stateForTable);
+
   const patch = {
-    objetivo_principal_consulta: serializeObjectiveAndAppState(
-      nextObjectiveText,
-      normalizedWithHiddenPreserved
-    ),
+    objetivo_principal_consulta: tableSaved
+      ? nextObjectiveText
+      : serializeObjectiveAndAppState(nextObjectiveText, normalizedWithHiddenPreserved),
     qualidade_sono_media: mapSleepToLabel(normalizedWithHiddenPreserved.wellness.selectedSleep),
     nivel_atividade_fisica_atual: latestActivity,
     data_hora_ultima_atualizacao: new Date().toISOString(),

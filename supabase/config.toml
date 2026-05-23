@@ -11,3 +11,6 @@ verify_jwt = true
 
 [functions.analisar-refeicao-ia]
 verify_jwt = false
+
+[functions.libreview-sync]
+verify_jwt = false

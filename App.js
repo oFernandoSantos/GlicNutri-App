@@ -45,6 +45,7 @@ import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacienteProgressoScreen from './src/telas/paciente/TelaProgressoPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
 import PacienteChatNutricionistaScreen from './src/telas/paciente/TelaChatNutricionistaPaciente';
+import PacienteChatNutricionistaDetalheScreen from './src/telas/paciente/TelaChatNutricionistaDetalhePaciente';
 import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
 import TelaPrevisaoMl from './src/telas/paciente/TelaPrevisaoMl';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
@@ -57,6 +58,11 @@ import { patientTheme } from './src/temas/temaVisualPaciente';
 import { INTRO_SEEN_STORAGE_KEY } from './src/constantes/chavesArmazenamento';
 import { hasPatientOnboardingSeen } from './src/servicos/servicoOnboardingPaciente';
 import { carregarSessaoAdmin, limparSessaoAdmin } from './src/servicos/servicoAdmin';
+import {
+  carregarSessaoNutricionista,
+  limparSessaoNutricionista,
+} from './src/servicos/servicoSessaoNutricionista';
+import { resolveInitialRouteName } from './src/utilitarios/perfisApp';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -166,6 +172,8 @@ export default function App() {
   const [patientSessionOverride, setPatientSessionOverride] = useState(null);
   const [adminSession, setAdminSession] = useState(null);
   const [adminReady, setAdminReady] = useState(false);
+  const [nutriSession, setNutriSession] = useState(null);
+  const [nutriReady, setNutriReady] = useState(false);
 
   useEffect(() => {
     let isMounted = true;
@@ -185,11 +193,35 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function carregarNutri() {
+      const nutri = await carregarSessaoNutricionista();
+      if (isMounted) {
+        setNutriSession(nutri);
+        setNutriReady(true);
+      }
+    }
+
+    carregarNutri();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (session?.user && adminSession) {
       limparSessaoAdmin();
       setAdminSession(null);
     }
   }, [session, adminSession]);
+
+  useEffect(() => {
+    if (session?.user && nutriSession) {
+      limparSessaoNutricionista();
+      setNutriSession(null);
+    }
+  }, [session, nutriSession]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -361,7 +393,7 @@ export default function App() {
     );
   }
 
-  if (!authReady || !introReady || !patientOnboardingReady || !adminReady) {
+  if (!authReady || !introReady || !patientOnboardingReady || !adminReady || !nutriReady) {
     return (
       <View
         style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
@@ -401,6 +433,26 @@ export default function App() {
     };
   }
 
+  function getNutriProps(props) {
+    return {
+      ...props,
+      route: {
+        ...props.route,
+        params: {
+          ...props.route?.params,
+          usuarioLogado:
+            props.route?.params?.usuarioLogado || nutriSession || null,
+        },
+      },
+      navigation: props.navigation,
+      onNutriLogout: async () => {
+        await limparSessaoNutricionista();
+        setNutriSession(null);
+        props.navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      },
+    };
+  }
+
   function withSwipeBack(props, content) {
     return (
       <SwipeBackContainer navigation={props.navigation}>
@@ -409,15 +461,13 @@ export default function App() {
     );
   }
 
-  const initialRouteName = adminSession
-    ? 'AdminHome'
-    : session
-      ? patientOnboardingSeen
-        ? 'HomePaciente'
-        : 'PacienteOnboarding'
-      : introSeen
-        ? 'Login'
-        : 'Intro';
+  const initialRouteName = resolveInitialRouteName({
+    adminSession,
+    nutriSession,
+    supabaseSession: session,
+    patientOnboardingSeen,
+    introSeen,
+  });
   const useFullBleedIntro = initialRouteName === 'Intro';
 
   const readerScreenOptions = {
@@ -498,6 +548,7 @@ export default function App() {
                         params: {
                           ...(props.route?.params || {}),
                           onAdminLogin: (adminUser) => setAdminSession(adminUser),
+                          onNutriLogin: (nutriUser) => setNutriSession(nutriUser),
                         },
                       }}
                     />
@@ -579,6 +630,15 @@ export default function App() {
                 }
               </Stack.Screen>
 
+              <Stack.Screen name="PacienteChatNutricionistaDetalhe" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(
+                    props,
+                    <PacienteChatNutricionistaDetalheScreen {...getPacienteProps(props)} />
+                  )
+                }
+              </Stack.Screen>
+
               <Stack.Screen name="PacienteProgresso" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacienteProgressoScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
@@ -624,23 +684,30 @@ export default function App() {
 
               <Stack.Screen
                 name="HomeNutricionista"
+                initialParams={
+                  nutriSession ? { usuarioLogado: nutriSession } : undefined
+                }
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <HomeNutricionista {...props} />)}
+                {(props) => withSwipeBack(props, <HomeNutricionista {...getNutriProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen
                 name="GerenciarPacientes"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <GerenciarPacientesScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <GerenciarPacientesScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaAgenda"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaAgendaScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <NutricionistaAgendaScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen
@@ -648,7 +715,7 @@ export default function App() {
                 options={readerScreenOptions}
               >
                 {(props) =>
-                  withSwipeBack(props, <NutriProntuarioPacienteScreen {...props} />)
+                  withSwipeBack(props, <NutriProntuarioPacienteScreen {...getNutriProps(props)} />)
                 }
               </Stack.Screen>
 
@@ -656,21 +723,25 @@ export default function App() {
                 name="NutriConsultaNutri"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <NutriConsultaScreen {...props} />)}
+                {(props) => withSwipeBack(props, <NutriConsultaScreen {...getNutriProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaMensagens"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaMensagensScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <NutricionistaMensagensScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaRelatorios"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaRelatoriosScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <NutricionistaRelatoriosScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen name="AdminHome" options={readerScreenOptions}>

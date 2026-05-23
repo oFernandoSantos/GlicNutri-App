@@ -4854,7 +4854,9 @@ export default function PacientePerfilScreen({
             <View>
               <Text style={styles.integrationLabel}>Status</Text>
               <Text style={styles.integrationHelper}>
-                {libreConnected ? 'Sincronização disponível no app.' : 'Integração ainda não configurada.'}
+                {libreConnected
+                  ? 'Sincronizacao automatica disponivel no app.'
+                  : 'Importacao manual de CSV do LibreView disponivel no monitoramento.'}
               </Text>
             </View>
             <View
@@ -4871,7 +4873,7 @@ export default function PacientePerfilScreen({
                     : styles.integrationBadgeTextPending,
                 ]}
               >
-                {libreConnected ? 'Conectado' : 'Pendente'}
+                {libreConnected ? 'Conectado' : 'Importacao'}
               </Text>
             </View>
           </View>
@@ -4882,7 +4884,7 @@ export default function PacientePerfilScreen({
             style={styles.integrationButton}
           >
             <Text style={styles.integrationButtonText}>
-              {libreConnected ? 'Abrir monitoramento' : 'Configurar conexão'}
+              {libreConnected ? 'Abrir monitoramento' : 'Importar leituras'}
             </Text>
           </TouchableOpacity>
         </SectionCard>

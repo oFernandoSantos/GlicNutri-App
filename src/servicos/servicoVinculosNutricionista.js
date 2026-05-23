@@ -224,12 +224,23 @@ export async function listPatientsByNutritionist(nutricionistaId, { limit = 200 
     });
   });
 
-  const directIds = directPatients.map((patient) => patient?.id_paciente_uuid);
-  const missingIds = [];
+  const byId = new Map();
+
+  directPatients.forEach((patient) => {
+    if (patient?.id_paciente_uuid) byId.set(patient.id_paciente_uuid, patient);
+  });
+
+  consultas.forEach((consulta) => {
+    const embedded = consulta?.paciente;
+    if (embedded?.id_paciente_uuid) {
+      byId.set(embedded.id_paciente_uuid, embedded);
+    }
+  });
+
+  const missingIds = [...patientMeta.keys()].filter((patientId) => !byId.has(patientId));
   const fetchedPatients = await fetchPatientsByIds(missingIds);
 
-  const byId = new Map();
-  [...directPatients, ...fetchedPatients].forEach((patient) => {
+  fetchedPatients.forEach((patient) => {
     if (patient?.id_paciente_uuid) byId.set(patient.id_paciente_uuid, patient);
   });
 
