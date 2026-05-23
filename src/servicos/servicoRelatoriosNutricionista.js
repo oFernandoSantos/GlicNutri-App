@@ -1,4 +1,5 @@
 import { fetchPatientExperience } from './servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from './limitesDadosPaciente';
 import {
   getNutritionistId,
   listConsultasNutricionistaComPaciente,
@@ -58,9 +59,7 @@ async function loadPatientClinicalRow(patientCard) {
 
   try {
     const experience = await fetchPatientExperience(patientId, {
-      glucoseLimit: 90,
-      mealLimit: 90,
-      medicationLimit: 40,
+      ...mesclarLimitesDadosPaciente('relatorio'),
     });
 
     const mealEntries = experience?.appState?.mealEntries || [];
@@ -524,7 +523,7 @@ export async function exportNutritionistReport({
   }
 
   if (format === 'pdf') {
-    const pdfDoc = buildNutritionistReportPdf(bundle, type);
+    const pdfDoc = await buildNutritionistReportPdf(bundle, type);
     return downloadPdfDocument(`${baseName}.pdf`, pdfDoc);
   }
 

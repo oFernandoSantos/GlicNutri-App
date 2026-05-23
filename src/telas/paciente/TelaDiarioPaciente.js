@@ -18,6 +18,7 @@ import {
   fetchPatientExperience,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
@@ -258,6 +259,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          ...mesclarLimitesDadosPaciente('diario'),
         });
 
         if (!active) return;

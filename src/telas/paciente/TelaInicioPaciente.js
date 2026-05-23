@@ -34,6 +34,7 @@ import {
   isPatientExperienceCacheFresh,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { syncGooglePatientRecord } from '../../servicos/sincronizarPacienteGoogle';
 import {
   getCachedGlucoseReadings,
@@ -46,7 +47,9 @@ import {
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
 import MensagemInline from '../../componentes/comum/MensagemInline';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import { listPatientClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 
 function padDatePart(value) {
   return String(value).padStart(2, '0');
@@ -667,6 +670,8 @@ export default function PacienteHomeScreen({
   const [appState, setAppState] = useState(createDefaultAppState());
   const [glucoseReadings, setGlucoseReadings] = useState([]);
   const [clinicalAlerts, setClinicalAlerts] = useState([]);
+  const [loadError, setLoadError] = useState(null);
+  const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
 
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
 
@@ -769,10 +774,19 @@ export default function PacienteHomeScreen({
         setLoading(true);
       }
 
-      let experience = await fetchPatientExperience(idPaciente, {
-        patientContext: usuarioLogado,
-        forceRefresh,
-      });
+      const [experienceResult, alertsResult] = await Promise.all([
+        fetchPatientExperience(idPaciente, {
+          patientContext: usuarioLogado,
+          forceRefresh,
+          ...mesclarLimitesDadosPaciente('resumo'),
+        }),
+        listPatientClinicalAlerts(idPaciente, {
+          onlyUnread: false,
+          limit: 20,
+        }).catch(() => []),
+      ]);
+
+      let experience = experienceResult;
 
       if (!experience.patient && usuarioLogado?.id) {
         const pacienteSincronizado = await syncGooglePatientRecord(usuarioLogado);
@@ -786,11 +800,13 @@ export default function PacienteHomeScreen({
       }
 
       aplicarExperience(experience);
-      await carregarAlertasClinicos(
-        experience.patient?.id_paciente_uuid || idPaciente
-      );
+      setClinicalAlerts(alertsResult || []);
+      setLoadError(null);
     } catch (error) {
       console.log('Erro ao carregar dados:', error);
+      setLoadError(
+        'Não foi possível carregar seu painel. Verifique a conexão e tente novamente.'
+      );
     } finally {
       if (showLoading) {
         setLoading(false);
@@ -854,12 +870,17 @@ export default function PacienteHomeScreen({
 
   useFocusEffect(
     useCallback(() => {
+      if (loadGuardRef.current.deveIgnorarCarregamentoFocus()) {
+        return undefined;
+      }
+
       carregarDados({
         forceRefresh: false,
         showLoading: !isPatientExperienceCacheFresh(idPaciente, {
           patientContext: usuarioLogado,
         }),
       });
+      return undefined;
     }, [carregarDados, idPaciente, usuarioLogado])
   );
 
@@ -1044,9 +1065,44 @@ export default function PacienteHomeScreen({
     );
   }
 
+  if (loadError && !paciente && !glucoseReadings.length) {
+    return (
+      <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
+        <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+        <View style={styles.loadingContainer}>
+          <EstadoErroCarregamento
+            titulo="Painel indisponível"
+            mensagem={loadError}
+            loading={refreshing}
+            onTentarNovamente={() => {
+              loadGuardRef.current.reiniciar();
+              carregarDados({ forceRefresh: true, showLoading: true });
+            }}
+          />
+        </View>
+        <BarraAbasPaciente
+          navigation={navigation}
+          rotaAtual={route?.name || 'HomePaciente'}
+          usuarioLogado={usuarioLogado}
+        />
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
       <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+
+      {loadError ? (
+        <View style={styles.inlineErrorWrap}>
+          <EstadoErroCarregamento
+            titulo="Atualização parcial"
+            mensagem={loadError}
+            loading={refreshing}
+            onTentarNovamente={() => carregarDados({ forceRefresh: true, showLoading: false })}
+          />
+        </View>
+      ) : null}
 
       {menuVisible ? (
         <PatientDrawer
@@ -1377,6 +1433,11 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
     alignItems: 'center',
     justifyContent: 'center',
+    paddingHorizontal: patientTheme.spacing.screen,
+  },
+  inlineErrorWrap: {
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 12,
   },
   loadingText: {
     marginTop: 12,
@@ -2082,7 +2143,7 @@ const styles = StyleSheet.create({
   homePlanProgressFill: {
     height: '100%',
     borderRadius: patientTheme.radius.pill,
-    backgroundColor: '#111318',
+    backgroundColor: patientTheme.colors.primary,
   },
   homePlanMealCard: {
     marginTop: 12,

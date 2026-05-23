@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
@@ -11,16 +11,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { SearchInput } from '../../componentes/nutricionista/NutriDesktopUI';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { patientTheme } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
   fetchPatientNutritionistChat,
   getPatientDisplayName,
   getPatientId,
-  normalizeNutritionistThreadEntry,
 } from '../../servicos/servicoDadosPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { buildPatientChatPreview } from '../../utilitarios/chatConversa';
 
 function getInitials(name) {
   return String(name || '')
@@ -91,12 +92,13 @@ export default function TelaChatNutricionistaPaciente({
     () => String(patientName || 'Paciente').trim().split(/\s+/)[0] || 'Paciente',
     [patientName]
   );
+  const hasLoadedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
   const [nutritionist, setNutritionist] = useState(
-    buildFallbackNutritionist(routeNutritionist, createDefaultAppState().nutritionistThread)
+    buildFallbackNutritionist(routeNutritionist, [])
   );
 
   useEffect(() => {
@@ -111,32 +113,43 @@ export default function TelaChatNutricionistaPaciente({
     };
   }, [navigation]);
 
-  const load = useMemo(
-    () => async () => {
+  const load = useCallback(
+    async ({ silent = false, forceRefresh = false } = {}) => {
       try {
-        setLoading(true);
+        if (!silent) setLoading(true);
 
         if (!canResolvePatient) {
-          const fallbackThread = createDefaultAppState().nutritionistThread;
           setAppState(createDefaultAppState());
-          setNutritionist(buildFallbackNutritionist(routeNutritionist, fallbackThread));
+          setNutritionist(buildFallbackNutritionist(routeNutritionist, []));
           return;
         }
 
         const experience = await fetchPatientNutritionistChat(patientId, {
+          ...mesclarLimitesDadosPaciente('chat'),
           patientContext: usuarioLogado,
+          forceRefresh,
         });
 
         setAppState(experience.appState || createDefaultAppState());
 
         let resolvedNutritionist = routeNutritionist;
         const routeNutritionistId = routeNutritionist?.id_nutricionista_uuid;
+        const linkedNutritionistId =
+          experience?.patient?.id_nutricionista_uuid || experience?.nutricionistaId || null;
 
         if (routeNutritionistId) {
           try {
             resolvedNutritionist = await getNutritionistById(routeNutritionistId);
           } catch (error) {
             console.log('Erro ao carregar nutricionista da rota:', error);
+          }
+        }
+
+        if (!resolvedNutritionist && linkedNutritionistId) {
+          try {
+            resolvedNutritionist = await getNutritionistById(linkedNutritionistId);
+          } catch (error) {
+            console.log('Erro ao carregar nutricionista vinculada ao paciente:', error);
           }
         }
 
@@ -155,52 +168,40 @@ export default function TelaChatNutricionistaPaciente({
         setNutritionist(
           buildFallbackNutritionist(
             resolvedNutritionist,
-            experience.appState?.nutritionistThread || createDefaultAppState().nutritionistThread
+            experience.appState?.nutritionistThread || []
           )
         );
       } catch (error) {
         console.log('Erro ao carregar lista de conversas do paciente:', error);
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
       }
     },
     [canResolvePatient, patientId, routeNutritionist, usuarioLogado]
   );
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
   useFocusEffect(
-    React.useCallback(() => {
-      load();
-      const intervalId = setInterval(load, 5000);
+    useCallback(() => {
+      load({ silent: hasLoadedRef.current, forceRefresh: false });
+      hasLoadedRef.current = true;
+      const intervalId = setInterval(() => load({ silent: true, forceRefresh: false }), 30000);
       return () => clearInterval(intervalId);
     }, [load])
   );
 
-  const messages = useMemo(() => {
-    const source = appState?.nutritionistThread?.length
-      ? appState.nutritionistThread
-      : createDefaultAppState().nutritionistThread;
-    const nutriName =
-      nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
+  const nutritionistName =
+    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
 
-    return source
-      .map((item) =>
-        normalizeNutritionistThreadEntry(item, {
-          nutritionistName: nutriName,
-          patientName: patientFirstName,
-        })
-      )
-      .filter((item) => item.text);
-  }, [appState?.nutritionistThread, nutritionist, patientFirstName]);
+  const chatPreview = useMemo(
+    () =>
+      buildPatientChatPreview(appState?.nutritionistThread, {
+        nutritionistName,
+        patientName: patientFirstName,
+      }),
+    [appState?.nutritionistThread, nutritionistName, patientFirstName]
+  );
 
   const chatItems = useMemo(() => {
-    const preview = messages[messages.length - 1] || null;
-    const nutritionistName =
-      nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
-
     return [
       {
         id: `nutri-${nutritionist?.id_nutricionista_uuid || nutritionistName}`,
@@ -210,20 +211,21 @@ export default function TelaChatNutricionistaPaciente({
           nutritionist?.crm_numero ? `CRN ${nutritionist.crm_numero}` : '',
         ]
           .filter(Boolean)
-          .join(' - '),
-        preview: preview?.text || 'Abra a conversa para ver todas as mensagens.',
-        time: preview?.time || '',
-        unread: messages.length ? messages.filter((item) => item.role === 'nutri').length : 0,
+          .join(' · '),
+        preview: chatPreview.lastMessage || 'Nenhuma mensagem ainda.',
+        time: chatPreview.lastMessageAt || '',
+        unread: chatPreview.unread,
       },
     ];
-  }, [messages, nutritionist]);
+  }, [chatPreview, nutritionist, nutritionistName]);
 
   const filteredChats = useMemo(() => {
     const normalized = String(search || '').toLowerCase().trim();
     if (!normalized) return chatItems;
     return chatItems.filter((item) =>
-      [item.nutritionistName, item.nutritionistMeta, item.preview]
-        .some((field) => String(field || '').toLowerCase().includes(normalized))
+      [item.nutritionistName, item.preview].some((field) =>
+        String(field || '').toLowerCase().includes(normalized)
+      )
     );
   }, [chatItems, search]);
 
@@ -253,7 +255,7 @@ export default function TelaChatNutricionistaPaciente({
         />
       </View>
 
-      <View>
+      <View style={styles.listSection}>
         {loading ? (
           <View style={styles.loadingCard}>
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
@@ -292,11 +294,8 @@ export default function TelaChatNutricionistaPaciente({
                         </Text>
                         <Text style={styles.chatListTime}>{chat.time}</Text>
                       </View>
-                      <Text style={styles.chatListTag} numberOfLines={1}>
-                        {chat.nutritionistMeta}
-                      </Text>
                       <Text style={styles.chatListPreview} numberOfLines={2}>
-                        {chat.preview}
+                        {`Ultima mensagem: ${chat.preview}`}
                       </Text>
                     </View>
                   </View>
@@ -315,21 +314,33 @@ export default function TelaChatNutricionistaPaciente({
   );
 }
 
+const CHAT_CARD_BORDER_COLOR = '#EEF3F7';
+
+const chatPanelBorder = {
+  backgroundColor: patientTheme.colors.background,
+  borderColor: CHAT_CARD_BORDER_COLOR,
+  borderWidth: 1,
+};
+
 const styles = StyleSheet.create({
   contentContainer: {
+    backgroundColor: patientTheme.colors.background,
+    flexGrow: 1,
     paddingTop: 8,
     paddingBottom: 28,
   },
   listSearch: {
-    marginTop: 2,
     marginBottom: 12,
+    marginTop: 2,
+  },
+  listSection: {
+    flexGrow: 1,
   },
   loadingCard: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.xl,
     padding: 24,
-    ...patientShadow,
+    ...chatPanelBorder,
   },
   loadingText: {
     color: patientTheme.colors.textMuted,
@@ -339,12 +350,9 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   chatListItem: {
-    backgroundColor: patientTheme.colors.background,
-    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
-    borderWidth: 1,
     padding: 16,
-    ...patientShadow,
+    ...chatPanelBorder,
   },
   chatRowTop: {
     alignItems: 'flex-start',
@@ -381,6 +389,7 @@ const styles = StyleSheet.create({
   },
   chatListName: {
     flex: 1,
+    fontSize: 16,
     fontWeight: '900',
     color: patientTheme.colors.text,
   },
@@ -389,16 +398,11 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontWeight: '700',
   },
-  chatListTag: {
-    marginTop: 4,
-    color: patientTheme.colors.primaryDark,
-    fontSize: 12,
-    fontWeight: '800',
-  },
   chatListPreview: {
-    marginTop: 6,
-    color: patientTheme.colors.textMuted,
-    lineHeight: 19,
+    marginTop: 5,
+    color: '#5F6F7D',
+    fontSize: 14,
+    lineHeight: 20,
   },
   unreadBadge: {
     minWidth: 28,
@@ -419,10 +423,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 10,
-    backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.xl,
     padding: 24,
-    ...patientShadow,
+    ...chatPanelBorder,
   },
   emptyTitle: {
     color: patientTheme.colors.text,

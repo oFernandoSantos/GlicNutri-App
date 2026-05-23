@@ -1,6 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  InteractionManager,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -12,18 +14,22 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { patientTheme } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
   fetchPatientNutritionistChat,
   getPatientDisplayName,
   getPatientId,
-  normalizeNutritionistThreadEntry,
   savePatientNutritionistChat,
 } from '../../servicos/servicoDadosPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { normalizeChatMessages, scrollChatToEnd } from '../../utilitarios/chatConversa';
+
+const READER_BAR_HEIGHT = 58;
 
 function formatTimeNow() {
   return new Date().toLocaleTimeString('pt-BR', {
@@ -81,6 +87,7 @@ export default function TelaChatNutricionistaDetalhePaciente({
   route,
   usuarioLogado: usuarioProp,
 }) {
+  const insets = useSafeAreaInsets();
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const canResolvePatient = useMemo(
@@ -102,43 +109,40 @@ export default function TelaChatNutricionistaDetalhePaciente({
     [patientName]
   );
   const scrollRef = useRef(null);
+  const hasLoadedRef = useRef(false);
 
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [patient, setPatient] = useState(null);
   const [clinicalObjective, setClinicalObjective] = useState('');
   const [appState, setAppState] = useState(createDefaultAppState());
   const [nutritionist, setNutritionist] = useState(
-    buildFallbackNutritionist(routeNutritionist, createDefaultAppState().nutritionistThread)
+    buildFallbackNutritionist(routeNutritionist, [])
   );
   const [draft, setDraft] = useState('');
 
   useEffect(() => {
-    navigation.setOptions({
-      readerTitle: 'Conversa',
-    });
-
-    return () => {
-      navigation.setOptions({
-        readerTitle: null,
-      });
-    };
+    navigation.setOptions({ readerTitle: 'Conversa' });
+    return () => navigation.setOptions({ readerTitle: null });
   }, [navigation]);
 
-  const load = useMemo(
-    () => async () => {
+  const load = useCallback(
+    async ({ silent = false, forceRefresh = false } = {}) => {
       try {
-        setLoading(true);
+        if (!silent) setLoading(true);
+        else setRefreshing(true);
 
         if (!canResolvePatient) {
-          const fallbackThread = createDefaultAppState().nutritionistThread;
           setAppState(createDefaultAppState());
-          setNutritionist(buildFallbackNutritionist(routeNutritionist, fallbackThread));
+          setNutritionist(buildFallbackNutritionist(routeNutritionist, []));
           return;
         }
 
         const experience = await fetchPatientNutritionistChat(patientId, {
+          ...mesclarLimitesDadosPaciente('chat'),
           patientContext: usuarioLogado,
+          forceRefresh,
         });
 
         setPatient(experience.patient || null);
@@ -156,7 +160,7 @@ export default function TelaChatNutricionistaDetalhePaciente({
           }
         }
 
-        if (!resolvedNutritionist && patientId) {
+        if (!resolvedNutritionist?.id_nutricionista_uuid && patientId) {
           try {
             const consultas = await listConsultasByPaciente(patientId, { limit: 40 });
             const assignedConsulta = selectAssignedConsulta(consultas);
@@ -171,72 +175,74 @@ export default function TelaChatNutricionistaDetalhePaciente({
         setNutritionist(
           buildFallbackNutritionist(
             resolvedNutritionist,
-            experience.appState?.nutritionistThread || createDefaultAppState().nutritionistThread
+            experience.appState?.nutritionistThread || []
           )
         );
       } catch (error) {
         console.log('Erro ao carregar detalhe do chat do paciente:', error);
       } finally {
-        setLoading(false);
+        if (!silent) setLoading(false);
+        setRefreshing(false);
       }
     },
     [canResolvePatient, patientId, routeNutritionist, usuarioLogado]
   );
 
-  useEffect(() => {
-    load();
-  }, [load]);
-
   useFocusEffect(
-    React.useCallback(() => {
-      load();
-      const intervalId = setInterval(load, 5000);
+    useCallback(() => {
+      load({ silent: hasLoadedRef.current, forceRefresh: false });
+      hasLoadedRef.current = true;
+      const intervalId = setInterval(() => {
+        if (sending || draft.trim()) return;
+        load({ silent: true, forceRefresh: false });
+      }, 25000);
       return () => clearInterval(intervalId);
-    }, [load])
+    }, [draft, load, sending])
   );
 
-  const messages = useMemo(() => {
-    const source = appState?.nutritionistThread?.length
-      ? appState.nutritionistThread
-      : createDefaultAppState().nutritionistThread;
-    const nutriName =
-      nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
+  const nutritionistName =
+    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
 
-    return source
-      .map((item) =>
-        normalizeNutritionistThreadEntry(item, {
-          nutritionistName: nutriName,
-          patientName: patientFirstName,
-        })
-      )
-      .filter((item) => item.text);
-  }, [appState?.nutritionistThread, nutritionist, patientFirstName]);
+  const messages = useMemo(
+    () =>
+      normalizeChatMessages(appState?.nutritionistThread, {
+        nutritionistName,
+        patientName: patientFirstName,
+      }),
+    [appState?.nutritionistThread, nutritionistName, patientFirstName]
+  );
+
+  const scrollToLatestMessage = useCallback((animated = false) => {
+    scrollChatToEnd(scrollRef, {
+      animated,
+      delays: animated ? [0, 80] : [0, 80, 200, 400],
+    });
+  }, []);
 
   useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      scrollRef.current?.scrollToEnd?.({ animated: true });
-    }, 50);
+    if (loading || !messages.length) return undefined;
 
-    return () => clearTimeout(timeoutId);
-  }, [messages.length]);
+    const interaction = InteractionManager.runAfterInteractions(() => {
+      scrollToLatestMessage(sending);
+    });
+
+    return () => interaction.cancel();
+  }, [loading, messages.length, sending, scrollToLatestMessage]);
 
   async function persistThread(nextThread, outgoingMessage = null) {
-    const nextState = {
-      ...appState,
-      nutritionistThread: nextThread,
-    };
+    const nextState = { ...appState, nutritionistThread: nextThread };
+    setAppState(nextState);
 
-    if (!canResolvePatient) {
-      setAppState(nextState);
-      return;
-    }
+    if (!canResolvePatient) return;
 
     const saved = await savePatientNutritionistChat({
       patientId,
       thread: nextThread,
       actor: usuarioLogado,
       patientContext: usuarioLogado,
-      newMessage: outgoingMessage,
+      newMessage: outgoingMessage
+        ? { ...outgoingMessage, patientName: patientFirstName, nutritionistName }
+        : null,
     });
 
     setPatient(saved.patient || patient);
@@ -248,19 +254,13 @@ export default function TelaChatNutricionistaDetalhePaciente({
     const text = draft.trim();
     if (!text || sending) return;
 
-    const nextMessage = normalizeNutritionistThreadEntry(
-      {
-        id: `user-${Date.now()}`,
-        author: patientFirstName,
-        role: 'user',
-        time: formatTimeNow(),
-        text,
-      },
-      {
-        nutritionistName: nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri,
-        patientName: patientFirstName,
-      }
-    );
+    const nextMessage = {
+      id: `user-${Date.now()}`,
+      author: patientFirstName,
+      role: 'user',
+      time: formatTimeNow(),
+      text,
+    };
     const nextThread = [...messages, nextMessage];
 
     try {
@@ -270,101 +270,147 @@ export default function TelaChatNutricionistaDetalhePaciente({
     } catch (error) {
       console.log('Erro ao enviar mensagem para nutricionista:', error);
       setDraft(text);
+      setAppState((current) => ({ ...current, nutritionistThread: messages }));
+      Alert.alert('Nao foi possivel enviar', 'Tente novamente em alguns instantes.');
     } finally {
       setSending(false);
     }
   }
 
-  const nutritionistName =
-    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
   const nutritionistMeta = [
     nutritionist?.especialidade || 'Acompanhamento nutricional',
     nutritionist?.crm_numero ? `CRN ${nutritionist.crm_numero}` : '',
   ]
     .filter(Boolean)
-    .join(' - ');
+    .join(' · ');
+
+  const keyboardOffset = Platform.OS === 'ios' ? insets.top + READER_BAR_HEIGHT : 0;
+  const inputBottomPadding = Platform.OS === 'ios' ? Math.max(insets.bottom, 14) : 18;
 
   return (
     <PatientScreenLayout
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
-      title="Conversa selecionada"
-      subtitle="Veja todo o historico e envie novas mensagens para o profissional."
+      title=""
+      subtitle=""
       showTabBar={false}
       scrollEnabled={false}
+      lockFixedContent
       contentContainerStyle={styles.contentContainer}
     >
       <KeyboardAvoidingView
         style={styles.keyboardWrap}
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={keyboardOffset}
       >
-        {loading ? (
-          <View style={styles.loadingCard}>
-            <ActivityIndicator color={patientTheme.colors.primaryDark} />
-            <Text style={styles.loadingText}>Carregando conversa...</Text>
+        <View style={styles.headerCard}>
+          <View style={styles.avatar}>
+            <Text style={styles.avatarText}>{getInitials(nutritionistName)}</Text>
           </View>
-        ) : (
-          <>
-            <View style={styles.headerCard}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{getInitials(nutritionistName)}</Text>
-              </View>
-              <View style={styles.headerCopy}>
-                <Text style={styles.headerName}>{nutritionistName}</Text>
-                <Text style={styles.headerMeta}>{nutritionistMeta}</Text>
-                <Text style={styles.headerHelper}>
-                  Todo o historico desta conversa fica salvo aqui.
-                </Text>
-              </View>
-            </View>
+          <View style={styles.headerCopy}>
+            <Text style={styles.headerName}>{nutritionistName}</Text>
+            <Text style={styles.headerMeta}>{nutritionistMeta}</Text>
+          </View>
+          {refreshing ? (
+            <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+          ) : null}
+        </View>
 
-            <View style={styles.chatCard}>
+        <View style={styles.chatCard}>
+          {loading ? (
+            <View style={styles.loadingInline}>
+              <ActivityIndicator color={patientTheme.colors.primaryDark} />
+              <Text style={styles.loadingText}>Carregando conversa...</Text>
+            </View>
+          ) : (
+            <>
               <ScrollView
                 ref={scrollRef}
                 style={styles.messagesScroll}
-                contentContainerStyle={styles.messagesContent}
+                contentContainerStyle={[
+                  styles.messagesContent,
+                  !messages.length && styles.messagesContentEmpty,
+                  messages.length > 0 && styles.messagesContentWithThread,
+                ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                nestedScrollEnabled
+                bounces={Platform.OS === 'ios'}
+                overScrollMode="never"
+                onContentSizeChange={() => {
+                  if (!loading && messages.length) {
+                    scrollToLatestMessage(false);
+                  }
+                }}
+                onLayout={() => {
+                  if (!loading && messages.length) {
+                    scrollToLatestMessage(false);
+                  }
+                }}
               >
-                {messages.map((message) => {
-                  const isMine = message.role === 'user';
-                  return (
-                    <View
-                      key={message.id}
-                      style={[styles.messageRow, isMine ? styles.messageRowMine : styles.messageRowNutri]}
-                    >
-                      <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleNutri]}>
-                        <Text style={[styles.bubbleAuthor, isMine && styles.bubbleAuthorMine]}>
-                          {isMine ? 'Voce' : message.author}
-                        </Text>
-                        <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>
-                          {message.text}
-                        </Text>
-                        <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
-                          {message.time}
-                        </Text>
+                {!messages.length ? (
+                  <View style={styles.emptyThread}>
+                    <Ionicons
+                      name="chatbubble-ellipses-outline"
+                      size={40}
+                      color={patientTheme.colors.border}
+                    />
+                    <Text style={styles.emptyThreadTitle}>Nenhuma mensagem ainda</Text>
+                    <Text style={styles.emptyThreadText}>
+                      Envie a primeira mensagem para sua nutricionista.
+                    </Text>
+                  </View>
+                ) : (
+                  messages.map((message) => {
+                    const isMine = message.role === 'user';
+                    return (
+                      <View
+                        key={message.id}
+                        style={[
+                          styles.messageRow,
+                          isMine ? styles.messageRowMine : styles.messageRowNutri,
+                        ]}
+                      >
+                        <View style={[styles.bubble, isMine ? styles.bubbleMine : styles.bubbleNutri]}>
+                          {!isMine ? (
+                            <Text style={styles.bubbleAuthor}>{message.author}</Text>
+                          ) : null}
+                          <Text style={[styles.bubbleText, isMine && styles.bubbleTextMine]}>
+                            {message.text}
+                          </Text>
+                          <Text style={[styles.bubbleTime, isMine && styles.bubbleTimeMine]}>
+                            {message.time}
+                          </Text>
+                        </View>
                       </View>
-                    </View>
-                  );
-                })}
+                    );
+                  })
+                )}
               </ScrollView>
 
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={styles.input}
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder="Escreva sua mensagem para a nutricionista"
-                  placeholderTextColor={patientTheme.colors.textMuted}
-                  multiline
-                  maxLength={280}
-                />
+              <View style={[styles.inputRow, { paddingBottom: inputBottomPadding }]}>
+                <View style={styles.inputWrap}>
+                  <TextInput
+                    style={styles.input}
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder="Escreva sua mensagem..."
+                    placeholderTextColor={patientTheme.colors.textMuted}
+                    multiline
+                    maxLength={500}
+                    editable={!sending}
+                  />
+                </View>
                 <TouchableOpacity
-                  style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                  style={[
+                    styles.sendButton,
+                    (!draft.trim() || sending) && styles.sendButtonDisabled,
+                  ]}
                   onPress={handleSend}
                   activeOpacity={0.9}
-                  disabled={sending}
+                  disabled={!draft.trim() || sending}
                 >
                   {sending ? (
                     <ActivityIndicator size="small" color={patientTheme.colors.onPrimary} />
@@ -373,30 +419,43 @@ export default function TelaChatNutricionistaDetalhePaciente({
                   )}
                 </TouchableOpacity>
               </View>
-            </View>
-          </>
-        )}
+            </>
+          )}
+        </View>
       </KeyboardAvoidingView>
     </PatientScreenLayout>
   );
 }
 
+const CHAT_BORDER_COLOR = '#D8E2EA';
+
+const chatPanelBorder = {
+  backgroundColor: patientTheme.colors.background,
+  borderColor: CHAT_BORDER_COLOR,
+  borderWidth: 1,
+};
+
 const styles = StyleSheet.create({
   contentContainer: {
-    flex: 1,
-    paddingBottom: 6,
-  },
-  keyboardWrap: {
+    backgroundColor: patientTheme.colors.background,
     flex: 1,
     minHeight: 0,
+    overflow: 'hidden',
+    paddingBottom: 0,
+    paddingTop: 4,
   },
-  loadingCard: {
+  keyboardWrap: {
+    backgroundColor: patientTheme.colors.background,
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    width: '100%',
+  },
+  loadingInline: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    marginTop: 8,
+    flex: 1,
+    justifyContent: 'center',
     padding: 24,
-    ...patientShadow,
   },
   loadingText: {
     color: patientTheme.colors.textMuted,
@@ -404,25 +463,26 @@ const styles = StyleSheet.create({
   },
   headerCard: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
-    gap: 14,
-    marginBottom: 8,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
+    flexShrink: 0,
+    gap: 12,
+    marginBottom: 10,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    ...chatPanelBorder,
   },
   avatar: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.primarySoft,
     borderRadius: 999,
-    height: 54,
+    height: 48,
     justifyContent: 'center',
-    width: 54,
+    width: 48,
   },
   avatarText: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 18,
+    fontSize: 16,
     fontWeight: '800',
   },
   headerCopy: {
@@ -430,36 +490,57 @@ const styles = StyleSheet.create({
   },
   headerName: {
     color: patientTheme.colors.text,
-    fontSize: 17,
+    fontSize: 16,
     fontWeight: '800',
   },
   headerMeta: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 12,
-    fontWeight: '700',
-    marginTop: 3,
-  },
-  headerHelper: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 6,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 2,
   },
   chatCard: {
-    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     flex: 1,
-    minHeight: Platform.OS === 'web' ? 520 : 420,
+    marginBottom: 14,
+    minHeight: 0,
     overflow: 'hidden',
-    ...patientShadow,
+    ...chatPanelBorder,
   },
   messagesScroll: {
     flex: 1,
-    minHeight: Platform.OS === 'web' ? 380 : 280,
+    minHeight: 0,
   },
   messagesContent: {
     gap: 10,
-    padding: patientTheme.spacing.card,
+    padding: 14,
+    paddingBottom: 8,
+  },
+  messagesContentWithThread: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  messagesContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  emptyThread: {
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 24,
+    paddingVertical: 32,
+  },
+  emptyThreadTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 16,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  emptyThreadText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
   },
   messageRow: {
     flexDirection: 'row',
@@ -472,12 +553,14 @@ const styles = StyleSheet.create({
   },
   bubble: {
     borderRadius: 18,
-    maxWidth: '84%',
+    maxWidth: '86%',
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   bubbleNutri: {
     backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
   },
   bubbleMine: {
     backgroundColor: patientTheme.colors.primaryDark,
@@ -486,15 +569,12 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontSize: 11,
     fontWeight: '800',
-    marginBottom: 6,
-  },
-  bubbleAuthorMine: {
-    color: patientTheme.colors.onPrimary,
+    marginBottom: 4,
   },
   bubbleText: {
     color: patientTheme.colors.text,
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: 15,
+    lineHeight: 21,
   },
   bubbleTextMine: {
     color: patientTheme.colors.onPrimary,
@@ -502,41 +582,54 @@ const styles = StyleSheet.create({
   bubbleTime: {
     color: patientTheme.colors.textMuted,
     fontSize: 11,
-    marginTop: 8,
+    marginTop: 6,
   },
   bubbleTimeMine: {
     color: 'rgba(255,255,255,0.82)',
   },
   inputRow: {
     alignItems: 'flex-end',
-    borderTopColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.background,
+    borderTopColor: CHAT_BORDER_COLOR,
     borderTopWidth: 1,
     flexDirection: 'row',
+    flexShrink: 0,
     gap: 10,
-    padding: 14,
+    marginTop: -14,
+    paddingHorizontal: 12,
+    paddingTop: 10,
+  },
+  inputWrap: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: CHAT_BORDER_COLOR,
+    borderRadius: 22,
+    borderWidth: 1,
+    flex: 1,
+    minHeight: 44,
+    overflow: 'hidden',
   },
   input: {
-    backgroundColor: patientTheme.colors.background,
-    borderColor: patientTheme.colors.border,
-    borderRadius: 18,
-    borderWidth: 1,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 0,
     color: patientTheme.colors.text,
     flex: 1,
-    maxHeight: 120,
-    minHeight: 48,
+    fontSize: 15,
+    maxHeight: 110,
+    minHeight: 44,
     paddingHorizontal: 14,
-    paddingTop: 12,
-    textAlignVertical: 'top',
+    paddingTop: Platform.OS === 'ios' ? 12 : 10,
+    paddingBottom: Platform.OS === 'ios' ? 12 : 10,
+    textAlignVertical: 'center',
   },
   sendButton: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.primaryDark,
-    borderRadius: 18,
-    height: 48,
+    borderRadius: 22,
+    height: 44,
     justifyContent: 'center',
-    width: 48,
+    width: 44,
   },
   sendButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.45,
   },
 });

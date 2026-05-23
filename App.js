@@ -63,6 +63,7 @@ import {
   limparSessaoNutricionista,
 } from './src/servicos/servicoSessaoNutricionista';
 import { resolveInitialRouteName } from './src/utilitarios/perfisApp';
+import { getPatientId } from './src/servicos/servicoDadosPaciente';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -395,30 +396,43 @@ export default function App() {
 
   if (!authReady || !introReady || !patientOnboardingReady || !adminReady || !nutriReady) {
     return (
-      <View
-        style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
-      >
-        <StatusBar
-          barStyle="dark-content"
-          backgroundColor={patientTheme.colors.background}
-        />
-        <View
-          style={styles.loadingBody}
-        >
-          <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-        </View>
-      </View>
+      <GestureHandlerRootView style={styles.gestureRoot}>
+        <SafeAreaProvider>
+          <View
+            style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
+          >
+            <StatusBar
+              barStyle="dark-content"
+              backgroundColor={patientTheme.colors.background}
+            />
+            <View style={styles.loadingBody}>
+              <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
+            </View>
+          </View>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   function getPacienteProps(props) {
+    const sessionUser = patientSessionOverride || session?.user || null;
+    const routeMeta = props.route?.params?.usuarioLogado || null;
+
+    const usuarioLogado = sessionUser
+      ? {
+          ...(routeMeta && typeof routeMeta === 'object' ? routeMeta : {}),
+          ...sessionUser,
+          id_paciente_uuid:
+            getPatientId(sessionUser) ||
+            routeMeta?.id_paciente_uuid ||
+            sessionUser?.user_metadata?.id_paciente_uuid ||
+            null,
+        }
+      : null;
+
     return {
       ...props,
-      usuarioLogado:
-        props.route?.params?.usuarioLogado ||
-        patientSessionOverride ||
-        session?.user ||
-        null,
+      usuarioLogado,
     };
   }
 
@@ -434,14 +448,25 @@ export default function App() {
   }
 
   function getNutriProps(props) {
+    const sessionNutri = nutriSession || null;
+    const routeMeta = props.route?.params?.usuarioLogado || null;
+
     return {
       ...props,
       route: {
         ...props.route,
         params: {
           ...props.route?.params,
-          usuarioLogado:
-            props.route?.params?.usuarioLogado || nutriSession || null,
+          usuarioLogado: sessionNutri
+            ? {
+                ...(routeMeta && typeof routeMeta === 'object' ? routeMeta : {}),
+                ...sessionNutri,
+                id_nutricionista_uuid:
+                  sessionNutri?.id_nutricionista_uuid ||
+                  routeMeta?.id_nutricionista_uuid ||
+                  null,
+              }
+            : null,
         },
       },
       navigation: props.navigation,
@@ -472,7 +497,8 @@ export default function App() {
 
   const readerScreenOptions = {
     animationEnabled: true,
-    cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
+    cardStyle:
+      Platform.OS === 'web' ? styles.webStackCard : styles.nativeStackCard,
     cardStyleInterpolator: fadeCardInterpolator,
     gestureEnabled: Platform.OS !== 'web',
     gestureDirection: 'horizontal',
@@ -810,5 +836,9 @@ const styles = StyleSheet.create({
   webStackCard: {
     overflow: 'visible',
     paddingTop: READER_TOPO_WEB_HEIGHT,
+  },
+  nativeStackCard: {
+    flex: 1,
+    backgroundColor: patientTheme.colors.background,
   },
 });

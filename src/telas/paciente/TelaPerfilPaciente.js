@@ -17,6 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { supabase } from '../../servicos/configSupabase';
@@ -2596,14 +2597,20 @@ export default function PacientePerfilScreen({
     }
   }, [patientId, usuarioLogado]);
 
+  const perfilLoadGuardRef = useRef(criarGuardiaoCarregamentoInicial());
+
   useFocusEffect(
     React.useCallback(() => {
+      if (perfilLoadGuardRef.current.deveIgnorarCarregamentoFocus()) {
+        return undefined;
+      }
+
       carregarPerfil({
         forceRefresh: false,
         showLoading: !isPatientProfileCacheFresh(patientId),
       });
       return undefined;
-  }, [carregarPerfil, patientId])
+    }, [carregarPerfil, patientId])
   );
 
   useEffect(() => {

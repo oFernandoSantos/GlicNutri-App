@@ -8,19 +8,27 @@ import {
 
 const PERFIL_TELECONSULTA_SELECT = '*';
 
-export async function listNutritionists({ limit = 80 } = {}) {
-  const { data, error } = await supabase
+export async function listNutritionists({ limit = null } = {}) {
+  let query = supabase
     .from('nutricionista')
     .select(PERFIL_TELECONSULTA_SELECT)
-    .order('nome_completo_nutri', { ascending: true })
-    .limit(limit);
+    .order('nome_completo_nutri', { ascending: true });
+
+  if (Number.isFinite(Number(limit)) && Number(limit) > 0) {
+    query = query.limit(Number(limit));
+  }
+
+  const { data, error } = await query;
 
   if (error) {
-    const fallback = await supabase
+    let fallbackQuery = supabase
       .from('nutricionista')
       .select('id_nutricionista_uuid, nome_completo_nutri, crm_numero, email_acesso')
-      .order('nome_completo_nutri', { ascending: true })
-      .limit(limit);
+      .order('nome_completo_nutri', { ascending: true });
+    if (Number.isFinite(Number(limit)) && Number(limit) > 0) {
+      fallbackQuery = fallbackQuery.limit(Number(limit));
+    }
+    const fallback = await fallbackQuery;
     if (fallback.error) throw fallback.error;
     return (fallback.data || []).map(enrichNutricionistaFallback);
   }

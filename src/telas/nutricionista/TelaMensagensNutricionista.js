@@ -1,17 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
+  KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
+import { NUTRI_TAB_BAR_HEIGHT, NUTRI_TAB_BAR_SPACE } from '../../componentes/nutricionista/BarraAbasNutricionista';
 import {
   AvatarBadge,
   RiskBadge,
@@ -30,6 +35,7 @@ import {
   getNutritionistId,
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
+import { isChatCompactLayout, scrollChatToEnd } from '../../utilitarios/chatConversa';
 
 function formatTimeNow() {
   return new Date().toLocaleTimeString('pt-BR', {
@@ -64,12 +70,31 @@ function buildChatItems(patients, summariesById) {
   });
 }
 
+const CHAT_PAGE_SIZE = 10;
+const READER_BAR_HEIGHT = 58;
+
 export default function TelaMensagensNutricionista({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const insets = useSafeAreaInsets();
+  const isCompact = isChatCompactLayout(windowWidth);
   const preselectedPatientId = route?.params?.pacienteId || route?.params?.patientId || null;
   const preselectedChatId = route?.params?.chatId || null;
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
   const scrollRef = useRef(null);
+  const hasLoadedChatsRef = useRef(false);
+  const showTabBar = route?.name === 'NutricionistaMensagens';
+  const chatPanelHeight = useMemo(() => {
+    const readerHeader = insets.top + READER_BAR_HEIGHT;
+    const tabBarSpace = showTabBar ? NUTRI_TAB_BAR_HEIGHT + NUTRI_TAB_BAR_SPACE + 16 : 16;
+    const available = windowHeight - readerHeader - insets.bottom - tabBarSpace;
+    if (isCompact) {
+      return Math.max(360, available);
+    }
+    return Math.max(420, available - 120);
+  }, [insets.bottom, insets.top, isCompact, showTabBar, windowHeight]);
+
+  const keyboardOffset = Platform.OS === 'ios' ? insets.top + READER_BAR_HEIGHT : 0;
 
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
@@ -78,10 +103,11 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const [draft, setDraft] = useState('');
   const [chats, setChats] = useState([]);
   const [activeChatId, setActiveChatId] = useState(null);
+  const [visibleChatCount, setVisibleChatCount] = useState(CHAT_PAGE_SIZE);
 
-  const loadChats = useCallback(async () => {
+  const loadChats = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setLoadError('');
 
       if (!nutricionistaId) {
@@ -105,6 +131,9 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         (preselectedPatientId ? `chat-${preselectedPatientId}` : null);
 
       setChats(nextChats);
+      if (!silent) {
+        setVisibleChatCount(CHAT_PAGE_SIZE);
+      }
       setActiveChatId((current) => {
         if (preferredChatId && nextChats.some((item) => item.id === preferredChatId)) {
           return preferredChatId;
@@ -112,7 +141,8 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         if (current && nextChats.some((item) => item.id === current)) {
           return current;
         }
-        return null;
+        if (isCompact) return null;
+        return nextChats[0]?.id || null;
       });
     } catch (error) {
       console.log('Erro ao carregar conversas da nutricionista:', error);
@@ -120,18 +150,15 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       setChats([]);
       setActiveChatId(null);
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
-  }, [nutricionistaId, preselectedChatId, preselectedPatientId]);
-
-  useEffect(() => {
-    loadChats();
-  }, [loadChats]);
+  }, [isCompact, nutricionistaId, preselectedChatId, preselectedPatientId]);
 
   useFocusEffect(
     React.useCallback(() => {
-      loadChats();
-      const intervalId = setInterval(loadChats, 5000);
+      loadChats({ silent: hasLoadedChatsRef.current });
+      hasLoadedChatsRef.current = true;
+      const intervalId = setInterval(() => loadChats({ silent: true }), 30000);
       return () => clearInterval(intervalId);
     }, [loadChats])
   );
@@ -146,9 +173,16 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     });
   }, [search, chats]);
 
+  const visibleChats = useMemo(() => {
+    return filteredChats.slice(0, visibleChatCount);
+  }, [filteredChats, visibleChatCount]);
+
   const activeChat = useMemo(() => {
     return filteredChats.find((item) => item.id === activeChatId) || null;
   }, [filteredChats, activeChatId]);
+
+  const showListColumn = !isCompact || !activeChatId;
+  const showThreadColumn = !isCompact || Boolean(activeChatId);
 
   const metrics = useMemo(() => {
     const total = chats.length;
@@ -167,13 +201,18 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     ];
   }, [chats]);
 
-  useEffect(() => {
-    const timeoutId = setTimeout(() => {
-      scrollRef.current?.scrollToEnd?.({ animated: true });
-    }, 50);
+  const scrollThreadToLatest = useCallback((animated = false) => {
+    scrollChatToEnd(scrollRef, {
+      animated,
+      delays: animated ? [0, 80] : [0, 80, 200, 400],
+    });
+  }, []);
 
-    return () => clearTimeout(timeoutId);
-  }, [activeChat?.messages?.length]);
+  useEffect(() => {
+    if (!activeChat?.messages?.length) return undefined;
+    scrollThreadToLatest(false);
+    return undefined;
+  }, [activeChat?.id, activeChat?.messages?.length, scrollThreadToLatest]);
 
   async function handleSend() {
     const text = draft.trim();
@@ -199,6 +238,20 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     );
     const nextThread = [...(activeChat.messages || []), nextMessage];
 
+    setChats((current) =>
+      current.map((chat) => {
+        if (chat.id !== activeChat.id) return chat;
+        const preview = buildNutritionistThreadPreview(nextThread);
+        return {
+          ...chat,
+          messages: nextThread,
+          lastMessage: preview.lastMessage,
+          lastMessageAt: preview.lastMessageAt,
+          unread: 0,
+        };
+      })
+    );
+
     try {
       setSending(true);
       setDraft('');
@@ -208,11 +261,16 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         thread: nextThread,
         actor: usuarioLogado,
         patientContext: activeChat.patient,
-        newMessage: nextMessage,
+        newMessage: {
+          ...nextMessage,
+          nutritionistName,
+          patientName: activeChat.patientName,
+        },
       });
 
-      const savedThread =
-        saved?.appState?.nutritionistThread?.length ? saved.appState.nutritionistThread : nextThread;
+      const savedThread = ensureArray(saved?.appState?.nutritionistThread).length
+        ? saved.appState.nutritionistThread
+        : nextThread;
 
       setChats((current) =>
         current.map((chat) => {
@@ -230,9 +288,20 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     } catch (error) {
       console.log('Erro ao enviar resposta da nutricionista:', error);
       setDraft(text);
+      await loadChats({ silent: true });
+      Alert.alert('Nao foi possivel enviar', 'Confira o vinculo com o paciente e tente novamente.');
     } finally {
       setSending(false);
     }
+  }
+
+  function ensureArray(value) {
+    return Array.isArray(value) ? value : [];
+  }
+
+  function handleLoadMoreChats() {
+    if (visibleChatCount >= filteredChats.length) return;
+    setVisibleChatCount((current) => Math.min(current + CHAT_PAGE_SIZE, filteredChats.length));
   }
 
   return (
@@ -242,30 +311,36 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       usuarioLogado={usuarioLogado}
       title=""
       subtitle=""
-      showTabBar={route?.name === 'NutricionistaMensagens'}
+      showTabBar={showTabBar}
+      scrollEnabled={false}
+      lockFixedContent={isCompact && Boolean(activeChatId)}
+      contentContainerStyle={styles.layoutContent}
     >
-      <View style={nutriDesktopStyles.pageGap}>
-        <View style={styles.metricGrid}>
-          {metrics.map((item) => (
-            <SectionCard key={item.id} style={[styles.metricCell, styles.metricCardCustom]}>
-              <Text style={styles.metricLabelCustom}>{item.label}</Text>
-              <Text
-                style={[
-                  styles.metricValueCustom,
-                  item.id === 'unread' && styles.metricValueUnread,
-                  item.id === 'read' && styles.metricValueRead,
-                  item.id === 'today' && styles.metricValueToday,
-                ]}
-              >
-                {item.value}
-              </Text>
-              <Text style={styles.metricHelperCustom}>{item.helper}</Text>
-            </SectionCard>
-          ))}
-        </View>
+      <View style={[nutriDesktopStyles.pageGap, styles.pageGap]}>
+        {!isCompact ? (
+          <View style={styles.metricGrid}>
+            {metrics.map((item) => (
+              <SectionCard key={item.id} style={[styles.metricCell, styles.metricCardCustom]}>
+                <Text style={styles.metricLabelCustom}>{item.label}</Text>
+                <Text
+                  style={[
+                    styles.metricValueCustom,
+                    item.id === 'unread' && styles.metricValueUnread,
+                    item.id === 'read' && styles.metricValueRead,
+                    item.id === 'today' && styles.metricValueToday,
+                  ]}
+                >
+                  {item.value}
+                </Text>
+                <Text style={styles.metricHelperCustom}>{item.helper}</Text>
+              </SectionCard>
+            ))}
+          </View>
+        ) : null}
 
-        <View style={[nutriDesktopStyles.desktopRow, styles.chatLayout]}>
-        <SectionCard style={styles.listColumn}>
+        <View style={[styles.chatRow, isCompact && styles.chatRowCompact]}>
+        {showListColumn ? (
+        <SectionCard style={[styles.listColumn, { height: chatPanelHeight }]}>
           <View style={styles.listHeader}>
             <Text style={styles.columnTitle}>Mensagens</Text>
             {metrics[1]?.value ? (
@@ -296,8 +371,21 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
               <Text style={styles.feedbackText}>Ajuste a busca ou aguarde um paciente iniciar contato.</Text>
             </View>
           ) : (
-            <View style={styles.chatList}>
-              {filteredChats.map((chat) => {
+            <ScrollView
+              style={styles.chatListScroll}
+              contentContainerStyle={styles.chatList}
+              showsVerticalScrollIndicator={false}
+              onScroll={({ nativeEvent }) => {
+                const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
+                const isNearBottom =
+                  layoutMeasurement.height + contentOffset.y >= contentSize.height - 80;
+                if (isNearBottom) {
+                  handleLoadMoreChats();
+                }
+              }}
+              scrollEventThrottle={16}
+            >
+              {visibleChats.map((chat) => {
                 const selected = activeChat?.id === chat.id;
                 return (
                   <TouchableOpacity
@@ -322,13 +410,36 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                   </TouchableOpacity>
                 );
               })}
-            </View>
+              {visibleChatCount < filteredChats.length ? (
+                <View style={styles.chatListFooter}>
+                  <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+                </View>
+              ) : null}
+            </ScrollView>
           )}
         </SectionCard>
+        ) : null}
 
-        <SectionCard style={styles.threadColumn}>
+        {showThreadColumn ? (
+        <SectionCard style={[styles.threadColumn, { height: chatPanelHeight }]}>
           {activeChat ? (
-            <>
+            <KeyboardAvoidingView
+              style={styles.threadKeyboardWrap}
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              keyboardVerticalOffset={keyboardOffset}
+            >
+              <View style={styles.threadInner}>
+              {isCompact ? (
+                <TouchableOpacity
+                  style={styles.backButton}
+                  onPress={() => setActiveChatId(null)}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="chevron-back" size={20} color={patientTheme.colors.primaryDark} />
+                  <Text style={styles.backButtonText}>Conversas</Text>
+                </TouchableOpacity>
+              ) : null}
+
               <View style={styles.threadHeader}>
                 <View style={styles.threadIdentity}>
                   <AvatarBadge name={activeChat.patientName} size={52} />
@@ -359,41 +470,68 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
               <ScrollView
                 ref={scrollRef}
                 style={styles.threadBody}
-                contentContainerStyle={styles.threadBodyContent}
+                contentContainerStyle={[
+                  styles.threadBodyContent,
+                  !(activeChat.messages || []).length && styles.threadBodyContentEmpty,
+                  (activeChat.messages || []).length > 0 && styles.threadBodyContentFilled,
+                ]}
                 showsVerticalScrollIndicator={false}
                 keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="interactive"
+                nestedScrollEnabled
+                bounces={Platform.OS === 'ios'}
+                overScrollMode="never"
+                onContentSizeChange={() => {
+                  if ((activeChat.messages || []).length) {
+                    scrollThreadToLatest(false);
+                  }
+                }}
+                onLayout={() => {
+                  if ((activeChat.messages || []).length) {
+                    scrollThreadToLatest(false);
+                  }
+                }}
               >
-                {(activeChat.messages || []).map((message) => {
-                  const mine = message.role === 'nutri';
-                  return (
-                    <View
-                      key={message.id}
-                      style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowPatient]}
-                    >
-                      <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePatient]}>
-                        <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.text}</Text>
-                        <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>{message.time}</Text>
+                {!(activeChat.messages || []).length ? (
+                  <View style={styles.emptyThread}>
+                    <Text style={styles.emptyText}>Nenhuma mensagem nesta conversa ainda.</Text>
+                  </View>
+                ) : (
+                  (activeChat.messages || []).map((message) => {
+                    const mine = message.role === 'nutri';
+                    return (
+                      <View
+                        key={message.id}
+                        style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowPatient]}
+                      >
+                        <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePatient]}>
+                          <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.text}</Text>
+                          <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>{message.time}</Text>
+                        </View>
                       </View>
-                    </View>
-                  );
-                })}
+                    );
+                  })
+                )}
               </ScrollView>
 
-              <View style={styles.inputRow}>
-                <TextInput
-                  style={styles.threadInput}
-                  value={draft}
-                  onChangeText={setDraft}
-                  placeholder="Responder paciente"
-                  placeholderTextColor={patientTheme.colors.textMuted}
-                  returnKeyType="send"
-                  onSubmitEditing={handleSend}
-                />
+              <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+                <View style={styles.threadInputWrap}>
+                  <TextInput
+                    style={styles.threadInput}
+                    value={draft}
+                    onChangeText={setDraft}
+                    placeholder="Responder paciente"
+                    placeholderTextColor={patientTheme.colors.textMuted}
+                    multiline
+                    maxLength={500}
+                    editable={!sending}
+                  />
+                </View>
                 <TouchableOpacity
-                  style={[styles.sendButton, sending && styles.sendButtonDisabled]}
+                  style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
                   onPress={handleSend}
                   activeOpacity={0.9}
-                  disabled={sending}
+                  disabled={!draft.trim() || sending}
                 >
                   {sending ? (
                     <ActivityIndicator size="small" color={patientTheme.colors.onPrimary} />
@@ -402,15 +540,17 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                   )}
                 </TouchableOpacity>
               </View>
-            </>
+              </View>
+            </KeyboardAvoidingView>
           ) : (
             <View style={styles.emptyState}>
               <Ionicons name="chatbubble-ellipses-outline" size={72} color={patientTheme.colors.border} />
               <Text style={styles.emptyTitle}>Selecione uma conversa</Text>
-              <Text style={styles.emptyText}>Escolha uma conversa da lista para ver as mensagens</Text>
+              <Text style={styles.emptyText}>Escolha um paciente na lista para ver as mensagens</Text>
             </View>
           )}
         </SectionCard>
+        ) : null}
       </View>
       </View>
     </LayoutNutricionista>
@@ -418,6 +558,16 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  layoutContent: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    paddingBottom: 0,
+  },
+  pageGap: {
+    flex: 1,
+    minHeight: 0,
+  },
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -472,13 +622,49 @@ const styles = StyleSheet.create({
   metricValueToday: {
     color: patientTheme.colors.primaryDark,
   },
-  chatLayout: {
+  chatRow: {
     alignItems: 'stretch',
+    flex: 1,
+    minHeight: 0,
+  },
+  chatRowCompact: {
+    flexDirection: 'column',
+  },
+  listColumnFlex: {
+    flex: 1,
+    minHeight: 320,
+  },
+  threadColumnFlex: {
+    flex: 1,
+    minHeight: 320,
+  },
+  threadKeyboardWrap: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  threadInner: {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'hidden',
+  },
+  backButton: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+    marginBottom: 8,
+  },
+  backButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 15,
+    fontWeight: '700',
   },
   listColumn: {
     flex: Platform.OS === 'web' ? 1 : 1,
     minWidth: 0,
-    minHeight: 400,
+    minHeight: 0,
     paddingHorizontal: 0,
     paddingTop: 16,
     paddingBottom: 0,
@@ -488,17 +674,19 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
     shadowColor: 'transparent',
     elevation: 0,
+    overflow: 'hidden',
   },
   threadColumn: {
     flex: Platform.OS === 'web' ? 2 : 1,
     minWidth: 0,
-    minHeight: 620,
+    minHeight: 0,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
     backgroundColor: patientTheme.colors.background,
     shadowColor: 'transparent',
     elevation: 0,
+    overflow: 'hidden',
   },
   columnTitle: {
     fontSize: 18,
@@ -561,8 +749,17 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontWeight: '900',
   },
+  chatListScroll: {
+    flex: 1,
+    minHeight: 0,
+  },
   chatList: {
     gap: 0,
+  },
+  chatListFooter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
   },
   chatListItem: {
     flexDirection: 'row',
@@ -577,7 +774,7 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   chatListItemActive: {
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.primarySoft,
   },
   chatListCopy: {
     flex: 1,
@@ -620,6 +817,7 @@ const styles = StyleSheet.create({
   },
   threadHeader: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    flexShrink: 0,
     justifyContent: 'space-between',
     gap: 14,
     paddingBottom: 14,
@@ -663,11 +861,26 @@ const styles = StyleSheet.create({
   },
   threadBody: {
     flex: 1,
-    minHeight: 380,
+    minHeight: 0,
     paddingVertical: 18,
   },
   threadBodyContent: {
     gap: 10,
+    paddingBottom: 8,
+  },
+  threadBodyContentEmpty: {
+    flexGrow: 1,
+    justifyContent: 'center',
+  },
+  threadBodyContentFilled: {
+    flexGrow: 1,
+    justifyContent: 'flex-end',
+  },
+  emptyThread: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 120,
+    paddingHorizontal: 16,
   },
   messageRow: {
     flexDirection: 'row',
@@ -686,7 +899,8 @@ const styles = StyleSheet.create({
   },
   bubblePatient: {
     backgroundColor: patientTheme.colors.background,
-    ...patientShadow,
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
   },
   bubbleMine: {
     backgroundColor: patientTheme.colors.primaryDark,
@@ -709,22 +923,36 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
   inputRow: {
+    flexShrink: 0,
     marginTop: 12,
     borderTopWidth: 1,
-    borderTopColor: patientTheme.colors.border,
+    borderTopColor: '#B0BEC8',
     paddingTop: 12,
     flexDirection: 'row',
     gap: 10,
-    alignItems: 'center',
+    alignItems: 'flex-end',
   },
-  threadInput: {
+  threadInputWrap: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: '#B0BEC8',
+    borderRadius: 22,
+    borderWidth: 1.5,
     flex: 1,
     minHeight: 44,
-    borderRadius: 999,
-    backgroundColor: patientTheme.colors.background,
-    paddingHorizontal: 16,
+    overflow: 'hidden',
+  },
+  threadInput: {
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 0,
     color: patientTheme.colors.text,
-    ...patientShadow,
+    flex: 1,
+    fontSize: 15,
+    maxHeight: 110,
+    minHeight: 44,
+    paddingHorizontal: 16,
+    paddingTop: Platform.OS === 'ios' ? 12 : 10,
+    paddingBottom: Platform.OS === 'ios' ? 12 : 10,
+    textAlignVertical: 'center',
   },
   sendButton: {
     width: 44,

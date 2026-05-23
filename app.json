@@ -21,6 +21,7 @@
       }
     },
     "android": {
+      "softwareKeyboardLayoutMode": "resize",
       "package": "com.glicnutri.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",

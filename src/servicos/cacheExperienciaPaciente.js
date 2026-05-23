@@ -1,10 +1,14 @@
-const DEFAULT_TTL_MS = 45 * 1000;
+const DEFAULT_TTL_MS = 90 * 1000;
+const CHAT_CACHE_TTL_MS = 20 * 1000;
 
 const experienceCache = new Map();
 const experienceInFlight = new Map();
 
 const profileCache = new Map();
 const profileInFlight = new Map();
+
+const chatCache = new Map();
+const chatInFlight = new Map();
 
 function buildExperienceCacheKey(patientId, options = {}) {
   return `${patientId}:${options.includeHidden ? 'all' : 'visible'}`;
@@ -50,6 +54,33 @@ export function invalidatePatientExperienceCache(patientId) {
 
   profileCache.delete(patientId);
   profileInFlight.delete(patientId);
+
+  chatCache.delete(`${patientId}:chat`);
+  chatInFlight.delete(`${patientId}:chat`);
+}
+
+export function getCachedPatientChat(patientId, ttlMs = CHAT_CACHE_TTL_MS) {
+  if (!patientId) return null;
+  return getFreshEntry(chatCache, `${patientId}:chat`, ttlMs);
+}
+
+export async function fetchCachedPatientChat(patientId, options, loader) {
+  if (!patientId) {
+    return loader();
+  }
+
+  const cacheKey = `${patientId}:chat`;
+  const ttlMs = options.cacheTtlMs ?? CHAT_CACHE_TTL_MS;
+  const forceRefresh = options.forceRefresh === true;
+
+  return readThroughPatientCache({
+    cache: chatCache,
+    inFlight: chatInFlight,
+    cacheKey,
+    forceRefresh,
+    ttlMs,
+    loader,
+  });
 }
 
 export function isPatientProfileCacheFresh(patientId, ttlMs = DEFAULT_TTL_MS) {

@@ -22,6 +22,7 @@ import {
   getLatestGlucose,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 
 const assistantWelcome =
   'Estou aqui para responder duvidas do dia a dia cruzando sua glicose, refeicoes e rotina.';
@@ -69,6 +70,7 @@ export default function PacienteAssistenteScreen({
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          ...mesclarLimitesDadosPaciente('assistente'),
         });
 
         if (!active) return;
