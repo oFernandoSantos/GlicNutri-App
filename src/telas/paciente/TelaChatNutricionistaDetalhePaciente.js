@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientTheme } from '../../temas/temaVisualPaciente';
+import { supabase } from '../../servicos/configSupabase';
 import {
   createDefaultAppState,
   fetchPatientNutritionistChat,
@@ -195,10 +196,35 @@ export default function TelaChatNutricionistaDetalhePaciente({
       const intervalId = setInterval(() => {
         if (sending || draft.trim()) return;
         load({ silent: true, forceRefresh: false });
-      }, 25000);
+      }, 5000);
       return () => clearInterval(intervalId);
     }, [draft, load, sending])
   );
+
+  useEffect(() => {
+    if (!patientId) return undefined;
+
+    const channel = supabase
+      .channel(`patient-chat-${patientId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mensagem_chat',
+          filter: `paciente_id=eq.${patientId}`,
+        },
+        () => {
+          if (draft.trim()) return;
+          load({ silent: true, forceRefresh: true });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [draft, load, patientId]);
 
   const nutritionistName =
     nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';

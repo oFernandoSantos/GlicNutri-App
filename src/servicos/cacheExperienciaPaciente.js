@@ -10,6 +10,10 @@ const profileInFlight = new Map();
 const chatCache = new Map();
 const chatInFlight = new Map();
 
+const nutriInboxCache = new Map();
+const nutriInboxInFlight = new Map();
+const NUTRI_INBOX_TTL_MS = 20 * 1000;
+
 function buildExperienceCacheKey(patientId, options = {}) {
   return `${patientId}:${options.includeHidden ? 'all' : 'visible'}`;
 }
@@ -150,6 +154,43 @@ export async function fetchCachedPatientExperience(patientId, options, loader) {
     forceRefresh,
     ttlMs,
     loader,
+  });
+}
+
+export async function fetchCachedNutriChatInbox(nutricionistaId, patientIds, loader) {
+  if (!nutricionistaId) {
+    return loader();
+  }
+
+  const cacheKey = `${nutricionistaId}:inbox`;
+  const forceRefresh = false;
+
+  return readThroughPatientCache({
+    cache: nutriInboxCache,
+    inFlight: nutriInboxInFlight,
+    cacheKey,
+    forceRefresh,
+    ttlMs: NUTRI_INBOX_TTL_MS,
+    loader,
+  });
+}
+
+export function invalidateNutriChatInboxCache(nutricionistaId) {
+  if (!nutricionistaId) {
+    nutriInboxCache.clear();
+    nutriInboxInFlight.clear();
+    return;
+  }
+
+  [...nutriInboxCache.keys()].forEach((key) => {
+    if (key.startsWith(`${nutricionistaId}:`)) {
+      nutriInboxCache.delete(key);
+    }
+  });
+  [...nutriInboxInFlight.keys()].forEach((key) => {
+    if (key.startsWith(`${nutricionistaId}:`)) {
+      nutriInboxInFlight.delete(key);
+    }
   });
 }
 

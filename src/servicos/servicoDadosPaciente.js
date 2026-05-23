@@ -94,11 +94,28 @@ export function createDefaultAppState() {
   };
 }
 
+export function sanitizeChatMessageText(text) {
+  let value = String(text || '').trim();
+  if (!value) return '';
+
+  value = value.replace(/\[hist-seed[^\]]*\]/gi, '').trim();
+  value = value
+    .replace(
+      new RegExp(`${META_START}[\\s\\S]*?${META_END}`, 'g'),
+      ''
+    )
+    .trim();
+
+  return value;
+}
+
 export function normalizeNutritionistThreadEntry(
   item,
   { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
 ) {
   const role = item?.role === 'nutri' ? 'nutri' : 'user';
+  const text = sanitizeChatMessageText(item?.text);
+
   return {
     id: item?.id || `thread-${role}-${Date.now()}`,
     author:
@@ -106,7 +123,7 @@ export function normalizeNutritionistThreadEntry(
       (role === 'nutri' ? nutritionistName : patientName),
     role,
     time: String(item?.time || '').trim(),
-    text: String(item?.text || '').trim(),
+    text,
   };
 }
 
@@ -902,7 +919,199 @@ export async function fetchPatientNutritionistChat(patientId, options = {}) {
   };
 }
 
-export async function fetchNutritionistChatSummariesByPatientIds(patientIds = [], nutricionistaId = null) {
+const NUTRI_INBOX_MESSAGES_PER_PATIENT = 12;
+const NUTRI_INBOX_FALLBACK_BATCH = 12;
+const NUTRI_THREAD_RECENT_LIMIT = 80;
+
+function formatChatRowTime(createdAt) {
+  const date = createdAt ? new Date(createdAt) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const sameDay =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+  if (sameDay) {
+    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function mapChatRowToThreadEntry(row, patientName) {
+  const entry = normalizeNutritionistThreadEntry(
+    {
+      id: row.id,
+      role: row.autor_role === 'nutricionista' ? 'nutri' : 'user',
+      author: row.autor_role === 'nutricionista' ? 'Nutricionista' : patientName,
+      time: formatChatRowTime(row.created_at),
+      text: row.texto,
+    },
+    { nutritionistName: 'Nutricionista', patientName }
+  );
+
+  return {
+    ...entry,
+    createdAt: row?.created_at || null,
+  };
+}
+
+function groupRecentChatRows(messages = []) {
+  const grouped = new Map();
+
+  (messages || []).forEach((row) => {
+    const patientId = row?.paciente_id;
+    if (!patientId) return;
+    const list = grouped.get(patientId) || [];
+    list.push(row);
+    grouped.set(patientId, list);
+  });
+
+  grouped.forEach((rows, patientId) => {
+    rows.sort((left, right) => new Date(left.created_at) - new Date(right.created_at));
+    grouped.set(patientId, rows);
+  });
+
+  return grouped;
+}
+
+async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
+  if (!nutricionistaId || !patientIds.length) {
+    return new Map();
+  }
+
+  const { data, error } = await supabase.rpc('listar_mensagens_chat_inbox', {
+    p_nutricionista_id: nutricionistaId,
+    p_paciente_ids: patientIds,
+    p_mensagens_por_paciente: NUTRI_INBOX_MESSAGES_PER_PATIENT,
+  });
+
+  if (!error && Array.isArray(data)) {
+    return groupRecentChatRows(data);
+  }
+
+  if (error && !isRpcFunctionMissing(error, 'listar_mensagens_chat_inbox')) {
+    console.log('RPC listar_mensagens_chat_inbox:', error.message);
+  }
+
+  const aggregated = [];
+
+  for (let index = 0; index < patientIds.length; index += NUTRI_INBOX_FALLBACK_BATCH) {
+    const chunk = patientIds.slice(index, index + NUTRI_INBOX_FALLBACK_BATCH);
+    const partial = await Promise.all(
+      chunk.map(async (patientId) => {
+        const { data: rows, error: rowError } = await supabase
+          .from('mensagem_chat')
+          .select('id, paciente_id, nutricionista_id, autor_role, texto, created_at')
+          .eq('nutricionista_id', nutricionistaId)
+          .eq('paciente_id', patientId)
+          .order('created_at', { ascending: false })
+          .limit(NUTRI_INBOX_MESSAGES_PER_PATIENT);
+
+        if (rowError) {
+          console.log('Inbox fallback paciente:', rowError.message);
+          return [];
+        }
+
+        return rows || [];
+      })
+    );
+
+    aggregated.push(...partial.flat());
+  }
+
+  return groupRecentChatRows(aggregated);
+}
+
+/** Lista leve: ultima mensagem + nao lidas, sem thread completa nem app_state por paciente. */
+export async function fetchNutritionistChatInbox(patientIds = [], nutricionistaId = null) {
+  const resolvedIds = uniqueValues(patientIds);
+  if (!resolvedIds.length) return [];
+
+  const { data: patients, error } = await supabase
+    .from('paciente')
+    .select('id_paciente_uuid, nome_completo, email_pac, objetivo_principal_consulta, id_nutricionista_uuid')
+    .in('id_paciente_uuid', resolvedIds);
+
+  if (error) throw error;
+
+  const resolvedNutriId =
+    nutricionistaId ||
+    patients?.find((item) => item?.id_nutricionista_uuid)?.id_nutricionista_uuid ||
+    null;
+
+  let messagesByPatient = new Map();
+
+  if (resolvedNutriId) {
+    try {
+      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
+    } catch (chatError) {
+      console.log('Chat inbox indisponivel:', chatError);
+    }
+  }
+
+  const patientById = new Map(
+    (patients || []).map((patient) => [patient.id_paciente_uuid, patient])
+  );
+
+  return resolvedIds.map((patientId) => {
+    const patient = patientById.get(patientId);
+    if (!patient) {
+      return null;
+    }
+
+    const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+    const patientName = patient?.nome_completo || patient?.email_pac || 'Paciente';
+    const rows = messagesByPatient.get(patientId) || [];
+    const thread = rows.map((row) => mapChatRowToThreadEntry(row, patientName)).filter((item) => item.text);
+    const preview = buildNutritionistThreadPreview(thread);
+    const lastRow = rows.length ? rows[rows.length - 1] : null;
+
+    return {
+      patient,
+      clinicalObjective: parsed.objectiveText,
+      preview,
+      lastMessageCreatedAt: lastRow?.created_at || null,
+      thread: [],
+    };
+  }).filter(Boolean);
+}
+
+export async function fetchNutritionistChatThreadForPatient(
+  patientId,
+  nutricionistaId,
+  { patientName = 'Paciente', limit = NUTRI_THREAD_RECENT_LIMIT } = {}
+) {
+  if (!patientId) return [];
+
+  const thread = await fetchChatThreadFromDatabase({
+    pacienteId: patientId,
+    nutricionistaId,
+    nutritionistName: 'Nutricionista',
+    patientName,
+    limit,
+  });
+
+  if (Array.isArray(thread)) {
+    return thread.filter((item) => item.text);
+  }
+
+  return [];
+}
+
+export async function fetchNutritionistChatSummariesByPatientIds(
+  patientIds = [],
+  nutricionistaId = null,
+  options = {}
+) {
+  if (options.inboxOnly === true) {
+    return fetchNutritionistChatInbox(patientIds, nutricionistaId);
+  }
+
   const resolvedIds = uniqueValues(patientIds);
   if (!resolvedIds.length) return [];
 
@@ -924,7 +1133,7 @@ export async function fetchNutritionistChatSummariesByPatientIds(patientIds = []
     try {
       const { data: messages, error: messagesError } = await supabase
         .from('mensagem_chat')
-        .select('*')
+        .select('id, paciente_id, nutricionista_id, autor_role, texto, created_at')
         .in('paciente_id', resolvedIds)
         .eq('nutricionista_id', resolvedNutriId)
         .order('created_at', { ascending: true });
@@ -944,7 +1153,9 @@ export async function fetchNutritionistChatSummariesByPatientIds(patientIds = []
   const patientsWithMeta = await Promise.all(
     (patients || []).map(async (patient) => {
       const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
-      const tableState = await fetchPacienteAppStateFromTable(patient.id_paciente_uuid);
+      const tableState = messagesByPatient.has(patient.id_paciente_uuid)
+        ? null
+        : await fetchPacienteAppStateFromTable(patient.id_paciente_uuid);
       return { patient, parsed, tableState };
     })
   );
@@ -955,21 +1166,9 @@ export async function fetchNutritionistChatSummariesByPatientIds(patientIds = []
     let thread = [];
 
     if (rows.length) {
-      thread = rows.map((row) =>
-        normalizeNutritionistThreadEntry(
-          {
-            id: row.id,
-            role: row.autor_role === 'nutricionista' ? 'nutri' : 'user',
-            author: row.autor_role === 'nutricionista' ? 'Nutricionista' : patientName,
-            time: new Date(row.created_at).toLocaleTimeString('pt-BR', {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-            text: row.texto,
-          },
-          { nutritionistName: 'Nutricionista', patientName }
-        )
-      );
+      thread = rows
+        .map((row) => mapChatRowToThreadEntry(row, patientName))
+        .filter((item) => item.text);
     } else {
       const legacy = ensureArray(
         tableState?.nutritionistThread || parsed?.appState?.nutritionistThread
@@ -990,6 +1189,7 @@ export async function fetchNutritionistChatSummariesByPatientIds(patientIds = []
         ...(tableState || parsed.appState),
         nutritionistThread: thread,
       }),
+      lastMessageCreatedAt: rows[rows.length - 1]?.created_at || null,
       thread: ensureArray(thread),
     };
   });
