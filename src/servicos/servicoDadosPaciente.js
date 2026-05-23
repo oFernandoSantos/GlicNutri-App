@@ -4,12 +4,16 @@ import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoog
 import { mergeCachedGlucoseReadings } from './centralGlicose';
 import { replaceCachedPatientAppState } from './centralAppState';
 import {
+  fetchCachedPatientChat,
   fetchCachedPatientExperience,
   fetchCachedPatientProfile,
+  getCachedPatientChat,
+  getCachedPatientExperience,
   invalidatePatientExperienceCache,
 } from './cacheExperienciaPaciente';
 
 export {
+  getCachedPatientChat,
   getCachedPatientExperience,
   getCachedPatientProfile,
   invalidatePatientExperienceCache,
@@ -18,7 +22,6 @@ export {
 } from './cacheExperienciaPaciente';
 import {
   mealPlanSections,
-  nutritionistThread,
 } from '../dados/dadosExperienciaPaciente';
 import {
   fetchPacienteAppStateFromTable,
@@ -81,7 +84,7 @@ export function createDefaultAppState() {
     assistantMessages: [],
     patientNotifications: [],
     hiddenGlucoseReadingIds: [],
-    nutritionistThread,
+    nutritionistThread: [],
     planSections: mealPlanSections,
     wellness: {
       selectedSymptoms: ['focused'],
@@ -126,6 +129,29 @@ export function buildNutritionistThreadPreview(thread = []) {
   };
 }
 
+function ensureThreadContainsMessage(thread = [], message = null) {
+  const normalizedThread = ensureArray(thread).map((item) => normalizeNutritionistThreadEntry(item));
+  const normalizedMessage = message ? normalizeNutritionistThreadEntry(message) : null;
+
+  if (!normalizedMessage?.text) {
+    return normalizedThread;
+  }
+
+  const alreadyPresent = normalizedThread.some((item) => {
+    return (
+      item.role === normalizedMessage.role &&
+      item.text === normalizedMessage.text &&
+      item.time === normalizedMessage.time
+    );
+  });
+
+  if (alreadyPresent) {
+    return normalizedThread;
+  }
+
+  return [...normalizedThread, normalizedMessage];
+}
+
 function ensureArray(value) {
   return Array.isArray(value) ? value : [];
 }
@@ -159,9 +185,7 @@ function normalizeAppState(rawState) {
     assistantMessages: ensureArray(appState.assistantMessages),
     patientNotifications: ensureArray(appState.patientNotifications),
     hiddenGlucoseReadingIds: ensureArray(appState.hiddenGlucoseReadingIds),
-    nutritionistThread: ensureArray(appState.nutritionistThread).length
-      ? appState.nutritionistThread
-      : defaults.nutritionistThread,
+    nutritionistThread: ensureArray(appState.nutritionistThread),
     planSections: ensureArray(appState.planSections).length
       ? appState.planSections
       : defaults.planSections,
@@ -707,14 +731,12 @@ export async function fetchPatientById(patientId, options = {}) {
   );
 }
 
-async function loadPatientExperience(patientId, options = {}) {
-  const patient = await fetchPatientById(patientId, options);
-  const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
-  const effectivePatientId = patient?.id_paciente_uuid || patientId;
-  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
-  const mergedLegacyState = tableAppState
-    ? { ...parsed.appState, ...tableAppState }
-    : parsed.appState;
+async function resolvePatientChatThread({
+  effectivePatientId,
+  patient,
+  options,
+  mergedLegacyState,
+}) {
   const nutricionistaId = await resolveNutricionistaIdForPatient(
     effectivePatientId,
     patient?.id_nutricionista_uuid
@@ -726,6 +748,7 @@ async function loadPatientExperience(patientId, options = {}) {
     patientName,
     nutritionistName: 'Nutricionista',
   });
+
   if (chatThread === null) {
     chatThread = ensureArray(mergedLegacyState.nutritionistThread);
   } else if (!chatThread.length && ensureArray(mergedLegacyState.nutritionistThread).length) {
@@ -737,17 +760,74 @@ async function loadPatientExperience(patientId, options = {}) {
     });
     chatThread = migrated === null ? mergedLegacyState.nutritionistThread : migrated || [];
   }
+
+  return { chatThread, nutricionistaId };
+}
+
+async function loadPatientChatOnly(patientId, options = {}) {
+  const patient = await fetchPatientById(patientId, options);
+  const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+  const effectivePatientId = patient?.id_paciente_uuid || patientId;
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const mergedLegacyState = tableAppState
+    ? { ...parsed.appState, ...tableAppState }
+    : parsed.appState;
+  const { chatThread, nutricionistaId } = await resolvePatientChatThread({
+    effectivePatientId,
+    patient,
+    options,
+    mergedLegacyState,
+  });
   const normalizedAppState = normalizeAppState({
     ...mergedLegacyState,
     nutritionistThread: chatThread,
   });
-  const glucoseLimit = options.glucoseLimit ?? 120;
-  const medicationLimit = options.medicationLimit ?? 120;
-  const mealLimit = options.mealLimit ?? 120;
+
+  return {
+    patient,
+    clinicalObjective: parsed.objectiveText,
+    appState: normalizedAppState,
+    glucoseReadings: [],
+    nutricionistaId,
+  };
+}
+
+async function loadPatientExperience(patientId, options = {}) {
+  if (options.chatOnly === true) {
+    return loadPatientChatOnly(patientId, options);
+  }
+
+  const patient = await fetchPatientById(patientId, options);
+  const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+  const effectivePatientId = patient?.id_paciente_uuid || patientId;
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const mergedLegacyState = tableAppState
+    ? { ...parsed.appState, ...tableAppState }
+    : parsed.appState;
+  const { chatThread, nutricionistaId } = await resolvePatientChatThread({
+    effectivePatientId,
+    patient,
+    options,
+    mergedLegacyState,
+  });
+  const normalizedAppState = normalizeAppState({
+    ...mergedLegacyState,
+    nutritionistThread: chatThread,
+  });
+
+  const glucoseLimit = options.glucoseLimit ?? 60;
+  const medicationLimit = options.medicationLimit ?? 60;
+  const mealLimit = options.mealLimit ?? 60;
   const [glucoseReadings, databaseMedicationEntries, databaseMealEntries] = await Promise.all([
-    fetchGlucoseReadings(effectivePatientId, glucoseLimit),
-    fetchMedicationEntries(effectivePatientId, medicationLimit),
-    fetchMealEntries(effectivePatientId, mealLimit),
+    glucoseLimit > 0
+      ? fetchGlucoseReadings(effectivePatientId, glucoseLimit)
+      : Promise.resolve([]),
+    medicationLimit > 0
+      ? fetchMedicationEntries(effectivePatientId, medicationLimit)
+      : Promise.resolve([]),
+    mealLimit > 0
+      ? fetchMealEntries(effectivePatientId, mealLimit)
+      : Promise.resolve([]),
   ]);
   const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
     (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
@@ -806,12 +886,19 @@ export async function fetchPatientExperience(patientId, options = {}) {
 }
 
 export async function fetchPatientNutritionistChat(patientId, options = {}) {
-  const experience = await fetchPatientExperience(patientId, options);
+  const loader = () =>
+    options.chatOnly === true
+      ? loadPatientChatOnly(patientId, options)
+      : loadPatientExperience(patientId, options);
+
+  const experience =
+    options.chatOnly === true
+      ? await fetchCachedPatientChat(patientId, options, loader)
+      : await fetchCachedPatientExperience(patientId, options, loader);
+
   return {
     ...experience,
-    thread: ensureArray(experience?.appState?.nutritionistThread).length
-      ? experience.appState.nutritionistThread
-      : createDefaultAppState().nutritionistThread,
+    thread: ensureArray(experience?.appState?.nutritionistThread),
   };
 }
 
@@ -854,50 +941,58 @@ export async function fetchNutritionistChatSummariesByPatientIds(patientIds = []
     }
   }
 
-  return Promise.all(
+  const patientsWithMeta = await Promise.all(
     (patients || []).map(async (patient) => {
       const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
       const tableState = await fetchPacienteAppStateFromTable(patient.id_paciente_uuid);
-      const patientName = patient?.nome_completo || patient?.email_pac || 'Paciente';
-      const nutriId = patient.id_nutricionista_uuid || resolvedNutriId;
-      let thread = [];
-
-      const rows = messagesByPatient.get(patient.id_paciente_uuid) || [];
-      if (rows.length) {
-        thread = rows.map((row) =>
-          normalizeNutritionistThreadEntry(
-            {
-              id: row.id,
-              role: row.autor_role === 'nutricionista' ? 'nutri' : 'user',
-              author: row.autor_role === 'nutricionista' ? 'Nutricionista' : patientName,
-              time: new Date(row.created_at).toLocaleTimeString('pt-BR', {
-                hour: '2-digit',
-                minute: '2-digit',
-              }),
-              text: row.texto,
-            },
-            { nutritionistName: 'Nutricionista', patientName }
-          )
-        );
-      } else {
-        const legacy = tableState?.nutritionistThread || parsed?.appState?.nutritionistThread || [];
-        thread = await migrateLegacyThreadToDatabase({
-          pacienteId: patient.id_paciente_uuid,
-          nutricionistaId: nutriId,
-          legacyThread: legacy,
-          patientName,
-        });
-        if (thread === null) thread = ensureArray(legacy);
-      }
-
-      return {
-        patient,
-        clinicalObjective: parsed.objectiveText,
-        appState: normalizeAppState({ ...(tableState || parsed.appState), nutritionistThread: thread }),
-        thread: thread.length ? thread : createDefaultAppState().nutritionistThread,
-      };
+      return { patient, parsed, tableState };
     })
   );
+
+  return patientsWithMeta.map(({ patient, parsed, tableState }) => {
+    const patientName = patient?.nome_completo || patient?.email_pac || 'Paciente';
+    const rows = messagesByPatient.get(patient.id_paciente_uuid) || [];
+    let thread = [];
+
+    if (rows.length) {
+      thread = rows.map((row) =>
+        normalizeNutritionistThreadEntry(
+          {
+            id: row.id,
+            role: row.autor_role === 'nutricionista' ? 'nutri' : 'user',
+            author: row.autor_role === 'nutricionista' ? 'Nutricionista' : patientName,
+            time: new Date(row.created_at).toLocaleTimeString('pt-BR', {
+              hour: '2-digit',
+              minute: '2-digit',
+            }),
+            text: row.texto,
+          },
+          { nutritionistName: 'Nutricionista', patientName }
+        )
+      );
+    } else {
+      const legacy = ensureArray(
+        tableState?.nutritionistThread || parsed?.appState?.nutritionistThread
+      );
+      thread = legacy.map((item, index) =>
+        normalizeNutritionistThreadEntry(item, {
+          nutritionistName: 'Nutricionista',
+          patientName,
+          index,
+        })
+      );
+    }
+
+    return {
+      patient,
+      clinicalObjective: parsed.objectiveText,
+      appState: normalizeAppState({
+        ...(tableState || parsed.appState),
+        nutritionistThread: thread,
+      }),
+      thread: ensureArray(thread),
+    };
+  });
 }
 
 export async function savePatientNutritionistChat({
@@ -924,21 +1019,35 @@ export async function savePatientNutritionistChat({
     });
 
     if (sent) {
-      const experience = await fetchPatientExperience(effectivePatientId, {
-        patientContext: patientContext || actor || null,
-        skipAlertSync: true,
-      });
-      const nextThread = [...ensureArray(experience.appState.nutritionistThread), sent];
+      const cached =
+        getCachedPatientExperience(effectivePatientId, {
+          patientContext: patientContext || actor || null,
+        }) ||
+        getCachedPatientChat(effectivePatientId);
+
+      const baseThread = ensureArray(thread).length
+        ? thread
+        : cached?.appState?.nutritionistThread || cached?.thread || [];
+      const nextThread = ensureThreadContainsMessage(baseThread, sent);
+
       return {
-        ...experience,
-        appState: { ...experience.appState, nutritionistThread: nextThread },
+        patient: cached?.patient || patientContext || actor || null,
+        clinicalObjective: cached?.clinicalObjective || '',
+        appState: {
+          ...(cached?.appState || createDefaultAppState()),
+          nutritionistThread: nextThread,
+        },
+        glucoseReadings: cached?.glucoseReadings || [],
+        thread: nextThread,
       };
     }
   }
 
-  const experience = await fetchPatientExperience(patientId, {
+  const experience = await fetchPatientNutritionistChat(effectivePatientId || patientId, {
     patientContext: patientContext || actor || null,
     skipAlertSync: true,
+    forceRefresh: true,
+    chatOnly: true,
   });
 
   const nextState = {
@@ -947,7 +1056,7 @@ export async function savePatientNutritionistChat({
   };
 
   return savePatientAppState({
-    patientId,
+    patientId: effectivePatientId || patientId,
     objectiveText: experience.clinicalObjective,
     appState: nextState,
     currentPatient: null,

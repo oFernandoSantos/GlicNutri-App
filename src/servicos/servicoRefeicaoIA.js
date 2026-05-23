@@ -1,5 +1,4 @@
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { AppLogger, MODULOS_LOG_SISTEMA } from './servicoLogSistema';
@@ -323,6 +322,7 @@ async function normalizePickerAsset(asset) {
       ]
     : [];
 
+  const ImageManipulator = await import('expo-image-manipulator');
   const manipulated = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
     compress: 0.65,
     format: ImageManipulator.SaveFormat.JPEG,

@@ -47,13 +47,18 @@ import {
   listConsultasByPaciente,
   updateConsultaStatus,
 } from '../../servicos/servicoConsultas';
-import { isPatientLinkedToNutritionist } from '../../servicos/servicoVinculosNutricionista';
+import {
+  isPatientLinkedToNutritionist,
+  resolveAssignedNutritionistIdFromRecords,
+} from '../../servicos/servicoVinculosNutricionista';
+import { resolveNutricionistaIdForPatient } from '../../servicos/servicoMensagensChat';
 import { formatValorConsulta, resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import {
   listarNotificacoesConsulta,
   marcarNotificacoesComoLidas,
   subscribeNotificacoesConsulta,
 } from '../../servicos/servicoNotificacoesConsulta';
+import { criarGuardiaoCarregamentoInicial, executarEmLotes } from '../../utilitarios/carregamentoTela';
 import {
   filterNutritionists,
   filterSlotsByDateRange,
@@ -163,6 +168,7 @@ export default function PacienteAgendamentosScreen({
   const [notificacoesModal, setNotificacoesModal] = useState(false);
   const [nutrisComAgendaIds, setNutrisComAgendaIds] = useState(new Set());
   const [loadingNutrisDisponiveis, setLoadingNutrisDisponiveis] = useState(false);
+  const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
 
   const dateFromKey = useMemo(() => parseDateBrToKey(dateFromBr), [dateFromBr]);
   const dateToKey = useMemo(() => parseDateBrToKey(dateToBr), [dateToBr]);
@@ -225,8 +231,8 @@ export default function PacienteAgendamentosScreen({
     try {
       setLoadError(null);
       const [nutris, cons, pacienteAtual] = await Promise.all([
-        listNutritionists({ limit: 80 }),
-        patientId ? listConsultasByPaciente(patientId, { limit: 120 }) : Promise.resolve([]),
+        listNutritionists(),
+        patientId ? listConsultasByPaciente(patientId, { limit: 60 }) : Promise.resolve([]),
         patientId
           ? fetchPatientById(patientId, {
               currentPatient: usuarioLogado,
@@ -234,7 +240,14 @@ export default function PacienteAgendamentosScreen({
             }).catch(() => null)
           : Promise.resolve(null),
       ]);
-      const linkedId = pacienteAtual?.id_nutricionista_uuid || null;
+      let linkedId = resolveAssignedNutritionistIdFromRecords({
+        patient: pacienteAtual,
+        consultas: cons,
+      });
+
+      if (!linkedId && patientId) {
+        linkedId = await resolveNutricionistaIdForPatient(patientId, null);
+      }
 
       setNutricionistas(nutris || []);
       setConsultasPaciente(cons || []);
@@ -285,7 +298,7 @@ export default function PacienteAgendamentosScreen({
       const nutriId = selectedNutri.id_nutricionista_uuid;
       const [avail, consultasNutri] = await Promise.all([
         listNutriAvailability(nutriId),
-        listConsultasByNutricionista(nutriId, { limit: 200 }),
+        listConsultasByNutricionista(nutriId, { limit: 60 }),
       ]);
       const generated = generateSlotsForNextDays(avail, { days: 21 });
       const marked = markSlotsWithBooking(generated, consultasNutri);
@@ -312,7 +325,10 @@ export default function PacienteAgendamentosScreen({
     (async () => {
       setLoading(true);
       await loadBase();
-      if (active) setLoading(false);
+      if (active) {
+        setLoading(false);
+        loadGuardRef.current.marcarCarregado();
+      }
     })();
     return () => {
       active = false;
@@ -320,7 +336,10 @@ export default function PacienteAgendamentosScreen({
   }, [loadBase]);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => loadBase());
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (loadGuardRef.current.deveIgnorarCarregamentoFocus()) return;
+      loadBase();
+    });
     return unsubscribe;
   }, [navigation, loadBase]);
 
@@ -421,33 +440,31 @@ export default function PacienteAgendamentosScreen({
       try {
         if (active) setLoadingNutrisDisponiveis(true);
 
-        const checks = await Promise.all(
-          filteredNutrisBase.map(async (nutri) => {
-            const nutriId = nutri?.id_nutricionista_uuid;
-            if (!nutriId) return null;
+        const checks = await executarEmLotes(filteredNutrisBase, 6, async (nutri) => {
+          const nutriId = nutri?.id_nutricionista_uuid;
+          if (!nutriId) return null;
 
-            try {
-              const [availabilityRows, consultasNutri] = await Promise.all([
-                listNutriAvailability(nutriId),
-                listConsultasByNutricionista(nutriId, { limit: 200 }),
-              ]);
+          try {
+            const [availabilityRows, consultasNutri] = await Promise.all([
+              listNutriAvailability(nutriId),
+              listConsultasByNutricionista(nutriId, { limit: 60 }),
+            ]);
 
-              const generated = generateSlotsForNextDays(availabilityRows, { days: 21 });
-              const marked = markSlotsWithBooking(generated, consultasNutri);
-              const byQuick = filterSlotsByQuick(marked, quickFilter);
+            const generated = generateSlotsForNextDays(availabilityRows, { days: 14 });
+            const marked = markSlotsWithBooking(generated, consultasNutri);
+            const byQuick = filterSlotsByQuick(marked, quickFilter);
 
-              const hasAvailable = nutritionistHasSlotsInRange(byQuick, {
-                dateFrom: dateFromKey,
-                dateTo: dateToKey,
-              });
+            const hasAvailable = nutritionistHasSlotsInRange(byQuick, {
+              dateFrom: dateFromKey,
+              dateTo: dateToKey,
+            });
 
-              return hasAvailable ? nutriId : null;
-            } catch (error) {
-              console.log('Erro ao verificar disponibilidade do profissional:', error);
-              return null;
-            }
-          })
-        );
+            return hasAvailable ? nutriId : null;
+          } catch (error) {
+            console.log('Erro ao verificar disponibilidade do profissional:', error);
+            return null;
+          }
+        });
 
         if (!active) return;
         setNutrisComAgendaIds(new Set(checks.filter(Boolean)));
@@ -463,17 +480,38 @@ export default function PacienteAgendamentosScreen({
     };
   }, [filteredNutrisBase, quickFilter, dateFromKey, dateToKey]);
 
+  const assignedNutri = useMemo(() => {
+    if (!linkedNutricionistaId) return null;
+    return (
+      (nutricionistas || []).find(
+        (nutri) => nutri.id_nutricionista_uuid === linkedNutricionistaId
+      ) ||
+      filteredNutrisBase.find(
+        (nutri) => nutri.id_nutricionista_uuid === linkedNutricionistaId
+      ) ||
+      null
+    );
+  }, [filteredNutrisBase, linkedNutricionistaId, nutricionistas]);
+
   const filteredNutris = useMemo(() => {
-    const availableNutris = filteredNutrisBase.filter((nutri) =>
-      nutrisComAgendaIds.has(nutri.id_nutricionista_uuid)
+    const others = filteredNutrisBase.filter(
+      (nutri) => nutri.id_nutricionista_uuid !== linkedNutricionistaId
     );
 
-    return [...availableNutris].sort((a, b) => {
-      const aLinked = a.id_nutricionista_uuid === linkedNutricionistaId ? 1 : 0;
-      const bLinked = b.id_nutricionista_uuid === linkedNutricionistaId ? 1 : 0;
-      return bLinked - aLinked;
-    });
-  }, [filteredNutrisBase, nutrisComAgendaIds, linkedNutricionistaId]);
+    if (assignedNutri) {
+      return [assignedNutri, ...others];
+    }
+
+    return filteredNutrisBase;
+  }, [assignedNutri, filteredNutrisBase, linkedNutricionistaId]);
+
+  const outrosNutrisDisponiveis = useMemo(
+    () =>
+      filteredNutris.filter(
+        (nutri) => nutri.id_nutricionista_uuid !== linkedNutricionistaId
+      ),
+    [filteredNutris, linkedNutricionistaId]
+  );
 
   const calendarDays = useMemo(() => groupSlotsByDay(slots), [slots]);
 
@@ -758,6 +796,137 @@ export default function PacienteAgendamentosScreen({
     </CartaoAgendamento>
   ) : null;
 
+  function renderNutriCard(nutri, options = {}) {
+    const { forceLinked = false } = options;
+    const spec = getNutriEspecialidadeLabel(nutri);
+    const ratingReal =
+      Number.isFinite(Number(nutri?.rating_media)) && Number(nutri?.rating_media) > 0
+        ? Number(nutri.rating_media).toFixed(1)
+        : getStableRating(nutri?.id_nutricionista_uuid);
+    const totalAvaliacoesReal =
+      Number.isFinite(Number(nutri?.total_avaliacoes)) && Number(nutri?.total_avaliacoes) > 0
+        ? Number(nutri.total_avaliacoes)
+        : getStableReviewCount(nutri?.id_nutricionista_uuid);
+    const expAnosReal =
+      Number.isFinite(Number(nutri?.anos_experiencia)) && Number(nutri?.anos_experiencia) > 0
+        ? Number(nutri.anos_experiencia)
+        : getStableExperienceYears(nutri?.id_nutricionista_uuid);
+    const rating = ratingReal;
+    const totalAvaliacoes = totalAvaliacoesReal;
+    const expAnos = expAnosReal;
+    const isLinkedNutri =
+      forceLinked || linkedNutricionistaId === nutri.id_nutricionista_uuid;
+    const hasAgenda = nutrisComAgendaIds.has(nutri.id_nutricionista_uuid);
+    const bioPreview =
+      nutri.bio_resumo ||
+      'Especialista em teleconsulta com foco em estratégias nutricionais personalizadas.';
+
+    return (
+      <CartaoAgendamento
+        key={nutri.id_nutricionista_uuid}
+        style={[styles.proCard, isLinkedNutri && styles.proCardLinked]}
+        onPress={() =>
+          navigation.push('PacientePerfilNutricionista', {
+            usuarioLogado,
+            nutricionista: nutri,
+            tipoConsulta,
+            convenio,
+          })
+        }
+      >
+        {isLinkedNutri ? (
+          <View style={styles.linkedBadge}>
+            <Ionicons name="checkmark-circle" size={15} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.linkedBadgeText}>Nutricionista vinculado</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.proRow}>
+          <AvatarProfissional
+            name={nutri.nome_completo_nutri}
+            size={56}
+            online
+            imageUri={getNutriAvatarUri(nutri)}
+          />
+          <View style={styles.proBody}>
+            <Text style={styles.proName}>{nutri.nome_completo_nutri}</Text>
+            <Text style={styles.proSpec}>{spec} · Google Meet</Text>
+            <Text style={styles.proCrn}>
+              {nutri.crm_numero ? `CRN ${nutri.crm_numero}` : 'CRN nao informado'}
+            </Text>
+
+            <Text numberOfLines={1} style={styles.proSpecVisible}>
+              {spec}
+            </Text>
+            <View style={styles.proMetaRow}>
+              <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+              <Text style={styles.proMeta}>{rating}</Text>
+              <Text style={styles.proMetaDot}>·</Text>
+              <Text style={styles.proMeta}>{totalAvaliacoes} avaliações</Text>
+              <Text style={styles.proMetaDot}>·</Text>
+              <Text style={styles.proMetaDot}>·</Text>
+              <Text style={styles.proMetaDot}>·</Text>
+              <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
+            </View>
+            <Text style={styles.proMetaSummary}>
+              {totalAvaliacoes} avaliações · {expAnos} anos de experiência
+            </Text>
+            <View style={styles.proMetaRowCompact}>
+              <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+              <Text style={styles.proMeta}>{rating}</Text>
+              <Text style={styles.proMeta}>({totalAvaliacoes})</Text>
+              <Text style={styles.proMetaDot}>·</Text>
+              <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
+            </View>
+            <Text numberOfLines={2} style={styles.proBio}>
+              {bioPreview}
+            </Text>
+            <Text style={[styles.proAvailability, hasAgenda ? styles.proAvailabilityOpen : null]}>
+              {hasAgenda ? 'Agenda disponivel no periodo selecionado' : 'Sem agenda no periodo selecionado'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.proHighlights}>
+          <View style={styles.highlightPill}>
+            <Ionicons name="cash-outline" size={14} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.highlightText}>
+              {formatValorConsulta(nutri.valor_consulta_centavos)}
+            </Text>
+          </View>
+          <View style={styles.highlightPill}>
+            <Ionicons
+              name={nutri.aceita_convenio ? 'shield-checkmark-outline' : 'card-outline'}
+              size={14}
+              color={patientTheme.colors.primaryDark}
+            />
+            <Text style={styles.highlightText}>
+              {nutri.aceita_convenio ? 'Aceita convênio' : 'Particular'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.proActions}>
+          <BotaoAgendamento
+            label={isLinkedNutri ? 'Ver acompanhamento' : 'Ver Perfil'}
+            icon={isLinkedNutri ? 'checkmark-circle-outline' : 'person-circle-outline'}
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              navigation.push('PacientePerfilNutricionista', {
+                usuarioLogado,
+                nutricionista: nutri,
+                tipoConsulta,
+                convenio,
+                openSchedulePopup: false,
+              });
+            }}
+            style={styles.proScheduleBtn}
+          />
+        </View>
+      </CartaoAgendamento>
+    );
+  }
+
   return (
     <PatientScreenLayout
       navigation={navigation}
@@ -1019,17 +1188,40 @@ export default function PacienteAgendamentosScreen({
             </>
           ) : null}
 
+          {assignedNutri ? (
+            <View style={styles.sectionHeaderRow}>
+              <View>
+                <Text style={styles.sectionTitle}>Nutricionista responsável pelo acompanhamento</Text>
+                <Text style={styles.sectionSubtitle}>
+                  {nutrisComAgendaIds.has(assignedNutri.id_nutricionista_uuid)
+                    ? 'Seu profissional de acompanhamento aparece primeiro para facilitar o agendamento.'
+                    : 'Sem horários no período selecionado. Ajuste as datas ou aguarde novas vagas.'}
+                </Text>
+              </View>
+            </View>
+          ) : null}
+
+          {assignedNutri ? (
+            <View style={styles.assignedNutriWrap}>
+              {renderNutriCard(assignedNutri, { forceLinked: true })}
+            </View>
+          ) : null}
+
           <View style={styles.sectionHeaderRow}>
             <View>
               <Text style={styles.sectionTitle}>
-                {disponibilidadeDireta ? 'Outros profissionais' : 'Profissionais disponiveis'}
+                {disponibilidadeDireta
+                  ? 'Outros profissionais'
+                  : assignedNutri
+                    ? 'Outros profissionais'
+                    : 'Profissionais cadastrados'}
               </Text>
               <Text style={styles.sectionSubtitle}>
                 {linkedNutricionistaId
                   ? 'Voce pode visualizar outros perfis, mas so troca de nutricionista apos desvincular o atual.'
                   : loadingNutrisDisponiveis
                   ? 'Verificando disponibilidade real...'
-                  : `${filteredNutris.length} resultado(s) para teleconsulta`}
+                  : `${outrosNutrisDisponiveis.length} profissional(is) encontrado(s) no banco`}
               </Text>
             </View>
             {loadingNutrisDisponiveis ? (
@@ -1037,7 +1229,7 @@ export default function PacienteAgendamentosScreen({
             ) : null}
           </View>
 
-          {!filteredNutris.length ? (
+          {!outrosNutrisDisponiveis.length && !assignedNutri ? (
             <CartaoAgendamento style={styles.emptyCard}>
               <Text style={styles.emptyTitle}>Nenhum profissional encontrado</Text>
               <Text style={styles.emptyText}>
@@ -1046,129 +1238,16 @@ export default function PacienteAgendamentosScreen({
             </CartaoAgendamento>
           ) : null}
 
-          {filteredNutris.map((nutri) => {
-            const spec = getNutriEspecialidadeLabel(nutri);
-            const ratingReal =
-              Number.isFinite(Number(nutri?.rating_media)) && Number(nutri?.rating_media) > 0
-                ? Number(nutri.rating_media).toFixed(1)
-                : getStableRating(nutri?.id_nutricionista_uuid);
-            const totalAvaliacoesReal =
-              Number.isFinite(Number(nutri?.total_avaliacoes)) && Number(nutri?.total_avaliacoes) > 0
-                ? Number(nutri.total_avaliacoes)
-                : getStableReviewCount(nutri?.id_nutricionista_uuid);
-            const expAnosReal =
-              Number.isFinite(Number(nutri?.anos_experiencia)) && Number(nutri?.anos_experiencia) > 0
-                ? Number(nutri.anos_experiencia)
-                : getStableExperienceYears(nutri?.id_nutricionista_uuid);
-            const rating = ratingReal;
-            const totalAvaliacoes = totalAvaliacoesReal;
-            const expAnos = expAnosReal;
-            const isLinkedNutri = linkedNutricionistaId === nutri.id_nutricionista_uuid;
-            const bioPreview =
-              nutri.bio_resumo ||
-              'Especialista em teleconsulta com foco em estratégias nutricionais personalizadas.';
-            const abrirPerfil = () =>
-              navigation.push('PacientePerfilNutricionista', {
-                usuarioLogado,
-                nutricionista: nutri,
-                tipoConsulta,
-                convenio,
-              });
+          {!outrosNutrisDisponiveis.length && assignedNutri && !loadingNutrisDisponiveis ? (
+            <CartaoAgendamento style={styles.emptyCard}>
+              <Text style={styles.emptyTitle}>Nenhum outro profissional com agenda</Text>
+              <Text style={styles.emptyText}>
+                No momento, apenas seu nutricionista de acompanhamento está listado acima.
+              </Text>
+            </CartaoAgendamento>
+          ) : null}
 
-            return (
-              <CartaoAgendamento
-                key={nutri.id_nutricionista_uuid}
-                style={[styles.proCard, isLinkedNutri && styles.proCardLinked]}
-                onPress={abrirPerfil}
-              >
-                {isLinkedNutri ? (
-                  <View style={styles.linkedBadge}>
-                    <Ionicons name="checkmark-circle" size={15} color={patientTheme.colors.primaryDark} />
-                    <Text style={styles.linkedBadgeText}>Nutricionista vinculado</Text>
-                  </View>
-                ) : null}
-
-                <View style={styles.proRow}>
-                  <AvatarProfissional
-                    name={nutri.nome_completo_nutri}
-                    size={56}
-                    online
-                    imageUri={getNutriAvatarUri(nutri)}
-                  />
-                  <View style={styles.proBody}>
-                    <Text style={styles.proName}>{nutri.nome_completo_nutri}</Text>
-                    <Text style={styles.proSpec}>{spec} · Google Meet</Text>
-                    <Text style={styles.proCrn}>
-                      {nutri.crm_numero ? `CRN ${nutri.crm_numero}` : 'CRN nao informado'}
-                    </Text>
-
-                    <Text numberOfLines={1} style={styles.proSpecVisible}>
-                      {spec}
-                    </Text>
-                    <View style={styles.proMetaRow}>
-                      <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-                      <Text style={styles.proMeta}>{rating}</Text>
-                      <Text style={styles.proMetaDot}>·</Text>
-                      <Text style={styles.proMeta}>{totalAvaliacoes} avaliações</Text>
-                      <Text style={styles.proMetaDot}>·</Text>
-                      <Text style={styles.proMetaDot}>·</Text>
-                      <Text style={styles.proMetaDot}>·</Text>
-                      <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
-                    </View>
-                    <Text style={styles.proMetaSummary}>
-                      {totalAvaliacoes} avaliações · {expAnos} anos de experiência
-                    </Text>
-                    <View style={styles.proMetaRowCompact}>
-                      <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-                      <Text style={styles.proMeta}>{rating}</Text>
-                      <Text style={styles.proMeta}>({totalAvaliacoes})</Text>
-                      <Text style={styles.proMetaDot}>·</Text>
-                      <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
-                    </View>
-                    <Text numberOfLines={2} style={styles.proBio}>
-                      {bioPreview}
-                    </Text>
-
-                  </View>
-                </View>
-
-                <View style={styles.proHighlights}>
-                  <View style={styles.highlightPill}>
-                    <Ionicons name="cash-outline" size={14} color={patientTheme.colors.primaryDark} />
-                    <Text style={styles.highlightText}>{formatValorConsulta(nutri.valor_consulta_centavos)}</Text>
-                  </View>
-                  <View style={styles.highlightPill}>
-                    <Ionicons
-                      name={nutri.aceita_convenio ? 'shield-checkmark-outline' : 'card-outline'}
-                      size={14}
-                      color={patientTheme.colors.primaryDark}
-                    />
-                    <Text style={styles.highlightText}>
-                      {nutri.aceita_convenio ? 'Aceita convênio' : 'Particular'}
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.proActions}>
-                  <BotaoAgendamento
-                    label={isLinkedNutri ? 'Ver acompanhamento' : 'Ver Perfil'}
-                    icon={isLinkedNutri ? 'checkmark-circle-outline' : 'person-circle-outline'}
-                    onPress={(event) => {
-                      event?.stopPropagation?.();
-                      navigation.push('PacientePerfilNutricionista', {
-                        usuarioLogado,
-                        nutricionista: nutri,
-                        tipoConsulta,
-                        convenio,
-                        openSchedulePopup: false,
-                      });
-                    }}
-                    style={styles.proScheduleBtn}
-                  />
-                </View>
-              </CartaoAgendamento>
-            );
-          })}
+          {outrosNutrisDisponiveis.map((nutri) => renderNutriCard(nutri))}
 
           {false ? (
             <CartaoAgendamento style={styles.emptyCard}>
@@ -1574,6 +1653,9 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     fontWeight: '800',
   },
+  assignedNutriWrap: {
+    marginBottom: 18,
+  },
   proCard: {
     marginBottom: 10,
     borderRadius: 18,
@@ -1587,7 +1669,7 @@ const styles = StyleSheet.create({
   linkedBadge: {
     alignSelf: 'flex-start',
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: '#FFFFFF',
     borderColor: patientTheme.colors.primaryDark,
     borderRadius: patientTheme.radius.pill,
     borderWidth: 1,
@@ -1665,6 +1747,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     lineHeight: 18,
     marginTop: 8,
+  },
+  proAvailability: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 8,
+  },
+  proAvailabilityOpen: {
+    color: patientTheme.colors.primaryDark,
   },
   proHighlights: {
     display: 'none',

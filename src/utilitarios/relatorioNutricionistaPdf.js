@@ -1,7 +1,20 @@
-import { jsPDF } from 'jspdf';
-import autoTable from 'jspdf-autotable';
 import { brand } from '../temas/designSystem';
 import { riskBucketLabel } from './adesaoNutricional';
+
+let pdfModulesPromise = null;
+
+async function loadPdfModules() {
+  if (!pdfModulesPromise) {
+    pdfModulesPromise = Promise.all([import('jspdf'), import('jspdf-autotable')]).then(
+      ([jspdfModule, autoTableModule]) => ({
+        jsPDF: jspdfModule.jsPDF,
+        autoTable: autoTableModule.default,
+      })
+    );
+  }
+
+  return pdfModulesPromise;
+}
 
 const PAGE_MARGIN = 14;
 const BRAND_RGB = [47, 157, 120];
@@ -58,7 +71,7 @@ function addSummaryBullets(doc, startY, lines) {
   return y + 4;
 }
 
-export function buildRelatorioGeralPdf(bundle) {
+export function buildRelatorioGeralPdf(bundle, { jsPDF, autoTable }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let y = addReportHeader(doc, bundle, 'Relatorio Geral da Carteira');
 
@@ -164,7 +177,7 @@ export function buildRelatorioGeralPdf(bundle) {
   return doc;
 }
 
-export function buildRelatorioAdesaoPdf(bundle) {
+export function buildRelatorioAdesaoPdf(bundle, { jsPDF, autoTable }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let y = addReportHeader(doc, bundle, 'Relatorio de Adesao Alimentar');
 
@@ -245,7 +258,7 @@ export function buildRelatorioAdesaoPdf(bundle) {
   return doc;
 }
 
-export function buildRelatorioRiscoPdf(bundle) {
+export function buildRelatorioRiscoPdf(bundle, { jsPDF, autoTable }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   let y = addReportHeader(doc, bundle, 'Relatorio de Risco Glicemico');
 
@@ -322,8 +335,11 @@ function addFooter(doc) {
   }
 }
 
-export function buildNutritionistReportPdf(bundle, type = 'geral') {
-  if (type === 'adesao') return buildRelatorioAdesaoPdf(bundle);
-  if (type === 'risco') return buildRelatorioRiscoPdf(bundle);
-  return buildRelatorioGeralPdf(bundle);
+export async function buildNutritionistReportPdf(bundle, type = 'geral') {
+  const { jsPDF, autoTable } = await loadPdfModules();
+  const modules = { jsPDF, autoTable };
+
+  if (type === 'adesao') return buildRelatorioAdesaoPdf(bundle, modules);
+  if (type === 'risco') return buildRelatorioRiscoPdf(bundle, modules);
+  return buildRelatorioGeralPdf(bundle, modules);
 }

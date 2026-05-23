@@ -96,6 +96,33 @@ function uniq(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+const CONSULTA_ASSIGNMENT_PRIORITY = {
+  confirmed: 0,
+  scheduled: 1,
+  done: 2,
+  no_show: 3,
+  cancelled: 9,
+};
+
+/** Nutricionista responsável: vínculo direto no paciente ou consulta ativa mais relevante. */
+export function resolveAssignedNutritionistIdFromRecords({ patient, consultas } = {}) {
+  if (patient?.id_nutricionista_uuid) {
+    return patient.id_nutricionista_uuid;
+  }
+
+  const assignedConsulta = [...(consultas || [])]
+    .filter((item) => item?.nutricionista_id && item?.status !== 'cancelled')
+    .sort((left, right) => {
+      const priorityDiff =
+        (CONSULTA_ASSIGNMENT_PRIORITY[left?.status] ?? 5) -
+        (CONSULTA_ASSIGNMENT_PRIORITY[right?.status] ?? 5);
+      if (priorityDiff !== 0) return priorityDiff;
+      return String(right?.scheduled_at || '').localeCompare(String(left?.scheduled_at || ''));
+    })[0];
+
+  return assignedConsulta?.nutricionista_id || null;
+}
+
 async function fetchPatientsByIds(ids) {
   const patientIds = uniq(ids);
   if (!patientIds.length) return [];
@@ -258,18 +285,26 @@ export async function isPatientLinkedToNutritionist({ pacienteId, nutricionistaI
 
   const direct = await supabase
     .from('paciente')
-    .select('id_paciente_uuid')
+    .select('id_paciente_uuid, id_nutricionista_uuid')
     .eq('id_paciente_uuid', pacienteId)
-    .eq('id_nutricionista_uuid', nutricionistaId)
     .maybeSingle();
 
   const directMessage = String(direct.error?.message || '').toLowerCase();
-  if (direct.data?.id_paciente_uuid) return true;
+  if (direct.data?.id_nutricionista_uuid === nutricionistaId) return true;
   if (direct.error && !directMessage.includes('id_nutricionista_uuid')) {
     throw direct.error;
   }
 
-  return false;
+  const { data: consultas, error: consultaError } = await supabase
+    .from('consulta')
+    .select('id')
+    .eq('paciente_id', pacienteId)
+    .eq('nutricionista_id', nutricionistaId)
+    .neq('status', 'cancelled')
+    .limit(1);
+
+  if (consultaError) throw consultaError;
+  return Boolean(consultas?.length);
 }
 
 export async function unlinkPatientNutritionist({

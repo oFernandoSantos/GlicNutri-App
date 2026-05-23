@@ -25,6 +25,8 @@ import {
   hideMealEntryForPatient,
   hideMedicationEntryForPatient,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import {
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
@@ -348,6 +350,7 @@ export default function PacienteHistoricoRegistrosScreen({
   const [refreshing, setRefreshing] = useState(false);
   const [bannerOperacao, setBannerOperacao] = useState(null);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
+  const historicoLoadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
   const loadHistoryExperience = useCallback(async () => {
     if (!canResolvePatient) {
       setPatient(null);
@@ -359,6 +362,7 @@ export default function PacienteHistoricoRegistrosScreen({
 
     const experience = await fetchPatientExperience(patientId, {
       patientContext: usuarioLogado,
+      ...mesclarLimitesDadosPaciente('historico'),
     });
     const mergedReadings = mergeCachedGlucoseReadings(
       experience.glucoseReadings,
@@ -399,7 +403,10 @@ export default function PacienteHistoricoRegistrosScreen({
         setLoading(true);
         await fetchHistoricoComErro();
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          setLoading(false);
+          historicoLoadGuardRef.current.marcarCarregado();
+        }
       }
     }
 
@@ -441,6 +448,10 @@ export default function PacienteHistoricoRegistrosScreen({
       async function refreshOnFocus() {
         try {
           if (!canResolvePatient) {
+            return;
+          }
+
+          if (historicoLoadGuardRef.current.deveIgnorarCarregamentoFocus()) {
             return;
           }
 

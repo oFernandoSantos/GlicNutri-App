@@ -23,10 +23,14 @@ import {
   addMedicationEntry,
   buildMonitorSeries,
   createDefaultAppState,
+  fetchGlucoseReadings,
+  fetchMedicationEntries,
   fetchPatientExperience,
   getPatientId,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { executarEmLotes } from '../../utilitarios/carregamentoTela';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   fetchLibreViewReadings,
   isLibreViewSyncConfigured,
@@ -1394,6 +1398,7 @@ export default function PacienteMonitoramentoScreen({
       const experience = await fetchPatientExperience(patientId, {
         patientContext: usuarioLogado,
         forceRefresh: options.forceRefresh === true,
+        ...mesclarLimitesDadosPaciente('monitoramento'),
       });
 
       const mergedReadings = mergeCachedGlucoseReadings(
@@ -2199,27 +2204,23 @@ export default function PacienteMonitoramentoScreen({
   async function importLibreViewReadings(readings, sourceLabel = 'libreview_import') {
     const newReadings = readings.filter((reading) => !isKnownReading(reading, glucoseReadings));
 
-    for (const reading of newReadings) {
-      await addGlucoseReading(activePatientId, reading.value, {
+    await executarEmLotes(newReadings, 5, (reading) =>
+      addGlucoseReading(activePatientId, reading.value, {
         date: reading.date,
         time: reading.time,
         actor: patient || usuarioLogado,
         auditSource: sourceLabel,
-      });
-    }
+      })
+    );
 
-    const updatedReadings = await fetchPatientExperience(activePatientId, {
-      patientContext: usuarioLogado,
-      forceRefresh: true,
-    });
+    const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
+    const glucoseLimit = monitorLimits.glucoseLimit || 120;
+    const fetchedReadings = await fetchGlucoseReadings(activePatientId, glucoseLimit);
     const mergedReadings = mergeCachedGlucoseReadings(
-      updatedReadings.glucoseReadings,
+      fetchedReadings,
       getCachedGlucoseReadings(activePatientId)
     );
 
-    setPatient(updatedReadings.patient || patient);
-    setObjectiveText(updatedReadings.clinicalObjective || objectiveText);
-    setAppState(updatedReadings.appState);
     setGlucoseReadings(mergedReadings);
     replaceCachedGlucoseReadings(activePatientId, mergedReadings);
 
@@ -2308,15 +2309,6 @@ export default function PacienteMonitoramentoScreen({
       return;
     }
 
-    if (!isLibreViewSyncConfigured()) {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto:
-          'LibreView não configurado: defina EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL no backend para sincronizar.',
-      });
-      return;
-    }
-
     try {
       setSyncingLibreView(true);
 
@@ -2328,27 +2320,23 @@ export default function PacienteMonitoramentoScreen({
         (reading) => !isKnownReading(reading, glucoseReadings)
       );
 
-      for (const reading of newReadings) {
-        await addGlucoseReading(activePatientId, reading.value, {
+      await executarEmLotes(newReadings, 5, (reading) =>
+        addGlucoseReading(activePatientId, reading.value, {
           date: reading.date,
           time: reading.time,
           actor: patient || usuarioLogado,
           auditSource: 'libreview_sync',
-        });
-      }
+        })
+      );
 
-      const updatedReadings = await fetchPatientExperience(activePatientId, {
-        patientContext: usuarioLogado,
-        forceRefresh: true,
-      });
+      const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
+      const glucoseLimit = monitorLimits.glucoseLimit || 120;
+      const fetchedReadings = await fetchGlucoseReadings(activePatientId, glucoseLimit);
       const mergedReadings = mergeCachedGlucoseReadings(
-        updatedReadings.glucoseReadings,
+        fetchedReadings,
         getCachedGlucoseReadings(activePatientId)
       );
 
-      setPatient(updatedReadings.patient || patient);
-      setObjectiveText(updatedReadings.clinicalObjective || objectiveText);
-      setAppState(updatedReadings.appState);
       setGlucoseReadings(mergedReadings);
       replaceCachedGlucoseReadings(activePatientId, mergedReadings);
 
@@ -2606,6 +2594,8 @@ export default function PacienteMonitoramentoScreen({
         medicationEntries: [historyMedicationEntry, ...(current.medicationEntries || [])],
       }));
 
+      let savedStateSnapshot = appState;
+
       try {
         const savedState = await savePatientAppState({
           patientId: activePatientId,
@@ -2618,6 +2608,7 @@ export default function PacienteMonitoramentoScreen({
           patientContext: usuarioLogado,
         });
 
+        savedStateSnapshot = savedState.appState || savedStateSnapshot;
         setPatient(savedState.patient || patient);
         setObjectiveText(savedState.clinicalObjective || objectiveText);
         setAppState(savedState.appState);
@@ -2626,15 +2617,21 @@ export default function PacienteMonitoramentoScreen({
       }
 
       try {
-        const refreshedExperience = await fetchPatientExperience(activePatientId, {
-          patientContext: usuarioLogado,
-          currentPatient: patient,
-          forceRefresh: true,
-        });
+        const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
+        const medicationLimit = monitorLimits.medicationLimit || 80;
+        const medicationEntries = await fetchMedicationEntries(
+          activePatientId,
+          medicationLimit
+        );
 
-        setPatient(refreshedExperience.patient);
-        setObjectiveText(refreshedExperience.clinicalObjective);
-        setAppState(refreshedExperience.appState);
+        setAppState((current) => ({
+          ...current,
+          medicationEntries,
+        }));
+        replaceCachedPatientAppState(activePatientId, {
+          ...savedStateSnapshot,
+          medicationEntries,
+        });
       } catch (refreshError) {
         console.log('Erro ao recarregar medicacoes apos salvar:', refreshError);
         setAppState((current) => ({
@@ -2704,13 +2701,13 @@ export default function PacienteMonitoramentoScreen({
       <View style={[styles.currentCard, { backgroundColor: latestStatus.cardColor }]}>
         <View style={styles.currentHeader}>
           <View>
-            <Text style={[styles.currentEyebrow, { color: latestStatus.mutedTextColor }]}>
+            <Text style={[styles.currentEyebrow, { color: patientTheme.colors.onPrimary }]}>
               Glicose Agora
             </Text>
-            <Text style={[styles.currentValue, { color: latestStatus.textColor }]}>
+            <Text style={[styles.currentValue, { color: patientTheme.colors.onPrimary }]}>
               {latestReading ? `${latestReading.value} mg/dL` : '-- mg/dL'}
             </Text>
-            <Text style={[styles.currentTime, { color: latestStatus.mutedTextColor }]}>
+            <Text style={[styles.currentTime, { color: patientTheme.colors.onPrimary }]}>
               {latestReading
                 ? `Última leitura às ${String(latestReading.time).slice(0, 5)}`
                 : 'Sem leitura registrada'}
@@ -2718,8 +2715,8 @@ export default function PacienteMonitoramentoScreen({
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: latestStatus.badgeColor }]}>
-            <Ionicons name="alert-circle-outline" size={14} color={latestStatus.textColor} />
-            <Text style={[styles.statusPillText, { color: latestStatus.textColor }]}>
+            <Ionicons name="alert-circle-outline" size={14} color={patientTheme.colors.onPrimary} />
+            <Text style={[styles.statusPillText, { color: patientTheme.colors.onPrimary }]}>
               {latestStatus.label}
             </Text>
           </View>

@@ -1,5 +1,20 @@
 import { supabase } from './configSupabase';
-import { normalizeNutritionistThreadEntry } from './servicoDadosPaciente';
+
+function normalizeThreadEntry(
+  item,
+  { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
+) {
+  const role = item?.role === 'nutri' ? 'nutri' : 'user';
+  return {
+    id: item?.id || `thread-${role}-${Date.now()}`,
+    author:
+      String(item?.author || '').trim() ||
+      (role === 'nutri' ? nutritionistName : patientName),
+    role,
+    time: String(item?.time || '').trim(),
+    text: String(item?.text || '').trim(),
+  };
+}
 
 function isMissingRpc(error, name) {
   const message = String(error?.message || '').toLowerCase();
@@ -22,7 +37,7 @@ function formatMessageTime(value) {
 
 function mapRowToThreadEntry(row, { nutritionistName, patientName }) {
   const role = row?.autor_role === 'nutricionista' ? 'nutri' : 'user';
-  return normalizeNutritionistThreadEntry(
+  return normalizeThreadEntry(
     {
       id: row?.id,
       role,

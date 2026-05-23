@@ -14,6 +14,7 @@ import {
   fetchPatientExperience,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { fetchActiveMealPlanForPatient } from '../../servicos/servicoPlanoAlimentar';
 import {
   averageAdherence,
@@ -26,14 +27,32 @@ function getAdherenceTone(value) {
   return '#ff5a6b';
 }
 
-function buildMealSummary(section, index) {
-  return {
-    carbs: 35 + index * 10,
-    protein: 12 + index * 6,
-    fat: 8 + index * 4,
-    kcal: 180 + section.foods.length * 85 + index * 20,
-    completed: index < 3,
-  };
+function buildMealSummary(section, index, mealEntries = []) {
+  const today = new Date().toISOString().slice(0, 10);
+  const sectionKey = String(section?.id || section?.title || index).toLowerCase();
+  const entries = (mealEntries || []).filter((entry) => {
+    if (entry?.date !== today) return false;
+    const mealKey = String(entry?.mealId || entry?.mealType || entry?.meal || entry?.title || '')
+      .toLowerCase()
+      .trim();
+    if (!mealKey) return false;
+    return mealKey === sectionKey || mealKey.includes(sectionKey.slice(0, 4));
+  });
+
+  if (!entries.length) {
+    return { carbs: 0, protein: 0, fat: 0, kcal: 0, completed: false };
+  }
+
+  return entries.reduce(
+    (acc, entry) => ({
+      carbs: acc.carbs + Number(entry?.carbs || entry?.carboidratos || 0),
+      protein: acc.protein + Number(entry?.protein || entry?.proteinas || 0),
+      fat: acc.fat + Number(entry?.fat || entry?.gorduras || 0),
+      kcal: acc.kcal + Number(entry?.kcal || entry?.calorias || 0),
+      completed: true,
+    }),
+    { carbs: 0, protein: 0, fat: 0, kcal: 0, completed: true }
+  );
 }
 
 function formatFoodsInline(foods = []) {
@@ -80,23 +99,21 @@ export default function PacientePlanoScreen({
           return;
         }
 
-        const experience = await fetchPatientExperience(patientId, {
-          patientContext: usuarioLogado,
-        });
+        const [experience, activePlan] = await Promise.all([
+          fetchPatientExperience(patientId, {
+            patientContext: usuarioLogado,
+            ...mesclarLimitesDadosPaciente('plano'),
+          }),
+          patientId
+            ? fetchActiveMealPlanForPatient(patientId).catch(() => null)
+            : Promise.resolve(null),
+        ]);
 
         if (!active) return;
 
         setPatient(experience.patient);
         setAppState(experience.appState);
-
-        const effectiveId = experience?.patient?.id_paciente_uuid || patientId;
-        if (effectiveId) {
-          const activePlan = await fetchActiveMealPlanForPatient(effectiveId);
-          if (!active) return;
-          setMealPlan(activePlan || null);
-        } else {
-          setMealPlan(null);
-        }
+        setMealPlan(activePlan || null);
       } catch (error) {
         console.log('Erro ao carregar plano:', error);
       } finally {
@@ -121,9 +138,9 @@ export default function PacientePlanoScreen({
     () =>
       planSections.map((section, index) => ({
         ...section,
-        summary: buildMealSummary(section, index),
+        summary: buildMealSummary(section, index, appState?.mealEntries),
       })),
-    [planSections]
+    [appState?.mealEntries, planSections]
   );
 
   const mergedMeals = useMemo(
@@ -579,7 +596,7 @@ const styles = StyleSheet.create({
   progressFill: {
     height: '100%',
     borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.primary,
   },
   mealSectionHeader: {
     flexDirection: 'row',

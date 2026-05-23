@@ -97,7 +97,7 @@ async function notificarAgendamento({ consulta, nutricionista, pacienteNome }) {
     destinatarioId: consulta.paciente_id,
     evento: 'meet_disponivel',
     titulo: 'Teleconsulta confirmada',
-    mensagem: `Consulta com ${nomeNutri} em ${quando}. Link Google Meet: ${meetLink}`,
+    mensagem: `Sua teleconsulta em ${quando} foi confirmada. Entre pelo Google Meet: ${meetLink}`,
   });
 }
 

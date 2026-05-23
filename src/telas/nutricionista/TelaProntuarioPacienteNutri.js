@@ -14,6 +14,7 @@ import {
   fetchPatientExperience,
   getLatestGlucose,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   averageAdherence,
   buildWeeklyAdherenceFromMeals,
@@ -152,6 +153,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       try {
         const experience = await fetchPatientExperience(effectivePacienteId, {
           skipAlertSync: true,
+          ...mesclarLimitesDadosPaciente('prontuario'),
         });
         if (active) setPatientExperience(experience);
       } catch (error) {

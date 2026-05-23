@@ -27,6 +27,7 @@ export default function PatientScreenLayout({
   scrollEnabled = true,
   footerOverlay,
   refreshControl,
+  lockFixedContent = false,
 }) {
   const showHeader = Boolean(title || subtitle || rightAction);
 
@@ -69,8 +70,9 @@ export default function PatientScreenLayout({
           <View
             style={[
               styles.scroll,
-              styles.content,
               styles.fixedContent,
+              styles.fixedContentPadding,
+              lockFixedContent && styles.fixedContentLocked,
               showTabBar && styles.contentWithTabBar,
               contentContainerStyle,
             ]}
@@ -161,8 +163,15 @@ const styles = StyleSheet.create({
   },
   fixedContent: {
     flex: 1,
-    flexGrow: 0,
     minHeight: 0,
+  },
+  fixedContentPadding: {
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 8,
+    paddingBottom: 36,
+  },
+  fixedContentLocked: {
+    overflow: 'hidden',
   },
   contentWithTabBar: {
     paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,

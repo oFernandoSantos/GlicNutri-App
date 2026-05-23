@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
@@ -19,6 +19,7 @@ import {
   listConsultasNutricionistaComPaciente,
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import {
   listFollowUpRequestsByNutritionist,
   updateFollowUpRequestStatus,
@@ -81,6 +82,7 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
   const [todayConsultasCount, setTodayConsultasCount] = useState(0);
   const [unreadChatCount, setUnreadChatCount] = useState(0);
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+  const patientsLoadGuardRef = useRef(criarGuardiaoCarregamentoInicial());
   const nutriNome =
     usuarioLogado?.nome_completo_nutri || usuarioLogado?.nome || usuarioLogado?.email || 'Nutricionista';
 
@@ -152,11 +154,17 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
   }, [navigation, nutricionistaId]);
 
   useEffect(() => {
-    loadPatients();
+    (async () => {
+      await loadPatients();
+      patientsLoadGuardRef.current.marcarCarregado();
+    })();
   }, [loadPatients]);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', loadPatients);
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (patientsLoadGuardRef.current.deveIgnorarCarregamentoFocus()) return;
+      loadPatients();
+    });
     return unsubscribe;
   }, [navigation, loadPatients]);
 

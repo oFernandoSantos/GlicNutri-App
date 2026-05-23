@@ -22,6 +22,7 @@ import {
   getPatientId,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   analisarImagemRefeicaoIA,
   buildMealTimelineEntryFromAI,
@@ -470,6 +471,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     try {
       const experience = await fetchPatientExperience(patientId, {
         patientContext: usuarioLogado,
+        ...mesclarLimitesDadosPaciente('diario'),
       });
       const nextState = {
         ...experience.appState,

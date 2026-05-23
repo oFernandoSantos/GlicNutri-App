@@ -14,6 +14,7 @@ import MensagemInline from '../../componentes/comum/MensagemInline';
 import { supabase } from '../../servicos/configSupabase';
 import TelaProntuarioPacienteNutri from './TelaProntuarioPacienteNutri';
 import { updateConsultaStatus, formatConsultaDateTime } from '../../servicos/servicoConsultas';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -25,6 +26,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
   const [consulta, setConsulta] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [mensagemAcao, setMensagemAcao] = useState(null);
+  const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
 
   const effectivePacienteId = pacienteId || consulta?.paciente_id || null;
 
@@ -55,7 +57,11 @@ export default function TelaConsultaNutri({ navigation, route }) {
 
   useEffect(() => {
     load();
-    const unsubscribe = navigation.addListener('focus', () => load());
+    loadGuardRef.current.marcarCarregado();
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (loadGuardRef.current.deveIgnorarCarregamentoFocus()) return;
+      load();
+    });
     return unsubscribe;
   }, [navigation, load]);
 

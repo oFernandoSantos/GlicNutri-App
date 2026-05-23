@@ -17,9 +17,9 @@ import {
   getPatientDisplayName,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { exportPatientProgressReport } from '../../servicos/servicoRelatorioPaciente';
 
-const WEEKLY_FALLBACK = [84, 91, 78, 88, 67, 72, 58];
 const WEIGHT_LABELS = ['01/03', '05/03', '10/03', '15/03', '20/03', '25/03', '29/03'];
 const WEEKDAY_LABELS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 
@@ -49,22 +49,34 @@ function getBarTone(value) {
 }
 
 function buildWeightSeries(currentWeight) {
-  const current = currentWeight > 0 ? currentWeight : 74.8;
-  const initial = current + 3.7;
+  if (!(currentWeight > 0)) {
+    return {
+      initial: null,
+      current: null,
+      goal: null,
+      loss: 0,
+      hasData: false,
+      points: [],
+    };
+  }
+
+  const current = currentWeight;
+  const initial = current;
   const goal = Math.max(current - 4.8, 50);
-  const delta = initial - current;
-  const step = delta / Math.max(WEIGHT_LABELS.length - 1, 1);
 
   return {
     initial,
     current,
     goal,
-    loss: -delta,
-    points: WEIGHT_LABELS.map((label, index) => ({
-      id: `weight-${label}`,
-      label,
-      value: Number((initial - step * index).toFixed(1)),
-    })),
+    loss: 0,
+    hasData: true,
+    points: [
+      {
+        id: 'weight-current',
+        label: 'Atual',
+        value: Number(current.toFixed(1)),
+      },
+    ],
   };
 }
 
@@ -94,9 +106,9 @@ function buildWeeklyAdherence(mealEntries, targetMeals) {
 
   if (!hasRealData) {
     return WEEKDAY_LABELS.map((label, index) => ({
-      id: `adherence-fallback-${index}`,
+      id: `adherence-empty-${index}`,
       label,
-      value: WEEKLY_FALLBACK[index],
+      value: 0,
     }));
   }
 
@@ -110,11 +122,12 @@ function buildGlycemicMetrics(glucoseReadings) {
 
   if (!values.length) {
     return {
-      average: 115,
-      gmi: 6.2,
-      variability: 32,
-      tir: 78,
+      average: null,
+      gmi: null,
+      variability: null,
+      tir: null,
       total: 0,
+      hasData: false,
     };
   }
 
@@ -133,6 +146,7 @@ function buildGlycemicMetrics(glucoseReadings) {
     variability,
     tir,
     total,
+    hasData: true,
   };
 }
 
@@ -401,6 +415,7 @@ export default function PacienteProgressoScreen({
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          ...mesclarLimitesDadosPaciente('progresso'),
         });
 
         if (!active) return;
@@ -432,7 +447,7 @@ export default function PacienteProgressoScreen({
     weeklyAdherence.reduce((sum, item) => sum + item.value, 0) / Math.max(weeklyAdherence.length, 1)
   );
   const weightSeries = useMemo(
-    () => buildWeightSeries(toNumber(patient?.peso_atual_kg, 74.8)),
+    () => buildWeightSeries(toNumber(patient?.peso_atual_kg, 0)),
     [patient?.peso_atual_kg]
   );
   const glycemicMetrics = useMemo(
@@ -526,7 +541,9 @@ export default function PacienteProgressoScreen({
                 size={18}
                 color={patientTheme.colors.primaryDark}
               />
-              <Text style={styles.topMetricValue}>{formatSignedWeight(weightSeries.loss)}</Text>
+              <Text style={styles.topMetricValue}>
+                {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
+              </Text>
               <Text style={styles.topMetricLabel}>Perda de peso</Text>
             </View>
 
@@ -545,28 +562,34 @@ export default function PacienteProgressoScreen({
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Sua evolução</Text>
               <View style={styles.badgeSoft}>
-                <Text style={styles.badgeSoftText}>{formatSignedWeight(weightSeries.loss)}</Text>
-              </View>
-            </View>
-
-            <View style={styles.weightStatsRow}>
-              <View style={styles.weightStat}>
-                <Text style={styles.weightStatLabel}>Inicial</Text>
-                <Text style={styles.weightStatValue}>{formatDecimal(weightSeries.initial)}kg</Text>
-              </View>
-              <View style={styles.weightStat}>
-                <Text style={styles.weightStatLabel}>Atual</Text>
-                <Text style={[styles.weightStatValue, styles.weightStatValueHighlight]}>
-                  {formatDecimal(weightSeries.current)}kg
+                <Text style={styles.badgeSoftText}>
+                  {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : 'Sem peso'}
                 </Text>
               </View>
-              <View style={styles.weightStat}>
-                <Text style={styles.weightStatLabel}>Meta</Text>
-                <Text style={styles.weightStatValue}>{formatDecimal(weightSeries.goal)}kg</Text>
-              </View>
             </View>
 
-            <WeightChart points={weightSeries.points} />
+            {weightSeries.hasData ? (
+              <>
+                <View style={styles.weightStatsRow}>
+                  <View style={styles.weightStat}>
+                    <Text style={styles.weightStatLabel}>Atual</Text>
+                    <Text style={[styles.weightStatValue, styles.weightStatValueHighlight]}>
+                      {formatDecimal(weightSeries.current)}kg
+                    </Text>
+                  </View>
+                  <View style={styles.weightStat}>
+                    <Text style={styles.weightStatLabel}>Meta sugerida</Text>
+                    <Text style={styles.weightStatValue}>{formatDecimal(weightSeries.goal)}kg</Text>
+                  </View>
+                </View>
+
+                <WeightChart points={weightSeries.points} />
+              </>
+            ) : (
+              <Text style={styles.emptyMealText}>
+                Informe seu peso no perfil para acompanhar a evolução.
+              </Text>
+            )}
           </View>
 
           <View style={styles.sectionCard}>
@@ -627,36 +650,46 @@ export default function PacienteProgressoScreen({
               </View>
             </View>
 
-            <View style={styles.glycemicTrackHeader}>
-              <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
-              <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
-            </View>
-            <View style={styles.glycemicTrack}>
-              <View
-                style={[
-                  styles.glycemicTrackFill,
-                  { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
-                ]}
-              />
-            </View>
+            {glycemicMetrics.hasData ? (
+              <>
+                <View style={styles.glycemicTrackHeader}>
+                  <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
+                  <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
+                </View>
+                <View style={styles.glycemicTrack}>
+                  <View
+                    style={[
+                      styles.glycemicTrackFill,
+                      { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
+                    ]}
+                  />
+                </View>
 
-            <View style={styles.glycemicMetricsRow}>
-              <View style={styles.glycemicMetricCard}>
-                <Text style={styles.glycemicMetricLabel}>Media</Text>
-                <Text style={styles.glycemicMetricValue}>{glycemicMetrics.average}</Text>
-                <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
-              </View>
-              <View style={styles.glycemicMetricCard}>
-                <Text style={styles.glycemicMetricLabel}>A1C estimada</Text>
-                <Text style={styles.glycemicMetricValue}>{glycemicMetrics.gmi.toFixed(1)}</Text>
-                <Text style={styles.glycemicMetricUnit}>%</Text>
-              </View>
-              <View style={styles.glycemicMetricCard}>
-                <Text style={styles.glycemicMetricLabel}>Variabilidade</Text>
-                <Text style={styles.glycemicMetricValue}>{glycemicMetrics.variability}</Text>
-                <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
-              </View>
-            </View>
+                <View style={styles.glycemicMetricsRow}>
+                  <View style={styles.glycemicMetricCard}>
+                    <Text style={styles.glycemicMetricLabel}>Media</Text>
+                    <Text style={styles.glycemicMetricValue}>{glycemicMetrics.average}</Text>
+                    <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
+                  </View>
+                  <View style={styles.glycemicMetricCard}>
+                    <Text style={styles.glycemicMetricLabel}>A1C estimada</Text>
+                    <Text style={styles.glycemicMetricValue}>
+                      {glycemicMetrics.gmi?.toFixed(1)}
+                    </Text>
+                    <Text style={styles.glycemicMetricUnit}>%</Text>
+                  </View>
+                  <View style={styles.glycemicMetricCard}>
+                    <Text style={styles.glycemicMetricLabel}>Variabilidade</Text>
+                    <Text style={styles.glycemicMetricValue}>{glycemicMetrics.variability}</Text>
+                    <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.emptyMealText}>
+                Registre glicemias no monitoramento para ver tendências aqui.
+              </Text>
+            )}
           </View>
 
           <View style={styles.sectionCard}>
