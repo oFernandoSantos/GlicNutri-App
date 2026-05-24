@@ -1,4 +1,9 @@
+import { hashIdsForCache, trimCacheMap } from '../utilitarios/chaveCache';
+
 const DEFAULT_TTL_MS = 90 * 1000;
+const MAX_EXPERIENCE_CACHE_ENTRIES = 100;
+const MAX_NUTRI_INBOX_CACHE_ENTRIES = 40;
+const HOME_EXPERIENCE_TTL_MS = 120 * 1000;
 const CHAT_CACHE_TTL_MS = 20 * 1000;
 
 const experienceCache = new Map();
@@ -15,7 +20,19 @@ const nutriInboxInFlight = new Map();
 const NUTRI_INBOX_TTL_MS = 20 * 1000;
 
 function buildExperienceCacheKey(patientId, options = {}) {
-  return `${patientId}:${options.includeHidden ? 'all' : 'visible'}`;
+  const scope = options.planOnly
+    ? 'plan'
+    : options.homeOnly
+      ? 'home'
+      : options.chatOnly
+        ? 'chat'
+        : 'full';
+  return `${patientId}:${scope}:${options.includeHidden ? 'all' : 'visible'}`;
+}
+
+function resolveExperienceTtlMs(options = {}) {
+  if (options.homeOnly) return options.cacheTtlMs ?? HOME_EXPERIENCE_TTL_MS;
+  return options.cacheTtlMs ?? DEFAULT_TTL_MS;
 }
 
 function getFreshEntry(cache, key, ttlMs) {
@@ -25,14 +42,18 @@ function getFreshEntry(cache, key, ttlMs) {
   return entry.data;
 }
 
-export function isPatientExperienceCacheFresh(patientId, options = {}, ttlMs = DEFAULT_TTL_MS) {
+export function isPatientExperienceCacheFresh(patientId, options = {}, ttlMs) {
   if (!patientId) return false;
-  return Boolean(getFreshEntry(experienceCache, buildExperienceCacheKey(patientId, options), ttlMs));
+  const effectiveTtl = ttlMs ?? resolveExperienceTtlMs(options);
+  return Boolean(
+    getFreshEntry(experienceCache, buildExperienceCacheKey(patientId, options), effectiveTtl)
+  );
 }
 
-export function getCachedPatientExperience(patientId, options = {}, ttlMs = DEFAULT_TTL_MS) {
+export function getCachedPatientExperience(patientId, options = {}, ttlMs) {
   if (!patientId) return null;
-  return getFreshEntry(experienceCache, buildExperienceCacheKey(patientId, options), ttlMs);
+  const effectiveTtl = ttlMs ?? resolveExperienceTtlMs(options);
+  return getFreshEntry(experienceCache, buildExperienceCacheKey(patientId, options), effectiveTtl);
 }
 
 export function invalidatePatientExperienceCache(patientId) {
@@ -126,6 +147,12 @@ export async function readThroughPatientCache({
         data,
         fetchedAt: Date.now(),
       });
+      if (cache === experienceCache) {
+        trimCacheMap(experienceCache, MAX_EXPERIENCE_CACHE_ENTRIES);
+      }
+      if (cache === nutriInboxCache) {
+        trimCacheMap(nutriInboxCache, MAX_NUTRI_INBOX_CACHE_ENTRIES);
+      }
       inFlight.delete(cacheKey);
       return data;
     })
@@ -144,7 +171,7 @@ export async function fetchCachedPatientExperience(patientId, options, loader) {
   }
 
   const cacheKey = buildExperienceCacheKey(patientId, options);
-  const ttlMs = options.cacheTtlMs ?? DEFAULT_TTL_MS;
+  const ttlMs = resolveExperienceTtlMs(options);
   const forceRefresh = options.forceRefresh === true;
 
   return readThroughPatientCache({
@@ -162,7 +189,7 @@ export async function fetchCachedNutriChatInbox(nutricionistaId, patientIds, loa
     return loader();
   }
 
-  const cacheKey = `${nutricionistaId}:inbox`;
+  const cacheKey = `${nutricionistaId}:inbox:${hashIdsForCache(patientIds)}`;
   const forceRefresh = false;
 
   return readThroughPatientCache({

@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -11,9 +10,10 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import BotaoVoltar from '../../componentes/comum/BotaoVoltar';
+import { RolagemComTeclado } from '../../componentes/comum/RolagemComTeclado';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { markPatientOnboardingSeen } from '../../servicos/servicoOnboardingPaciente';
 
@@ -103,6 +103,7 @@ export default function PacienteOnboardingScreen({
   onOnboardingFinished,
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
+  const insets = useSafeAreaInsets();
   const stepProgressAnim = useRef(new Animated.Value(1)).current;
   const { width: windowWidth } = useWindowDimensions();
   const [stepIndex, setStepIndex] = useState(0);
@@ -418,18 +419,20 @@ export default function PacienteOnboardingScreen({
         </View>
       </View>
 
-      <ScrollView
+      <RolagemComTeclado
         style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
         contentContainerStyle={[
           styles.scrollContent,
           Platform.OS === 'web' && styles.webScrollContent,
         ]}
+        keyboardBottomBase={120}
+        keyboardVerticalOffset={(insets.top || 0) + ONBOARDING_READER_HEIGHT}
         showsVerticalScrollIndicator={false}
       >
         <View style={[styles.stepFrame, { width: contentWidth }]}>
           {renderStepCard(currentStep, stepIndex)}
         </View>
-      </ScrollView>
+      </RolagemComTeclado>
     </SafeAreaView>
   );
 }

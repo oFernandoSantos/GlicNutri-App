@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -412,7 +411,7 @@ export default function PacientePerfilNutricionistaScreen({
       usuarioLogado={usuarioLogado}
       showTabBar={false}
     >
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <View style={styles.content}>
         <CartaoAgendamento style={styles.hero}>
           <View style={styles.heroRow}>
             <AvatarProfissional
@@ -589,7 +588,7 @@ export default function PacientePerfilNutricionistaScreen({
             loading={desvinculando}
           />
         ) : null}
-      </ScrollView>
+      </View>
 
       {false ? (
       <Modal visible={false} transparent animationType="fade" onRequestClose={handleFecharAgenda}>

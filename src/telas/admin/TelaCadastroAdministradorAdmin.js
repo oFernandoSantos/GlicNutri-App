@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
-  ScrollView,
   StatusBar,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { RolagemComTeclado } from '../../componentes/comum/RolagemComTeclado';
 import BarraAbasAdmin, {
   ADMIN_TAB_BAR_HEIGHT,
   ADMIN_TAB_BAR_SPACE,
@@ -141,7 +141,11 @@ export default function TelaCadastroAdministradorAdmin({ navigation, route, usua
         />
       ) : null}
 
-      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+      <RolagemComTeclado
+        style={styles.scroll}
+        contentContainerStyle={styles.scrollContent}
+        keyboardBottomBase={ADMIN_TAB_BAR_HEIGHT + 48}
+      >
         <View style={styles.hero}>
           <View style={styles.heroIcon}>
             <Ionicons name="shield-checkmark-outline" size={28} color={adminTheme.colors.primary} />
@@ -195,7 +199,7 @@ export default function TelaCadastroAdministradorAdmin({ navigation, route, usua
             )}
           </TouchableOpacity>
         </View>
-      </ScrollView>
+      </RolagemComTeclado>
 
       <BarraAbasAdmin navigation={navigation} rotaAtual="AdminCadastros" usuarioLogado={adminUser} />
     </View>

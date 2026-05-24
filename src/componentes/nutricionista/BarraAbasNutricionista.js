@@ -1,8 +1,9 @@
-import React from 'react';
-import { Platform, View, Text, TouchableOpacity, StyleSheet } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Platform, View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
+import { navigateNutriTab } from '../../utilitarios/navegacaoAbas';
 
 export const NUTRI_TAB_BAR_HEIGHT = 64;
 export const NUTRI_TAB_BAR_SPACE = 14;
@@ -23,13 +24,20 @@ export default function BarraAbasNutricionista({
   usuarioLogado,
 }) {
   const insets = useSafeAreaInsets();
+  const [rotaVisual, setRotaVisual] = useState(rotaAtual);
+
+  useEffect(() => {
+    setRotaVisual(rotaAtual);
+  }, [rotaAtual]);
 
   function navegar(rota) {
+    setRotaVisual(rota);
+
     if (rotaAtual === rota) {
       return;
     }
 
-    navigation.navigate(rota, { usuarioLogado });
+    navigateNutriTab(navigation, rota, usuarioLogado);
   }
 
   const bottomOffset = Platform.OS === 'web' ? 0 : Math.max(10, Math.min(insets.bottom || 0, 14));
@@ -38,16 +46,25 @@ export default function BarraAbasNutricionista({
     <View style={[styles.areaFixa, rodapeWebFixo]}>
       <View style={[styles.barra, { marginBottom: bottomOffset }]}>
         {abasPrincipais.map((aba) => {
-          const ativo = rotaAtual === aba.rota;
+          const ativo = rotaVisual === aba.rota;
 
           return (
-            <TouchableOpacity
+            <Pressable
               key={aba.rota}
               style={styles.aba}
               accessibilityRole="tab"
               accessibilityState={{ selected: ativo }}
               accessibilityLabel={`Aba ${aba.rotulo}${ativo ? ', selecionada' : ''}`}
-              onPress={() => navegar(aba.rota)}
+              onPressIn={() => {
+                if (rotaAtual !== aba.rota) {
+                  navegar(aba.rota);
+                }
+              }}
+              onPress={() => {
+                if (rotaAtual !== aba.rota) {
+                  navegar(aba.rota);
+                }
+              }}
             >
               <Ionicons
                 name={aba.icone}
@@ -57,7 +74,7 @@ export default function BarraAbasNutricionista({
               <Text style={[styles.rotuloAba, ativo && styles.rotuloAbaAtivo]}>
                 {aba.rotulo}
               </Text>
-            </TouchableOpacity>
+            </Pressable>
           );
         })}
       </View>

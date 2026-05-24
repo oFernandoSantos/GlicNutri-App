@@ -45,7 +45,8 @@ export async function fetchNutriDashboard(usuarioLogado) {
   ] = await Promise.all([
     supabase
       .from('paciente')
-      .select('*', { count: 'exact', head: true })
+      .select('id_paciente_uuid', { count: 'exact', head: true })
+      .eq('id_nutricionista_uuid', nutricionistaId)
       .or('excluido.is.null,excluido.eq.false'),
     supabase
       .from('consulta')
@@ -67,6 +68,7 @@ export async function fetchNutriDashboard(usuarioLogado) {
     supabase
       .from('paciente')
       .select('id_paciente_uuid, nome_completo, email_pac, data_hora_ultima_atualizacao')
+      .eq('id_nutricionista_uuid', nutricionistaId)
       .or('excluido.is.null,excluido.eq.false')
       .order('data_hora_ultima_atualizacao', { ascending: false })
       .limit(8),

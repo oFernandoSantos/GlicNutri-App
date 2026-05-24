@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -23,6 +24,7 @@ import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
+import { getMealEntryNutrition } from '../../servicos/servicoRefeicaoIA';
 
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
 const NUTRIENT_BASE = {
@@ -121,6 +123,18 @@ function formatNutrientValue(value, unit) {
 }
 
 function estimateNutritionFromMeal(entry) {
+  const structured = getMealEntryNutrition(entry);
+
+  if (structured) {
+    return {
+      ...NUTRIENT_BASE,
+      calories: structured.calories,
+      carbs: structured.carbs,
+      protein: structured.protein,
+      fat: structured.fat,
+    };
+  }
+
   const aiNote = String(entry?.aiNote || '');
   const delta = String(entry?.glucoseDelta || '');
   const combinedText = normalizeText([entry?.title, entry?.description, aiNote].filter(Boolean).join(' '));
@@ -243,55 +257,55 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
   const [range, setRange] = useState('Hoje');
   const [nutritionSlideIndex, setNutritionSlideIndex] = useState(0);
   const [appState, setAppState] = useState(createDefaultAppState());
+  const [resolvedPatientId, setResolvedPatientId] = useState(patientId);
+  const hasLoadedRef = useRef(false);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
+  const loadDiario = useCallback(
+    async ({ silent = false, forceRefresh = false } = {}) => {
       try {
-        setLoading(true);
+        if (!silent) setLoading(true);
 
         if (!canResolvePatient) {
-          if (!active) return;
           setAppState(createDefaultAppState());
+          setResolvedPatientId(null);
           return;
         }
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          forceRefresh,
           ...mesclarLimitesDadosPaciente('diario'),
         });
 
-        if (!active) return;
-
+        const canonicalId = experience.patient?.id_paciente_uuid || patientId;
+        setResolvedPatientId(canonicalId);
         setAppState(experience.appState);
-        replaceCachedPatientAppState(
-          experience.patient?.id_paciente_uuid || patientId,
-          experience.appState
-        );
+        replaceCachedPatientAppState(canonicalId, experience.appState);
       } catch (error) {
         console.log('Erro ao carregar diario:', error);
       } finally {
-        if (active) setLoading(false);
+        if (!silent) setLoading(false);
       }
-    }
+    },
+    [canResolvePatient, patientId, usuarioLogado]
+  );
 
-    load();
-
-    return () => {
-      active = false;
-    };
-  }, [patientId, canResolvePatient, usuarioLogado]);
+  useFocusEffect(
+    useCallback(() => {
+      loadDiario({ silent: hasLoadedRef.current, forceRefresh: hasLoadedRef.current });
+      hasLoadedRef.current = true;
+    }, [loadDiario])
+  );
 
   useEffect(() => {
-    if (!patientId) return undefined;
+    if (!resolvedPatientId) return undefined;
 
-    return subscribeToPatientAppState(patientId, (nextAppState) => {
+    return subscribeToPatientAppState(resolvedPatientId, (nextAppState) => {
       if (nextAppState) {
         setAppState(nextAppState);
       }
     });
-  }, [patientId]);
+  }, [resolvedPatientId]);
 
   useEffect(() => {
     if (!mealEntryFromIA || !mealIARefreshToken) {
@@ -448,7 +462,6 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
           onPress={() =>
             navigation.navigate('RegistroRefeicaoIA', {
               usuarioLogado,
-              openMealTimingChoice: true,
             })
           }
           disabled={!canResolvePatient}
@@ -676,7 +689,6 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
               onPress={() =>
                 navigation.navigate('RegistroRefeicaoIA', {
                   usuarioLogado,
-                  openMealTimingChoice: true,
                 })
               }
               disabled={!canResolvePatient}

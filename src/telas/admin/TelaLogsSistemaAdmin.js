@@ -666,6 +666,10 @@ export default function TelaLogsSistemaAdmin({ navigation, route, usuarioLogado,
   }
 
   function handleVoltar() {
+    if (navigation.canGoBack?.()) {
+      navigation.goBack();
+      return;
+    }
     navigation.navigate('AdminHome', { usuarioLogado: adminUser });
   }
 

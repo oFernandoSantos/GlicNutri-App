@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
@@ -28,11 +29,12 @@ import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../
 import { supabase } from '../../servicos/configSupabase';
 import {
   buildNutritionistThreadPreview,
-  fetchNutritionistChatInbox,
+  fetchNutritionistChatInboxForPatientIds,
   fetchNutritionistChatThreadForPatient,
   normalizeNutritionistThreadEntry,
   savePatientNutritionistChat,
 } from '../../servicos/servicoDadosPaciente';
+import { fetchNutritionistChatSummary } from '../../servicos/servicoEscalaNutri';
 import {
   fetchCachedNutriChatInbox,
   invalidateNutriChatInboxCache,
@@ -153,6 +155,7 @@ function mergeChatsWithLocalState(currentChats, nextChats) {
 }
 
 const CHAT_PAGE_SIZE = 10;
+const INBOX_PREVIEW_BATCH = 40;
 const READER_BAR_HEIGHT = 58;
 
 export default function TelaMensagensNutricionista({ navigation, route }) {
@@ -191,10 +194,62 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const [activeChatId, setActiveChatId] = useState(null);
   const [visibleChatCount, setVisibleChatCount] = useState(CHAT_PAGE_SIZE);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [inboxPreviewLoadedCount, setInboxPreviewLoadedCount] = useState(0);
+  const [chatSummaryMetrics, setChatSummaryMetrics] = useState({
+    total: 0,
+    unread: 0,
+    today: 0,
+  });
+  const patientsByIdRef = useRef(new Map());
+  const draftRef = useRef('');
+  const sendingRef = useRef(false);
+  const scheduleInboxRefreshRef = useRef(() => {});
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
 
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+
+  const mergeInboxPreviews = useCallback((patients, summaries) => {
+    const summariesById = new Map(
+      (summaries || []).map((item) => [item?.patient?.id_paciente_uuid, item])
+    );
+    const preserveMessagesById = new Map(
+      (chatsRef.current || [])
+        .filter((chat) => chat.threadLoaded && (chat.messages || []).length)
+        .map((chat) => [chat.patientId, { messages: chat.messages, threadLoaded: true }])
+    );
+
+    return sortChatsByRecency(buildChatItems(patients, summariesById, { preserveMessagesById }));
+  }, []);
+
+  const loadInboxPreviewsForPatients = useCallback(
+    async (patients, { fromIndex = 0, count = INBOX_PREVIEW_BATCH } = {}) => {
+      if (!nutricionistaId || !patients?.length) return;
+
+      const slice = patients.slice(fromIndex, fromIndex + count);
+      const patientIds = slice.map((patient) => patient.id);
+      if (!patientIds.length) return;
+
+      const summaries = await fetchCachedNutriChatInbox(nutricionistaId, patientIds, () =>
+        fetchNutritionistChatInboxForPatientIds(patientIds, nutricionistaId, patientsByIdRef.current)
+      );
+
+      setChats((current) => {
+        const mergedPatients = patientsRef.current || patients;
+        return mergeChatsWithLocalState(current, mergeInboxPreviews(mergedPatients, summaries));
+      });
+      setInboxPreviewLoadedCount((current) => Math.max(current, fromIndex + patientIds.length));
+    },
+    [mergeInboxPreviews, nutricionistaId]
+  );
 
   const loadInbox = useCallback(
     async ({ silent = false, bustCache = false } = {}) => {
@@ -211,55 +266,54 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 
         if (bustCache) {
           invalidateNutriChatInboxCache(nutricionistaId);
+          setInboxPreviewLoadedCount(0);
         }
 
-        const patients = await listPatientsByNutritionist(nutricionistaId);
+        const [patients, summary] = await Promise.all([
+          listPatientsByNutritionist(nutricionistaId),
+          fetchNutritionistChatSummary(nutricionistaId),
+        ]);
+
         patientsRef.current = patients;
-        const patientIds = patients.map((patient) => patient.id);
-
-        const summaries = await fetchCachedNutriChatInbox(
-          nutricionistaId,
-          patientIds,
-          () => fetchNutritionistChatInbox(patientIds, nutricionistaId)
-        );
-
-        const summariesById = new Map(
-          summaries.map((item) => [item?.patient?.id_paciente_uuid, item])
-        );
+        patientsByIdRef.current = new Map((patients || []).map((patient) => [patient.id, patient]));
+        setChatSummaryMetrics({
+          total: Number(summary?.totalConversas || patients.length),
+          unread: Number(summary?.naoLidas || 0),
+          today: Number(summary?.atualizadasHoje || 0),
+        });
 
         const preserveMessagesById = new Map(
           (chatsRef.current || [])
             .filter((chat) => chat.threadLoaded && (chat.messages || []).length)
-            .map((chat) => [
-              chat.patientId,
-              { messages: chat.messages, threadLoaded: true },
-            ])
+            .map((chat) => [chat.patientId, { messages: chat.messages, threadLoaded: true }])
         );
 
-        const nextChats = buildChatItems(patients, summariesById, { preserveMessagesById });
+        const shellChats = sortChatsByRecency(
+          buildChatItems(patients, new Map(), { preserveMessagesById })
+        );
         const preferredChatId =
           preselectedChatId ||
           (preselectedPatientId ? `chat-${preselectedPatientId}` : null);
 
-        setChats((current) => mergeChatsWithLocalState(current, nextChats));
+        setChats((current) => mergeChatsWithLocalState(current, shellChats));
 
         if (!silent) {
           setVisibleChatCount(CHAT_PAGE_SIZE);
+          setLoading(false);
         }
 
+        const initialPreviewCount = Math.min(patients.length, INBOX_PREVIEW_BATCH);
+        await loadInboxPreviewsForPatients(patients, { fromIndex: 0, count: initialPreviewCount });
+
         setActiveChatId((current) => {
-          if (preferredChatId && nextChats.some((item) => item.id === preferredChatId)) {
+          if (preferredChatId && shellChats.some((item) => item.id === preferredChatId)) {
             return preferredChatId;
           }
-          if (current && nextChats.some((item) => item.id === current)) {
+          if (current && shellChats.some((item) => item.id === current)) {
             return current;
           }
           if (isCompact) return null;
-          return (
-            nextChats.find((item) => item.lastMessage && item.lastMessage !== 'Sem mensagens ainda.')?.id ||
-            nextChats[0]?.id ||
-            null
-          );
+          return shellChats[0]?.id || null;
         });
       } catch (error) {
         console.log('Erro ao carregar conversas da nutricionista:', error);
@@ -270,7 +324,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         if (!silent) setLoading(false);
       }
     },
-    [isCompact, nutricionistaId, preselectedChatId, preselectedPatientId]
+    [isCompact, loadInboxPreviewsForPatients, nutricionistaId, preselectedChatId, preselectedPatientId]
   );
 
   const loadActiveThread = useCallback(
@@ -317,15 +371,36 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         clearTimeout(refreshTimerRef.current);
       }
 
-      refreshTimerRef.current = setTimeout(() => {
-        loadInbox({ silent: true, bustCache: true });
+      refreshTimerRef.current = setTimeout(async () => {
         if (patientId) {
+          const patients = patientsRef.current || [];
+          const index = patients.findIndex((patient) => patient.id === patientId);
+          if (index >= 0) {
+            await loadInboxPreviewsForPatients(patients, {
+              fromIndex: index,
+              count: 1,
+            });
+          }
           loadActiveThread(patientId, { silent: true });
+          fetchNutritionistChatSummary(nutricionistaId).then((summary) => {
+            setChatSummaryMetrics({
+              total: Number(summary?.totalConversas || patientsRef.current.length),
+              unread: Number(summary?.naoLidas || 0),
+              today: Number(summary?.atualizadasHoje || 0),
+            });
+          });
+          return;
         }
+
+        loadInbox({ silent: true, bustCache: true });
       }, 500);
     },
-    [loadActiveThread, loadInbox]
+    [loadActiveThread, loadInbox, loadInboxPreviewsForPatients, nutricionistaId]
   );
+
+  useEffect(() => {
+    scheduleInboxRefreshRef.current = scheduleInboxRefresh;
+  }, [scheduleInboxRefresh]);
 
   useFocusEffect(
     React.useCallback(() => {
@@ -338,6 +413,33 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       };
     }, [loadInbox])
   );
+
+  useEffect(() => {
+    if (!isCompact) {
+      navigation.setOptions({ readerBackAction: undefined });
+      return undefined;
+    }
+
+    navigation.setOptions({
+      readerBackAction: activeChatId ? () => setActiveChatId(null) : undefined,
+    });
+
+    return () => navigation.setOptions({ readerBackAction: undefined });
+  }, [activeChatId, isCompact, navigation]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return undefined;
+
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      if (isCompact && activeChatId) {
+        setActiveChatId(null);
+        return true;
+      }
+      return false;
+    });
+
+    return () => subscription.remove();
+  }, [activeChatId, isCompact]);
 
   useEffect(() => {
     if (!nutricionistaId) return undefined;
@@ -353,9 +455,9 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
           filter: `nutricionista_id=eq.${nutricionistaId}`,
         },
         (payload) => {
-          if (draft.trim() || sending) return;
+          if (draftRef.current.trim() || sendingRef.current) return;
           const patientId = payload?.new?.paciente_id || payload?.old?.paciente_id || null;
-          scheduleInboxRefresh(patientId);
+          scheduleInboxRefreshRef.current(patientId);
         }
       )
       .subscribe();
@@ -363,7 +465,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [draft, nutricionistaId, scheduleInboxRefresh, sending]);
+  }, [nutricionistaId]);
 
   useEffect(() => {
     const activeChat = chatsRef.current.find((chat) => chat.id === activeChatId);
@@ -400,13 +502,10 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const showThreadColumn = !isCompact || Boolean(activeChatId);
 
   const metrics = useMemo(() => {
-    const total = chats.length;
-    const unread = chats.filter((chat) => Number(chat.unread || 0) > 0).length;
-    const read = total - unread;
-    const today = chats.filter((chat) => {
-      const label = String(chat.lastMessageAt || '').toLowerCase();
-      return label.includes('hoje') || label === formatTimeNow();
-    }).length;
+    const total = chatSummaryMetrics.total || chats.length;
+    const unread = chatSummaryMetrics.unread;
+    const read = Math.max(0, total - unread);
+    const today = chatSummaryMetrics.today;
 
     return [
       { id: 'total', icon: 'chatbubbles-outline', label: 'Total Conversas', value: total, helper: 'Pacientes com chat', tone: 'default' },
@@ -414,7 +513,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       { id: 'read', icon: 'checkmark-done-outline', label: 'Lidas', value: read, helper: 'Conversas revisadas', tone: 'default' },
       { id: 'today', icon: 'today-outline', label: 'Hoje', value: today, helper: 'Atualizadas hoje', tone: 'default' },
     ];
-  }, [chats]);
+  }, [chatSummaryMetrics, chats.length]);
 
   const scrollThreadToLatest = useCallback((animated = false) => {
     scrollChatToEnd(scrollRef, {
@@ -517,8 +616,16 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   }
 
   function handleLoadMoreChats() {
-    if (visibleChatCount >= filteredChats.length) return;
-    setVisibleChatCount((current) => Math.min(current + CHAT_PAGE_SIZE, filteredChats.length));
+    const nextVisible = Math.min(visibleChatCount + CHAT_PAGE_SIZE, filteredChats.length);
+    setVisibleChatCount(nextVisible);
+
+    const patients = patientsRef.current || [];
+    if (inboxPreviewLoadedCount < nextVisible + CHAT_PAGE_SIZE) {
+      loadInboxPreviewsForPatients(patients, {
+        fromIndex: inboxPreviewLoadedCount,
+        count: INBOX_PREVIEW_BATCH,
+      });
+    }
   }
 
   return (

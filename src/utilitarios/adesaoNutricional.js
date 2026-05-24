@@ -1,12 +1,33 @@
+import { mergeCachedGlucoseReadings } from '../servicos/centralGlicose';
+
 const WEEKDAY_LABELS = ['D', 'S', 'T', 'Q', 'Q', 'S', 'S'];
 
 export function clampPercent(value) {
   return Math.min(100, Math.max(0, Math.round(Number(value) || 0)));
 }
 
+function countUniqueMealsByDate(mealEntries) {
+  const counts = new Map();
+  (Array.isArray(mealEntries) ? mealEntries : []).forEach((entry) => {
+    const date = String(entry?.date || '').trim();
+    const entryKey = String(entry?.databaseId || entry?.id || '').trim();
+    if (!date) return;
+    const bucket = counts.get(date) || { total: 0, ids: new Set() };
+    if (entryKey && bucket.ids.has(entryKey)) {
+      return;
+    }
+    if (entryKey) {
+      bucket.ids.add(entryKey);
+    }
+    bucket.total += 1;
+    counts.set(date, bucket);
+  });
+  return counts;
+}
+
 export function buildWeeklyAdherenceFromMeals(mealEntries, targetMeals = 3) {
   const safeTarget = Math.max(targetMeals || 3, 1);
-  const entries = Array.isArray(mealEntries) ? mealEntries : [];
+  const mealCountsByDate = countUniqueMealsByDate(mealEntries);
   const today = new Date();
   const items = [];
   let hasRealData = false;
@@ -16,7 +37,7 @@ export function buildWeeklyAdherenceFromMeals(mealEntries, targetMeals = 3) {
     date.setHours(0, 0, 0, 0);
     date.setDate(today.getDate() - index);
     const isoDate = date.toISOString().slice(0, 10);
-    const total = entries.filter((entry) => entry?.date === isoDate).length;
+    const total = mealCountsByDate.get(isoDate)?.total || 0;
     if (total > 0) hasRealData = true;
 
     items.push({
@@ -124,7 +145,7 @@ export function buildPortfolioWeeklyAdherence(patientWeeks = []) {
 }
 
 export function buildGlycemicSummary(glucoseReadings = []) {
-  const values = (Array.isArray(glucoseReadings) ? glucoseReadings : [])
+  const values = mergeCachedGlucoseReadings(Array.isArray(glucoseReadings) ? glucoseReadings : [])
     .map((item) => Number(item?.value))
     .filter((value) => Number.isFinite(value) && value > 0);
 

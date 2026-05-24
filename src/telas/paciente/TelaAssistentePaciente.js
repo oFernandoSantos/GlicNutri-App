@@ -107,7 +107,7 @@ export default function PacienteAssistenteScreen({
 
   async function sendQuestion(text) {
     const question = text.trim();
-    if (!question) return;
+    if (!question || saving) return;
 
     const nextMessages = [
       ...messages,

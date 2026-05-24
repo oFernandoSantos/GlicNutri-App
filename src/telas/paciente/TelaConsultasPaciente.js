@@ -937,7 +937,6 @@ export default function PacienteAgendamentosScreen({
         resumoVisivel && styles.screenContentWithFooter,
       ]}
       footerOverlay={footerOverlay}
-      showTabBar={route?.name === 'PacienteAgendamentos'}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
       {mensagem?.texto ? (

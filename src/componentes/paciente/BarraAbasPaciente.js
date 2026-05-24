@@ -14,6 +14,8 @@ import { BlurView } from 'expo-blur';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { temaPaciente, sombraPaciente } from '../../temas/temaPaciente';
 import { TAB_BAR_COACH_SEEN_KEY } from '../../constantes/chavesArmazenamento';
+import { navigatePatientTab } from '../../utilitarios/navegacaoAbas';
+import { getPatientId, prefetchPatientPlanExperience } from '../../servicos/servicoDadosPaciente';
 
 export const PATIENT_TAB_BAR_HEIGHT = 64;
 export const PATIENT_TAB_BAR_SPACE = 14;
@@ -121,11 +123,15 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
     setAcaoRapidaEmFoco(null);
     setRotaVisual(rota);
 
+    if (rota === 'PacientePlano' && rotaAtual !== rota) {
+      prefetchPatientPlanExperience(getPatientId(usuarioLogado), usuarioLogado);
+    }
+
     if (rotaAtual === rota) {
       return;
     }
 
-    navigation.navigate(rota, { usuarioLogado });
+    navigatePatientTab(navigation, rota, usuarioLogado);
   }
 
   function obterRotaPelaPosicao(posicaoX) {
@@ -144,15 +150,20 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
     return abasPrincipais[indice]?.rota || null;
   }
 
-  function atualizarSelecaoPorArraste(posicaoX) {
+  function atualizarSelecaoPorArraste(posicaoX, { navegarAoMudar = false } = {}) {
     const rota = obterRotaPelaPosicao(posicaoX);
 
     if (!rota) {
       return;
     }
 
+    const mudouAba = rotaArrastadaRef.current !== rota;
     rotaArrastadaRef.current = rota;
     setRotaVisual(rota);
+
+    if (navegarAoMudar && mudouAba && rotaAtual !== rota) {
+      navegar(rota);
+    }
   }
 
   function iniciarArrastePeloCirculo(posicaoX, posicaoY, rota) {
@@ -201,7 +212,7 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
       }
 
       setMenuRapidoVisivel(false);
-      atualizarSelecaoPorArraste(posicaoX);
+      atualizarSelecaoPorArraste(posicaoX, { navegarAoMudar: true });
       return;
     }
 
@@ -254,13 +265,11 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
     if (tipo === 'meal') {
       navigation.navigate('RegistroRefeicaoIA', {
         usuarioLogado,
-        openMealTimingChoice: true,
       });
       return;
     }
 
-    navigation.navigate('PacienteMonitoramento', {
-      usuarioLogado,
+    navigatePatientTab(navigation, 'PacienteMonitoramento', usuarioLogado, {
       openQuickRegister: tipo,
     });
   }
@@ -448,6 +457,17 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                 }
 
                 setRotaVisual(aba.rota);
+
+                if (aba.rota === 'HomePaciente') {
+                  if (!menuRapidoVisivel && rotaAtual !== 'HomePaciente') {
+                    navegar('HomePaciente');
+                  }
+                  return;
+                }
+
+                if (rotaAtual !== aba.rota) {
+                  navegar(aba.rota);
+                }
               }}
               onPress={() => {
                 if (arrasteMovidoRef.current) {
@@ -460,7 +480,9 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                   return;
                 }
 
-                navegar(aba.rota);
+                if (rotaAtual !== aba.rota) {
+                  navegar(aba.rota);
+                }
               }}
             >
               {() => {

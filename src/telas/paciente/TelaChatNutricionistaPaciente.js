@@ -94,6 +94,7 @@ export default function TelaChatNutricionistaPaciente({
     [patientName]
   );
   const hasLoadedRef = useRef(false);
+  const loadRef = useRef(() => Promise.resolve());
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -181,6 +182,10 @@ export default function TelaChatNutricionistaPaciente({
     [canResolvePatient, patientId, routeNutritionist, usuarioLogado]
   );
 
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
+
   useFocusEffect(
     useCallback(() => {
       load({ silent: hasLoadedRef.current, forceRefresh: false });
@@ -204,7 +209,7 @@ export default function TelaChatNutricionistaPaciente({
           filter: `paciente_id=eq.${patientId}`,
         },
         () => {
-          load({ silent: true, forceRefresh: true });
+          loadRef.current({ silent: true, forceRefresh: true });
         }
       )
       .subscribe();
@@ -212,7 +217,7 @@ export default function TelaChatNutricionistaPaciente({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [load, patientId]);
+  }, [patientId]);
 
   const nutritionistName =
     nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
