@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { RolagemComTeclado } from '../../componentes/comum/RolagemComTeclado';
 import { Ionicons } from '@expo/vector-icons';
 import {
   AvatarBadge,
@@ -412,9 +413,10 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         </View>
       </View>
 
-      <ScrollView
+      <RolagemComTeclado
         style={styles.scroll}
         contentContainerStyle={styles.content}
+        keyboardBottomBase={48}
         showsVerticalScrollIndicator={false}
       >
         {activeTab === 'overview' ? (
@@ -677,7 +679,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
             </SectionCard>
           </View>
         ) : null}
-      </ScrollView>
+      </RolagemComTeclado>
     </View>
   );
 }

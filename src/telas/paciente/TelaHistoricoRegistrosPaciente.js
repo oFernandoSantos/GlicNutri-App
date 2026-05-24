@@ -14,6 +14,7 @@ import {
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import { useKeyboardBottomInset } from '../../componentes/comum/RolagemComTeclado';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
@@ -274,7 +275,6 @@ function EmptyState({ activeTab, navigation, usuarioLogado, canResolvePatient })
     if (!canResolvePatient) return;
     navigation.navigate('RegistroRefeicaoIA', {
       usuarioLogado,
-      openMealTimingChoice: true,
     });
   }
 
@@ -351,7 +351,7 @@ export default function PacienteHistoricoRegistrosScreen({
   const [bannerOperacao, setBannerOperacao] = useState(null);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
   const historicoLoadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
-  const loadHistoryExperience = useCallback(async () => {
+  const loadHistoryExperience = useCallback(async ({ forceRefresh = false } = {}) => {
     if (!canResolvePatient) {
       setPatient(null);
       setObjectiveText('');
@@ -362,6 +362,7 @@ export default function PacienteHistoricoRegistrosScreen({
 
     const experience = await fetchPatientExperience(patientId, {
       patientContext: usuarioLogado,
+      forceRefresh,
       ...mesclarLimitesDadosPaciente('historico'),
     });
     const mergedReadings = mergeCachedGlucoseReadings(
@@ -383,10 +384,10 @@ export default function PacienteHistoricoRegistrosScreen({
     );
   }, [canResolvePatient, patientId, usuarioLogado]);
 
-  const fetchHistoricoComErro = useCallback(async () => {
+  const fetchHistoricoComErro = useCallback(async ({ forceRefresh = false } = {}) => {
     try {
       setLoadError(null);
-      await loadHistoryExperience();
+      await loadHistoryExperience({ forceRefresh });
     } catch (error) {
       console.log('Erro ao carregar historico:', error);
       setLoadError(
@@ -419,7 +420,7 @@ export default function PacienteHistoricoRegistrosScreen({
 
   const onRefreshHistorico = useCallback(async () => {
     setRefreshing(true);
-    await fetchHistoricoComErro();
+    await fetchHistoricoComErro({ forceRefresh: true });
     setRefreshing(false);
   }, [fetchHistoricoComErro]);
 
@@ -455,7 +456,7 @@ export default function PacienteHistoricoRegistrosScreen({
             return;
           }
 
-          await fetchHistoricoComErro();
+          await fetchHistoricoComErro({ forceRefresh: true });
         } catch (error) {
           if (!active) return;
           console.log('Erro ao recarregar historico no foco:', error);
@@ -539,6 +540,8 @@ export default function PacienteHistoricoRegistrosScreen({
     [activePeriod, foodEntries, searchEndDate, searchStartDate]
   );
 
+  const keyboardScrollPadding = useKeyboardBottomInset(48);
+
   const headerSelectors = useMemo(
     () => (
       <View style={styles.headerSelectors}>
@@ -575,38 +578,39 @@ export default function PacienteHistoricoRegistrosScreen({
             );
           })}
         </View>
-
-        {activePeriod === 'search' ? (
-          <View style={styles.searchCard}>
-            <View style={styles.searchField}>
-              <Text style={styles.searchLabel}>Início</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor="#8a9095"
-                keyboardType="numeric"
-                value={searchStartDate}
-                onChangeText={(value) => setSearchStartDate(formatDateInput(value))}
-              />
-            </View>
-
-            <View style={styles.searchField}>
-              <Text style={styles.searchLabel}>Fim</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor="#8a9095"
-                keyboardType="numeric"
-                value={searchEndDate}
-                onChangeText={(value) => setSearchEndDate(formatDateInput(value))}
-              />
-            </View>
-          </View>
-        ) : null}
       </View>
     ),
-    [activePeriod, activeTab, searchEndDate, searchStartDate]
+    [activePeriod, activeTab]
   );
+
+  const searchPanel =
+    activePeriod === 'search' ? (
+      <View style={styles.searchCard}>
+        <View style={styles.searchField}>
+          <Text style={styles.searchLabel}>Início</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="DD/MM/AAAA"
+            placeholderTextColor="#8a9095"
+            keyboardType="numeric"
+            value={searchStartDate}
+            onChangeText={(value) => setSearchStartDate(formatDateInput(value))}
+          />
+        </View>
+
+        <View style={styles.searchField}>
+          <Text style={styles.searchLabel}>Fim</Text>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="DD/MM/AAAA"
+            placeholderTextColor="#8a9095"
+            keyboardType="numeric"
+            value={searchEndDate}
+            onChangeText={(value) => setSearchEndDate(formatDateInput(value))}
+          />
+        </View>
+      </View>
+    ) : null;
 
   useLayoutEffect(() => {
     navigation.setOptions({
@@ -818,85 +822,23 @@ export default function PacienteHistoricoRegistrosScreen({
       ]}
       scrollEnabled={false}
     >
-      {false ? (
-      <View style={styles.stickySelectors}>
-        <View style={styles.tabRow}>
-          {historyTabs.map((tab) => {
-            const active = activeTab === tab.key;
-
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={[styles.tab, active && styles.tabActive]}
-                onPress={() => setActiveTab(tab.key)}
-              >
-                <Text style={[styles.tabText, active && styles.tabTextActive]}>{tab.label}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <View style={styles.periodRow}>
-          {periodTabs.map((tab) => {
-            const active = activePeriod === tab.key;
-
-            return (
-              <TouchableOpacity
-                key={tab.key}
-                style={[styles.periodTab, active && styles.periodTabActive]}
-                onPress={() => setActivePeriod(tab.key)}
-              >
-                <Text style={[styles.periodTabText, active && styles.periodTabTextActive]}>
-                  {tab.label}
-                </Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        {activePeriod === 'search' ? (
-          <View style={styles.searchCard}>
-            <View style={styles.searchField}>
-              <Text style={styles.searchLabel}>Início</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor="#8a9095"
-                keyboardType="numeric"
-                value={searchStartDate}
-                onChangeText={(value) => setSearchStartDate(formatDateInput(value))}
-              />
-            </View>
-
-            <View style={styles.searchField}>
-              <Text style={styles.searchLabel}>Fim</Text>
-              <TextInput
-                style={styles.searchInput}
-                placeholder="DD/MM/AAAA"
-                placeholderTextColor="#8a9095"
-                keyboardType="numeric"
-                value={searchEndDate}
-                onChangeText={(value) => setSearchEndDate(formatDateInput(value))}
-              />
-            </View>
-          </View>
-        ) : null}
-      </View>
-      ) : null}
-
       <ScrollView
         style={styles.recordsScroll}
         contentContainerStyle={[
           styles.recordsContent,
           activePeriod === 'search' && styles.recordsContentWithSearch,
+          { paddingBottom: keyboardScrollPadding },
         ]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
+        keyboardDismissMode="on-drag"
+        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
         nestedScrollEnabled
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefreshHistorico} />
         }
       >
+      {searchPanel}
       {bannerOperacao ? (
         <MensagemInline
           tipo="erro"

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   View,
   Text,
@@ -35,6 +35,7 @@ import {
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { getMealEntryNutrition } from '../../servicos/servicoRefeicaoIA';
 import { syncGooglePatientRecord } from '../../servicos/sincronizarPacienteGoogle';
 import {
   getCachedGlucoseReadings,
@@ -43,6 +44,7 @@ import {
   subscribeToGlucoseReadings,
 } from '../../servicos/centralGlicose';
 import {
+  getCachedPatientAppState,
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
@@ -50,6 +52,10 @@ import MensagemInline from '../../componentes/comum/MensagemInline';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import { listPatientClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
 import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
+import {
+  PATIENT_MAIN_TAB_ROUTES,
+  navigatePatientTab,
+} from '../../utilitarios/navegacaoAbas';
 
 function padDatePart(value) {
   return String(value).padStart(2, '0');
@@ -429,7 +435,43 @@ function percentage(value, target) {
 function buildNutritionSummary(mealEntries, planSections) {
   const today = todayDateString();
   const todayMeals = (mealEntries || []).filter((entry) => !entry.date || entry.date === today);
-  const consumed = estimateNutritionFromTexts(todayMeals.map(getMealText));
+  const consumedFromMeals = todayMeals.reduce(
+    (totals, entry) => {
+      const structured = getMealEntryNutrition(entry);
+
+      if (structured) {
+        return {
+          carbs: totals.carbs + structured.carbs,
+          protein: totals.protein + structured.protein,
+          fat: totals.fat + structured.fat,
+          calories: totals.calories + structured.calories,
+          micros: totals.micros,
+        };
+      }
+
+      const estimated = estimateNutritionFromTexts([getMealText(entry)]);
+
+      return {
+        carbs: totals.carbs + estimated.carbs,
+        protein: totals.protein + estimated.protein,
+        fat: totals.fat + estimated.fat,
+        calories: totals.calories + estimated.calories,
+        micros: Array.from(new Set([...totals.micros, ...estimated.micros])),
+      };
+    },
+    { carbs: 0, protein: 0, fat: 0, calories: 0, micros: [] }
+  );
+  const consumed = {
+    ...consumedFromMeals,
+    calories:
+      consumedFromMeals.calories > 0
+        ? consumedFromMeals.calories
+        : Math.round(
+            consumedFromMeals.carbs * 4 +
+              consumedFromMeals.protein * 4 +
+              consumedFromMeals.fat * 9
+          ),
+  };
   const planned = estimateNutritionFromTexts((planSections || []).map(getPlanText));
   const target = planned.matches
     ? planned
@@ -469,9 +511,10 @@ function buildHomePlanMealSummary(section, index, consumedCount) {
 }
 
 function buildGlucoseSummary(glucoseReadings) {
+  const dedupedReadings = mergeCachedGlucoseReadings(glucoseReadings || []);
   const today = todayDateString();
-  const todayReadings = (glucoseReadings || []).filter((item) => item.date === today);
-  const baseReadings = todayReadings.length ? todayReadings : glucoseReadings || [];
+  const todayReadings = dedupedReadings.filter((item) => item.date === today);
+  const baseReadings = todayReadings.length ? todayReadings : dedupedReadings;
   const inRange = baseReadings.filter((item) => item.value >= 70 && item.value <= 180).length;
   const above = baseReadings.filter((item) => item.value > 180).length;
   const below = baseReadings.filter((item) => item.value < 70).length;
@@ -509,6 +552,7 @@ function GlucoseMetricCard({
   sparklineData,
   glucoseSummary,
   latestGlucose,
+  loading,
 }) {
   const glucoseLabel = currentGlucose ? `${currentGlucose} mg/dL` : '-- mg/dL';
   const updatedLabel = latestGlucose?.time ? `Atualizado ${latestGlucose.time}` : 'Sem registro hoje';
@@ -516,6 +560,12 @@ function GlucoseMetricCard({
 
   return (
     <SectionCard style={[styles.metricSlide, { width }]}>
+      {loading ? (
+        <View style={styles.metricLoadingWrap}>
+          <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+          <Text style={styles.metricLoadingText}>Atualizando leituras...</Text>
+        </View>
+      ) : null}
       <View style={styles.heroTopRow}>
         <View>
           <Text style={styles.eyebrow}>Glicose em tempo real</Text>
@@ -659,7 +709,7 @@ export default function PacienteHomeScreen({
   const [menuVisible, setMenuVisible] = useState(false);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [dismissedNotificationKeys, setDismissedNotificationKeys] = useState({});
-  const [loading, setLoading] = useState(true);
+  const [metricsLoading, setMetricsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saindo, setSaindo] = useState(false);
   const [mensagemHome, setMensagemHome] = useState(null);
@@ -672,6 +722,8 @@ export default function PacienteHomeScreen({
   const [clinicalAlerts, setClinicalAlerts] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
+  const loadInFlightRef = useRef(null);
+  const homeLoadedRef = useRef(false);
 
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
 
@@ -690,6 +742,13 @@ export default function PacienteHomeScreen({
   );
 
   const nomeBaseUsuario = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
+  const homeFetchOptions = useMemo(
+    () => ({
+      patientContext: usuarioLogado,
+      ...mesclarLimitesDadosPaciente('resumo'),
+    }),
+    [usuarioLogado]
+  );
 
   const aplicarExperience = useCallback(
     function aplicarExperience(experience) {
@@ -741,86 +800,135 @@ export default function PacienteHomeScreen({
 
   const carregarDados = useCallback(async function carregarDados(options = {}) {
     const forceRefresh = options.forceRefresh === true;
-    const showLoading = options.showLoading !== false;
 
-    try {
-      if (!canResolvePatient) {
-        setPaciente({
-          nome_completo: nomeBaseUsuario,
-          email_pac: usuarioLogado?.email || null,
-        });
-        setAppState(createDefaultAppState());
-        setClinicalObjective('');
-        setGlucoseReadings([]);
-        setClinicalAlerts([]);
-        return;
-      }
+    if (loadInFlightRef.current) {
+      return loadInFlightRef.current;
+    }
 
-      if (!forceRefresh) {
-        const cachedExperience = getCachedPatientExperience(idPaciente, {
-          patientContext: usuarioLogado,
-        });
+    const run = (async () => {
+      try {
+        if (!canResolvePatient) {
+          setPaciente({
+            nome_completo: nomeBaseUsuario,
+            email_pac: usuarioLogado?.email || null,
+          });
+          setAppState(createDefaultAppState());
+          setClinicalObjective('');
+          setGlucoseReadings([]);
+          setClinicalAlerts([]);
+          setMetricsLoading(false);
+          return;
+        }
+
+        const cacheOptions = homeFetchOptions;
+        const cachedExperience = !forceRefresh
+          ? getCachedPatientExperience(idPaciente, cacheOptions)
+          : null;
+        const cacheIsFresh = isPatientExperienceCacheFresh(idPaciente, cacheOptions);
 
         if (cachedExperience) {
           aplicarExperience(cachedExperience);
-          await carregarAlertasClinicos(
-            cachedExperience.patient?.id_paciente_uuid || idPaciente
-          );
-          return;
+          setLoadError(null);
+          setMetricsLoading(false);
+          setRefreshing(false);
+          carregarAlertasClinicos(cachedExperience.patient?.id_paciente_uuid || idPaciente);
+
+          if (cacheIsFresh && !forceRefresh) {
+            return;
+          }
         }
-      }
 
-      if (showLoading) {
-        setLoading(true);
-      }
-
-      const [experienceResult, alertsResult] = await Promise.all([
-        fetchPatientExperience(idPaciente, {
-          patientContext: usuarioLogado,
+        const experienceResult = await fetchPatientExperience(idPaciente, {
+          ...cacheOptions,
           forceRefresh,
-          ...mesclarLimitesDadosPaciente('resumo'),
-        }),
-        listPatientClinicalAlerts(idPaciente, {
-          onlyUnread: false,
-          limit: 20,
-        }).catch(() => []),
-      ]);
+        });
 
-      let experience = experienceResult;
+        let experience = experienceResult;
 
-      if (!experience.patient && usuarioLogado?.id) {
-        const pacienteSincronizado = await syncGooglePatientRecord(usuarioLogado);
-
-        if (pacienteSincronizado?.id_paciente_uuid) {
-          experience = {
-            ...experience,
-            patient: pacienteSincronizado,
-          };
+        if (!experience.patient && usuarioLogado?.id) {
+          syncGooglePatientRecord(usuarioLogado)
+            .then((pacienteSincronizado) => {
+              if (pacienteSincronizado?.id_paciente_uuid) {
+                aplicarExperience({
+                  ...experience,
+                  patient: pacienteSincronizado,
+                });
+              }
+            })
+            .catch(() => {});
         }
-      }
 
-      aplicarExperience(experience);
-      setClinicalAlerts(alertsResult || []);
-      setLoadError(null);
-    } catch (error) {
-      console.log('Erro ao carregar dados:', error);
-      setLoadError(
-        'Não foi possível carregar seu painel. Verifique a conexão e tente novamente.'
-      );
-    } finally {
-      if (showLoading) {
-        setLoading(false);
+        aplicarExperience(experience);
+        setLoadError(null);
+        setMetricsLoading(false);
+        carregarAlertasClinicos(experience.patient?.id_paciente_uuid || idPaciente);
+      } catch (error) {
+        console.log('Erro ao carregar dados:', error);
+        if (!getCachedPatientExperience(idPaciente, homeFetchOptions)) {
+          setLoadError(
+            'Não foi possível carregar seu painel. Verifique a conexão e tente novamente.'
+          );
+        }
+        setMetricsLoading(false);
+      } finally {
+        setRefreshing(false);
       }
-      setRefreshing(false);
+    })();
+
+    loadInFlightRef.current = run;
+
+    try {
+      await run;
+    } finally {
+      loadInFlightRef.current = null;
     }
   }, [
     aplicarExperience,
     canResolvePatient,
     carregarAlertasClinicos,
+    homeFetchOptions,
     idPaciente,
     nomeBaseUsuario,
     usuarioLogado,
   ]);
+
+  useLayoutEffect(() => {
+    setPaciente((current) =>
+      current?.nome_completo
+        ? current
+        : {
+            ...usuarioLogado,
+            id_paciente_uuid: idPaciente,
+            nome_completo: nomeBaseUsuario,
+            email_pac: usuarioLogado?.email_pac || usuarioLogado?.email || null,
+          }
+    );
+
+    if (!canResolvePatient || !idPaciente) {
+      setMetricsLoading(false);
+      return;
+    }
+
+    const cachedExperience = getCachedPatientExperience(idPaciente, homeFetchOptions);
+    const cachedGlucose = getCachedGlucoseReadings(idPaciente);
+    const cachedAppState = getCachedPatientAppState(idPaciente);
+
+    if (cachedExperience) {
+      aplicarExperience(cachedExperience);
+      setMetricsLoading(false);
+      return;
+    }
+
+    if (cachedGlucose.length || cachedAppState) {
+      if (cachedAppState) {
+        setAppState(cachedAppState);
+      }
+      if (cachedGlucose.length) {
+        setGlucoseReadings(cachedGlucose);
+      }
+      setMetricsLoading(false);
+    }
+  }, [aplicarExperience, canResolvePatient, homeFetchOptions, idPaciente, nomeBaseUsuario, usuarioLogado]);
 
   async function persistirAppState(nextState) {
     if (!canResolvePatient) {
@@ -874,14 +982,10 @@ export default function PacienteHomeScreen({
         return undefined;
       }
 
-      carregarDados({
-        forceRefresh: false,
-        showLoading: !isPatientExperienceCacheFresh(idPaciente, {
-          patientContext: usuarioLogado,
-        }),
-      });
+      carregarDados({ forceRefresh: homeLoadedRef.current });
+      homeLoadedRef.current = true;
       return undefined;
-    }, [carregarDados, idPaciente, usuarioLogado])
+    }, [carregarDados, homeFetchOptions, idPaciente])
   );
 
   const nomeUsuario = paciente?.nome_completo || nomeBaseUsuario;
@@ -907,7 +1011,8 @@ export default function PacienteHomeScreen({
 
   const onRefresh = () => {
     setRefreshing(true);
-    carregarDados({ forceRefresh: true, showLoading: false });
+    setMetricsLoading(true);
+    carregarDados({ forceRefresh: true });
   };
 
   const latestGlucose = getLatestGlucose(glucoseReadings);
@@ -1046,25 +1151,6 @@ export default function PacienteHomeScreen({
     });
   }
 
-  if (loading) {
-    return (
-      <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
-        <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
-
-        <View style={styles.loadingContainer}>
-          <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-          <Text style={styles.loadingText}>Montando seu painel de cuidado...</Text>
-        </View>
-
-        <BarraAbasPaciente
-          navigation={navigation}
-          rotaAtual={route?.name || 'HomePaciente'}
-          usuarioLogado={usuarioLogado}
-        />
-      </View>
-    );
-  }
-
   if (loadError && !paciente && !glucoseReadings.length) {
     return (
       <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
@@ -1076,7 +1162,8 @@ export default function PacienteHomeScreen({
             loading={refreshing}
             onTentarNovamente={() => {
               loadGuardRef.current.reiniciar();
-              carregarDados({ forceRefresh: true, showLoading: true });
+              setMetricsLoading(true);
+              carregarDados({ forceRefresh: true });
             }}
           />
         </View>
@@ -1099,7 +1186,10 @@ export default function PacienteHomeScreen({
             titulo="Atualização parcial"
             mensagem={loadError}
             loading={refreshing}
-            onTentarNovamente={() => carregarDados({ forceRefresh: true, showLoading: false })}
+            onTentarNovamente={() => {
+              setMetricsLoading(true);
+              carregarDados({ forceRefresh: true });
+            }}
           />
         </View>
       ) : null}
@@ -1108,7 +1198,13 @@ export default function PacienteHomeScreen({
         <PatientDrawer
           visible={menuVisible}
           onClose={() => setMenuVisible(false)}
-          onNavigate={(screen, params) => navigation.navigate(screen, { usuarioLogado, ...params })}
+          onNavigate={(screen, params) => {
+            if (PATIENT_MAIN_TAB_ROUTES.has(screen)) {
+              navigatePatientTab(navigation, screen, usuarioLogado);
+              return;
+            }
+            navigation.navigate(screen, { usuarioLogado, ...params });
+          }}
           onLogout={handleLogout}
           currentRoute={route?.name || 'HomePaciente'}
           userName={nomeUsuario}
@@ -1262,6 +1358,7 @@ export default function PacienteHomeScreen({
               sparklineData={sparklineData}
               glucoseSummary={glucoseSummary}
               latestGlucose={latestGlucose}
+              loading={metricsLoading}
             />
 
             <MacroMetricCard width={carouselWidth} nutritionSummary={nutritionSummary} />
@@ -1438,6 +1535,16 @@ const styles = StyleSheet.create({
   inlineErrorWrap: {
     paddingHorizontal: patientTheme.spacing.screen,
     paddingTop: 12,
+  },
+  metricLoadingWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 8,
+  },
+  metricLoadingText: {
+    fontSize: 13,
+    color: patientTheme.colors.textMuted,
   },
   loadingText: {
     marginTop: 12,

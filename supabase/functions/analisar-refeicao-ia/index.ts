@@ -26,7 +26,11 @@ const DEFAULT_BUCKET = 'refeicoes-ia';
 const LOGMEAL_LANGUAGE = 'eng';
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const logMealApiKey = Deno.env.get('LOGMEAL_API_KEY') || '';
+const logMealCompanyKey = Deno.env.get('LOGMEAL_API_KEY') || '';
+const logMealUserKey = Deno.env.get('LOGMEAL_API_USER_KEY') || '';
+const logMealBackendUsername = Deno.env.get('LOGMEAL_BACKEND_USERNAME') || 'glicnutri-backend';
+
+let resolvedLogMealUserToken = '';
 
 const FOOD_TRANSLATIONS: Record<string, string> = {
   food: 'Comida',
@@ -193,6 +197,80 @@ function unwrapErrorMessage(raw: string) {
   } catch (_error) {
     return trimmed;
   }
+}
+
+function isLogMealAccessError(message: string) {
+  const normalized = String(message || '').toLowerCase();
+
+  return (
+    normalized.includes('not allowed') ||
+    normalized.includes('upgrade your logmeal plan') ||
+    normalized.includes('nao permitido')
+  );
+}
+
+function friendlyLogMealAccessMessage() {
+  return (
+    'A analise por foto usa o token de usuario LogMeal (APIUser), nao a chave da empresa. ' +
+    'No painel LogMeal > Users, copie o token do usuario de teste e configure LOGMEAL_API_USER_KEY no Supabase. ' +
+    'Se o plano gratuito expirou, ative o plano Analyse ou superior. ' +
+    'Enquanto isso, use "Anexar foto sem IA" e busque o alimento na tabela TACO.'
+  );
+}
+
+async function createLogMealApiUserToken() {
+  if (!logMealCompanyKey) {
+    throw new Error('LOGMEAL_API_KEY da empresa obrigatoria para criar usuario LogMeal.');
+  }
+
+  const response = await fetch(`${LOGMEAL_API_URL}/v2/users/signUp`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${logMealCompanyKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      username: logMealBackendUsername,
+      language: 'por',
+    }),
+  });
+
+  if (response.status === 201) {
+    const data = (await response.json()) as Record<string, unknown>;
+    const token = String(data?.token || data?.access_token || data?.api_token || '').trim();
+
+    if (token) {
+      return token;
+    }
+  }
+
+  if (response.status === 409) {
+    throw new Error(
+      `O usuario LogMeal "${logMealBackendUsername}" ja existe. ` +
+        'Copie o token APIUser no painel LogMeal e defina LOGMEAL_API_USER_KEY no Supabase.'
+    );
+  }
+
+  throw new Error(
+    unwrapErrorMessage(await response.text()) || 'Nao foi possivel criar usuario LogMeal para analise.'
+  );
+}
+
+async function resolveLogMealImageToken() {
+  if (logMealUserKey) {
+    return logMealUserKey;
+  }
+
+  if (resolvedLogMealUserToken) {
+    return resolvedLogMealUserToken;
+  }
+
+  if (logMealCompanyKey) {
+    resolvedLogMealUserToken = await createLogMealApiUserToken();
+    return resolvedLogMealUserToken;
+  }
+
+  throw new Error('LOGMEAL_API_USER_KEY ou LOGMEAL_API_KEY obrigatoria.');
 }
 
 function getSupabaseAdmin() {
@@ -592,7 +670,7 @@ function buildFoodItems(
         id: makeFoodId(position, index),
         nome: extractFoodName(segmentationItem, nutritionItem),
         categoria: extractCategory(segmentationItem, nutritionItem),
-        quantidade_gramas: extractQuantityGrams(segmentationItem),
+        quantidade_gramas: extractQuantityGrams(segmentationItem) || 100,
         calorias: findNumberByVariants(nutritionItem, ['calories', 'energykcal', 'energy', 'kcal']),
         carboidratos: findNumberByVariants(nutritionItem, ['carbohydrates', 'carbs', 'carbohydrate']),
         proteinas: findNumberByVariants(nutritionItem, ['proteins', 'protein']),
@@ -732,10 +810,10 @@ async function loadImageBlob(payload: AnalyzePayload) {
   };
 }
 
-async function callLogMealSegmentation(imageBlob: Blob, fileName: string) {
+async function callLogMealSegmentation(imageBlob: Blob, fileName: string, authToken: string) {
   const urls = [
-    `${LOGMEAL_API_URL}/v2/image/segmentation/complete/quantity/v1.0?language=${LOGMEAL_LANGUAGE}`,
     `${LOGMEAL_API_URL}/v2/image/segmentation/complete/v1.0?language=${LOGMEAL_LANGUAGE}`,
+    `${LOGMEAL_API_URL}/v2/image/segmentation/complete/quantity/v1.0?language=${LOGMEAL_LANGUAGE}`,
   ];
 
   let lastError = '';
@@ -747,7 +825,7 @@ async function callLogMealSegmentation(imageBlob: Blob, fileName: string) {
     const response = await fetch(url, {
       method: 'POST',
       headers: {
-        Authorization: `Bearer ${logMealApiKey}`,
+        Authorization: `Bearer ${authToken}`,
       },
       body: formData,
     });
@@ -757,16 +835,24 @@ async function callLogMealSegmentation(imageBlob: Blob, fileName: string) {
     }
 
     lastError = unwrapErrorMessage(await response.text());
+
+    if (isLogMealAccessError(lastError)) {
+      break;
+    }
+  }
+
+  if (isLogMealAccessError(lastError)) {
+    throw new Error(friendlyLogMealAccessMessage());
   }
 
   throw new Error(lastError || 'Falha ao consultar reconhecimento alimentar.');
 }
 
-async function callLogMealNutrition(imageId: number | string) {
+async function callLogMealNutrition(imageId: number | string, authToken: string) {
   const response = await fetch(`${LOGMEAL_API_URL}/v2/nutrition/recipe/nutritionalInfo?language=${LOGMEAL_LANGUAGE}`, {
     method: 'POST',
     headers: {
-      Authorization: `Bearer ${logMealApiKey}`,
+      Authorization: `Bearer ${authToken}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
@@ -776,6 +862,11 @@ async function callLogMealNutrition(imageId: number | string) {
 
   if (!response.ok) {
     const message = unwrapErrorMessage(await response.text());
+
+    if (isLogMealAccessError(message)) {
+      throw new Error(friendlyLogMealAccessMessage());
+    }
+
     throw new Error(message || 'Falha ao obter dados nutricionais da refeicao.');
   }
 
@@ -792,13 +883,14 @@ Deno.serve(async (request) => {
   }
 
   try {
-    if (!logMealApiKey) {
-      throw new Error('Variavel LOGMEAL_API_KEY obrigatoria.');
+    if (!logMealUserKey && !logMealCompanyKey) {
+      throw new Error('Variavel LOGMEAL_API_USER_KEY ou LOGMEAL_API_KEY obrigatoria.');
     }
 
     const payload = (await request.json().catch(() => ({}))) as AnalyzePayload;
     const { blob, fileName } = await loadImageBlob(payload);
-    const segmentationPayload = await callLogMealSegmentation(blob, fileName);
+    const logMealImageToken = await resolveLogMealImageToken();
+    const segmentationPayload = await callLogMealSegmentation(blob, fileName, logMealImageToken);
     const imageId =
       segmentationPayload.imageId ||
       segmentationPayload.image_id ||
@@ -815,7 +907,7 @@ Deno.serve(async (request) => {
       );
     }
 
-    const nutritionPayload = await callLogMealNutrition(imageId);
+    const nutritionPayload = await callLogMealNutrition(imageId, logMealImageToken);
     const alimentos = buildFoodItems(segmentationPayload, nutritionPayload);
 
     if (!alimentos.length) {
@@ -839,15 +931,17 @@ Deno.serve(async (request) => {
   } catch (error) {
     console.log('Erro ao analisar refeicao por IA:', error);
 
+    const message =
+      error instanceof Error ? error.message : 'Nao foi possivel analisar a refeicao agora.';
+    const status = isLogMealAccessError(message) ? 403 : 500;
+
     return jsonResponse(
       {
         ok: false,
-        message:
-          error instanceof Error
-            ? error.message
-            : 'Nao foi possivel analisar a refeicao agora.',
+        code: isLogMealAccessError(message) ? 'LOGMEAL_ACCESS' : 'ANALYSIS_ERROR',
+        message,
       },
-      500
+      status
     );
   }
 });

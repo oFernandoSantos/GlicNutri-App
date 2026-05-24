@@ -111,6 +111,9 @@ export default function TelaChatNutricionistaDetalhePaciente({
   );
   const scrollRef = useRef(null);
   const hasLoadedRef = useRef(false);
+  const draftRef = useRef('');
+  const sendingRef = useRef(false);
+  const loadRef = useRef(() => Promise.resolve());
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -122,6 +125,14 @@ export default function TelaChatNutricionistaDetalhePaciente({
     buildFallbackNutritionist(routeNutritionist, [])
   );
   const [draft, setDraft] = useState('');
+
+  useEffect(() => {
+    draftRef.current = draft;
+  }, [draft]);
+
+  useEffect(() => {
+    sendingRef.current = sending;
+  }, [sending]);
 
   useEffect(() => {
     navigation.setOptions({ readerTitle: 'Conversa' });
@@ -189,16 +200,20 @@ export default function TelaChatNutricionistaDetalhePaciente({
     [canResolvePatient, patientId, routeNutritionist, usuarioLogado]
   );
 
+  useEffect(() => {
+    loadRef.current = load;
+  }, [load]);
+
   useFocusEffect(
     useCallback(() => {
       load({ silent: hasLoadedRef.current, forceRefresh: false });
       hasLoadedRef.current = true;
       const intervalId = setInterval(() => {
-        if (sending || draft.trim()) return;
-        load({ silent: true, forceRefresh: false });
+        if (sendingRef.current || draftRef.current.trim()) return;
+        loadRef.current({ silent: true, forceRefresh: false });
       }, 5000);
       return () => clearInterval(intervalId);
-    }, [draft, load, sending])
+    }, [load])
   );
 
   useEffect(() => {
@@ -215,8 +230,8 @@ export default function TelaChatNutricionistaDetalhePaciente({
           filter: `paciente_id=eq.${patientId}`,
         },
         () => {
-          if (draft.trim()) return;
-          load({ silent: true, forceRefresh: true });
+          if (draftRef.current.trim() || sendingRef.current) return;
+          loadRef.current({ silent: true, forceRefresh: true });
         }
       )
       .subscribe();
@@ -224,7 +239,7 @@ export default function TelaChatNutricionistaDetalhePaciente({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [draft, load, patientId]);
+  }, [patientId]);
 
   const nutritionistName =
     nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';

@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -18,6 +19,8 @@ import {
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { mergeCachedGlucoseReadings } from '../../servicos/centralGlicose';
+import { subscribeToPatientAppState } from '../../servicos/centralAppState';
 import { exportPatientProgressReport } from '../../servicos/servicoRelatorioPaciente';
 
 const WEIGHT_LABELS = ['01/03', '05/03', '10/03', '15/03', '20/03', '25/03', '29/03'];
@@ -80,9 +83,28 @@ function buildWeightSeries(currentWeight) {
   };
 }
 
+function countMealsByDate(mealEntries) {
+  const counts = new Map();
+  (Array.isArray(mealEntries) ? mealEntries : []).forEach((entry) => {
+    const date = String(entry?.date || '').trim();
+    const entryId = String(entry?.databaseId || entry?.id || '').trim();
+    if (!date) return;
+    const bucket = counts.get(date) || { total: 0, ids: new Set() };
+    if (entryId && bucket.ids.has(entryId)) {
+      return;
+    }
+    if (entryId) {
+      bucket.ids.add(entryId);
+    }
+    bucket.total += 1;
+    counts.set(date, bucket);
+  });
+  return counts;
+}
+
 function buildWeeklyAdherence(mealEntries, targetMeals) {
   const safeTarget = Math.max(targetMeals || 3, 1);
-  const entries = Array.isArray(mealEntries) ? mealEntries : [];
+  const mealCountsByDate = countMealsByDate(mealEntries);
   const today = new Date();
   const items = [];
   let hasRealData = false;
@@ -92,7 +114,7 @@ function buildWeeklyAdherence(mealEntries, targetMeals) {
     date.setHours(0, 0, 0, 0);
     date.setDate(today.getDate() - index);
     const isoDate = date.toISOString().slice(0, 10);
-    const total = entries.filter((entry) => entry?.date === isoDate).length;
+    const total = mealCountsByDate.get(isoDate)?.total || 0;
     if (total > 0) {
       hasRealData = true;
     }
@@ -116,7 +138,7 @@ function buildWeeklyAdherence(mealEntries, targetMeals) {
 }
 
 function buildGlycemicMetrics(glucoseReadings) {
-  const values = (Array.isArray(glucoseReadings) ? glucoseReadings : [])
+  const values = mergeCachedGlucoseReadings(Array.isArray(glucoseReadings) ? glucoseReadings : [])
     .map((item) => Number(item?.value))
     .filter((value) => Number.isFinite(value) && value > 0);
 
@@ -397,16 +419,14 @@ export default function PacienteProgressoScreen({
   const [patient, setPatient] = useState(null);
   const [appState, setAppState] = useState(createDefaultAppState());
   const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const hasLoadedRef = useRef(false);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
+  const loadProgresso = useCallback(
+    async ({ silent = false, forceRefresh = false } = {}) => {
       try {
-        setLoading(true);
+        if (!silent) setLoading(true);
 
         if (!canResolvePatient) {
-          if (!active) return;
           setPatient(null);
           setAppState(createDefaultAppState());
           setGlucoseReadings([]);
@@ -415,10 +435,9 @@ export default function PacienteProgressoScreen({
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          forceRefresh,
           ...mesclarLimitesDadosPaciente('progresso'),
         });
-
-        if (!active) return;
 
         setPatient(experience?.patient || null);
         setAppState(experience?.appState || createDefaultAppState());
@@ -426,16 +445,29 @@ export default function PacienteProgressoScreen({
       } catch (error) {
         console.log('Erro ao carregar progresso:', error);
       } finally {
-        if (active) setLoading(false);
+        if (!silent) setLoading(false);
       }
-    }
+    },
+    [canResolvePatient, patientId, usuarioLogado]
+  );
 
-    load();
+  useFocusEffect(
+    useCallback(() => {
+      loadProgresso({ silent: hasLoadedRef.current, forceRefresh: hasLoadedRef.current });
+      hasLoadedRef.current = true;
+    }, [loadProgresso])
+  );
 
-    return () => {
-      active = false;
-    };
-  }, [patientId, canResolvePatient, usuarioLogado]);
+  useEffect(() => {
+    const activePatientId = patient?.id_paciente_uuid || patientId;
+    if (!activePatientId) return undefined;
+
+    return subscribeToPatientAppState(activePatientId, (nextAppState) => {
+      if (nextAppState) {
+        setAppState(nextAppState);
+      }
+    });
+  }, [patient?.id_paciente_uuid, patientId]);
 
   const displayName = getPatientDisplayName(patient || usuarioLogado).split(' ')[0] || 'Paciente';
   const targetMeals = appState?.planSections?.length || 3;

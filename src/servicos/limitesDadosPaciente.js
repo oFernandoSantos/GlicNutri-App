@@ -1,9 +1,13 @@
 /** Limites por contexto de tela — reduz payload e tempo de rede. */
 export const LIMITES_DADOS_PACIENTE = {
   resumo: {
-    glucoseLimit: 24,
-    medicationLimit: 16,
-    mealLimit: 16,
+    homeOnly: true,
+    skipChat: true,
+    minimalProfile: true,
+    allowGoogleSync: false,
+    glucoseLimit: 7,
+    medicationLimit: 0,
+    mealLimit: 0,
     skipAlertSync: true,
   },
   diario: {
@@ -28,9 +32,13 @@ export const LIMITES_DADOS_PACIENTE = {
     skipAlertSync: true,
   },
   plano: {
-    glucoseLimit: 12,
-    medicationLimit: 12,
-    mealLimit: 24,
+    planOnly: true,
+    skipChat: true,
+    minimalProfile: true,
+    allowGoogleSync: false,
+    glucoseLimit: 0,
+    medicationLimit: 0,
+    mealLimit: 32,
     skipAlertSync: true,
   },
   assistente: {

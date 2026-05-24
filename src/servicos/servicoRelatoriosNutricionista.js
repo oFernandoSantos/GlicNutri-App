@@ -212,6 +212,8 @@ function summarizeConsultas(consultas = []) {
   };
 }
 
+const MAX_REPORT_PATIENTS = 80;
+
 export async function buildNutritionistReportBundle(usuarioLogado) {
   const nutricionistaId = getNutritionistId(usuarioLogado);
   if (!nutricionistaId) {
@@ -223,8 +225,9 @@ export async function buildNutritionistReportBundle(usuarioLogado) {
     listConsultasNutricionistaComPaciente(nutricionistaId, { limit: 220 }).catch(() => []),
   ]);
 
+  const scopedPatients = (patientCards || []).slice(0, MAX_REPORT_PATIENTS);
   const rows = [];
-  const batches = chunkArray(patientCards, 3);
+  const batches = chunkArray(scopedPatients, 2);
 
   for (const batch of batches) {
     const batchRows = await Promise.all(batch.map((patient) => loadPatientClinicalRow(patient)));

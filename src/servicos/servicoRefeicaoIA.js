@@ -1,5 +1,7 @@
 import * as ImagePicker from 'expo-image-picker';
+import { invalidatePatientExperienceCache } from './cacheExperienciaPaciente';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
+import { buscarAlimentosBrasil } from './servicoBuscaAlimentosBrasil';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { AppLogger, MODULOS_LOG_SISTEMA } from './servicoLogSistema';
 
@@ -37,6 +39,19 @@ function normalizeErrorMessage(error) {
 
   if (message.includes('too large') || message.includes('less than 1048576 bytes')) {
     return 'A foto ficou maior que o limite aceito pela IA. O app reduziu a imagem; tente analisar novamente.';
+  }
+
+  if (
+    message.includes('not allowed') ||
+    message.includes('upgrade your logmeal plan') ||
+    message.includes('logmeal_api_user_key') ||
+    message.includes('token de usuario logmeal') ||
+    message.includes('apiuser')
+  ) {
+    return (
+      'A analise automatica por foto nao esta disponivel no momento (configuracao ou plano LogMeal). ' +
+      'Use "Anexar foto sem IA" e busque o alimento na tabela TACO abaixo.'
+    );
   }
 
   return error?.message || String(error || 'Ocorreu um erro inesperado.');
@@ -307,7 +322,7 @@ async function normalizePickerAsset(asset) {
     return null;
   }
 
-  const maxDimension = 1280;
+  const maxDimension = 1600;
   const width = Number(asset.width) || 0;
   const height = Number(asset.height) || 0;
   const shouldResize = width > maxDimension || height > maxDimension;
@@ -324,7 +339,7 @@ async function normalizePickerAsset(asset) {
 
   const ImageManipulator = await import('expo-image-manipulator');
   const manipulated = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
-    compress: 0.65,
+    compress: 0.85,
     format: ImageManipulator.SaveFormat.JPEG,
   });
   const normalizedUri = manipulated.uri;
@@ -447,7 +462,84 @@ export async function analisarImagemRefeicaoIA(payload) {
     throw new Error(normalizeErrorMessage(data?.message || 'Nao foi possivel analisar a refeicao agora.'));
   }
 
+  if (Array.isArray(data?.alimentos) && data.alimentos.length) {
+    return {
+      ...data,
+      alimentos: enriquecerAlimentosIdentificadosComTaco(data.alimentos),
+    };
+  }
+
   return data;
+}
+
+function escalarNutrienteTaco(valorPor100g, gramas) {
+  const factor = Math.max(normalizeNumber(gramas), 1) / 100;
+  return roundNutrient(normalizeNumber(valorPor100g) * factor);
+}
+
+/**
+ * Refina macros da IA com a TACO quando a porcao ou os totais parecem inconsistentes.
+ */
+export function enriquecerAlimentosIdentificadosComTaco(alimentos = []) {
+  return (Array.isArray(alimentos) ? alimentos : []).map((item) => {
+    const nomeBusca = String(item?.nome || item?.foodName || '').trim();
+    const normalized = criarAlimentoEditavel(item);
+
+    if (!nomeBusca || nomeBusca.toLowerCase().includes('nao identificado')) {
+      return normalized;
+    }
+
+    const match = buscarAlimentosBrasil(nomeBusca, { limit: 1 }).items[0];
+    if (!match) {
+      return normalized;
+    }
+
+    const grams = normalizeNumber(normalized.quantidade_gramas) > 0 ? normalized.quantidade_gramas : 100;
+    const iaCalories = normalizeNumber(normalized.calorias);
+    const tacoCalories = escalarNutrienteTaco(match.calorias, grams);
+    const preferTaco =
+      iaCalories <= 0 ||
+      iaCalories < tacoCalories * 0.35 ||
+      normalizeNumber(normalized.carboidratos) <= 0;
+
+    return criarAlimentoEditavel({
+      ...normalized,
+      nome: match.nome,
+      categoria:
+        normalized.categoria && normalized.categoria !== 'Nao informada'
+          ? normalized.categoria
+          : match.categoria,
+      quantidade_gramas: grams,
+      refTacoId: match.id,
+      calorias: preferTaco ? tacoCalories : normalized.calorias,
+      carboidratos: preferTaco
+        ? escalarNutrienteTaco(match.carboidratos, grams)
+        : normalized.carboidratos,
+      proteinas: preferTaco
+        ? escalarNutrienteTaco(match.proteinas, grams)
+        : normalized.proteinas,
+      gorduras: preferTaco ? escalarNutrienteTaco(match.gorduras, grams) : normalized.gorduras,
+      fibras: preferTaco ? escalarNutrienteTaco(match.fibras, grams) : normalized.fibras,
+    });
+  });
+}
+
+export function getMealEntryNutrition(entry) {
+  const kcal = Number(entry?.kcal ?? entry?.calories);
+  const carbs = Number(entry?.carbsG ?? entry?.carbs);
+  const protein = Number(entry?.proteinG ?? entry?.protein);
+  const fat = Number(entry?.fatG ?? entry?.fat);
+
+  if (!Number.isFinite(kcal) || kcal <= 0) {
+    return null;
+  }
+
+  return {
+    calories: kcal,
+    carbs: Number.isFinite(carbs) ? carbs : 0,
+    protein: Number.isFinite(protein) ? protein : 0,
+    fat: Number.isFinite(fat) ? fat : 0,
+  };
 }
 
 export function criarAlimentoEditavel(alimento = {}) {
@@ -531,7 +623,7 @@ export function calcularTotaisRefeicaoIA(alimentos) {
   );
 }
 
-export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, title }) {
+export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, title, mealLabel }) {
   const normalizedFoods = Array.isArray(alimentos) ? alimentos : [];
   const safeTotals = totais || calcularTotaisRefeicaoIA(normalizedFoods);
   const description = normalizedFoods
@@ -540,6 +632,7 @@ export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, ti
   const now = new Date();
   const entryDate = date || now.toISOString().slice(0, 10);
   const entryTime = time || now.toTimeString().slice(0, 5);
+  const displayTitle = mealLabel || title || 'Refeição Registrada';
 
   return {
     id: `meal-ia-${Date.now()}`,
@@ -547,15 +640,25 @@ export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, ti
     mode: 'photo',
     date: entryDate,
     time: entryTime,
-    title: title || 'Refeição Registrada',
+    title: displayTitle,
+    mealLabel: displayTitle,
+    mealTypeLabel: displayTitle,
     description: description || 'Refeicao confirmada manualmente.',
     glucoseNote: 'Macros confirmados pelo usuario',
     glucoseDelta: `${roundNutrient(safeTotals.carboidratos_total)} g carbos`,
     aiNote:
-      `IA identificou ${normalizedFoods.length} item(ns). ` +
-      `${roundNutrient(safeTotals.calorias_total)} kcal, ` +
+      `Totais: ${roundNutrient(safeTotals.calorias_total)} kcal, ` +
       `${roundNutrient(safeTotals.proteinas_total)} g proteinas e ` +
       `${roundNutrient(safeTotals.gorduras_total)} g gorduras.`,
+    carbsG: roundNutrient(safeTotals.carboidratos_total),
+    kcal: roundNutrient(safeTotals.calorias_total),
+    proteinG: roundNutrient(safeTotals.proteinas_total),
+    fatG: roundNutrient(safeTotals.gorduras_total),
+    foods: normalizedFoods.map((item) => ({
+      name: item.nome,
+      alimento: item.nome,
+      grams: roundNutrient(item.quantidade_gramas),
+    })),
   };
 }
 
@@ -649,6 +752,8 @@ export async function salvarRefeicaoIA({
       totais,
     },
   });
+
+  invalidatePatientExperienceCache(patientId);
 
   return {
     record: data || payload,

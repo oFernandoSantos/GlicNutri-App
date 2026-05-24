@@ -1,5 +1,13 @@
 import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
+const PATIENT_LIST_COLUMNS =
+  'id_paciente_uuid, nome_completo, nome_pac, email_pac, cpf_paciente, objetivo_principal_consulta, objetivo_principal, objetivo, diagnostico_principal, id_nutricionista_uuid, peso_atual_kg, imc_atual, imc, data_nascimento, data_hora_ultima_atualizacao, glicemia_atual, ultima_glicemia_mgdl, adesao_percentual, aderencia_percentual, risco, nivel_risco, observacoes, condicoes_saude, tendencia_glicemica';
+
+const CONSULTA_WITH_PATIENT_COLUMNS =
+  'id, paciente_id, nutricionista_id, scheduled_at, status, motivo, paciente:paciente_id(id_paciente_uuid, nome_completo, nome_pac, email_pac, objetivo_principal_consulta, objetivo_principal, objetivo, id_nutricionista_uuid, peso_atual_kg, imc_atual, imc, data_nascimento, data_hora_ultima_atualizacao, glicemia_atual, ultima_glicemia_mgdl, adesao_percentual, aderencia_percentual, risco, nivel_risco, observacoes, condicoes_saude, tendencia_glicemica)';
+
+const MAX_PATIENTS_PER_NUTRI = 500;
+const PATIENT_ID_CHUNK = 80;
 
 export function getNutritionistId(usuario) {
   return (
@@ -127,24 +135,32 @@ async function fetchPatientsByIds(ids) {
   const patientIds = uniq(ids);
   if (!patientIds.length) return [];
 
-  const { data, error } = await supabase
-    .from('paciente')
-    .select('*')
-    .in('id_paciente_uuid', patientIds);
+  const resultados = [];
 
-  if (error) throw error;
-  return data || [];
+  for (let index = 0; index < patientIds.length; index += PATIENT_ID_CHUNK) {
+    const chunk = patientIds.slice(index, index + PATIENT_ID_CHUNK);
+    const { data, error } = await supabase
+      .from('paciente')
+      .select(PATIENT_LIST_COLUMNS)
+      .in('id_paciente_uuid', chunk);
+
+    if (error) throw error;
+    resultados.push(...(data || []));
+  }
+
+  return resultados;
 }
 
-async function fetchPatientsByDirectLink(nutricionistaId) {
+async function fetchPatientsByDirectLink(nutricionistaId, { limit = MAX_PATIENTS_PER_NUTRI } = {}) {
   if (!nutricionistaId) return [];
 
   const { data, error } = await supabase
     .from('paciente')
-    .select('*')
+    .select(PATIENT_LIST_COLUMNS)
     .eq('id_nutricionista_uuid', nutricionistaId)
     .or('excluido.is.null,excluido.eq.false')
-    .limit(200);
+    .order('data_hora_ultima_atualizacao', { ascending: false })
+    .limit(limit);
 
   const message = String(error?.message || '').toLowerCase();
   if (error && message.includes('id_nutricionista_uuid')) return [];
@@ -206,7 +222,7 @@ export async function listConsultasNutricionistaComPaciente(
 
   let query = supabase
     .from('consulta')
-    .select('*, paciente:paciente_id(*)')
+    .select(CONSULTA_WITH_PATIENT_COLUMNS)
     .eq('nutricionista_id', nutricionistaId)
     .order('scheduled_at', { ascending: true })
     .limit(limit);
@@ -219,12 +235,15 @@ export async function listConsultasNutricionistaComPaciente(
   return data || [];
 }
 
-export async function listPatientsByNutritionist(nutricionistaId, { limit = 200 } = {}) {
+export async function listPatientsByNutritionist(
+  nutricionistaId,
+  { limit = MAX_PATIENTS_PER_NUTRI, consultaLimit = limit } = {}
+) {
   if (!nutricionistaId) return [];
 
   const [consultas, directPatients] = await Promise.all([
-    listConsultasNutricionistaComPaciente(nutricionistaId, { limit }).catch(() => []),
-    fetchPatientsByDirectLink(nutricionistaId).catch(() => []),
+    listConsultasNutricionistaComPaciente(nutricionistaId, { limit: consultaLimit }).catch(() => []),
+    fetchPatientsByDirectLink(nutricionistaId, { limit }).catch(() => []),
   ]);
 
   const patientMeta = new Map();

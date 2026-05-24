@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -12,10 +13,14 @@ import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
-import { fetchActiveMealPlanForPatient } from '../../servicos/servicoPlanoAlimentar';
+import {
+  fetchActiveMealPlanForPatient,
+  getCachedActiveMealPlanForPatient,
+} from '../../servicos/servicoPlanoAlimentar';
 import {
   averageAdherence,
   buildWeeklyAdherenceFromMeals,
@@ -79,37 +84,64 @@ export default function PacientePlanoScreen({
     [patientId, usuarioLogado]
   );
 
-  const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState(null);
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [mealPlan, setMealPlan] = useState(null);
+  const planFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('plano'), []);
+
+  const initialCachedExperience = useMemo(
+    () =>
+      patientId ? getCachedPatientExperience(patientId, planFetchLimits) : null,
+    [patientId, planFetchLimits]
+  );
+
+  const initialCachedPlan = useMemo(
+    () =>
+      getCachedActiveMealPlanForPatient(
+        initialCachedExperience?.patient?.id_paciente_uuid || patientId
+      ),
+    [initialCachedExperience, patientId]
+  );
+
+  const hasWarmCache = Boolean(initialCachedExperience);
+
+  const [loading, setLoading] = useState(!hasWarmCache);
+  const [patient, setPatient] = useState(initialCachedExperience?.patient || null);
+  const [appState, setAppState] = useState(
+    initialCachedExperience?.appState || createDefaultAppState()
+  );
+  const [mealPlan, setMealPlan] = useState(
+    initialCachedPlan === undefined ? null : initialCachedPlan
+  );
   const [mealCompletion, setMealCompletion] = useState({});
   const [expandedStructure, setExpandedStructure] = useState(null);
+  const hasLoadedRef = useRef(false);
 
-  useEffect(() => {
-    let active = true;
+  const loadPlano = useCallback(
+    async ({ silent = false, forceRefresh = false } = {}) => {
+      if (!canResolvePatient) {
+        setAppState(createDefaultAppState());
+        setLoading(false);
+        return;
+      }
 
-    async function load() {
-      try {
+      if (!silent && !hasWarmCache) {
         setLoading(true);
+      }
 
-        if (!canResolvePatient) {
-          if (!active) return;
-          setAppState(createDefaultAppState());
-          return;
-        }
+      try {
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+          forceRefresh,
+          ...planFetchLimits,
+        });
 
-        const [experience, activePlan] = await Promise.all([
-          fetchPatientExperience(patientId, {
-            patientContext: usuarioLogado,
-            ...mesclarLimitesDadosPaciente('plano'),
-          }),
-          patientId
-            ? fetchActiveMealPlanForPatient(patientId).catch(() => null)
-            : Promise.resolve(null),
-        ]);
+        const canonicalId =
+          experience?.patient?.id_paciente_uuid ||
+          patientId ||
+          usuarioLogado?.id_paciente_uuid ||
+          null;
 
-        if (!active) return;
+        const activePlan = canonicalId
+          ? await fetchActiveMealPlanForPatient(canonicalId, { forceRefresh }).catch(() => null)
+          : null;
 
         setPatient(experience.patient);
         setAppState(experience.appState);
@@ -117,16 +149,18 @@ export default function PacientePlanoScreen({
       } catch (error) {
         console.log('Erro ao carregar plano:', error);
       } finally {
-        if (active) setLoading(false);
+        setLoading(false);
       }
-    }
+    },
+    [canResolvePatient, hasWarmCache, patientId, planFetchLimits, usuarioLogado]
+  );
 
-    load();
-
-    return () => {
-      active = false;
-    };
-  }, [patientId, canResolvePatient, usuarioLogado]);
+  useFocusEffect(
+    useCallback(() => {
+      loadPlano({ silent: hasLoadedRef.current, forceRefresh: false });
+      hasLoadedRef.current = true;
+    }, [loadPlano])
+  );
 
   const planSections = useMemo(() => {
     const savedSections = mealPlan?.metas?.planSections || mealPlan?.metas?.refeicoes;
@@ -190,7 +224,6 @@ export default function PacientePlanoScreen({
   function openFoodRegister() {
     navigation.navigate('RegistroRefeicaoIA', {
       usuarioLogado,
-      openMealTimingChoice: true,
     });
   }
 
@@ -199,7 +232,6 @@ export default function PacientePlanoScreen({
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
-      showTabBar={route?.name === 'PacientePlano'}
       contentContainerStyle={styles.contentContainer}
     >
       {loading ? (

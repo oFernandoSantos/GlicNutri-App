@@ -25,12 +25,17 @@ const PATIENT_ROUTES = new Set([
   'PacientePerfilInsulinas',
   'PacientePrevisaoML',
   'RegistroRefeicaoIA',
+  'PacienteChatNutricionista',
+  'PacienteChatNutricionistaDetalhe',
+  'PacientePerfilNutricionista',
 ]);
 const NUTRITIONIST_ROUTES = new Set([
   'GerenciarPacientes',
   'NutricionistaAgenda',
   'NutricionistaMensagens',
   'NutricionistaRelatorios',
+  'NutriProntuarioPaciente',
+  'NutriConsultaNutri',
 ]);
 const ADMIN_ROUTES = new Set([
   'AdminAuditoria',
@@ -63,6 +68,9 @@ const routeTitles = {
   PacientePerfilInsulinas: 'Insulinas em uso',
   PacientePrevisaoML: 'Previsão (IA)',
   RegistroRefeicaoIA: 'Registrar Refeição',
+  PacienteChatNutricionista: 'Mensagens',
+  PacienteChatNutricionistaDetalhe: 'Conversa',
+  PacientePerfilNutricionista: 'Nutricionista',
   HomeNutricionista: 'GlicNutri',
   AdminHome: 'Admin',
   AdminAuditoria: 'Auditoria',
@@ -75,6 +83,17 @@ const routeTitles = {
   NutricionistaAgenda: 'Agenda',
   NutricionistaMensagens: 'Mensagens',
   NutricionistaRelatorios: 'Relatórios',
+  NutriProntuarioPaciente: 'Prontuário',
+  NutriConsultaNutri: 'Consulta',
+};
+
+const ROUTE_BACK_FALLBACK = {
+  PacienteChatNutricionistaDetalhe: 'PacienteChatNutricionista',
+  PacientePerfilNutricionista: 'PacienteAgendamentos',
+  NutriProntuarioPaciente: 'GerenciarPacientes',
+  NutriConsultaNutri: 'NutricionistaAgenda',
+  AdminDetalheLogSistema: 'AdminLogsSistema',
+  AdminCadastroAdministrador: 'AdminCadastros',
 };
 
 function getTitle(route) {
@@ -86,6 +105,10 @@ function getTitle(route) {
 }
 
 function getHomeRoute(route) {
+  if (ROUTE_BACK_FALLBACK[route?.name]) {
+    return ROUTE_BACK_FALLBACK[route.name];
+  }
+
   if (route?.name === 'RegistroRefeicaoIA') {
     return 'PacienteDiario';
   }

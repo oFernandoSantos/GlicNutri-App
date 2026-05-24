@@ -9,10 +9,7 @@ import {
   nutriDesktopStyles,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import { nutritionistQuickActions } from '../../dados/dadosNutricionistaMock';
-import {
-  buildNutritionistThreadPreview,
-  fetchNutritionistChatInbox,
-} from '../../servicos/servicoDadosPaciente';
+import { fetchNutritionistChatSummary } from '../../servicos/servicoEscalaNutri';
 import { listNutritionistClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
 import {
   getNutritionistId,
@@ -20,6 +17,10 @@ import {
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
 import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
+import {
+  NUTRI_MAIN_TAB_ROUTES,
+  navigateNutriTab,
+} from '../../utilitarios/navegacaoAbas';
 import {
   listFollowUpRequestsByNutritionist,
   updateFollowUpRequestStatus,
@@ -101,8 +102,8 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
       const endOfDay = new Date();
       endOfDay.setHours(23, 59, 59, 999);
 
-      const [items, pendingRequests, alerts, consultas] = await Promise.all([
-        listPatientsByNutritionist(nutricionistaId),
+      const [items, pendingRequests, alerts, consultas, chatSummary] = await Promise.all([
+        listPatientsByNutritionist(nutricionistaId, { limit: 80 }),
         listFollowUpRequestsByNutritionist(nutricionistaId, { status: 'pending' }),
         listNutritionistClinicalAlerts(nutricionistaId, { onlyUnread: true, limit: 40 }).catch(
           () => []
@@ -112,20 +113,10 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
           to: endOfDay.toISOString(),
           limit: 80,
         }).catch(() => []),
+        fetchNutritionistChatSummary(nutricionistaId),
       ]);
 
-      const patientIds = (items || []).map((patient) => patient.id);
-      let unreadTotal = 0;
-
-      if (patientIds.length) {
-        const summaries = await fetchNutritionistChatInbox(patientIds, nutricionistaId).catch(
-          () => []
-        );
-
-        unreadTotal = summaries.reduce((sum, summary) => {
-          return sum + Number(summary?.preview?.unread || 0);
-        }, 0);
-      }
+      const unreadTotal = Number(chatSummary?.naoLidas || 0);
 
       setPatients(items || []);
       setRequests(pendingRequests || []);
@@ -300,6 +291,10 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
           onClose={() => setMenuVisible(false)}
           onNavigate={(screen, params) => {
             setMenuVisible(false);
+            if (NUTRI_MAIN_TAB_ROUTES.has(screen)) {
+              navigateNutriTab(navigation, screen, usuarioLogado);
+              return;
+            }
             navigation.navigate(screen, { usuarioLogado, ...params });
           }}
           onLogout={onNutriLogout}

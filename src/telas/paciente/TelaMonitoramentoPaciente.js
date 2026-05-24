@@ -38,6 +38,7 @@ import {
 } from '../../servicos/servicoLibreView';
 import { buscarMedicamentosAnvisa } from '../../servicos/servicoMedicamentosAnvisa';
 import {
+  buildGlucoseFingerprint,
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
   prependCachedGlucoseReading,
@@ -2101,6 +2102,24 @@ export default function PacienteMonitoramentoScreen({
       return;
     }
 
+    const duplicateFingerprint = buildGlucoseFingerprint({
+      patientId: activePatientId,
+      date: selectedDate,
+      time: selectedTime,
+      value: parsedValue,
+    });
+    const hasDuplicateReading = mergeCachedGlucoseReadings(
+      getCachedGlucoseReadings(activePatientId)
+    ).some((item) => buildGlucoseFingerprint(item) === duplicateFingerprint);
+
+    if (hasDuplicateReading) {
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Ja existe um registro com a mesma data, hora e valor.',
+      });
+      return;
+    }
+
     try {
       setGlucoseConfirmVisible(false);
       setManualModalVisible(false);
@@ -2634,10 +2653,19 @@ export default function PacienteMonitoramentoScreen({
         });
       } catch (refreshError) {
         console.log('Erro ao recarregar medicacoes apos salvar:', refreshError);
-        setAppState((current) => ({
-          ...current,
-          medicationEntries: [savedMedication, ...(current.medicationEntries || [])],
-        }));
+        setAppState((current) => {
+          const existing = current.medicationEntries || [];
+          const savedId = savedMedication?.databaseId || savedMedication?.id;
+          const alreadyListed = existing.some(
+            (item) => (item?.databaseId || item?.id) === savedId
+          );
+          return {
+            ...current,
+            medicationEntries: alreadyListed
+              ? existing
+              : [savedMedication, ...existing],
+          };
+        });
       }
       setMedicationLabel('');
       setMedicationKind('');

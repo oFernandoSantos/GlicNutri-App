@@ -63,7 +63,10 @@ import {
   limparSessaoNutricionista,
 } from './src/servicos/servicoSessaoNutricionista';
 import { resolveInitialRouteName } from './src/utilitarios/perfisApp';
-import { getPatientId } from './src/servicos/servicoDadosPaciente';
+import {
+  getPatientId,
+  prefetchPatientHomeExperience,
+} from './src/servicos/servicoDadosPaciente';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -307,6 +310,13 @@ export default function App() {
   }, [session?.user?.id]);
 
   useEffect(() => {
+    const patientId = getPatientId(session?.user);
+    if (!patientId || adminSession || nutriSession) return;
+
+    prefetchPatientHomeExperience(patientId, session?.user);
+  }, [adminSession, nutriSession, session?.user]);
+
+  useEffect(() => {
     let isMounted = true;
 
     async function carregarOnboardingPaciente() {
@@ -509,6 +519,11 @@ export default function App() {
     headerShown: true,
   };
 
+  const mainTabReaderOptions = {
+    ...readerScreenOptions,
+    animationEnabled: false,
+  };
+
   return (
     <GestureHandlerRootView style={[styles.gestureRoot, Platform.OS === 'web' && styles.webDocumentRoot]}>
       <SafeAreaProvider>
@@ -612,15 +627,15 @@ export default function App() {
                 )}
               </Stack.Screen>
 
-              <Stack.Screen name="HomePaciente" options={readerScreenOptions}>
+              <Stack.Screen name="HomePaciente" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <HomePaciente {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteDiario" options={readerScreenOptions}>
+              <Stack.Screen name="PacienteDiario" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacienteDiarioScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteMonitoramento" options={readerScreenOptions}>
+              <Stack.Screen name="PacienteMonitoramento" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacienteMonitoramentoScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
@@ -632,7 +647,7 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacienteAssistenteScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteAgendamentos" options={readerScreenOptions}>
+              <Stack.Screen name="PacienteAgendamentos" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacienteAgendamentosScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
@@ -646,7 +661,7 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacienteBemEstarScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacientePlano" options={readerScreenOptions}>
+              <Stack.Screen name="PacientePlano" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacientePlanoScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
@@ -713,14 +728,14 @@ export default function App() {
                 initialParams={
                   nutriSession ? { usuarioLogado: nutriSession } : undefined
                 }
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
                 {(props) => withSwipeBack(props, <HomeNutricionista {...getNutriProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen
                 name="GerenciarPacientes"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
                 {(props) =>
                   withSwipeBack(props, <GerenciarPacientesScreen {...getNutriProps(props)} />)
@@ -729,7 +744,7 @@ export default function App() {
 
               <Stack.Screen
                 name="NutricionistaAgenda"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
                 {(props) =>
                   withSwipeBack(props, <NutricionistaAgendaScreen {...getNutriProps(props)} />)
@@ -754,7 +769,7 @@ export default function App() {
 
               <Stack.Screen
                 name="NutricionistaMensagens"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
                 {(props) =>
                   withSwipeBack(props, <NutricionistaMensagensScreen {...getNutriProps(props)} />)
@@ -763,14 +778,14 @@ export default function App() {
 
               <Stack.Screen
                 name="NutricionistaRelatorios"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
                 {(props) =>
                   withSwipeBack(props, <NutricionistaRelatoriosScreen {...getNutriProps(props)} />)
                 }
               </Stack.Screen>
 
-              <Stack.Screen name="AdminHome" options={readerScreenOptions}>
+              <Stack.Screen name="AdminHome" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaHomeAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
@@ -778,7 +793,7 @@ export default function App() {
                 {(props) => withSwipeBack(props, <TelaAuditoriaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="AdminCadastros" options={readerScreenOptions}>
+              <Stack.Screen name="AdminCadastros" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaCadastrosAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
@@ -786,11 +801,11 @@ export default function App() {
                 {(props) => withSwipeBack(props, <TelaCadastroAdministradorAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="AdminOperacoes" options={readerScreenOptions}>
+              <Stack.Screen name="AdminOperacoes" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaOperacoesAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="AdminLogsSistema" options={readerScreenOptions}>
+              <Stack.Screen name="AdminLogsSistema" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaLogsSistemaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 

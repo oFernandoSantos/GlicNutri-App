@@ -1,11 +1,17 @@
 import React from 'react';
 import { View, Text, ScrollView, StyleSheet, StatusBar, Platform } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import BarraAbasNutricionista, {
   NUTRI_TAB_BAR_HEIGHT,
   NUTRI_TAB_BAR_SPACE,
 } from './BarraAbasNutricionista';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { isNutriMainTabRoute } from '../../utilitarios/navegacaoAbas';
+import {
+  WrapperTeclado,
+  getKeyboardVerticalOffset,
+  useKeyboardBottomInset,
+} from '../comum/RolagemComTeclado';
 
 export default function LayoutNutricionista({
   navigation,
@@ -16,12 +22,19 @@ export default function LayoutNutricionista({
   rightAction,
   children,
   contentContainerStyle,
-  showTabBar = route?.name === 'HomeNutricionista',
+  showTabBar,
   scrollEnabled = true,
   refreshControl,
   lockFixedContent = false,
+  keyboardAware = true,
 }) {
+  const insets = useSafeAreaInsets();
+  const shouldShowTabBar =
+    typeof showTabBar === 'boolean' ? showTabBar : isNutriMainTabRoute(route?.name);
   const showHeader = Boolean(title || subtitle || rightAction);
+  const tabBarExtra = shouldShowTabBar ? NUTRI_TAB_BAR_HEIGHT + NUTRI_TAB_BAR_SPACE + 16 : 32;
+  const keyboardBottomPadding = useKeyboardBottomInset(tabBarExtra);
+  const keyboardOffset = getKeyboardVerticalOffset(insets);
 
   return (
     <SafeAreaView
@@ -30,7 +43,11 @@ export default function LayoutNutricionista({
     >
       <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
 
-      <View style={styles.body}>
+      <WrapperTeclado
+        style={styles.body}
+        enabled={keyboardAware && !lockFixedContent}
+        keyboardVerticalOffset={keyboardOffset}
+      >
         {showHeader ? (
           <View style={styles.header}>
             <View style={styles.headerText}>
@@ -46,12 +63,15 @@ export default function LayoutNutricionista({
             style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
             contentContainerStyle={[
               styles.content,
-              showTabBar && styles.contentWithTabBar,
+              shouldShowTabBar && styles.contentWithTabBar,
               Platform.OS === 'web' && styles.webContent,
+              keyboardAware && { paddingBottom: keyboardBottomPadding },
               contentContainerStyle,
             ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
             nestedScrollEnabled
             refreshControl={refreshControl}
           >
@@ -64,16 +84,17 @@ export default function LayoutNutricionista({
               styles.fixedContent,
               styles.fixedContentPadding,
               lockFixedContent && styles.fixedContentLocked,
-              showTabBar && styles.contentWithTabBar,
+              shouldShowTabBar && styles.contentWithTabBar,
+              keyboardAware && { paddingBottom: keyboardBottomPadding },
               contentContainerStyle,
             ]}
           >
             {children}
           </View>
         )}
-      </View>
+      </WrapperTeclado>
 
-      {showTabBar ? (
+      {shouldShowTabBar ? (
         <BarraAbasNutricionista
           navigation={navigation}
           rotaAtual={route?.name}
