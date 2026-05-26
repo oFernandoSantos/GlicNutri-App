@@ -78,11 +78,10 @@ export default function SwipeBackContainer({
     [disabled, navigation]
   );
 
+  const panHandlers = Platform.OS === 'web' ? {} : panResponder.panHandlers;
+
   return (
-    <View
-      style={styles.container}
-      {...(Platform.OS === 'web' ? panResponder.panHandlers : panResponder.panHandlers)}
-    >
+    <View style={styles.container} {...panHandlers}>
       {children}
     </View>
   );

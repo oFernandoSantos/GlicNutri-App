@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { adminTheme } from '../../temas/temaVisualAdmin';
+import { stripAuthRoutesFromPatientStack } from '../../utilitarios/navegacaoPaciente';
 
 const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista', 'AdminHome']);
 const AUTH_BACK_ROUTES = new Set(['Cadastro', 'ForgotPassword']);
@@ -12,6 +13,7 @@ const PATIENT_ROUTES = new Set([
   'PacienteMonitoramento',
   'PacienteHistoricoRegistros',
   'PacienteAssistente',
+  'PacienteSuporte',
   'PacienteAgendamentos',
   'PacienteBemEstar',
   'PacientePlano',
@@ -54,7 +56,8 @@ const routeTitles = {
   PacienteDiario: 'Alimentação',
   PacienteMonitoramento: 'Glicose',
   PacienteHistoricoRegistros: 'Histórico de Registros',
-  PacienteAssistente: 'IA',
+  PacienteAssistente: 'Assistente',
+  PacienteSuporte: 'Suporte',
   PacienteAgendamentos: 'Agendamentos',
   PacienteBemEstar: 'Bem-estar',
   PacientePlano: 'Plano',
@@ -163,6 +166,8 @@ export default function ReaderTopo({ navigation, route, options }) {
       backAction();
       return;
     }
+
+    stripAuthRoutesFromPatientStack(navigation);
 
     if (navigation?.canGoBack?.()) {
       navigation.goBack();

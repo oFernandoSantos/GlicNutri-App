@@ -13,6 +13,14 @@ export function sanitizeNutriUser(user) {
 }
 
 export function isNutriUser(user) {
+  if (!user || typeof user !== 'object') return false;
+  if (
+    user?.tipo_perfil === 'paciente' ||
+    user?.perfil === 'paciente' ||
+    user?.id_paciente_uuid
+  ) {
+    return false;
+  }
   return Boolean(
     user?.tipo_perfil === 'nutricionista' ||
       user?.perfil === 'nutricionista' ||

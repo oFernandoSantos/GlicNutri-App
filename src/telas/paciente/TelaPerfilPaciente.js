@@ -21,14 +21,17 @@ import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamento
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { supabase } from '../../servicos/configSupabase';
+import { limparSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
 import {
   extractObjectiveAndAppState,
   fetchPatientById,
+  getCachedPatientProfile,
   getPatientDisplayName,
   getPatientId,
   isPatientProfileCacheFresh,
   updatePatientProfile,
 } from '../../servicos/servicoDadosPaciente';
+import { EsqueletoPerfilPaciente } from '../../componentes/comum/EsqueletoCarregamento';
 import {
   buildPatientHealthInfoRows,
   buildPatientProfileSections,
@@ -2409,12 +2412,26 @@ export default function PacientePerfilScreen({
   usuarioLogado: usuarioProp,
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
+  const requestedInsulinProfileKey =
+    route?.params?.initialInsulinProfileKey === 'bolus' ? 'bolus' : 'basal';
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const fallbackName = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
+  const cachedProfileInicial = useMemo(
+    () => (patientId ? getCachedPatientProfile(patientId) : null),
+    [patientId]
+  );
+  const perfilTemDadosIniciais = Boolean(
+    cachedProfileInicial?.nome_completo ||
+      usuarioLogado?.nome_completo ||
+      cachedProfileInicial?.email_pac ||
+      usuarioLogado?.email_pac
+  );
 
-  const [paciente, setPaciente] = useState(usuarioLogado || null);
+  const [paciente, setPaciente] = useState(
+    () => cachedProfileInicial || usuarioLogado || null
+  );
   const [linkedNutritionist, setLinkedNutritionist] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !perfilTemDadosIniciais);
   const [openSections, setOpenSections] = useState({
     patient: false,
     clinical: false,
@@ -2497,6 +2514,11 @@ export default function PacientePerfilScreen({
 
   latestPatientRef.current = paciente;
 
+  useEffect(() => {
+    if (route?.name !== 'PacientePerfilInsulinas') return;
+    setActiveInsulinProfileKey(requestedInsulinProfileKey);
+  }, [route?.name, requestedInsulinProfileKey]);
+
   const profileBolusSuggestion = useMemo(() => {
     if (!therapyEditorVisible || therapyDraft.categoria_funcional !== 'bolus') return null;
     const carbsN = Number(String(profileBolusCarbs || '').replace(',', '.'));
@@ -2571,7 +2593,23 @@ export default function PacientePerfilScreen({
     const showLoading = options.showLoading !== false;
 
     try {
-      if (showLoading) {
+      if (!forceRefresh && patientId) {
+        const emCache = getCachedPatientProfile(patientId);
+        if (emCache) {
+          const onboardingLocalCache = await getPatientLocalOnboardingData(
+            emCache || usuarioLogado
+          );
+          setPaciente(
+            mergePatientOnboardingData(emCache || usuarioLogado || null, onboardingLocalCache) ||
+              emCache ||
+              usuarioLogado ||
+              null
+          );
+          setLoading(false);
+        }
+      }
+
+      if (showLoading && !getCachedPatientProfile(patientId)) {
         setLoading(true);
       }
 
@@ -2579,6 +2617,7 @@ export default function PacientePerfilScreen({
         patientContext: usuarioLogado,
         currentPatient: latestPatientRef.current,
         forceRefresh,
+        allowGoogleSync: false,
       });
       const onboardingLocal = await getPatientLocalOnboardingData(registro || usuarioLogado);
       const registroComOnboarding = mergePatientOnboardingData(
@@ -3936,6 +3975,8 @@ export default function PacientePerfilScreen({
         console.log('Erro ao sair da conta:', error.message);
       }
 
+      await limparSessaoPaciente();
+
       navigation.reset({
         index: 0,
         routes: [{ name: 'Login' }],
@@ -4326,14 +4367,7 @@ export default function PacientePerfilScreen({
     };
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-        <Text style={styles.loadingText}>Carregando perfil...</Text>
-      </View>
-    );
-  }
+  const exibirEsqueletoPerfil = loading && !perfilTemDadosIniciais && !paciente?.nome_completo;
 
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
@@ -4355,6 +4389,10 @@ export default function PacientePerfilScreen({
           nestedScrollEnabled
           showsVerticalScrollIndicator={false}
         >
+        {exibirEsqueletoPerfil ? (
+          <EsqueletoPerfilPaciente />
+        ) : (
+        <>
         {isOverviewProfile ? (
         <>
         <SectionCard style={styles.heroCard}>
@@ -4787,7 +4825,7 @@ export default function PacientePerfilScreen({
 
           <TouchableOpacity
             activeOpacity={0.78}
-            onPress={() => navigation.navigate('PacienteAssistente', { usuarioLogado })}
+            onPress={() => navigation.navigate('PacienteSuporte', { usuarioLogado })}
             style={styles.settingsRow}
           >
             <View style={styles.settingsRowLeft}>
@@ -4942,6 +4980,8 @@ export default function PacientePerfilScreen({
             isClinicalProfileEditor || isPatientProfileEditor ? styles.footerSpaceFloatingButton : null,
           ]}
         />
+        </>
+        )}
         </ScrollView>
 
         {isClinicalProfileEditor || isPatientProfileEditor ? (

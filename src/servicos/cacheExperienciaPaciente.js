@@ -5,6 +5,8 @@ const MAX_EXPERIENCE_CACHE_ENTRIES = 100;
 const MAX_NUTRI_INBOX_CACHE_ENTRIES = 40;
 const HOME_EXPERIENCE_TTL_MS = 120 * 1000;
 const CHAT_CACHE_TTL_MS = 20 * 1000;
+export const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
+const HISTORICO_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
 
 const experienceCache = new Map();
 const experienceInFlight = new Map();
@@ -19,6 +21,21 @@ const nutriInboxCache = new Map();
 const nutriInboxInFlight = new Map();
 const NUTRI_INBOX_TTL_MS = 20 * 1000;
 
+function buildLimitsFingerprint(options = {}) {
+  return [
+    options.homeOnly ? 'h1' : '',
+    options.planOnly ? 'p1' : '',
+    options.chatOnly ? 'c1' : '',
+    options.skipChat ? 'sc' : '',
+    options.minimalProfile ? 'mp' : '',
+    `g${options.glucoseLimit ?? '*'}`,
+    `m${options.medicationLimit ?? '*'}`,
+    `e${options.mealLimit ?? '*'}`,
+  ]
+    .filter(Boolean)
+    .join('-');
+}
+
 function buildExperienceCacheKey(patientId, options = {}) {
   const scope = options.planOnly
     ? 'plan'
@@ -27,11 +44,13 @@ function buildExperienceCacheKey(patientId, options = {}) {
       : options.chatOnly
         ? 'chat'
         : 'full';
-  return `${patientId}:${scope}:${options.includeHidden ? 'all' : 'visible'}`;
+  const limitsKey = buildLimitsFingerprint(options);
+  return `${patientId}:${scope}:${limitsKey}:${options.includeHidden ? 'all' : 'visible'}`;
 }
 
 function resolveExperienceTtlMs(options = {}) {
   if (options.homeOnly) return options.cacheTtlMs ?? HOME_EXPERIENCE_TTL_MS;
+  if (options.historicoPreset) return options.cacheTtlMs ?? HISTORICO_EXPERIENCE_TTL_MS;
   return options.cacheTtlMs ?? DEFAULT_TTL_MS;
 }
 
@@ -108,14 +127,14 @@ export async function fetchCachedPatientChat(patientId, options, loader) {
   });
 }
 
-export function isPatientProfileCacheFresh(patientId, ttlMs = DEFAULT_TTL_MS) {
-  if (!patientId) return false;
-  return Boolean(getFreshEntry(profileCache, patientId, ttlMs));
-}
-
-export function getCachedPatientProfile(patientId, ttlMs = DEFAULT_TTL_MS) {
+export function getCachedPatientProfile(patientId, ttlMs = PROFILE_CACHE_TTL_MS) {
   if (!patientId) return null;
   return getFreshEntry(profileCache, patientId, ttlMs);
+}
+
+export function isPatientProfileCacheFresh(patientId, ttlMs = PROFILE_CACHE_TTL_MS) {
+  if (!patientId) return false;
+  return Boolean(getFreshEntry(profileCache, patientId, ttlMs));
 }
 
 export async function readThroughPatientCache({
@@ -226,7 +245,7 @@ export async function fetchCachedPatientProfile(patientId, options, loader) {
     return loader();
   }
 
-  const ttlMs = options.cacheTtlMs ?? DEFAULT_TTL_MS;
+  const ttlMs = options.cacheTtlMs ?? PROFILE_CACHE_TTL_MS;
   const forceRefresh = options.forceRefresh === true;
 
   return readThroughPatientCache({

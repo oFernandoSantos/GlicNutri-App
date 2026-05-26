@@ -5,7 +5,6 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
   Alert,
   ScrollView,
   useWindowDimensions,
@@ -17,8 +16,11 @@ import {
   appendNewestEntry,
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientId,
+  isPatientExperienceCacheFresh,
 } from '../../servicos/servicoDadosPaciente';
+import { EsqueletoDiarioRefeicoes } from '../../componentes/comum/EsqueletoCarregamento';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   replaceCachedPatientAppState,
@@ -253,10 +255,18 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       ),
     [patientId, usuarioLogado]
   );
-  const [loading, setLoading] = useState(true);
+  const diarioFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('diario'), []);
+  const cachedDiarioInicial = useMemo(
+    () => (patientId ? getCachedPatientExperience(patientId, diarioFetchLimits) : null),
+    [patientId, diarioFetchLimits]
+  );
+  const diarioCacheQuente = Boolean(cachedDiarioInicial);
+  const [loading, setLoading] = useState(!diarioCacheQuente);
   const [range, setRange] = useState('Hoje');
   const [nutritionSlideIndex, setNutritionSlideIndex] = useState(0);
-  const [appState, setAppState] = useState(createDefaultAppState());
+  const [appState, setAppState] = useState(
+    () => cachedDiarioInicial?.appState || createDefaultAppState()
+  );
   const [resolvedPatientId, setResolvedPatientId] = useState(patientId);
   const hasLoadedRef = useRef(false);
 
@@ -274,7 +284,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
           forceRefresh,
-          ...mesclarLimitesDadosPaciente('diario'),
+          ...diarioFetchLimits,
         });
 
         const canonicalId = experience.patient?.id_paciente_uuid || patientId;
@@ -287,14 +297,19 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         if (!silent) setLoading(false);
       }
     },
-    [canResolvePatient, patientId, usuarioLogado]
+    [canResolvePatient, diarioFetchLimits, patientId, usuarioLogado]
   );
 
   useFocusEffect(
     useCallback(() => {
-      loadDiario({ silent: hasLoadedRef.current, forceRefresh: hasLoadedRef.current });
+      const cacheFresco =
+        patientId && isPatientExperienceCacheFresh(patientId, diarioFetchLimits);
+      loadDiario({
+        silent: hasLoadedRef.current || cacheFresco,
+        forceRefresh: false,
+      });
       hasLoadedRef.current = true;
-    }, [loadDiario])
+    }, [diarioFetchLimits, loadDiario, patientId])
   );
 
   useEffect(() => {
@@ -325,6 +340,14 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       };
     });
   }, [mealEntryFromIA, mealIARefreshToken]);
+
+  useEffect(() => {
+    if (!mealIARefreshToken || !canResolvePatient) {
+      return;
+    }
+
+    loadDiario({ silent: true, forceRefresh: true });
+  }, [mealIARefreshToken, canResolvePatient, loadDiario]);
 
   const timelineEntries = useMemo(() => {
     return (appState.mealEntries || []).map((item) => ({
@@ -644,10 +667,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         </View>
 
         {loading ? (
-          <View style={styles.emptyState}>
-            <ActivityIndicator color={patientTheme.colors.primaryDark} />
-            <Text style={styles.emptyStateText}>Carregando seus registros...</Text>
-          </View>
+          <EsqueletoDiarioRefeicoes linhas={3} />
         ) : todayTimelineEntries.length > 0 ? (
           <View style={styles.mealLogList}>
             {todayTimelineEntries.map((entry) => {

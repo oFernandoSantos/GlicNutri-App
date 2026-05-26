@@ -32,6 +32,8 @@ import {
   limparSessaoNutricionista,
   salvarSessaoNutricionista,
 } from '../../servicos/servicoSessaoNutricionista';
+import { salvarSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
+import { patientAppAlreadyActive } from '../../utilitarios/navegacaoPaciente';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
@@ -282,45 +284,6 @@ export default function TelaLogin({ navigation, route, session }) {
     maybeCompleteGoogleOAuthSession();
   }, []);
 
-  useEffect(() => {
-    async function verificarSessaoAtual() {
-      try {
-        const { data, error } = await supabase.auth.getSession();
-
-        console.log('Sessao atual ao abrir Login =>', {
-          hasSession: !!data?.session,
-          userId: data?.session?.user?.id || null,
-          error: error?.message || null,
-        });
-
-        if (data?.session?.user && !googleSessionHandledRef.current) {
-          googleSessionHandledRef.current = true;
-          await finalizarLoginGoogleComUsuario(data.session.user, { auditLogin: false });
-        }
-      } catch (error) {
-        console.log('Erro ao verificar sessao atual =>', error);
-        googleSessionHandledRef.current = false;
-      }
-    }
-
-    verificarSessaoAtual();
-  }, [navigation]);
-
-  useEffect(() => {
-    if (!session?.user) {
-      googleSessionHandledRef.current = false;
-      return;
-    }
-
-    if (!googleSessionHandledRef.current) {
-      googleSessionHandledRef.current = true;
-      finalizarLoginGoogleComUsuario(session.user, { auditLogin: false }).catch((error) => {
-        console.log('Erro ao sincronizar sessao Google =>', error);
-        googleSessionHandledRef.current = false;
-      });
-    }
-  }, [session, navigation]);
-
   async function handleLogin() {
     const errosFormulario = validarCamposLogin();
     setFieldErrors(errosFormulario);
@@ -459,6 +422,11 @@ export default function TelaLogin({ navigation, route, session }) {
         if (route?.params?.onNutriLogin) {
           route.params.onNutriLogin(usuarioSessao);
         }
+      } else if (role === 'Paciente') {
+        usuarioSessao = await salvarSessaoPaciente(usuario);
+        if (route?.params?.onPatientLogin) {
+          route.params.onPatientLogin(usuarioSessao);
+        }
       }
 
       const rotaDestino =
@@ -508,8 +476,16 @@ export default function TelaLogin({ navigation, route, session }) {
   }
 
   async function finalizarLoginGoogleComUsuario(user, auditOptions = {}) {
+    if (patientAppAlreadyActive(navigation)) {
+      return;
+    }
+
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
-    const usuarioPaciente = pacienteGoogle || user;
+    const usuarioPaciente = (await salvarSessaoPaciente(pacienteGoogle || user)) || pacienteGoogle || user;
+
+    if (route?.params?.onPatientLogin) {
+      route.params.onPatientLogin(usuarioPaciente);
+    }
     const rotaDestino = (await hasPatientOnboardingSeen(usuarioPaciente))
       ? 'HomePaciente'
       : 'PacienteOnboarding';

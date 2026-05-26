@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   StatusBar,
   View,
@@ -38,6 +38,7 @@ import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
 import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
+import PacienteSuporteScreen from './src/telas/paciente/TelaSuportePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
 import PacientePerfilNutricionistaScreen from './src/telas/paciente/TelaPerfilNutricionistaAgendamento';
 import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
@@ -62,10 +63,16 @@ import {
   carregarSessaoNutricionista,
   limparSessaoNutricionista,
 } from './src/servicos/servicoSessaoNutricionista';
-import { resolveInitialRouteName } from './src/utilitarios/perfisApp';
+import {
+  carregarSessaoPaciente,
+  limparSessaoPaciente,
+  salvarSessaoPaciente,
+} from './src/servicos/servicoSessaoPaciente';
+import { resolveInitialRouteName, isPatientUser } from './src/utilitarios/perfisApp';
 import {
   getPatientId,
   prefetchPatientHomeExperience,
+  prefetchPatientProfileExperience,
 } from './src/servicos/servicoDadosPaciente';
 
 const Stack = createStackNavigator();
@@ -174,10 +181,42 @@ export default function App() {
   const [patientOnboardingReady, setPatientOnboardingReady] = useState(false);
   const [patientOnboardingSeen, setPatientOnboardingSeen] = useState(false);
   const [patientSessionOverride, setPatientSessionOverride] = useState(null);
+  const [patientLocalSession, setPatientLocalSession] = useState(null);
+  const [patientLocalReady, setPatientLocalReady] = useState(false);
   const [adminSession, setAdminSession] = useState(null);
   const [adminReady, setAdminReady] = useState(false);
   const [nutriSession, setNutriSession] = useState(null);
   const [nutriReady, setNutriReady] = useState(false);
+  const onboardingUserIdRef = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function carregarPacienteLocal() {
+      const paciente = await carregarSessaoPaciente();
+      if (isMounted) {
+        setPatientLocalSession(paciente);
+        setPatientLocalReady(true);
+      }
+    }
+
+    carregarPacienteLocal();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function persistirSessaoPacienteApp(user) {
+    if (!user || !isPatientUser(user)) {
+      await limparSessaoPaciente();
+      setPatientLocalSession(null);
+      return null;
+    }
+
+    const sanitized = await salvarSessaoPaciente(user);
+    setPatientLocalSession(sanitized);
+    return sanitized;
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -245,17 +284,24 @@ export default function App() {
         const pacienteGoogle = await syncGooglePatientRecord(nextSession.user);
 
         if (!pacienteGoogle) {
+          if (isPatientUser(nextSession.user)) {
+            await persistirSessaoPacienteApp(nextSession.user);
+          }
           return nextSession;
         }
 
+        const mergedUser = {
+          ...nextSession.user,
+          ...pacienteGoogle,
+          id_paciente_uuid:
+            pacienteGoogle.id_paciente_uuid || nextSession.user.id || null,
+        };
+
+        await persistirSessaoPacienteApp(mergedUser);
+
         return {
           ...nextSession,
-          user: {
-            ...nextSession.user,
-            ...pacienteGoogle,
-            id_paciente_uuid:
-              pacienteGoogle.id_paciente_uuid || nextSession.user.id || null,
-          },
+          user: mergedUser,
         };
       } catch (error) {
         console.log('Erro ao sincronizar Google com tabela paciente:', error);
@@ -285,17 +331,40 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       (async () => {
         if (!isMounted) return;
 
-        setAuthReady(false);
-        const sessaoPreparada = await prepararSessao(nextSession || null);
+        const isSilentEvent =
+          event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED';
+
+        if (!isSilentEvent) {
+          setAuthReady(false);
+        }
+
+        if (!nextSession?.user) {
+          if (event === 'SIGNED_OUT') {
+            await limparSessaoPaciente();
+            if (isMounted) {
+              setPatientLocalSession(null);
+            }
+          }
+          if (!isMounted) return;
+          setSession(null);
+          if (!isSilentEvent) {
+            setAuthReady(true);
+          }
+          return;
+        }
+
+        const sessaoPreparada = await prepararSessao(nextSession);
 
         if (!isMounted) return;
 
         setSession(sessaoPreparada);
-        setAuthReady(true);
+        if (!isSilentEvent) {
+          setAuthReady(true);
+        }
       })();
     });
 
@@ -310,19 +379,41 @@ export default function App() {
   }, [session?.user?.id]);
 
   useEffect(() => {
-    const patientId = getPatientId(session?.user);
+    if (!authReady) return undefined;
+
+    let cancelled = false;
+
+    (async () => {
+      const paciente = await carregarSessaoPaciente();
+      if (!cancelled && paciente) {
+        setPatientLocalSession(paciente);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, session?.user?.id]);
+
+  useEffect(() => {
+    const perfilPaciente = session?.user || patientLocalSession;
+    const patientId = getPatientId(perfilPaciente);
     if (!patientId || adminSession || nutriSession) return;
 
-    prefetchPatientHomeExperience(patientId, session?.user);
-  }, [adminSession, nutriSession, session?.user]);
+    prefetchPatientHomeExperience(patientId, perfilPaciente);
+    prefetchPatientProfileExperience(patientId, perfilPaciente);
+  }, [adminSession, nutriSession, patientLocalSession, session?.user]);
 
   useEffect(() => {
     let isMounted = true;
 
     async function carregarOnboardingPaciente() {
-      if (!authReady) return;
+      if (!authReady || !patientLocalReady) return;
 
-      if (!session?.user) {
+      const perfilPaciente =
+        patientSessionOverride || patientLocalSession || session?.user || null;
+
+      if (!perfilPaciente || !isPatientUser(perfilPaciente)) {
         if (isMounted) {
           setPatientOnboardingSeen(false);
           setPatientOnboardingReady(true);
@@ -330,11 +421,15 @@ export default function App() {
         return;
       }
 
-      setPatientOnboardingReady(false);
+      const userKey = perfilPaciente.id_paciente_uuid || perfilPaciente.id || perfilPaciente.email;
+      if (onboardingUserIdRef.current === userKey && patientOnboardingReady) {
+        return;
+      }
 
-      const onboardingVisto = await hasPatientOnboardingSeen(session.user);
+      const onboardingVisto = await hasPatientOnboardingSeen(perfilPaciente);
 
       if (isMounted) {
+        onboardingUserIdRef.current = userKey;
         setPatientOnboardingSeen(onboardingVisto);
         setPatientOnboardingReady(true);
       }
@@ -345,7 +440,14 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [authReady, session]);
+  }, [
+    authReady,
+    patientLocalReady,
+    patientLocalSession,
+    patientSessionOverride,
+    patientOnboardingReady,
+    session?.user?.id,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -404,7 +506,14 @@ export default function App() {
     );
   }
 
-  if (!authReady || !introReady || !patientOnboardingReady || !adminReady || !nutriReady) {
+  if (
+    !authReady ||
+    !introReady ||
+    !patientOnboardingReady ||
+    !patientLocalReady ||
+    !adminReady ||
+    !nutriReady
+  ) {
     return (
       <GestureHandlerRootView style={styles.gestureRoot}>
         <SafeAreaProvider>
@@ -425,15 +534,17 @@ export default function App() {
   }
 
   function getPacienteProps(props) {
-    const sessionUser = patientSessionOverride || session?.user || null;
     const routeMeta = props.route?.params?.usuarioLogado || null;
+    const sessionUser =
+      patientSessionOverride || patientLocalSession || session?.user || routeMeta || null;
 
     const usuarioLogado = sessionUser
       ? {
           ...(routeMeta && typeof routeMeta === 'object' ? routeMeta : {}),
-          ...sessionUser,
+          ...(sessionUser && typeof sessionUser === 'object' ? sessionUser : {}),
           id_paciente_uuid:
             getPatientId(sessionUser) ||
+            getPatientId(routeMeta) ||
             routeMeta?.id_paciente_uuid ||
             sessionUser?.user_metadata?.id_paciente_uuid ||
             null,
@@ -500,6 +611,7 @@ export default function App() {
     adminSession,
     nutriSession,
     supabaseSession: session,
+    patientLocalSession,
     patientOnboardingSeen,
     introSeen,
   });
@@ -539,17 +651,6 @@ export default function App() {
           >
             <NavigationContainer>
               <Stack.Navigator
-                key={
-                  adminSession
-                    ? 'admin-auth'
-                    : session
-                      ? patientOnboardingSeen
-                        ? 'auth'
-                        : 'auth-onboarding'
-                      : introSeen
-                        ? 'guest-seen'
-                        : 'guest-first'
-                }
                 initialRouteName={initialRouteName}
                 screenOptions={{
                   animationEnabled: true,
@@ -590,6 +691,7 @@ export default function App() {
                           ...(props.route?.params || {}),
                           onAdminLogin: (adminUser) => setAdminSession(adminUser),
                           onNutriLogin: (nutriUser) => setNutriSession(nutriUser),
+                          onPatientLogin: (patientUser) => persistirSessaoPacienteApp(patientUser),
                         },
                       }}
                     />
@@ -619,6 +721,7 @@ export default function App() {
                       onOnboardingFinished={(updatedPatient) => {
                         if (updatedPatient) {
                           setPatientSessionOverride(updatedPatient);
+                          persistirSessaoPacienteApp(updatedPatient);
                         }
                         setPatientOnboardingSeen(true);
                       }}
@@ -645,6 +748,10 @@ export default function App() {
 
               <Stack.Screen name="PacienteAssistente" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacienteAssistenteScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteSuporte" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacienteSuporteScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacienteAgendamentos" options={mainTabReaderOptions}>

@@ -35,6 +35,7 @@ import {
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { EsqueletoMetricaGlicose } from '../../componentes/comum/EsqueletoCarregamento';
 import { getMealEntryNutrition } from '../../servicos/servicoRefeicaoIA';
 import { syncGooglePatientRecord } from '../../servicos/sincronizarPacienteGoogle';
 import {
@@ -56,6 +57,8 @@ import {
   PATIENT_MAIN_TAB_ROUTES,
   navigatePatientTab,
 } from '../../utilitarios/navegacaoAbas';
+import { navigatePatientFeature } from '../../utilitarios/navegacaoPaciente';
+import { limparSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
 
 function padDatePart(value) {
   return String(value).padStart(2, '0');
@@ -554,18 +557,16 @@ function GlucoseMetricCard({
   latestGlucose,
   loading,
 }) {
+  if (loading && !currentGlucose) {
+    return <EsqueletoMetricaGlicose width={width} />;
+  }
+
   const glucoseLabel = currentGlucose ? `${currentGlucose} mg/dL` : '-- mg/dL';
   const updatedLabel = latestGlucose?.time ? `Atualizado ${latestGlucose.time}` : 'Sem registro hoje';
   const statusMeta = getGlucoseStatusMeta(currentGlucose);
 
   return (
     <SectionCard style={[styles.metricSlide, { width }]}>
-      {loading ? (
-        <View style={styles.metricLoadingWrap}>
-          <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-          <Text style={styles.metricLoadingText}>Atualizando leituras...</Text>
-        </View>
-      ) : null}
       <View style={styles.heroTopRow}>
         <View>
           <Text style={styles.eyebrow}>Glicose em tempo real</Text>
@@ -960,6 +961,8 @@ export default function PacienteHomeScreen({
         console.log('Erro ao sair:', error.message);
       }
 
+      await limparSessaoPaciente();
+
       navigation.reset({
         index: 0,
         routes: [{ name: 'Login' }],
@@ -985,8 +988,12 @@ export default function PacienteHomeScreen({
       carregarDados({ forceRefresh: homeLoadedRef.current });
       homeLoadedRef.current = true;
       return undefined;
-    }, [carregarDados, homeFetchOptions, idPaciente])
+    }, [carregarDados, homeFetchOptions, idPaciente, navigation])
   );
+
+  function navegarParaTela(rota, params = {}) {
+    navigatePatientFeature(navigation, rota, { usuarioLogado, ...params });
+  }
 
   const nomeUsuario = paciente?.nome_completo || nomeBaseUsuario;
   const activeGlucosePatientId = paciente?.id_paciente_uuid || idPaciente || null;
@@ -1203,7 +1210,7 @@ export default function PacienteHomeScreen({
               navigatePatientTab(navigation, screen, usuarioLogado);
               return;
             }
-            navigation.navigate(screen, { usuarioLogado, ...params });
+            navegarParaTela(screen, params);
           }}
           onLogout={handleLogout}
           currentRoute={route?.name || 'HomePaciente'}
@@ -1455,7 +1462,7 @@ export default function PacienteHomeScreen({
 
           <TouchableOpacity
             style={styles.homePlanButton}
-            onPress={() => navigation.navigate('PacientePlano', { usuarioLogado })}
+            onPress={() => navegarParaTela('PacientePlano')}
           >
             <Text style={styles.homePlanButtonText}>Ver Plano Completo</Text>
           </TouchableOpacity>
@@ -1483,7 +1490,7 @@ export default function PacienteHomeScreen({
 
           <TouchableOpacity
             style={styles.planButton}
-            onPress={() => navigation.navigate('PacientePlano', { usuarioLogado })}
+            onPress={() => navegarParaTela('PacientePlano')}
           >
             <Text style={styles.planButtonText}>Abrir plano completo</Text>
           </TouchableOpacity>
@@ -1491,7 +1498,7 @@ export default function PacienteHomeScreen({
 
         <TouchableOpacity
           style={styles.homePlanExternalButton}
-          onPress={() => navigation.navigate('PacienteProgresso', { usuarioLogado })}
+          onPress={() => navegarParaTela('PacienteProgresso')}
         >
           <Text style={styles.homePlanExternalButtonText}>Ver meu progresso</Text>
         </TouchableOpacity>

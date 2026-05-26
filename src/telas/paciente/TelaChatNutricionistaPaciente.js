@@ -274,8 +274,21 @@ export default function TelaChatNutricionistaPaciente({
       usuarioLogado={usuarioLogado}
       title=""
       subtitle=""
-      showTabBar
       contentContainerStyle={styles.contentContainer}
+      footerOverlay={
+        <TouchableOpacity
+          style={styles.floatingPrimaryButton}
+          onPress={() => openChat(chatItems[0])}
+          activeOpacity={0.9}
+        >
+          <Ionicons
+            name="chatbubble-ellipses-outline"
+            size={18}
+            color={patientTheme.colors.onPrimary}
+          />
+          <Text style={styles.floatingPrimaryButtonText}>Falar com minha Nutricionista</Text>
+        </TouchableOpacity>
+      }
     >
       <View style={styles.listSearch}>
         <SearchInput
@@ -357,7 +370,22 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
     flexGrow: 1,
     paddingTop: 8,
-    paddingBottom: 28,
+    paddingBottom: 112,
+  },
+  floatingPrimaryButton: {
+    minHeight: 56,
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
+  },
+  floatingPrimaryButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 16,
+    fontWeight: '900',
   },
   listSearch: {
     marginBottom: 12,
