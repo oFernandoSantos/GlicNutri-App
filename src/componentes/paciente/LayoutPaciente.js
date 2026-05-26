@@ -37,6 +37,7 @@ export default function PatientScreenLayout({
   refreshControl,
   lockFixedContent = false,
   keyboardAware = true,
+  backgroundColor,
 }) {
   const insets = useSafeAreaInsets();
   const hasFloatingFooterOverlay = Boolean(footerOverlay);
@@ -53,9 +54,16 @@ export default function PatientScreenLayout({
     <GuardiaoSessaoPaciente navigation={navigation} usuarioLogado={usuarioLogado}>
     <SafeAreaView
       edges={Platform.OS === 'web' ? undefined : []}
-      style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
+      style={[
+        styles.container,
+        Platform.OS === 'web' && styles.containerWeb,
+        backgroundColor ? { backgroundColor } : null,
+      ]}
     >
-      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={backgroundColor || patientTheme.colors.background}
+      />
 
       <WrapperTeclado
         style={styles.body}

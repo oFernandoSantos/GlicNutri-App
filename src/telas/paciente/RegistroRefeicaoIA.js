@@ -38,14 +38,36 @@ import {
 import {
   buscarAlimentosBrasil,
   FONTE_ALIMENTOS_LABEL,
+  buscarProdutosRotuloBrasil,
+  buscarMelhorProdutoRotuloBrasil,
   materializarAlimentoDaBusca,
 } from '../../servicos/servicoBuscaAlimentosBrasil';
+import {
+  aplicarAprendizadoNutricional,
+  carregarAprendizadoNutricional,
+  registrarAprendizadoNutricional,
+} from '../../servicos/servicoAprendizadoNutricional';
+import {
+  enrichMealEntryWithPlanLink,
+  resolvePlanSections,
+} from '../../utilitarios/vinculoPlanoRefeicao';
 
 const FOOD_SEARCH_MIN_CHARS = 2;
 const FOOD_SEARCH_PAGE_SIZE = 12;
 const FOOD_SEARCH_LIST_MAX_HEIGHT = 200;
 const NOTIFICACAO_AUTO_MS = 5000;
 const PHOTO_DROPZONE_HEIGHT = 170;
+
+const EDITABLE_ITEM_FIELDS = [
+  { itemKey: 'calorias', baseKey: 'base_calorias', label: 'kcal', unit: '', color: '#111827' },
+  { itemKey: 'carboidratos', baseKey: 'base_carboidratos', label: 'Carbo', unit: 'g', color: '#2563eb' },
+  { itemKey: 'proteinas', baseKey: 'base_proteinas', label: 'Prot', unit: 'g', color: '#f97316' },
+  { itemKey: 'gorduras', baseKey: 'base_gorduras', label: 'Gord', unit: 'g', color: '#ef4444' },
+  { itemKey: 'fibras', baseKey: 'base_fibras', label: 'Fibra', unit: 'g', color: '#16a34a' },
+  { itemKey: 'acucares', baseKey: 'base_acucares', label: 'Açúc.', unit: 'g', color: '#9333ea' },
+  { itemKey: 'gorduras_saturadas', baseKey: 'base_gorduras_saturadas', label: 'Sat.', unit: 'g', color: '#ef4444' },
+  { itemKey: 'sodio', baseKey: 'base_sodio', label: 'Sódio', unit: 'mg', color: '#64748b' },
+];
 
 const mealTypeOptions = [
   'Cafe da Manha',
@@ -60,6 +82,16 @@ const mealTypeOptions = [
 function formatNutrient(value, suffix = '') {
   const normalized = Math.round((Number(value) || 0) * 10) / 10;
   return `${normalized.toFixed(1).replace('.0', '')}${suffix}`;
+}
+
+function formatEditableValue(value) {
+  const numeric = Math.round((Number(value) || 0) * 10) / 10;
+  return String(numeric).replace('.', ',').replace(',0', '');
+}
+
+function parseEditableValue(value) {
+  const numeric = Number(String(value || '').replace(',', '.'));
+  return Number.isFinite(numeric) && numeric >= 0 ? numeric : 0;
 }
 
 function getMealTimingLabel(mode) {
@@ -200,13 +232,130 @@ function feedbackErroAnalise(error) {
 }
 
 function buildSelectedFoodSummary(item) {
-  const calories = `${Math.round(Number(item.calorias) || 0)} kcal`;
-  const macros = `C:${formatNutrient(item.carboidratos, 'g')} P:${formatNutrient(
-    item.proteinas,
-    'g'
-  )} G:${formatNutrient(item.gorduras, 'g')}`;
+  const quantity = formatNutrient(item?.quantidade_gramas);
+  return `Tabela calculada para ${quantity}${getFoodQuantityUnit(item)}`;
+}
 
-  return `${calories} · ${macros}`;
+function normalizeFoodText(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+const BEVERAGE_TERMS = [
+  'bebida',
+  'beverage',
+  'drink',
+  'suco',
+  'refrigerante',
+  'agua',
+  'cha',
+  'cafe',
+  'leite',
+  'isotonico',
+  'energetico',
+  'achocolatado',
+  'vitamina',
+  'smoothie',
+];
+
+function getFoodQuantityUnit(item) {
+  const explicitUnit = normalizeFoodText(item?.unidade_quantidade || item?.unidade);
+  if (explicitUnit === 'ml') {
+    return 'ml';
+  }
+
+  if (/\bml\b/i.test(String(item?.porcao || item?.serving_size || ''))) {
+    return 'ml';
+  }
+
+  const searchableText = normalizeFoodText(
+    [item?.categoria, item?.category, item?.nome, item?.foodName, item?.nomeComercial].join(' ')
+  );
+
+  return BEVERAGE_TERMS.some((term) => searchableText.includes(term)) ? 'ml' : 'g';
+}
+
+function buildNutritionTableRows(item) {
+  const rows = [
+    { label: 'kcal', value: Math.round(Number(item?.calorias) || 0) },
+    { label: 'Carbo', value: formatNutrient(item?.carboidratos, 'g') },
+    { label: 'Prot.', value: formatNutrient(item?.proteinas, 'g') },
+    { label: 'Gord.', value: formatNutrient(item?.gorduras, 'g') },
+    { label: 'Fibras', value: formatNutrient(item?.fibras, 'g') },
+    { label: 'Açúcares', value: formatNutrient(item?.acucares, 'g') },
+    { label: 'Sat.', value: formatNutrient(item?.gorduras_saturadas, 'g') },
+    { label: 'Sódio', value: `${Math.round(Number(item?.sodio) || 0)}mg` },
+  ];
+
+  if (Number(item?.acucares_adicionados) > 0) {
+    rows.push({ label: 'Açúc. adic.', value: formatNutrient(item.acucares_adicionados, 'g') });
+  }
+
+  if (Number(item?.gordura_trans) > 0) {
+    rows.push({ label: 'Trans', value: formatNutrient(item.gordura_trans, 'g') });
+  }
+
+  return rows;
+}
+
+function buildItemDraft(item) {
+  return EDITABLE_ITEM_FIELDS.reduce(
+    (values, field) => ({
+      ...values,
+      [field.itemKey]: formatEditableValue(item?.[field.itemKey]),
+    }),
+    {
+      nome: String(item?.nome || '').trim(),
+      quantidade_gramas: formatEditableValue(item?.quantidade_gramas),
+    }
+  );
+}
+
+function buildItemFromDraft(item, draft) {
+  const quantidade = parseEditableValue(draft?.quantidade_gramas);
+  const baseQuantity = Number(item?.base_quantidade_gramas) > 0 ? Number(item.base_quantidade_gramas) : 100;
+  const nextItem = {
+    ...item,
+    nome: String(draft?.nome || item?.nome || 'Alimento').trim(),
+    quantidade_gramas: quantidade,
+    base_quantidade_gramas: baseQuantity,
+  };
+
+  EDITABLE_ITEM_FIELDS.forEach((field) => {
+    const value = parseEditableValue(draft?.[field.itemKey]);
+    const baseValue = quantidade > 0 ? Math.round((value / (quantidade / baseQuantity)) * 10) / 10 : value;
+    nextItem[field.itemKey] = value;
+    nextItem[field.baseKey] = baseValue;
+  });
+
+  return criarAlimentoEditavel(nextItem);
+}
+
+function getFoodSuggestionMeta(item) {
+  if (item?.ajusteNutricionalAprendido) {
+    return `Ajuste aprendido · ${item.ajusteNutricionalRegistros || 1} registro(s)`;
+  }
+
+  if (item?.origem === 'rotulo') {
+    const brand = String(item?.brands || item?.marca || '').trim();
+    return brand ? `Rótulo real · ${brand}` : 'Rótulo real · tabela da marca';
+  }
+
+  if (item?.buscaInteligente && item?.nomeTacoReferencia) {
+    return `Sugestão baseada em: ${item.nomeTacoReferencia}`;
+  }
+
+  if (item?.origem === 'industrializado') {
+    return 'Produto local · valores aproximados';
+  }
+
+  return '';
+}
+
+function getFoodSuggestionCalories(item) {
+  return Math.round(Number(item?.calorias ?? item?.base_calorias) || 0);
 }
 
 export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: usuarioProp }) {
@@ -233,8 +382,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   const [toast, setToast] = useState(null);
   const [foodSearch, setFoodSearch] = useState('');
   const [foodSearchLimit, setFoodSearchLimit] = useState(FOOD_SEARCH_PAGE_SIZE);
+  const [foodSearchRemoteItems, setFoodSearchRemoteItems] = useState([]);
+  const [foodSearchRemoteBusy, setFoodSearchRemoteBusy] = useState(false);
   const [mealGlucoseValue, setMealGlucoseValue] = useState('');
   const [savingMealGlucose, setSavingMealGlucose] = useState(false);
+  const [aprendizadoNutricional, setAprendizadoNutricional] = useState({});
+  const [editingFoodIndex, setEditingFoodIndex] = useState(null);
+  const [editingFoodDraft, setEditingFoodDraft] = useState(null);
 
   const totais = useMemo(() => calcularTotaisRefeicaoIA(alimentos), [alimentos]);
   const hasFoods = alimentos.length > 0;
@@ -246,6 +400,42 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     Boolean(mealType) &&
     isValidManualDate(mealTimingDate) &&
     isValidManualTime(mealTimingTime);
+  const hasMealType = Boolean(mealType);
+  const hasMealContent = hasFoods || hasSelectedImage;
+  const canSaveMeal = hasMealType && hasMealContent && !isBusy;
+
+  function solicitarTipoRefeicao() {
+    setMealTypeMenuVisible(false);
+    setMealTimingDetailsVisible(true);
+    mostrarToast(
+      'aviso',
+      'Tipo obrigatorio',
+      'Selecione o tipo da refeicao para continuar.'
+    );
+    return false;
+  }
+
+  function exigirTipoRefeicao() {
+    if (hasMealType) {
+      return true;
+    }
+
+    return solicitarTipoRefeicao();
+  }
+
+  function tentarFecharDetalhesRefeicao() {
+    if (!hasMealType) {
+      mostrarToast(
+        'aviso',
+        'Tipo obrigatorio',
+        'Selecione o tipo da refeicao para continuar.'
+      );
+      return;
+    }
+
+    setMealTypeMenuVisible(false);
+    setMealTimingDetailsVisible(false);
+  }
 
   function mostrarAvisoTopo({ tipo = 'aviso', titulo, detalhe = '' }) {
     setToast(null);
@@ -333,6 +523,9 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       { label: 'Carbo', value: formatNutrient(totais.carboidratos_total), color: '#2563eb' },
       { label: 'Prot', value: formatNutrient(totais.proteinas_total), color: '#f97316' },
       { label: 'Gord', value: formatNutrient(totais.gorduras_total), color: '#ef4444' },
+      { label: 'Fibra', value: formatNutrient(totais.fibras_total), color: '#16a34a' },
+      { label: 'Açúc.', value: formatNutrient(totais.acucares_total), color: '#9333ea' },
+      { label: 'Sódio', value: Math.round(Number(totais.sodio_total) || 0), unit: 'mg', color: '#64748b' },
     ],
     [totais]
   );
@@ -341,8 +534,55 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setFoodSearchLimit(FOOD_SEARCH_PAGE_SIZE);
   }, [foodSearch]);
 
+  useEffect(() => {
+    let mounted = true;
+
+    carregarAprendizadoNutricional().then((dados) => {
+      if (mounted) {
+        setAprendizadoNutricional(dados);
+      }
+    });
+
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   const foodSearchQuery = String(foodSearch || '').trim();
   const foodSearchAtivo = foodSearchQuery.length >= FOOD_SEARCH_MIN_CHARS;
+
+  useEffect(() => {
+    let isActive = true;
+    let debounceTimer = null;
+
+    if (!foodSearchAtivo) {
+      setFoodSearchRemoteItems([]);
+      setFoodSearchRemoteBusy(false);
+      return () => {};
+    }
+
+    setFoodSearchRemoteBusy(true);
+    debounceTimer = setTimeout(() => {
+      buscarProdutosRotuloBrasil(foodSearchQuery, { limit: 10, page: 1 })
+        .then((result) => {
+          if (!isActive) return;
+          setFoodSearchRemoteItems(Array.isArray(result?.items) ? result.items : []);
+        })
+        .catch(() => {
+          if (!isActive) return;
+          setFoodSearchRemoteItems([]);
+        })
+        .finally(() => {
+          if (!isActive) return;
+          setFoodSearchRemoteBusy(false);
+        });
+    }, 350);
+
+    return () => {
+      isActive = false;
+      if (debounceTimer) clearTimeout(debounceTimer);
+    };
+  }, [foodSearchAtivo, foodSearchQuery]);
 
   const foodSearchResult = useMemo(() => {
     if (!foodSearchAtivo) {
@@ -352,7 +592,29 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     return buscarAlimentosBrasil(foodSearchQuery, { limit: foodSearchLimit, offset: 0 });
   }, [foodSearchAtivo, foodSearchQuery, foodSearchLimit]);
 
-  const filteredSuggestions = foodSearchResult.items;
+  const filteredSuggestions = useMemo(() => {
+    const localItems = Array.isArray(foodSearchResult.items) ? foodSearchResult.items : [];
+    const remoteItems = Array.isArray(foodSearchRemoteItems) ? foodSearchRemoteItems : [];
+
+    const seen = new Set();
+    const merged = [];
+
+    remoteItems.forEach((item) => {
+      const key = String(item?.code ?? item?.nome ?? item?.id ?? '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(aplicarAprendizadoNutricional(item, aprendizadoNutricional));
+    });
+
+    localItems.forEach((item) => {
+      const key = String(item?.nome ?? item?.id ?? '').trim().toLowerCase();
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      merged.push(aplicarAprendizadoNutricional(item, aprendizadoNutricional));
+    });
+
+    return merged;
+  }, [aprendizadoNutricional, foodSearchResult.items, foodSearchRemoteItems]);
   const foodSearchSummary = useMemo(() => {
     if (!foodSearchQuery) {
       return `Mín. ${FOOD_SEARCH_MIN_CHARS} letras · ex.: arroz, frango, salada`;
@@ -362,7 +624,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       return 'Digite mais 1 letra.';
     }
 
-    if (!foodSearchResult.total) {
+    if (!foodSearchResult.total && !foodSearchRemoteItems.length && !foodSearchRemoteBusy) {
       return `Nada para "${foodSearchQuery}".`;
     }
 
@@ -370,8 +632,16 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       return foodSearchResult.searchHint;
     }
 
-    return `${foodSearchResult.total} resultado(s)`;
-  }, [foodSearchQuery, foodSearchAtivo, foodSearchResult]);
+    const localTotal = Number(foodSearchResult.total) || 0;
+    const remoteTotal = foodSearchRemoteItems.length;
+    const total = localTotal + remoteTotal;
+
+    if (foodSearchRemoteBusy) {
+      return `${Math.max(0, total)} resultado(s) · buscando rótulos...`;
+    }
+
+    return `${Math.max(0, total)} resultado(s)`;
+  }, [foodSearchQuery, foodSearchAtivo, foodSearchResult, foodSearchRemoteItems.length, foodSearchRemoteBusy]);
 
   function fecharEscolhaHorarioEVoltar() {
     setPendingMealAction(null);
@@ -387,17 +657,12 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
   function abrirEdicaoHorarioRefeicao() {
     setMealTypeMenuVisible(false);
-
-    if (mealType) {
-      setMealTimingDetailsVisible(true);
-      return;
-    }
-
-    setMealTimingChoiceVisible(true);
+    setMealTimingDetailsVisible(true);
   }
 
   function abrirOpcoesFoto() {
     if (isBusy) return;
+    if (!exigirTipoRefeicao()) return;
     setPhotoOptionsVisible(true);
   }
 
@@ -561,26 +826,14 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         if (field === 'quantidade_gramas') {
           const raw = Number(String(value).replace(',', '.'));
           const quantidade = Number.isFinite(raw) ? raw : 0;
-          const baseQty = Number(item.base_quantidade_gramas) > 0 ? Number(item.base_quantidade_gramas) : 100;
-          const factor = baseQty > 0 ? quantidade / baseQty : 1;
-
-          const scaled = (baseValue) => {
-            const base = Number(baseValue);
-            if (!Number.isFinite(base)) return 0;
-            return Math.round(base * factor * 10) / 10;
-          };
 
           return {
-            ...item,
+            ...criarAlimentoEditavel({
+              ...item,
+              id: item.id,
+              quantidade_gramas: quantidade,
+            }),
             quantidade_gramas: quantidade,
-            calorias: scaled(item.base_calorias),
-            carboidratos: scaled(item.base_carboidratos),
-            proteinas: scaled(item.base_proteinas),
-            gorduras: scaled(item.base_gorduras),
-            fibras: scaled(item.base_fibras),
-            acucares: scaled(item.base_acucares),
-            gorduras_saturadas: scaled(item.base_gorduras_saturadas),
-            sodio: scaled(item.base_sodio),
           };
         }
 
@@ -602,15 +855,21 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   }
 
   function adicionarItemManual(nomeSugerido, { limparBusca = true } = {}) {
+    if (!exigirTipoRefeicao()) {
+      return;
+    }
+
     const nomeDigitado = String(nomeSugerido ?? foodSearchQuery ?? '').trim();
     const nome = nomeDigitado || 'Novo alimento';
+    const alimentoManual = criarAlimentoEditavel({
+      nome,
+      categoria: 'Ajuste manual',
+    });
+    const unidadeQuantidade = getFoodQuantityUnit(alimentoManual);
 
     setAlimentos((current) => [
       ...current,
-      criarAlimentoEditavel({
-        nome,
-        categoria: 'Ajuste manual',
-      }),
+      alimentoManual,
     ]);
 
     if (limparBusca) {
@@ -620,7 +879,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     mostrarAvisoTopo({
       tipo: 'sucesso',
       titulo: 'Adicionado como digitado',
-      detalhe: `${nome} · ajuste a quantidade (g) na lista.`,
+      detalhe: `${nome} · ajuste a quantidade (${unidadeQuantidade}) na lista.`,
     });
   }
 
@@ -632,40 +891,117 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     adicionarItemManual(foodSearchQuery, { limparBusca: true });
   }
 
-  function adicionarSugestao(item) {
-    const fonte = materializarAlimentoDaBusca(item);
-    const refTacoId = item.buscaInteligente
-      ? item.refTacoId
-      : item.refTacoId ?? (item.origem === 'taco' ? item.id : null);
-    const nomeExibicao = item.buscaInteligente
-      ? item.nomeComercial || item.nome
-      : item.nome;
-    const referenciaLabel =
-      item.nomeTacoReferencia ||
-      item.referenciaTacoNome ||
-      fonte.referenciaTacoNome ||
-      (item.origem === 'taco' ? item.nome : null);
+  function abrirModalItem(index) {
+    const item = alimentos[index];
+    if (!item) return;
+    setEditingFoodIndex(index);
+    setEditingFoodDraft(buildItemDraft(item));
+  }
 
-    setAlimentos((current) => [
-      ...current,
-      criarAlimentoEditavel({
-        ...fonte,
-        id: undefined,
-        nome: nomeExibicao,
-        refTacoId: refTacoId || null,
-        nomeTacoReferencia: referenciaLabel,
-      }),
-    ]);
+  function fecharModalItem() {
+    setEditingFoodIndex(null);
+    setEditingFoodDraft(null);
+  }
 
-    setFoodSearch('');
+  function atualizarDraftItem(field, value) {
+    setEditingFoodDraft((current) => ({
+      ...(current || {}),
+      [field]: field === 'nome' ? value : value.replace(/[^0-9,.]/g, ''),
+    }));
+  }
 
-    const detalheReferencia = item.buscaInteligente && referenciaLabel ? ` · sugestão baseada em: ${referenciaLabel}` : '';
+  function salvarModalItem() {
+    if (editingFoodIndex === null || !editingFoodDraft) {
+      fecharModalItem();
+      return;
+    }
 
-    mostrarAvisoTopo({
-      tipo: 'sucesso',
-      titulo: 'Adicionado à lista',
-      detalhe: `${nomeExibicao}${detalheReferencia} · confira porção (g/ml)`,
-    });
+    setAlimentos((current) =>
+      current.map((item, index) =>
+        index === editingFoodIndex ? buildItemFromDraft(item, editingFoodDraft) : item
+      )
+    );
+    fecharModalItem();
+  }
+
+  async function adicionarSugestao(item) {
+    if (!exigirTipoRefeicao()) {
+      return;
+    }
+
+    const itemComAprendizado = aplicarAprendizadoNutricional(item, aprendizadoNutricional);
+    const isApproximateMarketProduct =
+      itemComAprendizado?.origem === 'industrializado' ||
+      itemComAprendizado?.buscaInteligente ||
+      itemComAprendizado?.origem === 'taco';
+    let itemResolvido = itemComAprendizado;
+    let usouRotuloReal = itemComAprendizado?.origem === 'rotulo';
+
+    if (isApproximateMarketProduct && !itemComAprendizado?.ajusteNutricionalAprendido) {
+      setLoadingAction('rotulo-real');
+      const consulta = [itemComAprendizado?.nomeComercial, itemComAprendizado?.nome, itemComAprendizado?.brands, itemComAprendizado?.marca]
+        .filter(Boolean)
+        .join(' ');
+      const rotuloReal = await buscarMelhorProdutoRotuloBrasil(consulta);
+
+      if (rotuloReal) {
+        itemResolvido = aplicarAprendizadoNutricional(rotuloReal, aprendizadoNutricional);
+        usouRotuloReal = true;
+      }
+    }
+
+    try {
+      const fonte = materializarAlimentoDaBusca(itemResolvido);
+      const refTacoId = itemResolvido.buscaInteligente
+        ? itemResolvido.refTacoId
+        : itemResolvido.refTacoId ?? (itemResolvido.origem === 'taco' ? itemResolvido.id : null);
+      const nomeExibicao = itemResolvido.buscaInteligente
+        ? itemResolvido.nomeComercial || itemResolvido.nome
+        : itemResolvido.nome;
+      const referenciaLabel =
+        itemResolvido.nomeTacoReferencia ||
+        itemResolvido.referenciaTacoNome ||
+        fonte.referenciaTacoNome ||
+        (itemResolvido.origem === 'taco' ? itemResolvido.nome : null);
+      const unidadeQuantidade = getFoodQuantityUnit(fonte);
+
+      setAlimentos((current) => [
+        ...current,
+        {
+          ...criarAlimentoEditavel({
+            ...fonte,
+            id: undefined,
+            nome: nomeExibicao,
+            refTacoId: refTacoId || null,
+            nomeTacoReferencia: referenciaLabel,
+          }),
+          unidade_quantidade: unidadeQuantidade,
+        },
+      ]);
+
+      setFoodSearch('');
+
+      const detalheReferencia =
+        !usouRotuloReal && itemResolvido.buscaInteligente && referenciaLabel
+          ? ` · sugestão baseada em: ${referenciaLabel}`
+          : '';
+
+      mostrarAvisoTopo({
+        tipo: usouRotuloReal || itemResolvido?.ajusteNutricionalAprendido ? 'sucesso' : 'aviso',
+        titulo: itemResolvido?.ajusteNutricionalAprendido
+          ? 'Ajuste aprendido aplicado'
+          : usouRotuloReal
+            ? 'Rótulo real adicionado'
+            : 'Adicionado com aproximação',
+        detalhe: itemResolvido?.ajusteNutricionalAprendido
+          ? `${nomeExibicao} · usando média dos seus registros anteriores.`
+          : usouRotuloReal
+          ? `${nomeExibicao} · tabela nutricional da marca.`
+          : `${nomeExibicao}${detalheReferencia} · rótulo real não encontrado.`,
+      });
+    } finally {
+      setLoadingAction('');
+    }
   }
 
   function removerItem(index) {
@@ -704,11 +1040,15 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         return entryId && itemId === entryId;
       });
 
-      const timelineEntry = {
-        ...entry,
-        databaseId: recordId || entry?.databaseId || null,
-        storageOrigin: entry?.storageOrigin || 'database',
-      };
+      const planSections = resolvePlanSections({ appState: experience.appState });
+      const timelineEntry = enrichMealEntryWithPlanLink(
+        {
+          ...entry,
+          databaseId: recordId || entry?.databaseId || null,
+          storageOrigin: entry?.storageOrigin || 'database',
+        },
+        planSections
+      );
       const nextState = alreadyPresent
         ? experience.appState
         : {
@@ -844,9 +1184,23 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     }, delay);
   }
 
+  function openNutritionistChat() {
+    navigation.navigate('PacienteChatNutricionista', {
+      usuarioLogado,
+    });
+  }
+
   async function confirmarSalvar() {
-    if (!hasFoods) {
-      mostrarToast('aviso', 'Lista vazia', 'Adicione ao menos um alimento para salvar.');
+    if (!exigirTipoRefeicao()) {
+      return;
+    }
+
+    if (!hasMealContent) {
+      mostrarToast(
+        'aviso',
+        'Refeicao incompleta',
+        'Adicione itens na lista ou anexe uma foto da refeicao.'
+      );
       return;
     }
 
@@ -879,12 +1233,18 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         fotoUrl = upload.storagePath;
       }
 
+      const alimentosParaSalvar = alimentos.map((item) => criarAlimentoEditavel(item));
+      const aprendizadoAtualizado = await registrarAprendizadoNutricional(alimentosParaSalvar);
+      setAprendizadoNutricional(aprendizadoAtualizado);
+
       const saved = await salvarRefeicaoIA({
         patientId,
         fotoUrl,
-        alimentos,
+        alimentos: alimentosParaSalvar,
         confirmado: true,
         createdAt,
+        mealLabel: mealType,
+        mealTypeLabel: mealType,
       });
 
       const recordId = String(saved.record?.id || '').trim();
@@ -894,7 +1254,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           totais: saved.totals,
           date: effectiveDate,
           time: effectiveTime,
-          mealLabel: mealType || 'Refeicao Registrada',
+          mealLabel: mealType,
         }),
         id: recordId ? `meal-ia-${recordId}` : `meal-ia-${Date.now()}`,
         databaseId: recordId || null,
@@ -944,14 +1304,22 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       footerOverlay={
         <View style={styles.footerStack}>
           <TouchableOpacity
-            style={[styles.saveButton, isBusy && styles.saveButtonBusy]}
-            onPress={confirmarSalvar}
-            disabled={!hasFoods || isBusy}
+            style={[
+              styles.saveButton,
+              !canSaveMeal && styles.saveButtonDisabled,
+              isBusy && styles.saveButtonBusy,
+            ]}
+            onPress={() => {
+              if (!canSaveMeal) return;
+              confirmarSalvar();
+            }}
+            activeOpacity={canSaveMeal ? 0.88 : 1}
+            accessibilityState={{ disabled: !canSaveMeal }}
           >
             {loadingAction === 'save' ? (
               <ActivityIndicator color={patientTheme.colors.onPrimary} />
             ) : (
-              <Text style={styles.saveButtonText}>Salvar Refeicao</Text>
+              <Text style={styles.saveButtonText}>Salvar Refeição</Text>
             )}
           </TouchableOpacity>
         </View>
@@ -1103,10 +1471,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         visible={mealTimingDetailsVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => {
-          setMealTypeMenuVisible(false);
-          setMealTimingDetailsVisible(false);
-        }}
+        onRequestClose={tentarFecharDetalhesRefeicao}
       >
         <View style={styles.overlayLayer}>
           <View style={styles.modalOverlay}>
@@ -1121,17 +1486,14 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   </Text>
                   <TouchableOpacity
                     style={styles.modalCloseButton}
-                    onPress={() => {
-                      setMealTypeMenuVisible(false);
-                      setMealTimingDetailsVisible(false);
-                    }}
+                    onPress={tentarFecharDetalhesRefeicao}
                   >
                     <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
                   </TouchableOpacity>
                 </View>
 
                 <Text style={styles.modalText}>
-                  Informe o tipo, a data e a hora da refeicao.
+                  Informe o tipo, a data e a hora da refeicao. O tipo e obrigatorio.
                 </Text>
 
                 <View style={styles.previousMealFields}>
@@ -1295,17 +1657,14 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </View>
       </TouchableOpacity>
 
-      <View style={[styles.card, styles.photoCard]}>
+      <View style={styles.photoCard}>
         <TouchableOpacity
-          style={[
-            styles.photoDropzone,
-            selectedImage?.uri ? styles.photoDropzoneFilled : styles.photoDropzoneEmpty,
-          ]}
+          style={styles.photoDropzone}
           onPress={abrirOpcoesFoto}
           activeOpacity={0.88}
         >
           {selectedImage?.uri ? (
-            <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="cover" />
+            <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="contain" />
           ) : (
             <>
               <Ionicons name="camera-outline" size={48} color={patientTheme.colors.primary} />
@@ -1398,17 +1757,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   >
                     {item.nome}
                   </Text>
-                  {item.buscaInteligente && item.nomeTacoReferencia ? (
+                  {getFoodSuggestionMeta(item) ? (
                     <Text style={styles.suggestionRefTaco} numberOfLines={1}>
-                      Sugestão para: {item.nomeTacoReferencia}
-                    </Text>
-                  ) : item.origem === 'industrializado' ? (
-                    <Text style={styles.suggestionRefTaco} numberOfLines={1}>
-                      Produto pronto para registrar
+                      {getFoodSuggestionMeta(item)}
                     </Text>
                   ) : null}
                 </View>
-                <Text style={styles.suggestionKcalCompact}>{Math.round(item.calorias)} kcal</Text>
+                <Text style={styles.suggestionKcalCompact}>{getFoodSuggestionCalories(item)} kcal</Text>
                 <View
                   style={[
                     styles.suggestionAddButtonCompact,
@@ -1446,16 +1801,17 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         {hasFoods ? (
           <View style={styles.selectedList}>
             {alimentos.map((item, index) => (
-              <View key={item.id || `${item.nome}-${index}`} style={styles.selectedItemRow}>
+              <TouchableOpacity
+                key={item.id || `${item.nome}-${index}`}
+                style={styles.selectedItemRow}
+                onPress={() => abrirModalItem(index)}
+                activeOpacity={0.82}
+              >
                 <View style={styles.selectedItemContent}>
                   <View style={styles.selectedItemInfo}>
-                    <TextInput
-                      style={styles.selectedItemName}
-                      value={item.nome}
-                      onChangeText={(value) => atualizarCampo(index, 'nome', value)}
-                      placeholder="Nome do alimento"
-                      placeholderTextColor="#8a9095"
-                    />
+                    <Text style={styles.selectedItemName} numberOfLines={1}>
+                      {item.nome || 'Nome do alimento'}
+                    </Text>
                     <Text style={styles.selectedItemSummary} numberOfLines={2}>
                       {buildSelectedFoodSummary(item)}
                     </Text>
@@ -1463,14 +1819,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   <View style={styles.selectedItemActions}>
                     <View style={styles.quantityGroup}>
                       <Text style={styles.quantityLabel}>Qtd</Text>
-                      <TextInput
-                        style={styles.quantityInput}
-                        value={String(item.quantidade_gramas ?? 0)}
-                        onChangeText={(value) => atualizarCampo(index, 'quantidade_gramas', value)}
-                        keyboardType="decimal-pad"
-                        selectTextOnFocus
-                      />
-                      <Text style={styles.quantityUnit}>g</Text>
+                      <Text style={styles.quantityInput}>{String(item.quantidade_gramas ?? 0)}</Text>
+                      <Text style={styles.quantityUnit}>{getFoodQuantityUnit(item)}</Text>
                     </View>
                     <TouchableOpacity
                       style={styles.removeItemButton}
@@ -1481,7 +1831,15 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                     </TouchableOpacity>
                   </View>
                 </View>
-              </View>
+                <View style={styles.selectedItemNutritionGrid}>
+                  {buildNutritionTableRows(item).map((nutrient) => (
+                    <View key={nutrient.label} style={styles.selectedItemNutritionPill}>
+                      <Text style={styles.selectedItemNutritionLabel}>{nutrient.label}</Text>
+                      <Text style={styles.selectedItemNutritionValue}>{nutrient.value}</Text>
+                    </View>
+                  ))}
+                </View>
+              </TouchableOpacity>
             ))}
           </View>
         ) : (
@@ -1499,12 +1857,104 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         <View style={styles.summaryStatsRow}>
           {summaryMetrics.map((item) => (
             <View key={item.label} style={styles.summaryStatItem}>
-              <Text style={[styles.summaryStatValue, { color: item.color }]}>{item.value}</Text>
+              <Text style={[styles.summaryStatValue, { color: item.color }]}>
+                {item.value}
+                {item.unit ? <Text style={styles.summaryStatValueUnit}>{item.unit}</Text> : null}
+              </Text>
               <Text style={styles.summaryStatLabel}>{item.label}</Text>
             </View>
           ))}
         </View>
+        <TouchableOpacity
+          style={styles.mealQuestionButton}
+          onPress={openNutritionistChat}
+          activeOpacity={0.88}
+        >
+          <Ionicons name="chatbubble-ellipses-outline" size={15} color={patientTheme.colors.primaryDark} />
+          <Text style={styles.mealQuestionButtonText}>Dúvida sobre esta refeição?</Text>
+        </TouchableOpacity>
       </View>
+
+      <Modal
+        visible={editingFoodIndex !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={fecharModalItem}
+      >
+        <KeyboardAvoidingView
+          style={styles.modalOverlay}
+          behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+        >
+          <View style={[styles.modalCard, styles.foodEditModalCard]}>
+            <View style={styles.modalHeader}>
+              <View style={styles.foodEditTitleCol}>
+                <Text style={styles.modalTitle}>Editar item</Text>
+                <Text style={styles.modalSubtitle}>Ajuste os dados deste alimento</Text>
+              </View>
+              <TouchableOpacity
+                style={[styles.modalCloseButton, styles.foodEditCloseButton]}
+                onPress={fecharModalItem}
+              >
+                <Ionicons name="close" size={18} color={patientTheme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.foodEditModalScroll}
+              contentContainerStyle={styles.foodEditModalContent}
+              keyboardShouldPersistTaps="handled"
+            >
+              <Text style={[styles.modalFieldLabel, styles.foodEditLabel]}>Nome do item</Text>
+              <TextInput
+                style={[styles.input, styles.foodEditNameInput]}
+                value={editingFoodDraft?.nome || ''}
+                onChangeText={(value) => atualizarDraftItem('nome', value)}
+                placeholder="Nome do alimento"
+                placeholderTextColor="#8a9095"
+              />
+
+              <View style={styles.foodEditGrid}>
+                <View style={styles.foodEditField}>
+                  <Text style={[styles.modalFieldLabel, styles.foodEditLabel]}>
+                    Quantidade ({getFoodQuantityUnit(alimentos[editingFoodIndex] || {})})
+                  </Text>
+                  <TextInput
+                    style={[styles.input, styles.foodEditInput]}
+                    value={editingFoodDraft?.quantidade_gramas || ''}
+                    onChangeText={(value) => atualizarDraftItem('quantidade_gramas', value)}
+                    keyboardType="decimal-pad"
+                    selectTextOnFocus
+                  />
+                </View>
+
+                {EDITABLE_ITEM_FIELDS.map((field) => (
+                  <View key={field.itemKey} style={styles.foodEditField}>
+                    <Text style={[styles.modalFieldLabel, styles.foodEditLabel]}>
+                      {field.label}{field.unit ? ` (${field.unit})` : ''}
+                    </Text>
+                    <TextInput
+                      style={[styles.input, styles.foodEditInput]}
+                      value={editingFoodDraft?.[field.itemKey] || ''}
+                      onChangeText={(value) => atualizarDraftItem(field.itemKey, value)}
+                      keyboardType="decimal-pad"
+                      selectTextOnFocus
+                    />
+                  </View>
+                ))}
+              </View>
+            </ScrollView>
+
+            <View style={styles.foodEditActions}>
+              <TouchableOpacity style={styles.foodEditCancelButton} onPress={fecharModalItem}>
+                <Text style={styles.foodEditCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={styles.foodEditSaveButton} onPress={salvarModalItem}>
+                <Text style={styles.foodEditSaveText}>Salvar item</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
     </PatientScreenLayout>
   );
 }
@@ -1643,24 +2093,21 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   photoCard: {
-    padding: 0,
-    overflow: 'hidden',
-    borderColor: patientTheme.colors.border,
+    marginBottom: 16,
   },
   photoDropzone: {
-    width: '100%',
-    height: PHOTO_DROPZONE_HEIGHT,
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderStyle: 'dashed',
+    borderWidth: 1.5,
+    justifyContent: 'center',
     minHeight: PHOTO_DROPZONE_HEIGHT,
     overflow: 'hidden',
-    backgroundColor: '#ffffff',
-  },
-  photoDropzoneEmpty: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 18,
-  },
-  photoDropzoneFilled: {
-    padding: 0,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    width: '100%',
   },
   photoDropzoneTitle: {
     marginTop: 12,
@@ -1674,9 +2121,10 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   previewImage: {
+    backgroundColor: '#fff',
+    borderRadius: patientTheme.radius.md,
+    height: PHOTO_DROPZONE_HEIGHT - 24,
     width: '100%',
-    height: PHOTO_DROPZONE_HEIGHT,
-    backgroundColor: patientTheme.colors.surfaceMuted,
   },
   photoPickerOptions: {
     gap: 10,
@@ -1943,6 +2391,31 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 13,
   },
+  selectedItemNutritionGrid: {
+    marginTop: 8,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 5,
+  },
+  selectedItemNutritionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 3,
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.surface,
+  },
+  selectedItemNutritionLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  selectedItemNutritionValue: {
+    color: patientTheme.colors.text,
+    fontSize: 9,
+    fontWeight: '700',
+  },
   selectedItemActions: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2009,16 +2482,40 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   summaryStatsRow: {
-    marginTop: 16,
+    marginTop: 12,
     flexDirection: 'row',
+    flexWrap: 'wrap',
     justifyContent: 'space-between',
     gap: 8,
   },
   summaryStatItem: {
-    flex: 1,
+    minWidth: 70,
+    flexGrow: 1,
     alignItems: 'center',
   },
   summaryStatValue: {
+    fontSize: 17,
+    fontWeight: '900',
+    letterSpacing: 0.1,
+  },
+  summaryStatValueUnit: {
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  summaryEditHint: {
+    marginTop: 6,
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  summaryStatInput: {
+    minWidth: 62,
+    minHeight: 34,
+    borderRadius: 10,
+    backgroundColor: patientTheme.colors.surface,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    textAlign: 'center',
     fontSize: 16,
     fontWeight: '800',
   },
@@ -2026,6 +2523,31 @@ const styles = StyleSheet.create({
     marginTop: 4,
     color: patientTheme.colors.textMuted,
     fontSize: 12,
+  },
+  mealQuestionButton: {
+    alignSelf: 'flex-start',
+    marginTop: 14,
+    minHeight: 34,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.primarySoft,
+    backgroundColor: '#ffffff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 12,
+  },
+  mealQuestionButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  summaryStatUnit: {
+    marginTop: 1,
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '700',
   },
   footerStack: {
     width: '100%',
@@ -2042,6 +2564,9 @@ const styles = StyleSheet.create({
   },
   saveButtonBusy: {
     backgroundColor: patientTheme.colors.primaryDark,
+  },
+  saveButtonDisabled: {
+    backgroundColor: '#cfd6d4',
   },
   saveButtonText: {
     color: patientTheme.colors.onPrimary,
@@ -2086,6 +2611,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     paddingHorizontal: 42,
+    textAlign: 'center',
+  },
+  modalSubtitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    marginTop: 2,
     textAlign: 'center',
   },
   modalCloseButton: {
@@ -2154,6 +2685,84 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
+  },
+  foodEditModalCard: {
+    maxHeight: '78%',
+    maxWidth: 360,
+    padding: 14,
+    width: '100%',
+  },
+  foodEditTitleCol: {
+    flex: 1,
+  },
+  foodEditCloseButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+  },
+  foodEditModalScroll: {
+    marginTop: 8,
+  },
+  foodEditModalContent: {
+    paddingBottom: 4,
+  },
+  foodEditNameInput: {
+    marginBottom: 8,
+    minHeight: 36,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    fontSize: 13,
+  },
+  foodEditLabel: {
+    fontSize: 11,
+    marginBottom: 3,
+  },
+  foodEditGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 7,
+  },
+  foodEditField: {
+    flexBasis: '47%',
+    flexGrow: 1,
+  },
+  foodEditInput: {
+    minHeight: 34,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    fontSize: 13,
+    textAlign: 'left',
+    fontWeight: '400',
+  },
+  foodEditActions: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 10,
+  },
+  foodEditCancelButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.surface,
+  },
+  foodEditCancelText: {
+    color: patientTheme.colors.textMuted,
+    fontWeight: '800',
+  },
+  foodEditSaveButton: {
+    flex: 1,
+    minHeight: 38,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  foodEditSaveText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '800',
   },
   manualModalInput: {
     alignSelf: 'stretch',

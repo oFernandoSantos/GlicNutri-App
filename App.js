@@ -36,6 +36,7 @@ import TelaLogsSistemaAdmin from './src/telas/admin/TelaLogsSistemaAdmin';
 import TelaDetalheLogSistemaAdmin from './src/telas/admin/TelaDetalheLogSistemaAdmin';
 import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
+import PacienteIntegracaoSensorScreen from './src/telas/paciente/TelaIntegracaoSensorPaciente';
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
 import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
 import PacienteSuporteScreen from './src/telas/paciente/TelaSuportePaciente';
@@ -74,6 +75,11 @@ import {
   prefetchPatientHomeExperience,
   prefetchPatientProfileExperience,
 } from './src/servicos/servicoDadosPaciente';
+import {
+  hasLibreLinkUpLinked,
+  startLibreViewAutoSync,
+  stopLibreViewAutoSync,
+} from './src/servicos/servicoLibreViewAutoSync';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -403,6 +409,52 @@ export default function App() {
     prefetchPatientHomeExperience(patientId, perfilPaciente);
     prefetchPatientProfileExperience(patientId, perfilPaciente);
   }, [adminSession, nutriSession, patientLocalSession, session?.user]);
+
+  useEffect(() => {
+    const perfilPaciente =
+      patientSessionOverride || patientLocalSession || session?.user || null;
+
+    if (!perfilPaciente || !isPatientUser(perfilPaciente) || adminSession || nutriSession) {
+      stopLibreViewAutoSync();
+      return undefined;
+    }
+
+    const patientId = getPatientId(perfilPaciente);
+    if (!patientId) {
+      stopLibreViewAutoSync();
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const linked = await hasLibreLinkUpLinked(patientId);
+      if (cancelled) return;
+
+      if (!linked) {
+        stopLibreViewAutoSync();
+        return;
+      }
+
+      startLibreViewAutoSync({
+        patientId,
+        patientEmail: perfilPaciente.email_pac || perfilPaciente.email,
+        actor: perfilPaciente,
+        runImmediately: true,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      stopLibreViewAutoSync();
+    };
+  }, [
+    adminSession,
+    nutriSession,
+    patientLocalSession,
+    patientSessionOverride,
+    session?.user,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -812,7 +864,9 @@ export default function App() {
               </Stack.Screen>
 
               <Stack.Screen name="PacientePerfilIntegracao" options={readerScreenOptions}>
-                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+                {(props) =>
+                  withSwipeBack(props, <PacienteIntegracaoSensorScreen {...getPacienteProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen name="PacientePerfilInsulinas" options={readerScreenOptions}>

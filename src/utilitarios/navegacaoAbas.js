@@ -62,10 +62,19 @@ export function isAdminMainTabRoute(routeName) {
 export function navigatePatientTab(navigation, tabRoute, usuarioLogado, extraParams = {}) {
   stripAuthRoutesFromPatientStack(navigation);
 
+  const registerParams =
+    extraParams.openQuickRegister || extraParams.openMedication
+      ? extraParams
+      : {
+          openQuickRegister: undefined,
+          openMedication: undefined,
+          ...extraParams,
+        };
+
   navigateToMainTab(navigation, {
     tabRoute,
     mainTabRoutes: PATIENT_MAIN_TAB_ROUTES,
-    params: { usuarioLogado, ...extraParams },
+    params: { usuarioLogado, ...registerParams },
   });
 }
 

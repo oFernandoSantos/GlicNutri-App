@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -9,6 +10,7 @@ import {
   ActivityIndicator,
   Platform,
   Modal,
+  PanResponder,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -27,6 +29,7 @@ import {
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  fetchPatientNutritionistChat,
   getCachedPatientExperience,
   getLatestGlucose,
   getPatientDisplayName,
@@ -39,6 +42,10 @@ import { EsqueletoMetricaGlicose } from '../../componentes/comum/EsqueletoCarreg
 import { getMealEntryNutrition } from '../../servicos/servicoRefeicaoIA';
 import { syncGooglePatientRecord } from '../../servicos/sincronizarPacienteGoogle';
 import {
+  buildPlanDayStatus,
+  resolvePlanSections,
+} from '../../utilitarios/vinculoPlanoRefeicao';
+import {
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
   replaceCachedGlucoseReadings,
@@ -49,6 +56,7 @@ import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
+import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
 import MensagemInline from '../../componentes/comum/MensagemInline';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import { listPatientClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
@@ -58,7 +66,16 @@ import {
   navigatePatientTab,
 } from '../../utilitarios/navegacaoAbas';
 import { navigatePatientFeature } from '../../utilitarios/navegacaoPaciente';
+import {
+  buildPatientChatPreview,
+  getPatientChatLastReadAt,
+} from '../../utilitarios/chatConversa';
 import { limparSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
+
+const HOME_CHAT_BUTTON_SIZE = 54;
+const HOME_CHAT_BUTTON_EDGE_GAP = patientTheme.spacing.screen;
+const HOME_CHAT_BUTTON_MIN_TOP = 104;
+const HOME_CHAT_BUTTON_POSITION_KEY = '@glicnutri:homeChatButtonPosition';
 
 function padDatePart(value) {
   return String(value).padStart(2, '0');
@@ -443,12 +460,23 @@ function buildNutritionSummary(mealEntries, planSections) {
       const structured = getMealEntryNutrition(entry);
 
       if (structured) {
+        const structuredMicros = [
+          structured.fiber > 0 ? 'Fibras' : null,
+          structured.sodium > 0 ? 'Sódio' : null,
+          structured.sugars > 0 ? 'Açúcares' : null,
+          structured.saturatedFat > 0 ? 'Gordura saturada' : null,
+        ].filter(Boolean);
+
         return {
           carbs: totals.carbs + structured.carbs,
           protein: totals.protein + structured.protein,
           fat: totals.fat + structured.fat,
           calories: totals.calories + structured.calories,
-          micros: totals.micros,
+          fiber: totals.fiber + structured.fiber,
+          sugars: totals.sugars + structured.sugars,
+          saturatedFat: totals.saturatedFat + structured.saturatedFat,
+          sodium: totals.sodium + structured.sodium,
+          micros: Array.from(new Set([...totals.micros, ...structuredMicros])),
         };
       }
 
@@ -459,10 +487,14 @@ function buildNutritionSummary(mealEntries, planSections) {
         protein: totals.protein + estimated.protein,
         fat: totals.fat + estimated.fat,
         calories: totals.calories + estimated.calories,
+        fiber: totals.fiber,
+        sugars: totals.sugars,
+        saturatedFat: totals.saturatedFat,
+        sodium: totals.sodium,
         micros: Array.from(new Set([...totals.micros, ...estimated.micros])),
       };
     },
-    { carbs: 0, protein: 0, fat: 0, calories: 0, micros: [] }
+    { carbs: 0, protein: 0, fat: 0, calories: 0, fiber: 0, sugars: 0, saturatedFat: 0, sodium: 0, micros: [] }
   );
   const consumed = {
     ...consumedFromMeals,
@@ -493,23 +525,21 @@ function buildNutritionSummary(mealEntries, planSections) {
       { label: 'Proteínas', value: consumed.protein, target: target.protein, unit: 'g' },
       { label: 'Gorduras', value: consumed.fat, target: target.fat, unit: 'g' },
     ],
-    microItems: target.micros.slice(0, 5).map((label) => ({
-      label,
-      reached: consumedMicroSet.has(label),
-    })),
+    microItems: Array.from(
+      new Map(
+        target.micros.slice(0, 5).map((label) => ({
+          label,
+          reached: consumedMicroSet.has(label),
+        })).concat([
+          { label: 'Fibras', value: Math.round(consumed.fiber), unit: 'g', reached: consumed.fiber > 0 },
+          { label: 'Açúcares', value: Math.round(consumed.sugars), unit: 'g', reached: consumed.sugars > 0 },
+          { label: 'Sódio', value: Math.round(consumed.sodium), unit: 'mg', reached: consumed.sodium > 0 },
+        ]).map((item) => [item.label, item])
+      ).values()
+    ).slice(0, 6),
     microScore: percentage(matchedMicros.length, microTarget),
     mealCount: todayMeals.length,
     plannedCount: (planSections || []).length,
-  };
-}
-
-function buildHomePlanMealSummary(section, index, consumedCount) {
-  return {
-    kcal: 180 + section.foods.length * 85 + index * 20,
-    carbs: 35 + index * 10,
-    protein: 12 + index * 6,
-    fat: 8 + index * 4,
-    completed: index < consumedCount,
   };
 }
 
@@ -675,9 +705,9 @@ function MicroMetricCard({ width, nutritionSummary }) {
       </Text>
 
       <View style={styles.microGrid}>
-        {nutritionSummary.microItems.map((item) => (
+        {nutritionSummary.microItems.map((item, index) => (
           <View
-            key={item.label}
+            key={`${item.label}-${index}`}
             style={[styles.microPill, item.reached && styles.microPillReached]}
           >
             <Ionicons
@@ -686,7 +716,7 @@ function MicroMetricCard({ width, nutritionSummary }) {
               color={item.reached ? patientTheme.colors.primaryDark : patientTheme.colors.textMuted}
             />
             <Text style={[styles.microPillText, item.reached && styles.microPillTextReached]}>
-              {item.label}
+              {item.value != null ? `${item.label}: ${item.value}${item.unit || ''}` : item.label}
             </Text>
           </View>
         ))}
@@ -706,7 +736,25 @@ export default function PacienteHomeScreen({
   route,
   usuarioLogado: usuarioProp,
 }) {
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
+  const initialChatButtonBottom = PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 8;
+  const initialChatButtonLeft = Math.max(
+    HOME_CHAT_BUTTON_EDGE_GAP,
+    windowWidth - HOME_CHAT_BUTTON_EDGE_GAP - HOME_CHAT_BUTTON_SIZE
+  );
+  const [chatButtonPosition, setChatButtonPosition] = useState(() => ({
+    left: initialChatButtonLeft,
+    bottom: initialChatButtonBottom,
+  }));
+  const chatButtonPositionRef = useRef({
+    left: initialChatButtonLeft,
+    bottom: initialChatButtonBottom,
+  });
+  const chatDragStartRef = useRef({
+    left: initialChatButtonLeft,
+    bottom: initialChatButtonBottom,
+  });
+  const chatDraggedRef = useRef(false);
   const [menuVisible, setMenuVisible] = useState(false);
   const [notificationsVisible, setNotificationsVisible] = useState(false);
   const [dismissedNotificationKeys, setDismissedNotificationKeys] = useState({});
@@ -722,6 +770,7 @@ export default function PacienteHomeScreen({
   const [glucoseReadings, setGlucoseReadings] = useState([]);
   const [clinicalAlerts, setClinicalAlerts] = useState([]);
   const [loadError, setLoadError] = useState(null);
+  const [chatLastReadAt, setChatLastReadAt] = useState(null);
   const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
   const loadInFlightRef = useRef(null);
   const homeLoadedRef = useRef(false);
@@ -985,7 +1034,9 @@ export default function PacienteHomeScreen({
         return undefined;
       }
 
-      carregarDados({ forceRefresh: homeLoadedRef.current });
+      const cacheFresco =
+        idPaciente && isPatientExperienceCacheFresh(idPaciente, homeFetchOptions);
+      carregarDados({ forceRefresh: !cacheFresco && homeLoadedRef.current });
       homeLoadedRef.current = true;
       return undefined;
     }, [carregarDados, homeFetchOptions, idPaciente, navigation])
@@ -995,8 +1046,226 @@ export default function PacienteHomeScreen({
     navigatePatientFeature(navigation, rota, { usuarioLogado, ...params });
   }
 
+  function abrirChatNutricionista() {
+    navegarParaTela('PacienteChatNutricionista');
+  }
+
+  const getChatButtonBounds = useCallback(() => {
+    const minLeft = HOME_CHAT_BUTTON_EDGE_GAP;
+    const maxLeft = Math.max(
+      minLeft,
+      windowWidth - HOME_CHAT_BUTTON_EDGE_GAP - HOME_CHAT_BUTTON_SIZE
+    );
+    const minBottom = PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 8;
+    const maxBottom = Math.max(
+      minBottom,
+      windowHeight -
+        HOME_CHAT_BUTTON_MIN_TOP -
+        HOME_CHAT_BUTTON_SIZE -
+        8
+    );
+
+    return { minLeft, maxLeft, minBottom, maxBottom };
+  }, [windowHeight, windowWidth]);
+
+  const clampChatButtonPosition = useCallback(
+    (position) => {
+      const bounds = getChatButtonBounds();
+      return {
+        left: Math.min(Math.max(position.left, bounds.minLeft), bounds.maxLeft),
+        bottom: Math.min(Math.max(position.bottom, bounds.minBottom), bounds.maxBottom),
+      };
+    },
+    [getChatButtonBounds]
+  );
+
+  const snapChatButtonPosition = useCallback(
+    (position) => {
+      const bounds = getChatButtonBounds();
+      const clamped = clampChatButtonPosition(position);
+      const snapLeft =
+        clamped.left + HOME_CHAT_BUTTON_SIZE / 2 < windowWidth / 2
+          ? bounds.minLeft
+          : bounds.maxLeft;
+
+      return { ...clamped, left: snapLeft };
+    },
+    [clampChatButtonPosition, getChatButtonBounds, windowWidth]
+  );
+
+  const persistChatButtonPosition = useCallback(async (position) => {
+    try {
+      await AsyncStorage.setItem(HOME_CHAT_BUTTON_POSITION_KEY, JSON.stringify(position));
+    } catch (_) {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    setChatButtonPosition((current) => clampChatButtonPosition(current));
+  }, [clampChatButtonPosition]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function carregarPosicaoChat() {
+      try {
+        const raw = await AsyncStorage.getItem(HOME_CHAT_BUTTON_POSITION_KEY);
+        if (cancelled || !raw) return;
+
+        const parsed = JSON.parse(raw);
+        const nextPosition = snapChatButtonPosition({
+          left: Number(parsed?.left) || initialChatButtonLeft,
+          bottom: Number(parsed?.bottom) || initialChatButtonBottom,
+        });
+
+        setChatButtonPosition(nextPosition);
+      } catch (_) {
+        /* ignore */
+      }
+    }
+
+    carregarPosicaoChat();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [initialChatButtonBottom, initialChatButtonLeft, snapChatButtonPosition]);
+
+  useEffect(() => {
+    chatButtonPositionRef.current = chatButtonPosition;
+  }, [chatButtonPosition]);
+
+  const chatButtonPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => true,
+        onMoveShouldSetPanResponder: (_, gestureState) =>
+          Math.abs(gestureState.dx) > 3 || Math.abs(gestureState.dy) > 3,
+        onPanResponderGrant: () => {
+          chatDragStartRef.current = chatButtonPositionRef.current;
+          chatDraggedRef.current = false;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (Math.abs(gestureState.dx) > 5 || Math.abs(gestureState.dy) > 5) {
+            chatDraggedRef.current = true;
+          }
+
+          setChatButtonPosition(
+            clampChatButtonPosition({
+              left: chatDragStartRef.current.left + gestureState.dx,
+              bottom: chatDragStartRef.current.bottom - gestureState.dy,
+            })
+          );
+        },
+        onPanResponderRelease: (_, gestureState) => {
+          const nextBottom = chatDragStartRef.current.bottom - gestureState.dy;
+          const nextLeft = chatDragStartRef.current.left + gestureState.dx;
+          const wasDragged =
+            chatDraggedRef.current ||
+            Math.abs(gestureState.dx) > 5 ||
+            Math.abs(gestureState.dy) > 5;
+
+          const nextPosition = snapChatButtonPosition({
+            left: nextLeft,
+            bottom: nextBottom,
+          });
+
+          setChatButtonPosition(nextPosition);
+          persistChatButtonPosition(nextPosition);
+
+          if (!wasDragged) {
+            abrirChatNutricionista();
+          }
+        },
+        onPanResponderTerminate: () => {
+          setChatButtonPosition((current) => {
+            const nextPosition = snapChatButtonPosition(current);
+            persistChatButtonPosition(nextPosition);
+            return nextPosition;
+          });
+        },
+      }),
+    [clampChatButtonPosition, persistChatButtonPosition, snapChatButtonPosition]
+  );
+
   const nomeUsuario = paciente?.nome_completo || nomeBaseUsuario;
+  const chatPreview = useMemo(
+    () =>
+      buildPatientChatPreview(appState?.nutritionistThread, {
+        patientName: nomeUsuario,
+        lastReadAt: chatLastReadAt,
+      }),
+    [appState?.nutritionistThread, nomeUsuario, chatLastReadAt]
+  );
+  const unreadChatCount = Number(chatPreview.unread || 0);
   const activeGlucosePatientId = paciente?.id_paciente_uuid || idPaciente || null;
+
+  const atualizarPreviewChat = useCallback(
+    async ({ forceRefresh = false } = {}) => {
+      if (!activeGlucosePatientId) return;
+
+      const cachedChat = !forceRefresh ? getCachedPatientChat(activeGlucosePatientId) : null;
+      if (cachedChat?.appState?.nutritionistThread) {
+        setAppState((current) => ({
+          ...current,
+          nutritionistThread: cachedChat.appState.nutritionistThread,
+        }));
+      }
+
+      try {
+        const experience = await fetchPatientNutritionistChat(activeGlucosePatientId, {
+          ...mesclarLimitesDadosPaciente('chat'),
+          patientContext: usuarioLogado,
+          forceRefresh,
+        });
+        setAppState((current) => ({
+          ...current,
+          nutritionistThread: experience?.appState?.nutritionistThread || [],
+        }));
+      } catch (error) {
+        console.log('Erro ao atualizar contador do chat:', error);
+      }
+    },
+    [activeGlucosePatientId, usuarioLogado]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+
+      getPatientChatLastReadAt(activeGlucosePatientId).then((readAt) => {
+        if (active) setChatLastReadAt(readAt);
+      });
+      atualizarPreviewChat();
+
+      return () => {
+        active = false;
+      };
+    }, [activeGlucosePatientId, atualizarPreviewChat])
+  );
+
+  useEffect(() => {
+    if (!activeGlucosePatientId) return undefined;
+
+    const channel = supabase
+      .channel(`patient-home-chat-counter-${activeGlucosePatientId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mensagem_chat',
+          filter: `paciente_id=eq.${activeGlucosePatientId}`,
+        },
+        () => atualizarPreviewChat({ forceRefresh: true })
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [activeGlucosePatientId, atualizarPreviewChat]);
 
   useEffect(() => {
     if (!activeGlucosePatientId) return undefined;
@@ -1027,7 +1296,10 @@ export default function PacienteHomeScreen({
   const glucoseForInsights = currentGlucose || 105;
   const trendMeta = getTrendMeta(glucoseForInsights);
   const mealEntries = appState?.mealEntries || [];
-  const planSections = appState?.planSections || [];
+  const planSections = useMemo(
+    () => resolvePlanSections({ mealPlan: appState?.activeMealPlan, appState }),
+    [appState]
+  );
   const waterCount = appState?.waterCount || 0;
   const carouselWidth = Math.max(windowWidth - patientTheme.spacing.screen * 2, 280);
   const glucoseSummary = useMemo(
@@ -1038,18 +1310,15 @@ export default function PacienteHomeScreen({
     () => buildNutritionSummary(mealEntries, planSections),
     [mealEntries, planSections]
   );
-  const homePlanMeals = useMemo(() => {
-    const consumedCount = Math.min(mealEntries.length, 3);
-    return (planSections || []).slice(0, 3).map((section, index) => ({
-      ...section,
-      summary: buildHomePlanMealSummary(section, index, consumedCount),
-    }));
-  }, [mealEntries.length, planSections]);
-  const homePlanProgress = homePlanMeals.length
-    ? Math.round(
-        (homePlanMeals.filter((item) => item.summary.completed).length / homePlanMeals.length) * 100
-      )
-    : 0;
+  const homePlanDayStatus = useMemo(
+    () => buildPlanDayStatus({ mealEntries, sections: planSections }),
+    [mealEntries, planSections]
+  );
+  const homePlanMeals = useMemo(
+    () => homePlanDayStatus.meals.slice(0, 3),
+    [homePlanDayStatus.meals]
+  );
+  const homePlanProgress = homePlanDayStatus.progressPercent;
   const insights = useMemo(
     () => buildHomeInsights(glucoseForInsights, mealEntries.length),
     [glucoseForInsights, mealEntries.length]
@@ -1398,7 +1667,7 @@ export default function PacienteHomeScreen({
               <Text style={styles.homePlanHeaderTitle}>Plano Alimentar</Text>
             </View>
             <Text style={styles.homePlanHeaderCount}>
-              {homePlanMeals.filter((item) => item.summary.completed).length}/{homePlanMeals.length || 0}
+              {homePlanDayStatus.completedCount}/{homePlanDayStatus.totalCount || 0}
             </Text>
           </View>
 
@@ -1505,6 +1774,32 @@ export default function PacienteHomeScreen({
 
         <View style={styles.listFooter} />
       </ScrollView>
+
+      <View
+        accessibilityLabel="Abrir conversa com nutricionista"
+        accessibilityRole="button"
+        style={[
+          styles.homeChatFloatingButton,
+          {
+            left: chatButtonPosition.left,
+            bottom: chatButtonPosition.bottom,
+          },
+        ]}
+        {...chatButtonPanResponder.panHandlers}
+      >
+        <Ionicons
+          name="chatbubble-ellipses-outline"
+          size={24}
+          color={patientTheme.colors.onPrimary}
+        />
+        {unreadChatCount > 0 ? (
+          <View style={styles.homeChatBadge}>
+            <Text style={styles.homeChatBadgeText}>
+              {unreadChatCount > 9 ? '9+' : unreadChatCount}
+            </Text>
+          </View>
+        ) : null}
+      </View>
 
       <BarraAbasPaciente
         navigation={navigation}
@@ -2266,11 +2561,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   homePlanMealCardDone: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: '#ffffff',
     borderColor: patientTheme.colors.primaryDark,
   },
   homePlanMealCardPending: {
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    backgroundColor: '#ffffff',
     borderColor: patientTheme.colors.border,
   },
   homePlanMealHeader: {
@@ -2375,5 +2670,39 @@ const styles = StyleSheet.create({
     marginTop: 12,
     color: patientTheme.colors.text,
     fontWeight: '600',
+  },
+  homeChatFloatingButton: {
+    position: Platform.OS === 'web' ? 'fixed' : 'absolute',
+    width: HOME_CHAT_BUTTON_SIZE,
+    height: HOME_CHAT_BUTTON_SIZE,
+    borderRadius: HOME_CHAT_BUTTON_SIZE / 2,
+    backgroundColor: patientTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+    shadowColor: patientTheme.colors.primary,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.58,
+    shadowRadius: 12,
+    elevation: 32,
+    zIndex: 1200,
+  },
+  homeChatBadge: {
+    position: 'absolute',
+    top: -5,
+    right: -5,
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: '#ef4444',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+  },
+  homeChatBadgeText: {
+    color: '#ffffff',
+    fontSize: 10,
+    fontWeight: '900',
+    lineHeight: 12,
   },
 });

@@ -134,8 +134,11 @@ function roundNutrient(value) {
 const EXTRA_NUTRIENT_DEFAULTS = {
   fibras: 0,
   acucares: 0,
+  acucares_adicionados: 0,
   gorduras_saturadas: 0,
+  gordura_trans: 0,
   sodio: 0,
+  sal: 0,
   ferro: 0,
   calcio: 0,
   magnesio: 0,
@@ -149,6 +152,25 @@ const EXTRA_NUTRIENT_DEFAULTS = {
 };
 
 const FOOD_NUTRIENT_HINTS = [
+  {
+    keys: ['bebida', 'refrigerante', 'coca', 'cola', 'pepsi', 'guarana', 'suco', 'isotonico'],
+    fibras: 0,
+    acucares: 10.6,
+    acucares_adicionados: 10.6,
+    gorduras_saturadas: 0,
+    gordura_trans: 0,
+    sodio: 7,
+    ferro: 0,
+    calcio: 0,
+    magnesio: 0,
+    potassio: 0,
+    zinco: 0,
+    vitamina_a: 0,
+    vitamina_c: 0,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 0,
+  },
   {
     keys: ['arroz', 'massa', 'macarrao', 'batata', 'pao', 'quinoa', 'aveia'],
     fibras: 3,
@@ -283,6 +305,22 @@ function hasValue(value) {
 
 function inferFoodNutrientDefaults(alimento) {
   const text = normalizeText(`${alimento?.nome || alimento?.foodName || ''} ${alimento?.categoria || alimento?.category || ''}`);
+  const isNoSugarDrink =
+    (text.includes('refrigerante') || text.includes('bebida') || text.includes('coca') || text.includes('cola')) &&
+    (text.includes('zero') || text.includes('diet') || text.includes('sem acucar'));
+
+  if (isNoSugarDrink) {
+    return {
+      ...EXTRA_NUTRIENT_DEFAULTS,
+      fibras: 0,
+      acucares: 0,
+      acucares_adicionados: 0,
+      gorduras_saturadas: 0,
+      gordura_trans: 0,
+      sodio: 15,
+    };
+  }
+
   const match = FOOD_NUTRIENT_HINTS.find((item) => item.keys.some((key) => text.includes(key)));
   if (!match) return EXTRA_NUTRIENT_DEFAULTS;
 
@@ -293,6 +331,21 @@ function pickNutrientValue(alimento, ptKey, enKey, fallback) {
   if (hasValue(alimento?.[ptKey])) return roundNutrient(alimento[ptKey]);
   if (hasValue(alimento?.[enKey])) return roundNutrient(alimento[enKey]);
   return roundNutrient(fallback);
+}
+
+function pickBaseNutrientValue(alimento, baseKey, ptKey, enKey, fallback) {
+  if (hasValue(alimento?.[baseKey])) {
+    const baseValue = roundNutrient(alimento[baseKey]);
+    const isRealLabel =
+      alimento?.origem === 'rotulo' ||
+      normalizeText(alimento?.fonteNutricional || alimento?.fonte_nutricional).includes('rotulo');
+
+    if (baseValue !== 0 || isRealLabel) {
+      return baseValue;
+    }
+  }
+
+  return pickNutrientValue(alimento, ptKey, enKey, fallback);
 }
 
 function inferExtension(fileName, mimeType) {
@@ -585,6 +638,11 @@ export function getMealEntryNutrition(entry) {
     carbs: Number.isFinite(carbs) ? carbs : 0,
     protein: Number.isFinite(protein) ? protein : 0,
     fat: Number.isFinite(fat) ? fat : 0,
+    fiber: Number(entry?.fiberG ?? entry?.fibrasG ?? entry?.fibras ?? 0) || 0,
+    sugars: Number(entry?.sugarsG ?? entry?.acucaresG ?? entry?.acucares ?? 0) || 0,
+    saturatedFat:
+      Number(entry?.saturatedFatG ?? entry?.gordurasSaturadasG ?? entry?.gorduras_saturadas ?? 0) || 0,
+    sodium: Number(entry?.sodiumMg ?? entry?.sodioMg ?? entry?.sodio ?? 0) || 0,
   };
 }
 
@@ -600,30 +658,77 @@ export function criarAlimentoEditavel(alimento = {}) {
   const proteinasBase = roundNutrient(alimento.base_proteinas || alimento.proteinas || alimento.proteins);
   const gordurasBase = roundNutrient(alimento.base_gorduras || alimento.gorduras || alimento.fats);
 
-  const fibrasBase = pickNutrientValue(
+  const fibrasBase = pickBaseNutrientValue(
     alimento,
     'base_fibras',
+    'fibras',
     'fiber',
-    pickNutrientValue(alimento, 'fibras', 'fiber', inferred.fibras)
+    inferred.fibras
   );
-  const acucaresBase = pickNutrientValue(
+  let acucaresBase = pickBaseNutrientValue(
     alimento,
     'base_acucares',
+    'acucares',
     'sugar',
-    pickNutrientValue(alimento, 'acucares', 'sugar', inferred.acucares)
+    inferred.acucares
   );
-  const gordurasSaturadasBase = pickNutrientValue(
+  let acucaresAdicionadosBase = pickBaseNutrientValue(
+    alimento,
+    'base_acucares_adicionados',
+    'acucares_adicionados',
+    'addedSugar',
+    inferred.acucares_adicionados
+  );
+  const gordurasSaturadasBase = pickBaseNutrientValue(
     alimento,
     'base_gorduras_saturadas',
+    'gorduras_saturadas',
     'saturatedFat',
-    pickNutrientValue(alimento, 'gorduras_saturadas', 'saturatedFat', inferred.gorduras_saturadas)
+    inferred.gorduras_saturadas
   );
-  const sodioBase = pickNutrientValue(
+  const gorduraTransBase = pickBaseNutrientValue(
+    alimento,
+    'base_gordura_trans',
+    'gordura_trans',
+    'transFat',
+    inferred.gordura_trans
+  );
+  const sodioBase = pickBaseNutrientValue(
     alimento,
     'base_sodio',
+    'sodio',
     'sodium',
-    pickNutrientValue(alimento, 'sodio', 'sodium', inferred.sodio)
+    inferred.sodio
   );
+  const salBase = pickBaseNutrientValue(alimento, 'base_sal', 'sal', 'salt', inferred.sal);
+  const ferroBase = pickBaseNutrientValue(alimento, 'base_ferro', 'ferro', 'iron', inferred.ferro);
+  const calcioBase = pickBaseNutrientValue(alimento, 'base_calcio', 'calcio', 'calcium', inferred.calcio);
+  const magnesioBase = pickBaseNutrientValue(alimento, 'base_magnesio', 'magnesio', 'magnesium', inferred.magnesio);
+  const potassioBase = pickBaseNutrientValue(alimento, 'base_potassio', 'potassio', 'potassium', inferred.potassio);
+  const zincoBase = pickBaseNutrientValue(alimento, 'base_zinco', 'zinco', 'zinc', inferred.zinco);
+  const vitaminaABase = pickBaseNutrientValue(alimento, 'base_vitamina_a', 'vitamina_a', 'vitaminA', inferred.vitamina_a);
+  const vitaminaCBase = pickBaseNutrientValue(alimento, 'base_vitamina_c', 'vitamina_c', 'vitaminC', inferred.vitamina_c);
+  const vitaminaDBase = pickBaseNutrientValue(alimento, 'base_vitamina_d', 'vitamina_d', 'vitaminD', inferred.vitamina_d);
+  const vitaminaB12Base = pickBaseNutrientValue(
+    alimento,
+    'base_vitamina_b12',
+    'vitamina_b12',
+    'vitaminB12',
+    inferred.vitamina_b12
+  );
+  const folatoBase = pickBaseNutrientValue(alimento, 'base_folato', 'folato', 'folate', inferred.folato);
+  const isSugaryDrink =
+    normalizeText(`${alimento?.nome || ''} ${alimento?.categoria || ''}`).match(
+      /(bebida|refrigerante|coca|cola|pepsi|guarana|suco|isotonico)/
+    ) && !normalizeText(alimento?.nome).match(/(zero|diet|sem acucar)/);
+
+  if (isSugaryDrink && acucaresBase <= 0 && carboidratosBase > 0) {
+    acucaresBase = carboidratosBase;
+  }
+
+  if (isSugaryDrink && acucaresAdicionadosBase <= 0 && acucaresBase > 0) {
+    acucaresAdicionadosBase = acucaresBase;
+  }
 
   const baseForScaling = quantidadeBase > 0 ? quantidadeBase : 100;
   const quantidadeAtual = roundNutrient(alimento.quantidade_gramas || alimento.quantity_grams) || baseForScaling;
@@ -640,8 +745,21 @@ export function criarAlimentoEditavel(alimento = {}) {
     base_gorduras: roundNutrient(gordurasBase),
     base_fibras: roundNutrient(fibrasBase),
     base_acucares: roundNutrient(acucaresBase),
+    base_acucares_adicionados: roundNutrient(acucaresAdicionadosBase),
     base_gorduras_saturadas: roundNutrient(gordurasSaturadasBase),
+    base_gordura_trans: roundNutrient(gorduraTransBase),
     base_sodio: roundNutrient(sodioBase),
+    base_sal: roundNutrient(salBase),
+    base_ferro: roundNutrient(ferroBase),
+    base_calcio: roundNutrient(calcioBase),
+    base_magnesio: roundNutrient(magnesioBase),
+    base_potassio: roundNutrient(potassioBase),
+    base_zinco: roundNutrient(zincoBase),
+    base_vitamina_a: roundNutrient(vitaminaABase),
+    base_vitamina_c: roundNutrient(vitaminaCBase),
+    base_vitamina_d: roundNutrient(vitaminaDBase),
+    base_vitamina_b12: roundNutrient(vitaminaB12Base),
+    base_folato: roundNutrient(folatoBase),
 
     quantidade_gramas: roundNutrient(quantidadeAtual),
     calorias: roundNutrient(caloriasBase * factor),
@@ -650,18 +768,26 @@ export function criarAlimentoEditavel(alimento = {}) {
     gorduras: roundNutrient(gordurasBase * factor),
     fibras: roundNutrient(fibrasBase * factor),
     acucares: roundNutrient(acucaresBase * factor),
+    acucares_adicionados: roundNutrient(acucaresAdicionadosBase * factor),
     gorduras_saturadas: roundNutrient(gordurasSaturadasBase * factor),
+    gordura_trans: roundNutrient(gorduraTransBase * factor),
     sodio: roundNutrient(sodioBase * factor),
-    ferro: pickNutrientValue(alimento, 'ferro', 'iron', inferred.ferro),
-    calcio: pickNutrientValue(alimento, 'calcio', 'calcium', inferred.calcio),
-    magnesio: pickNutrientValue(alimento, 'magnesio', 'magnesium', inferred.magnesio),
-    potassio: pickNutrientValue(alimento, 'potassio', 'potassium', inferred.potassio),
-    zinco: pickNutrientValue(alimento, 'zinco', 'zinc', inferred.zinco),
-    vitamina_a: pickNutrientValue(alimento, 'vitamina_a', 'vitaminA', inferred.vitamina_a),
-    vitamina_c: pickNutrientValue(alimento, 'vitamina_c', 'vitaminC', inferred.vitamina_c),
-    vitamina_d: pickNutrientValue(alimento, 'vitamina_d', 'vitaminD', inferred.vitamina_d),
-    vitamina_b12: pickNutrientValue(alimento, 'vitamina_b12', 'vitaminB12', inferred.vitamina_b12),
-    folato: pickNutrientValue(alimento, 'folato', 'folate', inferred.folato),
+    sal: roundNutrient(salBase * factor),
+    ferro: roundNutrient(ferroBase * factor),
+    calcio: roundNutrient(calcioBase * factor),
+    magnesio: roundNutrient(magnesioBase * factor),
+    potassio: roundNutrient(potassioBase * factor),
+    zinco: roundNutrient(zincoBase * factor),
+    vitamina_a: roundNutrient(vitaminaABase * factor),
+    vitamina_c: roundNutrient(vitaminaCBase * factor),
+    vitamina_d: roundNutrient(vitaminaDBase * factor),
+    vitamina_b12: roundNutrient(vitaminaB12Base * factor),
+    folato: roundNutrient(folatoBase * factor),
+    tabelaNutricional: alimento.tabelaNutricional || alimento.tabela_nutricional || null,
+    nutriScore: alimento.nutriScore || alimento.nutriscore || null,
+    novaGroup: alimento.novaGroup || alimento.nova_group || null,
+    fonteNutricional: alimento.fonteNutricional || alimento.fonte_nutricional || null,
+    unidade_quantidade: alimento.unidade_quantidade || alimento.unidade || null,
   };
 }
 
@@ -674,10 +800,15 @@ export function calcularTotaisRefeicaoIA(alimentos) {
       gorduras_total: roundNutrient(totais.gorduras_total + item.gorduras),
       fibras_total: roundNutrient(totais.fibras_total + item.fibras),
       acucares_total: roundNutrient(totais.acucares_total + item.acucares),
+      acucares_adicionados_total: roundNutrient(
+        totais.acucares_adicionados_total + item.acucares_adicionados
+      ),
       gorduras_saturadas_total: roundNutrient(
         totais.gorduras_saturadas_total + item.gorduras_saturadas
       ),
+      gordura_trans_total: roundNutrient(totais.gordura_trans_total + item.gordura_trans),
       sodio_total: roundNutrient(totais.sodio_total + item.sodio),
+      sal_total: roundNutrient(totais.sal_total + item.sal),
       ferro_total: roundNutrient(totais.ferro_total + item.ferro),
       calcio_total: roundNutrient(totais.calcio_total + item.calcio),
       magnesio_total: roundNutrient(totais.magnesio_total + item.magnesio),
@@ -696,8 +827,11 @@ export function calcularTotaisRefeicaoIA(alimentos) {
       gorduras_total: 0,
       fibras_total: 0,
       acucares_total: 0,
+      acucares_adicionados_total: 0,
       gorduras_saturadas_total: 0,
+      gordura_trans_total: 0,
       sodio_total: 0,
+      sal_total: 0,
       ferro_total: 0,
       calcio_total: 0,
       magnesio_total: 0,
@@ -712,7 +846,16 @@ export function calcularTotaisRefeicaoIA(alimentos) {
   );
 }
 
-export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, title, mealLabel }) {
+export function buildMealTimelineEntryFromAI({
+  alimentos,
+  totais,
+  date,
+  time,
+  title,
+  mealLabel,
+  mealTypeLabel,
+  planSectionId,
+}) {
   const normalizedFoods = Array.isArray(alimentos) ? alimentos : [];
   const safeTotals = totais || calcularTotaisRefeicaoIA(normalizedFoods);
   const description = normalizedFoods
@@ -731,7 +874,9 @@ export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, ti
     time: entryTime,
     title: displayTitle,
     mealLabel: displayTitle,
-    mealTypeLabel: displayTitle,
+    mealTypeLabel: mealTypeLabel || displayTitle,
+    planSectionId: planSectionId || null,
+    mealId: planSectionId || null,
     description: description || 'Refeicao confirmada manualmente.',
     glucoseNote: 'Macros confirmados pelo usuario',
     glucoseDelta: `${roundNutrient(safeTotals.carboidratos_total)} g carbos`,
@@ -743,12 +888,40 @@ export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, ti
     kcal: roundNutrient(safeTotals.calorias_total),
     proteinG: roundNutrient(safeTotals.proteinas_total),
     fatG: roundNutrient(safeTotals.gorduras_total),
+    fiberG: roundNutrient(safeTotals.fibras_total),
+    sugarsG: roundNutrient(safeTotals.acucares_total),
+    addedSugarsG: roundNutrient(safeTotals.acucares_adicionados_total),
+    saturatedFatG: roundNutrient(safeTotals.gorduras_saturadas_total),
+    transFatG: roundNutrient(safeTotals.gordura_trans_total),
+    sodiumMg: roundNutrient(safeTotals.sodio_total),
     foods: normalizedFoods.map((item) => ({
       name: item.nome,
       alimento: item.nome,
       grams: roundNutrient(item.quantidade_gramas),
+      unit: item.unidade_quantidade || null,
+      calories: roundNutrient(item.calorias),
+      carbs: roundNutrient(item.carboidratos),
+      protein: roundNutrient(item.proteinas),
+      fat: roundNutrient(item.gorduras),
+      fiber: roundNutrient(item.fibras),
+      sugars: roundNutrient(item.acucares),
+      saturatedFat: roundNutrient(item.gorduras_saturadas),
+      sodium: roundNutrient(item.sodio),
     })),
   };
+}
+
+function isMissingMealTotalColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('schema cache') &&
+    (
+      message.includes('fibras_total') ||
+      message.includes('acucares_total') ||
+      message.includes('gorduras_saturadas_total') ||
+      message.includes('sodio_total')
+    )
+  );
 }
 
 export async function salvarRefeicaoIA({
@@ -757,17 +930,31 @@ export async function salvarRefeicaoIA({
   alimentos,
   confirmado = true,
   createdAt,
+  mealLabel,
+  mealTypeLabel,
+  planSectionId,
 }) {
   if (!patientId) {
     throw new Error('Paciente sem identificador para salvar a refeicao.');
   }
 
+  const mealMetadata = {
+    mealLabel: mealLabel || null,
+    mealTypeLabel: mealTypeLabel || mealLabel || null,
+    planSectionId: planSectionId || null,
+  };
   const normalizedFoods = (Array.isArray(alimentos) ? alimentos : [])
     .map((item) => criarAlimentoEditavel(item))
+    .map((item) => ({
+      ...item,
+      ...mealMetadata,
+    }))
     .filter((item) => item.nome);
 
-  if (!normalizedFoods.length) {
-    throw new Error('Adicione ao menos um alimento antes de confirmar.');
+  const hasFoto = Boolean(String(fotoUrl || '').trim());
+
+  if (!normalizedFoods.length && !hasFoto) {
+    throw new Error('Adicione ao menos um alimento ou uma foto antes de confirmar.');
   }
 
   const totais = calcularTotaisRefeicaoIA(normalizedFoods);
@@ -779,15 +966,38 @@ export async function salvarRefeicaoIA({
     calorias_total: totais.calorias_total,
     proteinas_total: totais.proteinas_total,
     gorduras_total: totais.gorduras_total,
+    fibras_total: totais.fibras_total,
+    acucares_total: totais.acucares_total,
+    gorduras_saturadas_total: totais.gorduras_saturadas_total,
+    sodio_total: totais.sodio_total,
     confirmado,
     ...(createdAt ? { created_at: createdAt } : {}),
   };
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('refeicao_ia')
     .insert([payload])
     .select('*')
     .maybeSingle();
+
+  if (isMissingMealTotalColumnError(error)) {
+    const {
+      fibras_total,
+      acucares_total,
+      gorduras_saturadas_total,
+      sodio_total,
+      ...legacyPayload
+    } = payload;
+
+    const retry = await supabase
+      .from('refeicao_ia')
+      .insert([legacyPayload])
+      .select('*')
+      .maybeSingle();
+
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     AppLogger.erro(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Cadastro de refeicao', error, {

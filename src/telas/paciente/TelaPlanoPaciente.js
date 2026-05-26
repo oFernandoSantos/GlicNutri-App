@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -23,41 +23,17 @@ import {
 } from '../../servicos/servicoPlanoAlimentar';
 import {
   averageAdherence,
-  buildWeeklyAdherenceFromMeals,
 } from '../../utilitarios/adesaoNutricional';
+import {
+  buildPlanAdherenceSeries,
+  buildPlanDayStatus,
+  resolvePlanSections,
+} from '../../utilitarios/vinculoPlanoRefeicao';
 
 function getAdherenceTone(value) {
   if (value >= 80) return patientTheme.colors.success;
   if (value >= 60) return '#ff7a12';
   return '#ff5a6b';
-}
-
-function buildMealSummary(section, index, mealEntries = []) {
-  const today = new Date().toISOString().slice(0, 10);
-  const sectionKey = String(section?.id || section?.title || index).toLowerCase();
-  const entries = (mealEntries || []).filter((entry) => {
-    if (entry?.date !== today) return false;
-    const mealKey = String(entry?.mealId || entry?.mealType || entry?.meal || entry?.title || '')
-      .toLowerCase()
-      .trim();
-    if (!mealKey) return false;
-    return mealKey === sectionKey || mealKey.includes(sectionKey.slice(0, 4));
-  });
-
-  if (!entries.length) {
-    return { carbs: 0, protein: 0, fat: 0, kcal: 0, completed: false };
-  }
-
-  return entries.reduce(
-    (acc, entry) => ({
-      carbs: acc.carbs + Number(entry?.carbs || entry?.carboidratos || 0),
-      protein: acc.protein + Number(entry?.protein || entry?.proteinas || 0),
-      fat: acc.fat + Number(entry?.fat || entry?.gorduras || 0),
-      kcal: acc.kcal + Number(entry?.kcal || entry?.calorias || 0),
-      completed: true,
-    }),
-    { carbs: 0, protein: 0, fat: 0, kcal: 0, completed: true }
-  );
 }
 
 function formatFoodsInline(foods = []) {
@@ -100,9 +76,7 @@ export default function PacientePlanoScreen({
     [initialCachedExperience, patientId]
   );
 
-  const hasWarmCache = Boolean(initialCachedExperience);
-
-  const [loading, setLoading] = useState(!hasWarmCache);
+  const [loading, setLoading] = useState(false);
   const [patient, setPatient] = useState(initialCachedExperience?.patient || null);
   const [appState, setAppState] = useState(
     initialCachedExperience?.appState || createDefaultAppState()
@@ -110,9 +84,7 @@ export default function PacientePlanoScreen({
   const [mealPlan, setMealPlan] = useState(
     initialCachedPlan === undefined ? null : initialCachedPlan
   );
-  const [mealCompletion, setMealCompletion] = useState({});
   const [expandedStructure, setExpandedStructure] = useState(null);
-  const hasLoadedRef = useRef(false);
 
   const loadPlano = useCallback(
     async ({ silent = false, forceRefresh = false } = {}) => {
@@ -122,11 +94,12 @@ export default function PacientePlanoScreen({
         return;
       }
 
-      if (!silent && !hasWarmCache) {
-        setLoading(true);
-      }
+      if (!silent && !appState?.planSections?.length && !mealPlan) setLoading(true);
 
       try {
+        const initialPlanPromise = patientId
+          ? fetchActiveMealPlanForPatient(patientId, { forceRefresh }).catch(() => null)
+          : Promise.resolve(null);
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
           forceRefresh,
@@ -139,12 +112,14 @@ export default function PacientePlanoScreen({
           usuarioLogado?.id_paciente_uuid ||
           null;
 
-        const activePlan = canonicalId
-          ? await fetchActiveMealPlanForPatient(canonicalId, { forceRefresh }).catch(() => null)
-          : null;
-
         setPatient(experience.patient);
         setAppState(experience.appState);
+        setLoading(false);
+
+        const activePlan =
+          canonicalId && canonicalId !== patientId
+            ? await fetchActiveMealPlanForPatient(canonicalId, { forceRefresh }).catch(() => null)
+            : await initialPlanPromise;
         setMealPlan(activePlan || null);
       } catch (error) {
         console.log('Erro ao carregar plano:', error);
@@ -152,74 +127,47 @@ export default function PacientePlanoScreen({
         setLoading(false);
       }
     },
-    [canResolvePatient, hasWarmCache, patientId, planFetchLimits, usuarioLogado]
+    [appState?.planSections?.length, canResolvePatient, mealPlan, patientId, planFetchLimits, usuarioLogado]
   );
 
   useFocusEffect(
     useCallback(() => {
-      loadPlano({ silent: hasLoadedRef.current, forceRefresh: false });
-      hasLoadedRef.current = true;
+      loadPlano({ silent: true, forceRefresh: false });
     }, [loadPlano])
   );
 
   const planSections = useMemo(() => {
-    const savedSections = mealPlan?.metas?.planSections || mealPlan?.metas?.refeicoes;
-    return Array.isArray(savedSections) && savedSections.length
-      ? savedSections
-      : appState.planSections || [];
-  }, [appState.planSections, mealPlan]);
-  const todayMeals = useMemo(
-    () =>
-      planSections.map((section, index) => ({
-        ...section,
-        summary: buildMealSummary(section, index, appState?.mealEntries),
-      })),
+    return resolvePlanSections({ mealPlan, appState });
+  }, [appState, mealPlan]);
+  const todayPlanStatus = useMemo(
+    () => buildPlanDayStatus({ mealEntries: appState?.mealEntries, sections: planSections }),
     [appState?.mealEntries, planSections]
   );
+  const mergedMeals = todayPlanStatus.meals;
 
-  const mergedMeals = useMemo(
-    () =>
-      todayMeals.map((meal) => ({
-        ...meal,
-        completed:
-          typeof mealCompletion[meal.id] === 'boolean'
-            ? mealCompletion[meal.id]
-            : meal.summary.completed,
-      })),
-    [todayMeals, mealCompletion]
-  );
-
-  const completedMeals = mergedMeals.filter((meal) => meal.completed).length;
-  const progressPercent = mergedMeals.length
-    ? Math.round((completedMeals / mergedMeals.length) * 100)
-    : 0;
+  const completedMeals = todayPlanStatus.completedCount;
+  const progressPercent = todayPlanStatus.progressPercent;
   const totalKcal = mergedMeals.reduce((sum, meal) => sum + meal.summary.kcal, 0);
-  const targetMeals = Math.max(mergedMeals.length || planSections.length || 3, 3);
   const weeklyAdherence = useMemo(() => {
-    const { items, hasRealData } = buildWeeklyAdherenceFromMeals(
-      appState?.mealEntries,
-      targetMeals
-    );
+    const today = new Date();
+    const endDate = today.toISOString().slice(0, 10);
+    const start = new Date(today);
+    start.setDate(today.getDate() - 6);
+    const startDate = start.toISOString().slice(0, 10);
+    const { items, hasRealData } = buildPlanAdherenceSeries({
+      mealEntries: appState?.mealEntries,
+      sections: planSections,
+      startDate,
+      endDate,
+    });
     return { items, hasRealData };
-  }, [appState?.mealEntries, targetMeals]);
+  }, [appState?.mealEntries, planSections]);
   const weeklyAverage = averageAdherence(weeklyAdherence.items);
   const planDurationWeeks = 12;
   const patientName =
     patient?.nome_completo?.split(' ')[0] ||
     usuarioLogado?.nome_completo?.split(' ')[0] ||
     'João';
-
-  function toggleMealCompletion(mealId) {
-    setMealCompletion((current) => {
-      const fallback = mergedMeals.find((item) => item.id === mealId)?.summary.completed || false;
-      const currentValue =
-        typeof current[mealId] === 'boolean' ? current[mealId] : fallback;
-      return {
-        ...current,
-        [mealId]: !currentValue,
-      };
-    });
-  }
 
   function openFoodRegister() {
     navigation.navigate('RegistroRefeicaoIA', {
@@ -239,20 +187,6 @@ export default function PacientePlanoScreen({
       route={route}
       usuarioLogado={usuarioLogado}
       contentContainerStyle={styles.contentContainer}
-      footerOverlay={
-        <TouchableOpacity
-          style={styles.floatingCtaButton}
-          activeOpacity={0.9}
-          onPress={openNutritionistChat}
-        >
-          <Ionicons
-            name="chatbubble-ellipses-outline"
-            size={16}
-            color={patientTheme.colors.onPrimary}
-          />
-          <Text style={styles.ctaButtonText}>Falar com minha Nutricionista</Text>
-        </TouchableOpacity>
-      }
     >
       {loading ? <EsqueletoPlanoPaciente /> : null}
 
@@ -296,6 +230,7 @@ export default function PacientePlanoScreen({
             {mealPlan?.descricao ? (
               <Text style={styles.heroDescription}>{mealPlan.descricao}</Text>
             ) : null}
+
           </View>
 
           <View style={styles.sectionCard}>
@@ -336,7 +271,7 @@ export default function PacientePlanoScreen({
                   meal.completed ? styles.todayMealCardDone : styles.todayMealCardPending,
                 ]}
                 activeOpacity={0.92}
-                onPress={() => toggleMealCompletion(meal.id)}
+                onPress={meal.completed ? undefined : openFoodRegister}
               >
                 <View style={styles.todayMealHeader}>
                   <View style={styles.todayMealTitleRow}>
@@ -443,6 +378,7 @@ export default function PacientePlanoScreen({
 
             {mergedMeals.map((meal) => {
               const expanded = expandedStructure === meal.id;
+              const foods = Array.isArray(meal.foods) ? meal.foods : [];
               return (
                 <TouchableOpacity
                   key={`${meal.id}-structure`}
@@ -462,8 +398,10 @@ export default function PacientePlanoScreen({
                   </View>
                   <Text style={styles.structureText}>
                     {expanded
-                      ? formatFoodsInline(meal.foods)
-                      : `${meal.foods[0]} e mais ${Math.max(meal.foods.length - 1, 0)} item(ns)`}
+                      ? formatFoodsInline(foods)
+                      : foods.length
+                        ? `${foods[0]} e mais ${Math.max(foods.length - 1, 0)} item(ns)`
+                        : 'Plano registrado para este horario.'}
                   </Text>
                   <Text style={styles.structureKcal}>~{meal.summary.kcal} kcal</Text>
                 </TouchableOpacity>
@@ -476,6 +414,21 @@ export default function PacientePlanoScreen({
           <Text style={styles.weeklyAverageText}>
             Adesão média da semana: {weeklyAverage}%
           </Text>
+
+          <TouchableOpacity
+            style={styles.nutritionistChatButton}
+            onPress={openNutritionistChat}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={18}
+              color={patientTheme.colors.onPrimary}
+            />
+            <Text style={styles.nutritionistChatButtonText}>
+              Falar com minha Nutricionista
+            </Text>
+          </TouchableOpacity>
         </>
       ) : null}
     </PatientScreenLayout>
@@ -642,11 +595,11 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   todayMealCardDone: {
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    borderColor: patientTheme.colors.border,
+    backgroundColor: '#ffffff',
+    borderColor: patientTheme.colors.primary,
   },
   todayMealCardPending: {
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    backgroundColor: '#ffffff',
     borderColor: patientTheme.colors.border,
   },
   todayMealHeader: {
@@ -791,26 +744,28 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: patientTheme.colors.text,
   },
-  floatingCtaButton: {
-    minHeight: 52,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 18,
-  },
-  ctaButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '800',
-    fontSize: 14,
-  },
   weeklyAverageText: {
     marginTop: 10,
     marginBottom: 4,
     textAlign: 'center',
     color: patientTheme.colors.textMuted,
     fontSize: 12,
+  },
+  nutritionistChatButton: {
+    minHeight: 56,
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.primary,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 20,
+    marginTop: 14,
+    marginBottom: 10,
+  },
+  nutritionistChatButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 16,
+    fontWeight: '900',
   },
 });

@@ -25,10 +25,15 @@ import {
   getPatientId,
   savePatientNutritionistChat,
 } from '../../servicos/servicoDadosPaciente';
+import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
-import { normalizeChatMessages, scrollChatToEnd } from '../../utilitarios/chatConversa';
+import {
+  markPatientChatRead,
+  normalizeChatMessages,
+  scrollChatToEnd,
+} from '../../utilitarios/chatConversa';
 
 const READER_BAR_HEIGHT = 58;
 
@@ -104,6 +109,8 @@ export default function TelaChatNutricionistaDetalhePaciente({
     [patientId, usuarioLogado]
   );
   const routeNutritionist = route?.params?.nutricionista || null;
+  const routeInitialAppState = route?.params?.initialAppState || null;
+  const routeInitialNutritionist = route?.params?.initialNutritionist || routeNutritionist;
   const patientName = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
   const patientFirstName = useMemo(
     () => String(patientName || 'Paciente').trim().split(/\s+/)[0] || 'Paciente',
@@ -115,14 +122,17 @@ export default function TelaChatNutricionistaDetalhePaciente({
   const sendingRef = useRef(false);
   const loadRef = useRef(() => Promise.resolve());
 
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!routeInitialAppState);
   const [refreshing, setRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [patient, setPatient] = useState(null);
   const [clinicalObjective, setClinicalObjective] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
+  const [appState, setAppState] = useState(routeInitialAppState || createDefaultAppState());
   const [nutritionist, setNutritionist] = useState(
-    buildFallbackNutritionist(routeNutritionist, [])
+    buildFallbackNutritionist(
+      routeInitialNutritionist,
+      routeInitialAppState?.nutritionistThread || []
+    )
   );
   const [draft, setDraft] = useState('');
 
@@ -149,6 +159,20 @@ export default function TelaChatNutricionistaDetalhePaciente({
           setAppState(createDefaultAppState());
           setNutritionist(buildFallbackNutritionist(routeNutritionist, []));
           return;
+        }
+
+        const cached = !forceRefresh ? getCachedPatientChat(patientId) : null;
+        if (cached?.appState && !silent) {
+          setPatient(cached.patient || null);
+          setClinicalObjective(cached.clinicalObjective || '');
+          setAppState(cached.appState);
+          setNutritionist(
+            buildFallbackNutritionist(
+              routeInitialNutritionist,
+              cached.appState?.nutritionistThread || []
+            )
+          );
+          setLoading(false);
         }
 
         const experience = await fetchPatientNutritionistChat(patientId, {
@@ -206,14 +230,15 @@ export default function TelaChatNutricionistaDetalhePaciente({
 
   useFocusEffect(
     useCallback(() => {
+      markPatientChatRead(patientId);
       load({ silent: hasLoadedRef.current, forceRefresh: false });
       hasLoadedRef.current = true;
       const intervalId = setInterval(() => {
         if (sendingRef.current || draftRef.current.trim()) return;
         loadRef.current({ silent: true, forceRefresh: false });
-      }, 5000);
+      }, 15000);
       return () => clearInterval(intervalId);
-    }, [load])
+    }, [load, patientId])
   );
 
   useEffect(() => {
@@ -252,6 +277,15 @@ export default function TelaChatNutricionistaDetalhePaciente({
       }),
     [appState?.nutritionistThread, nutritionistName, patientFirstName]
   );
+
+  useEffect(() => {
+    if (!patientId || !messages.length) return;
+
+    const lastMessage = messages[messages.length - 1];
+    if (lastMessage?.role === 'nutri') {
+      markPatientChatRead(patientId);
+    }
+  }, [messages.length, patientId]);
 
   const scrollToLatestMessage = useCallback((animated = false) => {
     scrollChatToEnd(scrollRef, {

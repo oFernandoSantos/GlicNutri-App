@@ -43,6 +43,7 @@ import {
   ProfileDataSectionCard,
   TherapyQuickStrip,
 } from '../../componentes/paciente/PerfilDadosSecoes';
+import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
 import {
   getPatientLocalOnboardingData,
   mergePatientOnboardingData,
@@ -59,6 +60,7 @@ import {
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
 import { isLibreViewSyncConfigured } from '../../servicos/servicoLibreView';
+import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 
 const EMPTY_PROFILE_FORM = {
@@ -4814,13 +4816,15 @@ export default function PacientePerfilScreen({
           <TouchableOpacity
             activeOpacity={0.78}
             onPress={openLibreIntegration}
-            style={styles.settingsRow}
+            style={[styles.settingsRow, styles.settingsRowLibre]}
           >
             <View style={styles.settingsRowLeft}>
-              <Ionicons name="sync-outline" size={18} color={patientTheme.colors.text} />
-              <Text style={styles.settingsRowText}>Integração do sensor</Text>
+              <IconeSensorLibre size={18} />
+              <Text style={[styles.settingsRowText, styles.settingsRowTextLibre]}>
+                Integração do sensor
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+            <Ionicons name="chevron-forward" size={18} color={LIBRE_BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -4893,7 +4897,9 @@ export default function PacientePerfilScreen({
         {isIntegrationProfileScreen ? (
         <View onLayout={registerFieldLayout('integration-card')}>
         <SectionCard style={styles.integrationCard}>
-          <Text style={styles.profileSummaryTitle}>Integração FreeStyle Libre</Text>
+          <Text style={[styles.profileSummaryTitle, styles.integrationTitle]}>
+            Integração FreeStyle Libre
+          </Text>
 
           <View style={styles.integrationHeader}>
             <View>
@@ -4925,7 +4931,13 @@ export default function PacientePerfilScreen({
 
           <TouchableOpacity
             activeOpacity={0.82}
-            onPress={() => navigation.navigate('PacienteMonitoramento', { usuarioLogado })}
+            onPress={() =>
+              navigation.navigate('PacienteMonitoramento', {
+                usuarioLogado,
+                openQuickRegister: undefined,
+                openMedication: undefined,
+              })
+            }
             style={styles.integrationButton}
           >
             <Text style={styles.integrationButtonText}>
@@ -6896,6 +6908,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 12,
   },
+  settingsRowLibre: {
+    backgroundColor: 'rgba(255, 209, 0, 0.14)',
+    borderRadius: patientTheme.radius.lg,
+    borderBottomWidth: 0,
+    marginTop: 4,
+    paddingHorizontal: 10,
+  },
+  settingsRowTextLibre: {
+    color: LIBRE_BLUE,
+    fontWeight: '700',
+  },
   preferenceRow: {
     alignItems: 'center',
     borderBottomColor: patientTheme.colors.border,
@@ -6921,9 +6944,12 @@ const styles = StyleSheet.create({
   },
   integrationCard: {
     marginTop: 14,
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.border,
+    backgroundColor: LIBRE_YELLOW,
+    borderColor: LIBRE_BLUE,
     borderWidth: 1,
+  },
+  integrationTitle: {
+    color: LIBRE_BLUE,
   },
   integrationHeader: {
     alignItems: 'center',
@@ -6932,12 +6958,12 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   integrationLabel: {
-    color: patientTheme.colors.text,
+    color: LIBRE_BLUE,
     fontSize: 13,
     fontWeight: '700',
   },
   integrationHelper: {
-    color: patientTheme.colors.textMuted,
+    color: LIBRE_BLUE_SOFT,
     fontSize: 11,
     marginTop: 4,
   },
@@ -6947,11 +6973,11 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   integrationBadgeConnected: {
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: LIBRE_BLUE,
   },
   integrationBadgePending: {
     backgroundColor: '#ffffff',
-    borderColor: patientTheme.colors.border,
+    borderColor: LIBRE_BLUE,
     borderWidth: 1,
   },
   integrationBadgeText: {
@@ -6962,19 +6988,19 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   integrationBadgeTextPending: {
-    color: patientTheme.colors.textMuted,
+    color: LIBRE_BLUE,
   },
   integrationButton: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    borderColor: patientTheme.colors.border,
+    backgroundColor: '#ffffff',
+    borderColor: LIBRE_BLUE,
     borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
+    borderWidth: 1.5,
     justifyContent: 'center',
     minHeight: 42,
   },
   integrationButtonText: {
-    color: patientTheme.colors.text,
+    color: LIBRE_BLUE,
     fontSize: 13,
     fontWeight: '700',
   },

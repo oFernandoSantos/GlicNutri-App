@@ -4,7 +4,7 @@ import { isPatientLinkedToNutritionist } from './servicoVinculosNutricionista';
 
 const ACTIVE_PLAN_COLUMNS =
   'id, titulo, descricao, metas, ativo, inicio_em, fim_em, updated_at, paciente_id, nutricionista_id';
-const ACTIVE_PLAN_CACHE_TTL_MS = 90 * 1000;
+const ACTIVE_PLAN_CACHE_TTL_MS = 5 * 60 * 1000;
 
 const activePlanCache = new Map();
 const activePlanInFlight = new Map();

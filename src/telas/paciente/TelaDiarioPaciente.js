@@ -134,6 +134,10 @@ function estimateNutritionFromMeal(entry) {
       carbs: structured.carbs,
       protein: structured.protein,
       fat: structured.fat,
+      fiber: structured.fiber,
+      sugar: structured.sugars,
+      saturatedFat: structured.saturatedFat,
+      sodium: structured.sodium,
     };
   }
 
@@ -1088,7 +1092,9 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   mealLogEntry: {
-    backgroundColor: '#f8fbf9',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     borderRadius: 16,
     paddingHorizontal: 12,
     paddingVertical: 12,

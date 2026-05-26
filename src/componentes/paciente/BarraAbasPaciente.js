@@ -17,8 +17,10 @@ import { navigatePatientTab } from '../../utilitarios/navegacaoAbas';
 import { navigatePatientFeature } from '../../utilitarios/navegacaoPaciente';
 import {
   getPatientId,
+  prefetchPatientHomeExperience,
   prefetchPatientPlanExperience,
   prefetchPatientProfileExperience,
+  prefetchPatientScreenExperience,
 } from '../../servicos/servicoDadosPaciente';
 
 export const PATIENT_TAB_BAR_HEIGHT = 64;
@@ -31,6 +33,11 @@ const QUICK_ACTION_ITEM_HEIGHT = 84;
 const QUICK_ACTION_GAP = 16;
 const DOUBLE_TAP_DELAY = 320;
 const HEADER_VISIBLE_SPACE = 0;
+const PREFETCH_POR_ROTA = {
+  HomePaciente: 'home',
+  PacienteDiario: 'diario',
+  PacienteMonitoramento: 'monitoramento',
+};
 
 const abasPrincipais = [
   { rota: 'PacienteDiario', rotulo: 'Alimentação', biblioteca: 'ion', icone: 'restaurant-outline' },
@@ -133,6 +140,17 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
     setRotaVisual(rota);
 
     const patientIdPrefetch = getPatientId(usuarioLogado);
+    if (rota !== rotaAtual) {
+      if (PREFETCH_POR_ROTA[rota] === 'home') {
+        prefetchPatientHomeExperience(patientIdPrefetch, usuarioLogado);
+      } else if (PREFETCH_POR_ROTA[rota]) {
+        prefetchPatientScreenExperience(
+          patientIdPrefetch,
+          usuarioLogado,
+          PREFETCH_POR_ROTA[rota]
+        );
+      }
+    }
     if (rota === 'PacientePlano' && rotaAtual !== rota) {
       prefetchPatientPlanExperience(patientIdPrefetch, usuarioLogado);
     }
