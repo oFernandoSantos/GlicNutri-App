@@ -1,9 +1,14 @@
 import { corsHeaders } from '../_shared/cors.ts';
+import { fetchLibreLinkUpReadings } from '../_shared/libreLinkUpClient.ts';
 
 type SyncPayload = {
   patientId?: string;
   patientEmail?: string;
   limit?: number;
+  libreEmail?: string;
+  librePassword?: string;
+  libreRegion?: string;
+  connectionPatientId?: string;
 };
 
 type NormalizedReading = {
@@ -124,6 +129,60 @@ function normalizeProviderPayload(payload: unknown) {
     .filter((item): item is NormalizedReading => Boolean(item));
 }
 
+async function syncViaProvider(body: SyncPayload) {
+  const patientId = String(body?.patientId || '').trim();
+  const patientEmail = String(body?.patientEmail || '').trim();
+  const limit = Number(body?.limit) || 24;
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+    ...parseStaticHeaders(providerStaticHeaders),
+  };
+
+  if (providerToken) {
+    headers[providerAuthHeader] = providerToken;
+  }
+
+  const response = await fetch(providerUrl, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({
+      patientId,
+      patientEmail,
+      limit,
+    }),
+  });
+
+  const responseText = await response.text();
+  let payload: unknown = null;
+
+  try {
+    payload = responseText ? JSON.parse(responseText) : null;
+  } catch (_error) {
+    payload = responseText;
+  }
+
+  if (!response.ok) {
+    return jsonResponse(
+      {
+        error: 'Falha ao buscar leituras do provedor LibreView.',
+        status: response.status,
+        providerResponse: payload,
+      },
+      502
+    );
+  }
+
+  const readings = normalizeProviderPayload(payload);
+
+  return jsonResponse({
+    readings,
+    count: readings.length,
+    syncedAt: new Date().toISOString(),
+    source: 'provider',
+  });
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -133,76 +192,51 @@ Deno.serve(async (request) => {
     return jsonResponse({ error: 'Metodo nao suportado.' }, 405);
   }
 
-  if (!providerUrl) {
-    return jsonResponse(
-      {
-        error: 'Integração LibreView nao configurada.',
-        details:
-          'Defina LIBREVIEW_PROVIDER_URL e, se necessario, LIBREVIEW_PROVIDER_TOKEN nas secrets da function.',
-      },
-      501
-    );
-  }
-
   try {
     const body = (await request.json()) as SyncPayload;
     const patientId = String(body?.patientId || '').trim();
     const patientEmail = String(body?.patientEmail || '').trim();
-    const limit = Number(body?.limit) || 24;
+    const limit = Number(body?.limit) || 48;
+    const libreEmail = String(body?.libreEmail || '').trim();
+    const librePassword = String(body?.librePassword || '');
 
-    if (!patientId && !patientEmail) {
+    if (!patientId && !patientEmail && !libreEmail) {
       return jsonResponse(
-        { error: 'Informe patientId ou patientEmail para sincronizar o LibreView.' },
+        { error: 'Informe patientId, patientEmail ou credenciais do LibreLinkUp.' },
         400
       );
     }
 
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json',
-      ...parseStaticHeaders(providerStaticHeaders),
-    };
-
-    if (providerToken) {
-      headers[providerAuthHeader] = providerToken;
-    }
-
-    const response = await fetch(providerUrl, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify({
-        patientId,
-        patientEmail,
+    if (libreEmail && librePassword) {
+      const result = await fetchLibreLinkUpReadings({
+        email: libreEmail,
+        password: librePassword,
+        region: body?.libreRegion,
         limit,
-      }),
-    });
+        connectionPatientId: body?.connectionPatientId,
+      });
 
-    const responseText = await response.text();
-    let payload: unknown = null;
-
-    try {
-      payload = responseText ? JSON.parse(responseText) : null;
-    } catch (_error) {
-      payload = responseText;
+      return jsonResponse({
+        readings: result.readings,
+        count: result.readings.length,
+        syncedAt: new Date().toISOString(),
+        source: 'librelinkup',
+        connection: result.connection,
+      });
     }
 
-    if (!response.ok) {
-      return jsonResponse(
-        {
-          error: 'Falha ao buscar leituras do provedor LibreView.',
-          status: response.status,
-          providerResponse: payload,
-        },
-        502
-      );
+    if (providerUrl) {
+      return await syncViaProvider(body);
     }
 
-    const readings = normalizeProviderPayload(payload);
-
-    return jsonResponse({
-      readings,
-      count: readings.length,
-      syncedAt: new Date().toISOString(),
-    });
+    return jsonResponse(
+      {
+        error: 'Integracao LibreView nao configurada.',
+        details:
+          'Informe libreEmail e librePassword no app ou configure LIBREVIEW_PROVIDER_URL na function.',
+      },
+      501
+    );
   } catch (error) {
     console.error('libreview-sync error', error);
     return jsonResponse(

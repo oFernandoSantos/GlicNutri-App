@@ -16,13 +16,19 @@ import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientDisplayName,
   getPatientId,
+  isPatientExperienceCacheFresh,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { mergeCachedGlucoseReadings } from '../../servicos/centralGlicose';
 import { subscribeToPatientAppState } from '../../servicos/centralAppState';
 import { exportPatientProgressReport } from '../../servicos/servicoRelatorioPaciente';
+import {
+  buildPlanAdherenceSeries,
+  resolvePlanSections,
+} from '../../utilitarios/vinculoPlanoRefeicao';
 
 const WEEKDAY_LABELS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 const PROGRESS_PERIOD_TABS = [
@@ -433,6 +439,9 @@ function buildMealRecords(mealEntries) {
       title: entry?.mealLabel || entry?.mealTypeLabel || entry?.typeLabel || entry?.title || 'Refeição',
       summary: foodSummary || 'Registro alimentar do dia',
       calories: Math.round(Number(entry?.calories || entry?.kcal || 0)) || 0,
+      fiber: Math.round(Number(entry?.fiberG || 0)) || 0,
+      sugars: Math.round(Number(entry?.sugarsG || 0)) || 0,
+      sodium: Math.round(Number(entry?.sodiumMg || 0)) || 0,
     };
   });
 }
@@ -550,11 +559,20 @@ export default function PacienteProgressoScreen({
       ),
     [patientId, usuarioLogado]
   );
+  const progressoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('progresso'), []);
+  const cachedProgressoInicial = useMemo(
+    () => (patientId ? getCachedPatientExperience(patientId, progressoFetchLimits) : null),
+    [patientId, progressoFetchLimits]
+  );
 
-  const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState(null);
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [loading, setLoading] = useState(!cachedProgressoInicial);
+  const [patient, setPatient] = useState(cachedProgressoInicial?.patient || null);
+  const [appState, setAppState] = useState(
+    cachedProgressoInicial?.appState || createDefaultAppState()
+  );
+  const [glucoseReadings, setGlucoseReadings] = useState(
+    cachedProgressoInicial?.glucoseReadings || []
+  );
   const [selectedPeriod, setSelectedPeriod] = useState('today');
   const [searchStartDate, setSearchStartDate] = useState('');
   const [searchEndDate, setSearchEndDate] = useState('');
@@ -575,7 +593,7 @@ export default function PacienteProgressoScreen({
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
           forceRefresh,
-          ...mesclarLimitesDadosPaciente('progresso'),
+          ...progressoFetchLimits,
         });
 
         setPatient(experience?.patient || null);
@@ -587,14 +605,19 @@ export default function PacienteProgressoScreen({
         if (!silent) setLoading(false);
       }
     },
-    [canResolvePatient, patientId, usuarioLogado]
+    [canResolvePatient, patientId, progressoFetchLimits, usuarioLogado]
   );
 
   useFocusEffect(
     useCallback(() => {
-      loadProgresso({ silent: hasLoadedRef.current, forceRefresh: hasLoadedRef.current });
+      const cacheFresco =
+        patientId && isPatientExperienceCacheFresh(patientId, progressoFetchLimits);
+      loadProgresso({
+        silent: hasLoadedRef.current || cacheFresco,
+        forceRefresh: false,
+      });
       hasLoadedRef.current = true;
-    }, [loadProgresso])
+    }, [loadProgresso, patientId, progressoFetchLimits])
   );
 
   useEffect(() => {
@@ -675,17 +698,27 @@ export default function PacienteProgressoScreen({
   }, [periodBounds.endDate, periodBounds.startDate, selectedPeriod]);
 
   const displayName = getPatientDisplayName(patient || usuarioLogado).split(' ')[0] || 'Paciente';
-  const targetMeals = appState?.planSections?.length || 3;
+  const planSections = useMemo(
+    () => resolvePlanSections({ mealPlan: appState?.activeMealPlan, appState }),
+    [appState]
+  );
   const adherenceSeries = useMemo(
-    () =>
-      buildAdherenceSeries(
-        filteredMealEntries,
-        targetMeals,
-        selectedPeriod,
-        searchStartDate,
-        searchEndDate
-      ),
-    [filteredMealEntries, targetMeals, selectedPeriod, searchStartDate, searchEndDate]
+    () => {
+      const { items } = buildPlanAdherenceSeries({
+        mealEntries: appState?.mealEntries,
+        sections: planSections,
+        startDate: periodBounds.startDate,
+        endDate: periodBounds.endDate,
+        labelForDate: (isoDate, index) =>
+          selectedPeriod === 'today'
+            ? 'Hoje'
+            : selectedPeriod === '7days'
+              ? WEEKDAY_LABELS[index % WEEKDAY_LABELS.length]
+              : formatShortDateLabel(isoDate),
+      });
+      return items;
+    },
+    [appState?.mealEntries, periodBounds.endDate, periodBounds.startDate, planSections, selectedPeriod]
   );
   const adherenceAverage = Math.round(
     adherenceSeries.reduce((sum, item) => sum + item.value, 0) / Math.max(adherenceSeries.length, 1)
@@ -903,6 +936,11 @@ export default function PacienteProgressoScreen({
                       <View style={styles.todayMealBadge}>
                         <Text style={styles.todayMealBadgeText}>{item.calories} kcal</Text>
                       </View>
+                      {(item.fiber || item.sugars || item.sodium) ? (
+                        <Text style={styles.todayMealSummary}>
+                          Fibra {item.fiber}g · Açúcares {item.sugars}g · Sódio {item.sodium}mg
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 ))}

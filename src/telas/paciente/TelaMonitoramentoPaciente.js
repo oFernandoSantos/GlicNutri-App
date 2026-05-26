@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -23,7 +24,6 @@ import {
   addMedicationEntry,
   buildMonitorSeries,
   createDefaultAppState,
-  fetchGlucoseReadings,
   fetchMedicationEntries,
   fetchPatientExperience,
   getCachedPatientExperience,
@@ -31,13 +31,13 @@ import {
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { EsqueletoBloco } from '../../componentes/comum/EsqueletoCarregamento';
-import { executarEmLotes } from '../../utilitarios/carregamentoTela';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
-  fetchLibreViewReadings,
-  isLibreViewSyncConfigured,
-  parseLibreViewExportText,
-} from '../../servicos/servicoLibreView';
+  hasLibreLinkUpLinked,
+  syncLinkedLibreViewReadings,
+} from '../../servicos/servicoLibreViewAutoSync';
+import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
+import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
 import { buscarMedicamentosAnvisa } from '../../servicos/servicoMedicamentosAnvisa';
 import {
   buildGlucoseFingerprint,
@@ -601,16 +601,6 @@ function EventBadge({ event, compact = false }) {
       ) : (
         <Ionicons name={meta.icon} size={14} color={meta.color} />
       )}
-    </View>
-  );
-}
-
-function LibreSensorIcon() {
-  return (
-    <View style={styles.libreSensorIconOuter}>
-      <View style={styles.libreSensorIconMiddle}>
-        <View style={styles.libreSensorIconCenter} />
-      </View>
     </View>
   );
 }
@@ -1267,10 +1257,7 @@ export default function PacienteMonitoramentoScreen({
   const [loading, setLoading] = useState(!monitoramentoCacheQuente);
   const [savingGlucose, setSavingGlucose] = useState(false);
   const [savingMedication, setSavingMedication] = useState(false);
-  const [syncingLibreView, setSyncingLibreView] = useState(false);
-  const [libreViewImportVisible, setLibreViewImportVisible] = useState(false);
-  const [libreViewImporting, setLibreViewImporting] = useState(false);
-  const [libreViewImportText, setLibreViewImportText] = useState('');
+  const [libreLinkLinked, setLibreLinkLinked] = useState(false);
   const [newGlucoseValue, setNewGlucoseValue] = useState('');
   const [manualChoiceVisible, setManualChoiceVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
@@ -1494,6 +1481,60 @@ export default function PacienteMonitoramentoScreen({
   }, [activePatientId]);
 
   useEffect(() => {
+    if (!activePatientId) return undefined;
+
+    let active = true;
+
+    hasLibreLinkUpLinked(activePatientId).then((linked) => {
+      if (!active) return;
+      setLibreLinkLinked(linked);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [activePatientId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (route?.params?.openQuickRegister !== 'glucose') {
+        setManualChoiceVisible(false);
+      }
+
+      if (!activePatientId) {
+        return undefined;
+      }
+
+      let active = true;
+
+      hasLibreLinkUpLinked(activePatientId).then((linked) => {
+        if (!active) return;
+        setLibreLinkLinked(linked);
+
+        if (!linked) return;
+
+        syncLinkedLibreViewReadings({
+          patientId: activePatientId,
+          patientEmail: patient?.email_pac || usuarioLogado?.email_pac || usuarioLogado?.email,
+          actor: patient || usuarioLogado,
+          silent: true,
+        })
+          .then((result) => {
+            if (!active || !result?.readings?.length) return;
+            setGlucoseReadings(result.readings);
+          })
+          .catch((error) => {
+            console.log('Erro ao sincronizar LibreView ao abrir monitoramento:', error);
+          });
+      });
+
+      return () => {
+        active = false;
+      };
+    }, [activePatientId, patient, route?.params?.openQuickRegister, usuarioLogado])
+  );
+
+  useEffect(() => {
     if (insulinCategory !== 'basal') {
       if (insulinDevice) {
         setInsulinDevice('');
@@ -1537,7 +1578,7 @@ export default function PacienteMonitoramentoScreen({
 
     const timer = setTimeout(() => {
       if (quickRegister === 'glucose') {
-        // O fluxo de glicose deve abrir apenas por acoes explicitas do botao na tela.
+        handleOpenManualChoice();
       } else if (quickRegister === 'insulin') {
         handleSelectMedicationKind('insulin');
       } else if (quickRegister === 'medicine') {
@@ -2234,176 +2275,6 @@ export default function PacienteMonitoramentoScreen({
     }
   }
 
-  function isKnownReading(reading, existingReadings) {
-    return existingReadings.some(
-      (item) =>
-        item.value === reading.value &&
-        item.date === reading.date &&
-        String(item.time).slice(0, 5) === String(reading.time).slice(0, 5)
-    );
-  }
-
-  async function importLibreViewReadings(readings, sourceLabel = 'libreview_import') {
-    const newReadings = readings.filter((reading) => !isKnownReading(reading, glucoseReadings));
-
-    await executarEmLotes(newReadings, 5, (reading) =>
-      addGlucoseReading(activePatientId, reading.value, {
-        date: reading.date,
-        time: reading.time,
-        actor: patient || usuarioLogado,
-        auditSource: sourceLabel,
-      })
-    );
-
-    const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
-    const glucoseLimit = monitorLimits.glucoseLimit || 120;
-    const fetchedReadings = await fetchGlucoseReadings(activePatientId, glucoseLimit);
-    const mergedReadings = mergeCachedGlucoseReadings(
-      fetchedReadings,
-      getCachedGlucoseReadings(activePatientId)
-    );
-
-    setGlucoseReadings(mergedReadings);
-    replaceCachedGlucoseReadings(activePatientId, mergedReadings);
-
-    return newReadings;
-  }
-
-  function handlePickLibreViewFile() {
-    if (Platform.OS !== 'web' || typeof document === 'undefined') {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto: 'No celular, copie e cole o CSV exportado do LibreView no campo abaixo.',
-      });
-      return;
-    }
-
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.csv,.txt,text/csv,text/plain';
-    input.onchange = () => {
-      const [file] = Array.from(input.files || []);
-      if (!file) return;
-
-      const reader = new FileReader();
-      reader.onload = () => setLibreViewImportText(String(reader.result || ''));
-      reader.readAsText(file);
-    };
-    input.click();
-  }
-
-  async function handleImportLibreViewText() {
-    if (!activePatientId) {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto: 'Paciente sem identificador para importar o LibreView.',
-      });
-      return;
-    }
-
-    const parsedReadings = parseLibreViewExportText(libreViewImportText);
-
-    if (!parsedReadings.length) {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto: 'Nao encontramos leituras validas no conteudo do LibreView.',
-      });
-      return;
-    }
-
-    try {
-      setLibreViewImporting(true);
-      const newReadings = await importLibreViewReadings(parsedReadings, 'libreview_csv_import');
-      setLibreViewImportVisible(false);
-      setLibreViewImportText('');
-      setAvisoUsuario({
-        tipo: 'sucesso',
-        texto: newReadings.length
-          ? `LibreView: ${newReadings.length} leitura(s) importada(s) do arquivo.`
-          : 'Importacao concluida: nenhuma leitura nova encontrada.',
-      });
-    } catch (error) {
-      console.log('Erro ao importar LibreView:', error);
-      setAvisoUsuario({
-        tipo: 'erro',
-        texto: 'Nao foi possivel importar o arquivo do LibreView agora.',
-      });
-      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Importacao LibreView', error, {
-        usuario: patient || usuarioLogado,
-        complemento: 'Falha ao importar CSV/texto do LibreView',
-      });
-    } finally {
-      setLibreViewImporting(false);
-    }
-  }
-
-  async function handleSyncLibreView() {
-    if (!activePatientId) {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto: 'Paciente sem identificador para sincronizar o LibreView.',
-      });
-      return;
-    }
-
-    if (!isLibreViewSyncConfigured()) {
-      setLibreViewImportVisible(true);
-      return;
-    }
-
-    try {
-      setSyncingLibreView(true);
-
-      const libreReadings = await fetchLibreViewReadings({
-        patientId: activePatientId,
-        patientEmail: patient?.email_pac || usuarioLogado?.email_pac || usuarioLogado?.email,
-      });
-      const newReadings = libreReadings.filter(
-        (reading) => !isKnownReading(reading, glucoseReadings)
-      );
-
-      await executarEmLotes(newReadings, 5, (reading) =>
-        addGlucoseReading(activePatientId, reading.value, {
-          date: reading.date,
-          time: reading.time,
-          actor: patient || usuarioLogado,
-          auditSource: 'libreview_sync',
-        })
-      );
-
-      const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
-      const glucoseLimit = monitorLimits.glucoseLimit || 120;
-      const fetchedReadings = await fetchGlucoseReadings(activePatientId, glucoseLimit);
-      const mergedReadings = mergeCachedGlucoseReadings(
-        fetchedReadings,
-        getCachedGlucoseReadings(activePatientId)
-      );
-
-      setGlucoseReadings(mergedReadings);
-      replaceCachedGlucoseReadings(activePatientId, mergedReadings);
-
-      setAvisoUsuario({
-        tipo: 'sucesso',
-        texto: newReadings.length
-          ? `LibreView: ${newReadings.length} leitura(s) importada(s).`
-          : 'LibreView sincronizado: nenhuma leitura nova encontrada.',
-      });
-    } catch (error) {
-      console.log('Erro ao sincronizar LibreView:', error);
-      setAvisoUsuario({
-        tipo: 'erro',
-        texto:
-          'Não foi possível sincronizar o LibreView. Verifique a conexão e tente novamente.',
-      });
-      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Sincronizacao LibreView', error, {
-        usuario: patient || usuarioLogado,
-        complemento: 'Falha ao sincronizar leituras do LibreView',
-      });
-    } finally {
-      setSyncingLibreView(false);
-    }
-  }
-
   async function handleRegisterMedication() {
     try {
       if (!activePatientId) {
@@ -2897,89 +2768,38 @@ export default function PacienteMonitoramentoScreen({
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={styles.libreViewStandaloneButton}
-        onPress={handleSyncLibreView}
-        disabled={syncingLibreView || !activePatientId}
+        style={[
+          styles.libreViewStandaloneButton,
+          libreLinkLinked && styles.libreViewStandaloneButtonLinked,
+        ]}
+        onPress={() =>
+          navigation.navigate('PacientePerfilIntegracao', {
+            usuarioLogado,
+          })
+        }
+        disabled={!activePatientId}
       >
-        {syncingLibreView ? (
-          <ActivityIndicator color="#1F2F6B" />
-        ) : (
-          <>
-            <View style={styles.libreViewStandaloneIcon}>
-              <LibreSensorIcon />
-            </View>
+        <>
+          <View style={styles.libreViewStandaloneIcon}>
+            <IconeSensorLibre />
+          </View>
+          <View style={styles.libreViewStandaloneCopy}>
             <Text style={[styles.currentActionText, styles.libreViewActionText]}>
               FreeStyle Libre
             </Text>
-          </>
-        )}
+            <Text style={styles.libreViewStandaloneSubtitle}>
+              {libreLinkLinked
+                ? 'Vinculado · toque para gerenciar integração'
+                : 'Toque para integrar com LibreLinkUp'}
+            </Text>
+          </View>
+          {libreLinkLinked ? (
+            <Ionicons name="checkmark-circle" size={20} color={LIBRE_BLUE} />
+          ) : (
+            <Ionicons name="chevron-forward" size={20} color={LIBRE_BLUE} />
+          )}
+        </>
       </TouchableOpacity>
-
-      <Modal
-        visible={libreViewImportVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setLibreViewImportVisible(false)}
-      >
-        <View style={styles.modalOverlay}>
-          <KeyboardAvoidingView
-            style={styles.libreViewImportKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.libreViewImportCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Importar LibreView</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={() => setLibreViewImportVisible(false)}
-                >
-                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.modalText}>
-                Cole o CSV exportado do LibreView ou, no web, escolha o arquivo para importar as
-                leituras no cadastro do paciente.
-              </Text>
-
-              <View style={styles.libreViewImportActions}>
-                <TouchableOpacity
-                  style={styles.libreViewImportFileButton}
-                  onPress={handlePickLibreViewFile}
-                >
-                  <Ionicons name="document-outline" size={18} color={patientTheme.colors.text} />
-                  <Text style={styles.libreViewImportFileButtonText}>Escolher arquivo</Text>
-                </TouchableOpacity>
-              </View>
-
-              <TextInput
-                style={styles.libreViewImportInput}
-                multiline
-                value={libreViewImportText}
-                onChangeText={setLibreViewImportText}
-                placeholder="Cole aqui o conteudo CSV/texto exportado do LibreView..."
-                placeholderTextColor={patientTheme.colors.textMuted}
-                textAlignVertical="top"
-              />
-
-              <TouchableOpacity
-                style={[
-                  styles.libreViewImportSubmitButton,
-                  (!libreViewImportText.trim() || libreViewImporting) && styles.buttonDisabled,
-                ]}
-                onPress={handleImportLibreViewText}
-                disabled={!libreViewImportText.trim() || libreViewImporting}
-              >
-                {libreViewImporting ? (
-                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                ) : (
-                  <Text style={styles.libreViewImportSubmitButtonText}>Importar leituras</Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
-      </Modal>
 
       <Modal
         visible={manualChoiceVisible}
@@ -4509,106 +4329,43 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   libreViewActionButton: {
-    backgroundColor: '#FFE600',
+    backgroundColor: LIBRE_YELLOW,
   },
   libreViewStandaloneButton: {
     alignItems: 'center',
-    backgroundColor: '#FFE600',
+    backgroundColor: LIBRE_YELLOW,
     borderRadius: 18,
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     marginTop: 14,
-    minHeight: 46,
+    minHeight: 58,
     position: 'relative',
     paddingHorizontal: 18,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  libreViewStandaloneButtonLinked: {
+    borderWidth: 1.5,
+    borderColor: LIBRE_BLUE,
   },
   libreViewStandaloneIcon: {
-    left: 12,
-    position: 'absolute',
+    marginLeft: 2,
+  },
+  libreViewStandaloneCopy: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  libreViewStandaloneSubtitle: {
+    color: LIBRE_BLUE_SOFT,
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
   libreViewActionText: {
-    color: '#1F2F6B',
+    color: LIBRE_BLUE,
     fontSize: 15,
     fontWeight: '700',
-    textAlign: 'center',
-  },
-  libreViewImportKeyboard: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    width: '100%',
-  },
-  libreViewImportCard: {
-    width: '100%',
-    maxWidth: 460,
-    backgroundColor: '#ffffff',
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
-  },
-  libreViewImportActions: {
-    marginTop: 14,
-  },
-  libreViewImportFileButton: {
-    minHeight: 44,
-    borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.surface,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  libreViewImportFileButtonText: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  libreViewImportInput: {
-    marginTop: 12,
-    minHeight: 180,
-    borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: patientTheme.colors.text,
-  },
-  libreViewImportSubmitButton: {
-    marginTop: 14,
-    minHeight: 48,
-    borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.primaryDark,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  libreViewImportSubmitButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontSize: 14,
-    fontWeight: '800',
-  },
-  libreSensorIconOuter: {
-    alignItems: 'center',
-    backgroundColor: '#E6CF00',
-    borderRadius: 15,
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  libreSensorIconMiddle: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    height: 20,
-    justifyContent: 'center',
-    width: 20,
-  },
-  libreSensorIconCenter: {
-    backgroundColor: '#E6CF00',
-    borderRadius: 4,
-    height: 8,
-    width: 8,
+    textAlign: 'left',
   },
   medicationQuickCard: {
     alignItems: 'center',

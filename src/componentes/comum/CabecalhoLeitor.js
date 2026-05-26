@@ -134,6 +134,8 @@ function getHomeRoute(route) {
 export default function ReaderTopo({ navigation, route, options }) {
   const insets = useSafeAreaInsets();
   const title = options?.readerTitle || getTitle(route);
+  const readerBackgroundColor = options?.readerBackgroundColor || null;
+  const readerAccentColor = options?.readerAccentColor || null;
   const topSpacing = Platform.OS === 'web' ? 0 : insets.top || StatusBar.currentHeight || 0;
   const isHome = HOME_ROUTES.has(route?.name);
   const isLogin = route?.name === 'Login';
@@ -144,6 +146,9 @@ export default function ReaderTopo({ navigation, route, options }) {
   const isNutriHome = route?.name === 'HomeNutricionista';
   const isAdminHome = route?.name === 'AdminHome';
   const isAdminContext = isAdminLogin || isAdminHome || ADMIN_ROUTES.has(route?.name);
+  const accentColor =
+    readerAccentColor ||
+    (isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary);
   const menuAction = options?.readerOnMenuPress;
   const menuDisabled = options?.readerMenuDisabled;
   const menuLoading = options?.readerMenuLoading;
@@ -198,6 +203,7 @@ export default function ReaderTopo({ navigation, route, options }) {
       style={[
         styles.reader,
         isAdminContext && styles.readerAdmin,
+        readerBackgroundColor ? { backgroundColor: readerBackgroundColor, borderColor: readerBackgroundColor, borderBottomColor: readerBackgroundColor, shadowOpacity: 0, elevation: 0 } : null,
         Platform.OS === 'web' && styles.readerWebFixed,
       ]}
     >
@@ -219,16 +225,17 @@ export default function ReaderTopo({ navigation, route, options }) {
               style={[
                 styles.readerButton,
                 isAdminContext && styles.readerButtonAdmin,
+                readerBackgroundColor && styles.readerButtonThemed,
                 (menuDisabled || menuLoading) && styles.readerButtonDisabled,
               ]}
             >
               {menuLoading ? (
-                <ActivityIndicator size="small" color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary} />
+                <ActivityIndicator size="small" color={accentColor} />
               ) : (
                 <Ionicons
                   name="menu-outline"
                   size={22}
-                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+                  color={accentColor}
                 />
               )}
             </TouchableOpacity>
@@ -238,12 +245,16 @@ export default function ReaderTopo({ navigation, route, options }) {
               accessibilityLabel="Voltar"
               accessibilityRole="button"
               onPress={handleBack}
-              style={[styles.readerButton, isAdminContext && styles.readerButtonAdmin]}
+              style={[
+                styles.readerButton,
+                isAdminContext && styles.readerButtonAdmin,
+                readerBackgroundColor && styles.readerButtonThemed,
+              ]}
             >
               <Ionicons
                 name="chevron-back"
                 size={22}
-                color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
+                color={accentColor}
               />
             </TouchableOpacity>
           ) : null}
@@ -251,7 +262,14 @@ export default function ReaderTopo({ navigation, route, options }) {
 
         {!hideCenteredTitle ? (
           <View pointerEvents="none" style={styles.titleWrap}>
-            <Text style={[styles.title, isAdminContext && styles.titleAdmin]} numberOfLines={1}>
+            <Text
+              style={[
+                styles.title,
+                isAdminContext && styles.titleAdmin,
+                readerAccentColor ? { color: readerAccentColor } : null,
+              ]}
+              numberOfLines={1}
+            >
               {title}
             </Text>
           </View>
@@ -400,6 +418,12 @@ const styles = StyleSheet.create({
   readerButtonAdmin: {
     backgroundColor: adminTheme.colors.background,
     borderColor: adminTheme.colors.background,
+  },
+  readerButtonThemed: {
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
   },
   notificationBadge: {
     alignItems: 'center',

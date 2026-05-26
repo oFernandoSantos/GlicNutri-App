@@ -7,13 +7,15 @@ export const LIMITES_DADOS_PACIENTE = {
     allowGoogleSync: false,
     glucoseLimit: 7,
     medicationLimit: 0,
-    mealLimit: 0,
+    mealLimit: 40,
+    includeMealPlan: true,
     skipAlertSync: true,
   },
   diario: {
     glucoseLimit: 40,
     medicationLimit: 30,
     mealLimit: 40,
+    includeMealPlan: true,
     skipAlertSync: true,
   },
   monitoramento: {
@@ -52,6 +54,7 @@ export const LIMITES_DADOS_PACIENTE = {
     glucoseLimit: 60,
     medicationLimit: 40,
     mealLimit: 40,
+    includeMealPlan: true,
     skipAlertSync: true,
   },
   prontuario: {

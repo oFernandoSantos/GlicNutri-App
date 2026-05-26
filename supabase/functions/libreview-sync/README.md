@@ -1,23 +1,33 @@
 # LibreView Sync
 
-Function preparada para sincronizacao automatica de leituras do LibreView.
+Function para sincronizacao automatica de leituras do LibreView / LibreLinkUp.
 
 ## Como funciona
 
 1. O app chama `EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL`
 2. Essa URL aponta para a function `libreview-sync`
-3. A function repassa `patientId`, `patientEmail` e `limit` para um integrador autorizado
-4. O integrador devolve leituras em JSON
-5. A function normaliza e retorna no formato esperado pelo app
+3. Se o app enviar `libreEmail` e `librePassword`, a function autentica direto no LibreLinkUp (API nao oficial)
+4. Se nao houver credenciais, a function repassa para `LIBREVIEW_PROVIDER_URL` (integrador externo)
+5. A function normaliza e retorna leituras no formato esperado pelo app
 
-## Secrets necessarias
-
-Defina nas secrets do Supabase:
+## Secrets opcionais (modo provedor externo)
 
 - `LIBREVIEW_PROVIDER_URL`
 - `LIBREVIEW_PROVIDER_TOKEN`
 - `LIBREVIEW_PROVIDER_AUTH_HEADER` (opcional, default `Authorization`)
 - `LIBREVIEW_PROVIDER_EXTRA_HEADERS` (opcional, uma linha por header, `Nome: valor`)
+
+## Requisicao direta LibreLinkUp
+
+```json
+{
+  "patientId": "uuid-do-paciente",
+  "limit": 48,
+  "libreEmail": "conta@email.com",
+  "librePassword": "senha-librelinkup",
+  "libreRegion": "la"
+}
+```
 
 ## Contrato esperado do provedor
 

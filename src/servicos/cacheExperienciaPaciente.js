@@ -27,6 +27,7 @@ function buildLimitsFingerprint(options = {}) {
     options.planOnly ? 'p1' : '',
     options.chatOnly ? 'c1' : '',
     options.skipChat ? 'sc' : '',
+    options.includeMealPlan ? 'plan' : '',
     options.minimalProfile ? 'mp' : '',
     `g${options.glucoseLimit ?? '*'}`,
     `m${options.medicationLimit ?? '*'}`,

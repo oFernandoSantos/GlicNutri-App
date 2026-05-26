@@ -10,7 +10,8 @@
     "ios": "expo run:ios",
     "web": "expo start --web",
     "docker:ml-api": "docker build -f machine-learning/api/Dockerfile -t glicnutri-ml-api .",
-    "test:validacoes": "node --test src/utilitarios/__tests__/validacoesPaciente.test.js"
+    "test:validacoes": "node --test src/utilitarios/__tests__/validacoesPaciente.test.js",
+    "supabase:deploy-libreview": "npx supabase functions deploy libreview-sync"
   },
   "dependencies": {
     "@expo/metro-runtime": "~6.1.2",

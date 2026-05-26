@@ -3,6 +3,8 @@ const libreViewSyncUrl =
   globalThis?.process?.env?.EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL ||
   (supabaseProjectUrl ? `${supabaseProjectUrl}/functions/v1/libreview-sync` : '');
 
+const LIBRE_LINKUP_STORAGE_PREFIX = '@glicnutri:libreLinkUp:';
+
 function normalizeHeader(value) {
   return String(value || '')
     .normalize('NFD')
@@ -212,7 +214,82 @@ export function isLibreViewSyncConfigured() {
   return Boolean(libreViewSyncUrl);
 }
 
-export async function fetchLibreViewReadings({ patientId, patientEmail, limit = 24 }) {
+function buildLibreLinkUpStorageKey(patientId) {
+  return patientId ? `${LIBRE_LINKUP_STORAGE_PREFIX}${patientId}` : '';
+}
+
+export async function loadLibreLinkUpCredentials(patientId) {
+  const key = buildLibreLinkUpStorageKey(patientId);
+  if (!key) return null;
+
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    const raw = await AsyncStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw);
+    const email = String(parsed?.email || '').trim();
+    const password = String(parsed?.password || '');
+
+    if (!email || !password) return null;
+
+    return {
+      email,
+      password,
+      region: String(parsed?.region || 'la').trim() || 'la',
+      connectionPatientId: String(parsed?.connectionPatientId || '').trim() || null,
+    };
+  } catch (error) {
+    console.log('Erro ao carregar credenciais LibreLinkUp:', error);
+    return null;
+  }
+}
+
+export async function saveLibreLinkUpCredentials(patientId, credentials = {}) {
+  const key = buildLibreLinkUpStorageKey(patientId);
+  if (!key) return null;
+
+  const email = String(credentials?.email || '').trim();
+  const password = String(credentials?.password || '');
+
+  if (!email || !password) {
+    throw new Error('Informe e-mail e senha do LibreLinkUp.');
+  }
+
+  const payload = {
+    email,
+    password,
+    region: String(credentials?.region || 'la').trim() || 'la',
+    connectionPatientId: String(credentials?.connectionPatientId || '').trim() || null,
+    linkedAt: new Date().toISOString(),
+  };
+
+  const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+  await AsyncStorage.setItem(key, JSON.stringify(payload));
+  return payload;
+}
+
+export async function clearLibreLinkUpCredentials(patientId) {
+  const key = buildLibreLinkUpStorageKey(patientId);
+  if (!key) return;
+
+  try {
+    const AsyncStorage = (await import('@react-native-async-storage/async-storage')).default;
+    await AsyncStorage.removeItem(key);
+  } catch (error) {
+    console.log('Erro ao remover credenciais LibreLinkUp:', error);
+  }
+}
+
+export async function fetchLibreViewReadings({
+  patientId,
+  patientEmail,
+  limit = 48,
+  libreEmail,
+  librePassword,
+  libreRegion,
+  connectionPatientId,
+} = {}) {
   if (!libreViewSyncUrl) {
     throw new Error('A URL de sincronizacao do LibreView ainda nao foi configurada.');
   }
@@ -226,19 +303,32 @@ export async function fetchLibreViewReadings({ patientId, patientEmail, limit = 
       patientId,
       patientEmail,
       limit,
+      libreEmail,
+      librePassword,
+      libreRegion,
+      connectionPatientId,
     }),
   });
 
+  const payload = await response.json().catch(() => ({}));
+
   if (!response.ok) {
-    throw new Error('Nao foi possivel buscar leituras do LibreView agora.');
+    throw new Error(
+      payload?.details ||
+        payload?.error ||
+        'Nao foi possivel buscar leituras do LibreView agora.'
+    );
   }
 
-  const payload = await response.json();
   const rawReadings = Array.isArray(payload) ? payload : payload?.readings || [];
 
-  return rawReadings
-    .map(normalizeLibreReading)
-    .filter((item) => Number.isFinite(item.value) && item.value > 0);
+  return {
+    readings: rawReadings
+      .map(normalizeLibreReading)
+      .filter((item) => Number.isFinite(item.value) && item.value > 0),
+    connection: payload?.connection || null,
+    source: payload?.source || null,
+  };
 }
 
 export function parseLibreViewExportText(rawText) {

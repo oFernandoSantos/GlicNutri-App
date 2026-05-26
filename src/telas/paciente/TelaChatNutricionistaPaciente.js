@@ -19,10 +19,15 @@ import {
   getPatientDisplayName,
   getPatientId,
 } from '../../servicos/servicoDadosPaciente';
+import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
-import { buildPatientChatPreview } from '../../utilitarios/chatConversa';
+import {
+  buildPatientChatPreview,
+  getPatientChatLastReadAt,
+  markPatientChatRead,
+} from '../../utilitarios/chatConversa';
 
 function getInitials(name) {
   return String(name || '')
@@ -102,6 +107,7 @@ export default function TelaChatNutricionistaPaciente({
   const [nutritionist, setNutritionist] = useState(
     buildFallbackNutritionist(routeNutritionist, [])
   );
+  const [chatLastReadAt, setChatLastReadAt] = useState(null);
 
   useEffect(() => {
     navigation.setOptions({
@@ -124,6 +130,18 @@ export default function TelaChatNutricionistaPaciente({
           setAppState(createDefaultAppState());
           setNutritionist(buildFallbackNutritionist(routeNutritionist, []));
           return;
+        }
+
+        const cached = !forceRefresh ? getCachedPatientChat(patientId) : null;
+        if (cached?.appState && !silent) {
+          setAppState(cached.appState);
+          setNutritionist(
+            buildFallbackNutritionist(
+              routeNutritionist,
+              cached.appState?.nutritionistThread || []
+            )
+          );
+          setLoading(false);
         }
 
         const experience = await fetchPatientNutritionistChat(patientId, {
@@ -188,11 +206,18 @@ export default function TelaChatNutricionistaPaciente({
 
   useFocusEffect(
     useCallback(() => {
+      let active = true;
+      getPatientChatLastReadAt(patientId).then((readAt) => {
+        if (active) setChatLastReadAt(readAt);
+      });
       load({ silent: hasLoadedRef.current, forceRefresh: false });
       hasLoadedRef.current = true;
-      const intervalId = setInterval(() => load({ silent: true, forceRefresh: false }), 5000);
-      return () => clearInterval(intervalId);
-    }, [load])
+      const intervalId = setInterval(() => load({ silent: true, forceRefresh: false }), 15000);
+      return () => {
+        active = false;
+        clearInterval(intervalId);
+      };
+    }, [load, patientId])
   );
 
   useEffect(() => {
@@ -227,8 +252,9 @@ export default function TelaChatNutricionistaPaciente({
       buildPatientChatPreview(appState?.nutritionistThread, {
         nutritionistName,
         patientName: patientFirstName,
+        lastReadAt: chatLastReadAt,
       }),
-    [appState?.nutritionistThread, nutritionistName, patientFirstName]
+    [appState?.nutritionistThread, nutritionistName, patientFirstName, chatLastReadAt]
   );
 
   const chatItems = useMemo(() => {
@@ -259,11 +285,17 @@ export default function TelaChatNutricionistaPaciente({
     );
   }, [chatItems, search]);
 
-  function openChat(chat) {
+  async function openChat(chat) {
+    const readAt = await markPatientChatRead(patientId);
+    if (readAt) setChatLastReadAt(readAt);
+
     navigation.navigate('PacienteChatNutricionistaDetalhe', {
       usuarioLogado,
       conversationId: chat.id,
       nutricionista: nutritionist,
+      initialAppState: { ...appState, nutritionistThread: appState?.nutritionistThread || [] },
+      initialNutritionist: nutritionist,
+      initialReadAt: readAt,
     });
   }
 
@@ -275,20 +307,6 @@ export default function TelaChatNutricionistaPaciente({
       title=""
       subtitle=""
       contentContainerStyle={styles.contentContainer}
-      footerOverlay={
-        <TouchableOpacity
-          style={styles.floatingPrimaryButton}
-          onPress={() => openChat(chatItems[0])}
-          activeOpacity={0.9}
-        >
-          <Ionicons
-            name="chatbubble-ellipses-outline"
-            size={18}
-            color={patientTheme.colors.onPrimary}
-          />
-          <Text style={styles.floatingPrimaryButtonText}>Falar com minha Nutricionista</Text>
-        </TouchableOpacity>
-      }
     >
       <View style={styles.listSearch}>
         <SearchInput
@@ -370,22 +388,7 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
     flexGrow: 1,
     paddingTop: 8,
-    paddingBottom: 112,
-  },
-  floatingPrimaryButton: {
-    minHeight: 56,
-    borderRadius: 999,
-    backgroundColor: patientTheme.colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 20,
-  },
-  floatingPrimaryButtonText: {
-    color: patientTheme.colors.onPrimary,
-    fontSize: 16,
-    fontWeight: '900',
+    paddingBottom: 32,
   },
   listSearch: {
     marginBottom: 12,

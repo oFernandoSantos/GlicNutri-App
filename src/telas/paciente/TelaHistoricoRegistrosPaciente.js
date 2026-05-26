@@ -87,6 +87,21 @@ function formatTime(value) {
   return String(value).slice(0, 5);
 }
 
+function formatMealExtraNutrition(entry) {
+  const fiber = Number(entry?.fiberG || entry?.fibrasG || 0);
+  const sugars = Number(entry?.sugarsG || entry?.acucaresG || 0);
+  const sodium = Number(entry?.sodiumMg || entry?.sodioMg || 0);
+  const saturated = Number(entry?.saturatedFatG || entry?.gordurasSaturadasG || 0);
+  const parts = [];
+
+  if (fiber > 0) parts.push(`Fibras: ${Math.round(fiber)}g`);
+  if (sugars > 0) parts.push(`Açúcares: ${Math.round(sugars)}g`);
+  if (saturated > 0) parts.push(`Gord. sat.: ${Math.round(saturated)}g`);
+  if (sodium > 0) parts.push(`Sódio: ${Math.round(sodium)}mg`);
+
+  return parts.join(' · ');
+}
+
 function formatDateInput(value) {
   const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
 
@@ -273,7 +288,12 @@ function EmptyState({ activeTab, navigation, usuarioLogado, canResolvePatient })
 
   function irParaMonitoramento(extra = {}) {
     if (!canResolvePatient) return;
-    navigation.navigate('PacienteMonitoramento', { usuarioLogado, ...extra });
+    navigation.navigate('PacienteMonitoramento', {
+      usuarioLogado,
+      openQuickRegister: undefined,
+      openMedication: undefined,
+      ...extra,
+    });
   }
 
   function irParaDiario() {
@@ -1059,6 +1079,9 @@ export default function PacienteHistoricoRegistrosScreen({
                     <Text style={styles.recordLine}>
                       Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
                     </Text>
+                    {formatMealExtraNutrition(entry) ? (
+                      <Text style={styles.recordLine}>{formatMealExtraNutrition(entry)}</Text>
+                    ) : null}
                     {possuiFoto ? (
                       <Text style={styles.recordPhotoHint}>Toque para ver a foto</Text>
                     ) : null}

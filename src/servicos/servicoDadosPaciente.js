@@ -514,6 +514,26 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   const calories = Number(row?.calorias_total) || 0;
   const protein = Number(row?.proteinas_total) || 0;
   const fat = Number(row?.gorduras_total) || 0;
+  const firstFoodWithMealMeta = foods.find(
+    (item) => item?.mealLabel || item?.mealTypeLabel || item?.planSectionId
+  );
+  const mealLabel =
+    firstFoodWithMealMeta?.mealLabel ||
+    firstFoodWithMealMeta?.mealTypeLabel ||
+    'Refeição Registrada';
+  const planSectionId = firstFoodWithMealMeta?.planSectionId || null;
+  const fiber =
+    Number(row?.fibras_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.fibras) || 0), 0);
+  const sugars =
+    Number(row?.acucares_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.acucares) || 0), 0);
+  const saturatedFat =
+    Number(row?.gorduras_saturadas_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.gorduras_saturadas) || 0), 0);
+  const sodium =
+    Number(row?.sodio_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.sodio) || 0), 0);
 
   return {
     id: recordId ? `meal-ia-${recordId}` : `meal-db-${date}-${time}-${index}`,
@@ -521,7 +541,11 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     mode: row?.foto_url ? 'photo' : 'manual',
     date,
     time,
-    title: 'Refeição Registrada',
+    title: mealLabel,
+    mealLabel,
+    mealTypeLabel: firstFoodWithMealMeta?.mealTypeLabel || mealLabel,
+    planSectionId,
+    mealId: planSectionId,
     description: description || 'Refeição registrada.',
     glucoseNote: 'Macros salvos no banco',
     glucoseDelta: `${Math.round(carbs)} g carbos`,
@@ -530,10 +554,26 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     kcal: calories,
     proteinG: protein,
     fatG: fat,
+    fiberG: fiber,
+    sugarsG: sugars,
+    saturatedFatG: saturatedFat,
+    sodiumMg: sodium,
     foods: foods.map((item) => ({
       name: String(item?.nome || '').trim(),
       alimento: String(item?.nome || '').trim(),
       grams: Math.round(Number(item?.quantidade_gramas) || 0),
+      unit: item?.unidade_quantidade || null,
+      calories: Number(item?.calorias) || 0,
+      carbs: Number(item?.carboidratos) || 0,
+      protein: Number(item?.proteinas) || 0,
+      fat: Number(item?.gorduras) || 0,
+      fiber: Number(item?.fibras) || 0,
+      sugars: Number(item?.acucares) || 0,
+      saturatedFat: Number(item?.gorduras_saturadas) || 0,
+      sodium: Number(item?.sodio) || 0,
+      mealLabel: item?.mealLabel || null,
+      mealTypeLabel: item?.mealTypeLabel || null,
+      planSectionId: item?.planSectionId || null,
     })),
     storageOrigin: 'database',
     databaseId: recordId || null,
@@ -774,6 +814,24 @@ export function prefetchPatientPlanExperience(patientId, patientContext = null) 
     });
 }
 
+export function prefetchPatientScreenExperience(patientId, patientContext = null, preset = 'diario') {
+  if (!patientId && !patientContext) return Promise.resolve(null);
+
+  return resolveCanonicalPatientId(patientId, { patientContext })
+    .then((resolvedId) => {
+      if (!resolvedId) return null;
+
+      return fetchPatientExperience(resolvedId, {
+        patientContext,
+        ...mesclarLimitesDadosPaciente(preset),
+      });
+    })
+    .catch((error) => {
+      console.log(`Prefetch ${preset} paciente:`, error?.message || error);
+      return null;
+    });
+}
+
 export function prefetchPatientProfileExperience(patientId, patientContext = null) {
   if (!patientId && !patientContext) return Promise.resolve(null);
 
@@ -950,7 +1008,7 @@ async function loadPatientHomeSummary(patientId, options = {}) {
   const glucoseLimit = options.glucoseLimit ?? 7;
   const mealLimit = options.mealLimit ?? 0;
 
-  const [patient, tableAppState, glucoseReadings, databaseMealEntries] = await Promise.all([
+  const [patient, tableAppState, glucoseReadings, databaseMealEntries, activeMealPlan] = await Promise.all([
     effectivePatientId
       ? fetchPatientById(effectivePatientId, options)
       : fetchPatientById(patientId, options),
@@ -963,6 +1021,9 @@ async function loadPatientHomeSummary(patientId, options = {}) {
     mealLimit > 0 && effectivePatientId
       ? fetchMealEntries(effectivePatientId, mealLimit)
       : Promise.resolve([]),
+    options.includeMealPlan && effectivePatientId
+      ? fetchActiveMealPlanForPatient(effectivePatientId).catch(() => null)
+      : Promise.resolve(null),
   ]);
 
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
@@ -991,6 +1052,7 @@ async function loadPatientHomeSummary(patientId, options = {}) {
     clinicalObjective: parsed.objectiveText,
     appState: {
       ...normalizedAppState,
+      activeMealPlan,
       mealEntries: visibleMealEntries,
       medicationEntries: ensureArray(normalizedAppState.medicationEntries),
     },
@@ -1033,7 +1095,12 @@ async function loadPatientExperience(patientId, options = {}) {
   const glucoseLimit = options.glucoseLimit ?? 60;
   const medicationLimit = options.medicationLimit ?? 60;
   const mealLimit = options.mealLimit ?? 60;
-  const [glucoseReadings, databaseMedicationEntries, databaseMealEntries] = await Promise.all([
+  const [
+    glucoseReadings,
+    databaseMedicationEntries,
+    databaseMealEntries,
+    activeMealPlan,
+  ] = await Promise.all([
     glucoseLimit > 0
       ? fetchGlucoseReadings(effectivePatientId, glucoseLimit)
       : Promise.resolve([]),
@@ -1043,6 +1110,9 @@ async function loadPatientExperience(patientId, options = {}) {
     mealLimit > 0
       ? fetchMealEntries(effectivePatientId, mealLimit)
       : Promise.resolve([]),
+    options.includeMealPlan
+      ? fetchActiveMealPlanForPatient(effectivePatientId).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
     (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
@@ -1087,6 +1157,7 @@ async function loadPatientExperience(patientId, options = {}) {
     clinicalObjective: parsed.objectiveText,
     appState: {
       ...normalizedAppState,
+      activeMealPlan,
       mealEntries: visibleMealEntries,
       medicationEntries: visibleMedicationEntries,
     },
@@ -1739,6 +1810,7 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
 
   if (!rpcError && Array.isArray(rpcData)) {
     rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
+    return mergeCachedGlucoseReadings(rpcReadings).slice(0, limit);
   } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
     console.log('Erro ao buscar glicemia por RPC:', rpcError.message);
   }
@@ -1793,6 +1865,7 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
     rpcEntries = rpcData.map((item, index) =>
       normalizeMedicationEntry(item, 'database', index)
     );
+    return rpcEntries.slice(0, limit);
   } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
     console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
   }
@@ -1861,12 +1934,29 @@ export async function fetchMealEntries(patientId, limit = 120) {
     return [];
   }
 
-  const { data, error } = await supabase
+  const mealColumns =
+    'id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, fibras_total, acucares_total, gorduras_saturadas_total, sodio_total, confirmado, created_at';
+  const legacyMealColumns =
+    'id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, confirmado, created_at';
+
+  let { data, error } = await supabase
     .from('refeicao_ia')
-    .select('id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, confirmado, created_at')
+    .select(mealColumns)
     .eq('paciente_id', patientId)
     .order('created_at', { ascending: false })
     .limit(limit);
+
+  if (String(error?.message || '').toLowerCase().includes('schema cache')) {
+    const retry = await supabase
+      .from('refeicao_ia')
+      .select(legacyMealColumns)
+      .eq('paciente_id', patientId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.log('Erro ao buscar refeicoes IA:', error.message);

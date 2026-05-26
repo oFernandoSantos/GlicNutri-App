@@ -46,8 +46,13 @@ export function buildPatientProgressTxt({
 
   lines.push('', 'ULTIMAS REFEICOES REGISTRADAS');
   (mealEntries || []).slice(0, 40).forEach((entry, index) => {
+    const extras = [
+      Number(entry?.fiberG) > 0 ? `fibras ${Math.round(Number(entry.fiberG))}g` : '',
+      Number(entry?.sugarsG) > 0 ? `acucares ${Math.round(Number(entry.sugarsG))}g` : '',
+      Number(entry?.sodiumMg) > 0 ? `sodio ${Math.round(Number(entry.sodiumMg))}mg` : '',
+    ].filter(Boolean);
     lines.push(
-      `${index + 1}. ${entry?.date || '—'} ${entry?.time || ''} — ${entry?.title || entry?.name || 'Refeicao'}`
+      `${index + 1}. ${entry?.date || '—'} ${entry?.time || ''} — ${entry?.title || entry?.name || 'Refeicao'}${extras.length ? ` (${extras.join(', ')})` : ''}`
     );
   });
 
