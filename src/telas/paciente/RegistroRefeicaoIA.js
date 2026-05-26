@@ -14,10 +14,9 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
-import MensagemInline from '../../componentes/comum/MensagemInline';
+import ToastPaciente from '../../componentes/comum/ToastPaciente';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { invalidatePatientExperienceCache } from '../../servicos/cacheExperienciaPaciente';
-import { replaceCachedPatientAppState } from '../../servicos/centralAppState';
 import {
   addGlucoseReading,
   appendNewestEntry,
@@ -39,10 +38,14 @@ import {
 import {
   buscarAlimentosBrasil,
   FONTE_ALIMENTOS_LABEL,
-  TOTAL_ALIMENTOS_BRASIL,
+  materializarAlimentoDaBusca,
 } from '../../servicos/servicoBuscaAlimentosBrasil';
 
-const FOOD_SEARCH_PAGE_SIZE = 50;
+const FOOD_SEARCH_MIN_CHARS = 2;
+const FOOD_SEARCH_PAGE_SIZE = 12;
+const FOOD_SEARCH_LIST_MAX_HEIGHT = 200;
+const NOTIFICACAO_AUTO_MS = 5000;
+const PHOTO_DROPZONE_HEIGHT = 170;
 
 const mealTypeOptions = [
   'Cafe da Manha',
@@ -151,33 +154,59 @@ function normalizeAnalysisErrorMessage(error) {
   const normalized = rawMessage.toLowerCase();
 
   if (!rawMessage) {
-    return 'A IA nao conseguiu reconhecer a refeicao.';
+    return 'Nao foi possivel analisar a foto.';
   }
 
   if (normalized.includes('non-2xx status code')) {
-    return 'A analise da IA falhou no servidor. Se a conta da LogMeal ainda nao foi ativada, confirme o e-mail dela e tente novamente.';
+    return 'Servidor indisponivel. Tente de novo em instantes.';
   }
 
-  if (normalized.includes('confirm your apicompany email') || normalized.includes('confirmation link')) {
-    return 'A conta da LogMeal ainda nao foi ativada. Confirme o e-mail da conta LogMeal e tente novamente.';
+  if (
+    normalized.includes('limite') ||
+    normalized.includes('gemini') ||
+    normalized.includes('quota')
+  ) {
+    return 'Limite da IA atingido. Use anexar sem IA ou adicione manualmente.';
   }
 
   return rawMessage;
 }
 
+function feedbackErroAnalise(error) {
+  const detalhe = normalizeAnalysisErrorMessage(error);
+  const texto = detalhe.toLowerCase();
+
+  if (texto.includes('limite') || texto.includes('gemini') || texto.includes('quota')) {
+    return {
+      tipo: 'aviso',
+      title: 'IA indisponivel agora',
+      detail: 'Continuaremos no modo manual.',
+    };
+  }
+
+  if (texto.includes('identificar') || texto.includes('reconhecer')) {
+    return {
+      tipo: 'aviso',
+      title: 'Nao vimos alimentos na foto',
+      detail: 'Outro angulo, mais luz, ou adicione manualmente.',
+    };
+  }
+
+  return {
+    tipo: 'erro',
+    title: 'Analise nao concluida',
+    detail: detalhe,
+  };
+}
+
 function buildSelectedFoodSummary(item) {
-  const quantity = item.quantidade_gramas ? `${formatNutrient(item.quantidade_gramas, 'g')}` : '';
   const calories = `${Math.round(Number(item.calorias) || 0)} kcal`;
   const macros = `C:${formatNutrient(item.carboidratos, 'g')} P:${formatNutrient(
     item.proteinas,
     'g'
   )} G:${formatNutrient(item.gorduras, 'g')}`;
 
-  if (quantity) {
-    return `${quantity}  ${calories}  ${macros}`;
-  }
-
-  return `${calories}  ${macros}`;
+  return `${calories} · ${macros}`;
 }
 
 export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: usuarioProp }) {
@@ -197,10 +226,11 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   const [selectedImage, setSelectedImage] = useState(null);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [alimentos, setAlimentos] = useState([]);
-  const [erroAnalise, setErroAnalise] = useState('');
+  const [statusFoto, setStatusFoto] = useState(null);
   const [loadingAction, setLoadingAction] = useState('');
   const [analysisMeta, setAnalysisMeta] = useState(null);
-  const [mensagemTopo, setMensagemTopo] = useState(null);
+  const [photoOptionsVisible, setPhotoOptionsVisible] = useState(false);
+  const [toast, setToast] = useState(null);
   const [foodSearch, setFoodSearch] = useState('');
   const [foodSearchLimit, setFoodSearchLimit] = useState(FOOD_SEARCH_PAGE_SIZE);
   const [mealGlucoseValue, setMealGlucoseValue] = useState('');
@@ -217,6 +247,86 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     isValidManualDate(mealTimingDate) &&
     isValidManualTime(mealTimingTime);
 
+  function mostrarAvisoTopo({ tipo = 'aviso', titulo, detalhe = '' }) {
+    setToast(null);
+    setStatusFoto({
+      tipo,
+      title: titulo,
+      detail: detalhe,
+    });
+  }
+
+  function mostrarToast(tipo, texto, detalhe = '') {
+    mostrarAvisoTopo({ tipo, titulo: texto, detalhe });
+  }
+
+  function fecharNotificacaoTopo() {
+    setStatusFoto(null);
+    setToast(null);
+  }
+
+  function mostrarFotoSelecionada(origem) {
+    const detalhe =
+      origem === 'camera'
+        ? 'Foto da camera pronta. Analise com IA ou anexe sem IA.'
+        : 'Foto da galeria pronta. Analise com IA ou anexe sem IA.';
+
+    mostrarAvisoTopo({
+      tipo: 'info',
+      titulo: 'Foto selecionada',
+      detalhe,
+    });
+  }
+
+  const notificacaoTopo = useMemo(() => {
+    if (loadingAction === 'upload') {
+      return {
+        tipo: 'processando',
+        texto: 'Enviando foto...',
+        subtexto: 'Preparando imagem para a refeicao',
+        carregando: true,
+      };
+    }
+
+    if (loadingAction === 'analysis') {
+      return {
+        tipo: 'info',
+        texto: 'Analisando com IA...',
+        subtexto: 'Identificando alimentos na foto',
+        carregando: true,
+      };
+    }
+
+    if (loadingAction === 'save') {
+      return {
+        tipo: 'processando',
+        texto: 'Salvando refeicao...',
+        subtexto: 'Registrando alimentos e nutrientes',
+        carregando: true,
+      };
+    }
+
+    if (statusFoto?.title) {
+      return {
+        tipo: statusFoto.tipo || 'aviso',
+        texto: statusFoto.title,
+        subtexto: statusFoto.detail || '',
+        carregando: false,
+      };
+    }
+
+    if (toast?.texto) {
+      return {
+        tipo: toast.tipo || 'aviso',
+        texto: toast.texto,
+        subtexto: '',
+        carregando: false,
+      };
+    }
+
+    return null;
+  }, [loadingAction, statusFoto, toast]);
+
   const summaryMetrics = useMemo(
     () => [
       { label: 'kcal', value: Math.round(Number(totais.calorias_total) || 0), color: '#111827' },
@@ -231,21 +341,37 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setFoodSearchLimit(FOOD_SEARCH_PAGE_SIZE);
   }, [foodSearch]);
 
-  const foodSearchResult = useMemo(
-    () => buscarAlimentosBrasil(foodSearch, { limit: foodSearchLimit, offset: 0 }),
-    [foodSearch, foodSearchLimit]
-  );
+  const foodSearchQuery = String(foodSearch || '').trim();
+  const foodSearchAtivo = foodSearchQuery.length >= FOOD_SEARCH_MIN_CHARS;
+
+  const foodSearchResult = useMemo(() => {
+    if (!foodSearchAtivo) {
+      return { items: [], total: 0, hasMore: false };
+    }
+
+    return buscarAlimentosBrasil(foodSearchQuery, { limit: foodSearchLimit, offset: 0 });
+  }, [foodSearchAtivo, foodSearchQuery, foodSearchLimit]);
 
   const filteredSuggestions = foodSearchResult.items;
   const foodSearchSummary = useMemo(() => {
-    const query = String(foodSearch || '').trim();
-
-    if (!query) {
-      return `${TOTAL_ALIMENTOS_BRASIL} alimentos da tabela ${FONTE_ALIMENTOS_LABEL} (valores por 100 g)`;
+    if (!foodSearchQuery) {
+      return `Mín. ${FOOD_SEARCH_MIN_CHARS} letras · ex.: arroz, frango, salada`;
     }
 
-    return `${foodSearchResult.total} resultado(s) para "${query}"`;
-  }, [foodSearch, foodSearchResult.total]);
+    if (!foodSearchAtivo) {
+      return 'Digite mais 1 letra.';
+    }
+
+    if (!foodSearchResult.total) {
+      return `Nada para "${foodSearchQuery}".`;
+    }
+
+    if (foodSearchResult.searchHint) {
+      return foodSearchResult.searchHint;
+    }
+
+    return `${foodSearchResult.total} resultado(s)`;
+  }, [foodSearchQuery, foodSearchAtivo, foodSearchResult]);
 
   function fecharEscolhaHorarioEVoltar() {
     setPendingMealAction(null);
@@ -270,92 +396,38 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setMealTimingChoiceVisible(true);
   }
 
-  function abrirCameraRefeicao() {
-    if (!mealType) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Defina o tipo e o horario da refeicao antes de usar a camera.',
-      });
-      return;
-    }
-
-    tirarFoto();
+  function abrirOpcoesFoto() {
+    if (isBusy) return;
+    setPhotoOptionsVisible(true);
   }
 
-  function abrirGaleriaRefeicao() {
-    if (!mealType) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Defina o tipo e o horario da refeicao antes de usar a galeria.',
-      });
-      return;
-    }
-
-    escolherDaGaleria();
+  function fecharOpcoesFoto() {
+    setPhotoOptionsVisible(false);
   }
 
-  async function escolherDaGaleria() {
-    try {
-      const imagem = await escolherImagemRefeicaoDaGaleria();
+  async function processarFotoComFallback(imagem, origem) {
+    if (!imagem?.uri) return;
 
-      if (!imagem) {
-        return;
-      }
+    setSelectedImage(imagem);
+    setUploadedImage(null);
+    setAlimentos([]);
+    setAnalysisMeta(null);
 
-      setSelectedImage(imagem);
-      setUploadedImage(null);
-      setAlimentos([]);
-      setAnalysisMeta(null);
-      setErroAnalise('');
-    } catch (error) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: error?.message || 'Nao foi possivel abrir a galeria. Verifique as permissoes.',
-      });
-    }
-  }
-
-  async function tirarFoto() {
-    try {
-      const imagem = await tirarFotoRefeicao();
-
-      if (!imagem) {
-        return;
-      }
-
-      setSelectedImage(imagem);
-      setUploadedImage(null);
-      setAlimentos([]);
-      setAnalysisMeta(null);
-      setErroAnalise('');
-    } catch (error) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: error?.message || 'Nao foi possivel abrir a camera. Verifique as permissoes.',
-      });
-    }
-  }
-
-  async function analisarImagem() {
-    if (!selectedImage?.uri) {
-      setMensagemTopo({ tipo: 'aviso', texto: 'Selecione uma imagem antes de analisar.' });
-      return;
+    if (origem) {
+      mostrarFotoSelecionada(origem);
     }
 
     if (!patientId) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Paciente sem identificador para registrar a refeicao.',
-      });
+      mostrarToast('aviso', 'Sessao expirada', 'Faca login novamente no app.');
       return;
     }
 
-    setErroAnalise('');
+    setStatusFoto(null);
     setLoadingAction('upload');
 
     try {
       const upload = await uploadImagemRefeicaoIA({
-        asset: selectedImage,
+        asset: imagem,
         patientId,
       });
 
@@ -374,66 +446,108 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       if (!itens.length) {
         throw new Error(
           response.message ||
-            'A IA nao conseguiu reconhecer alimentos nessa imagem. Tente outra foto ou preencha manualmente.'
+            'Nao foi possivel identificar alimentos nesta foto. Continue preenchendo manualmente.'
         );
       }
 
       setAlimentos(itens);
       setAnalysisMeta({
-        source: response.source || 'logmeal',
+        source: response.source || 'gemini-vision',
         imageId: response.imageId || null,
       });
+      mostrarAvisoTopo({
+        tipo: 'sucesso',
+        titulo: `${itens.length} alimento(s) pela IA`,
+        detalhe: 'Confira porcoes (g) e ajuste se precisar.',
+      });
     } catch (error) {
-      console.log('Erro ao analisar refeicao com IA:', error);
-      setErroAnalise(
-        normalizeAnalysisErrorMessage(error) +
-          ' Voce pode anexar a foto sem IA ou preencher os alimentos manualmente abaixo.'
-      );
+      console.log('Falha na IA, seguindo manual:', error);
+      setAnalysisMeta({
+        source: 'foto-manual',
+        imageId: null,
+      });
+
+      const feedback = feedbackErroAnalise(error);
+      mostrarAvisoTopo({
+        tipo: feedback.tipo || 'aviso',
+        titulo: feedback.title || 'IA indisponivel',
+        detalhe: 'Foto anexada. Continue adicionando os alimentos na lista.',
+      });
     } finally {
       setLoadingAction('');
     }
   }
 
-  async function anexarFotoSemAnalise() {
-    if (!selectedImage?.uri) {
-      setMensagemTopo({ tipo: 'aviso', texto: 'Selecione ou tire uma foto antes de anexar.' });
+  async function escolherDaGaleria({ fecharModal = false } = {}) {
+    if (isBusy) {
       return;
     }
-
-    if (!patientId) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Paciente sem identificador para registrar a refeicao.',
-      });
-      return;
-    }
-
-    setErroAnalise('');
-    setLoadingAction('upload');
 
     try {
-      const upload = await uploadImagemRefeicaoIA({
-        asset: selectedImage,
-        patientId,
-      });
+      const imagem = await escolherImagemRefeicaoDaGaleria();
 
-      setUploadedImage(upload);
-      setAnalysisMeta({
-        source: 'foto-manual',
-        imageId: null,
-      });
-      setMensagemTopo({
-        tipo: 'sucesso',
-        texto: 'Foto anexada. Adicione os alimentos abaixo e salve a refeicao.',
-      });
+      if (fecharModal) {
+        fecharOpcoesFoto();
+      }
+
+      if (!imagem) {
+        return;
+      }
+
+      await processarFotoComFallback(imagem, 'galeria');
     } catch (error) {
-      console.log('Erro ao anexar foto sem IA:', error);
-      setMensagemTopo({
+      if (fecharModal) {
+        fecharOpcoesFoto();
+      }
+
+      mostrarAvisoTopo({
         tipo: 'erro',
-        texto: error?.message || 'Nao foi possivel enviar a foto agora.',
+        titulo: 'Galeria indisponivel',
+        detalhe: error?.message || 'Nao foi possivel abrir a galeria.',
       });
-    } finally {
-      setLoadingAction('');
+    }
+  }
+
+  async function tirarFoto({ fecharModal = false } = {}) {
+    if (isBusy) {
+      return;
+    }
+
+    if (Platform.OS === 'web') {
+      if (fecharModal) {
+        fecharOpcoesFoto();
+      }
+
+      mostrarAvisoTopo({
+        tipo: 'aviso',
+        titulo: 'Use a galeria no navegador',
+        detalhe: 'No computador, escolha a foto pelo botao Galeria.',
+      });
+      return;
+    }
+
+    try {
+      const imagem = await tirarFotoRefeicao();
+
+      if (fecharModal) {
+        fecharOpcoesFoto();
+      }
+
+      if (!imagem) {
+        return;
+      }
+
+      await processarFotoComFallback(imagem, 'camera');
+    } catch (error) {
+      if (fecharModal) {
+        fecharOpcoesFoto();
+      }
+
+      mostrarAvisoTopo({
+        tipo: 'erro',
+        titulo: 'Camera indisponivel',
+        detalhe: error?.message || 'Nao foi possivel abrir a camera.',
+      });
     }
   }
 
@@ -442,6 +556,32 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       current.map((item, currentIndex) => {
         if (currentIndex !== index) {
           return item;
+        }
+
+        if (field === 'quantidade_gramas') {
+          const raw = Number(String(value).replace(',', '.'));
+          const quantidade = Number.isFinite(raw) ? raw : 0;
+          const baseQty = Number(item.base_quantidade_gramas) > 0 ? Number(item.base_quantidade_gramas) : 100;
+          const factor = baseQty > 0 ? quantidade / baseQty : 1;
+
+          const scaled = (baseValue) => {
+            const base = Number(baseValue);
+            if (!Number.isFinite(base)) return 0;
+            return Math.round(base * factor * 10) / 10;
+          };
+
+          return {
+            ...item,
+            quantidade_gramas: quantidade,
+            calorias: scaled(item.base_calorias),
+            carboidratos: scaled(item.base_carboidratos),
+            proteinas: scaled(item.base_proteinas),
+            gorduras: scaled(item.base_gorduras),
+            fibras: scaled(item.base_fibras),
+            acucares: scaled(item.base_acucares),
+            gorduras_saturadas: scaled(item.base_gorduras_saturadas),
+            sodio: scaled(item.base_sodio),
+          };
         }
 
         if (field === 'nome' || field === 'categoria') {
@@ -461,29 +601,86 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     );
   }
 
-  function adicionarItemManual() {
+  function adicionarItemManual(nomeSugerido, { limparBusca = true } = {}) {
+    const nomeDigitado = String(nomeSugerido ?? foodSearchQuery ?? '').trim();
+    const nome = nomeDigitado || 'Novo alimento';
+
     setAlimentos((current) => [
       ...current,
       criarAlimentoEditavel({
-        nome: 'Novo alimento',
+        nome,
         categoria: 'Ajuste manual',
       }),
     ]);
+
+    if (limparBusca) {
+      setFoodSearch('');
+    }
+
+    mostrarAvisoTopo({
+      tipo: 'sucesso',
+      titulo: 'Adicionado como digitado',
+      detalhe: `${nome} · ajuste a quantidade (g) na lista.`,
+    });
+  }
+
+  function adicionarTextoDigitadoBusca() {
+    if (!foodSearchQuery || isBusy) {
+      return;
+    }
+
+    adicionarItemManual(foodSearchQuery, { limparBusca: true });
   }
 
   function adicionarSugestao(item) {
+    const fonte = materializarAlimentoDaBusca(item);
+    const refTacoId = item.buscaInteligente
+      ? item.refTacoId
+      : item.refTacoId ?? (item.origem === 'taco' ? item.id : null);
+    const nomeExibicao = item.buscaInteligente
+      ? item.nomeComercial || item.nome
+      : item.nome;
+    const referenciaLabel =
+      item.nomeTacoReferencia ||
+      item.referenciaTacoNome ||
+      fonte.referenciaTacoNome ||
+      (item.origem === 'taco' ? item.nome : null);
+
     setAlimentos((current) => [
       ...current,
       criarAlimentoEditavel({
-        ...item,
+        ...fonte,
         id: undefined,
-        refTacoId: item.id,
+        nome: nomeExibicao,
+        refTacoId: refTacoId || null,
+        nomeTacoReferencia: referenciaLabel,
       }),
     ]);
+
+    setFoodSearch('');
+
+    const detalheReferencia = item.buscaInteligente && referenciaLabel ? ` · sugestão baseada em: ${referenciaLabel}` : '';
+
+    mostrarAvisoTopo({
+      tipo: 'sucesso',
+      titulo: 'Adicionado à lista',
+      detalhe: `${nomeExibicao}${detalheReferencia} · confira porção (g/ml)`,
+    });
   }
 
   function removerItem(index) {
+    const removido = alimentos[index];
+    const nomeRemovido = String(removido?.nome || '').trim();
+
     setAlimentos((current) => current.filter((_, currentIndex) => currentIndex !== index));
+
+    mostrarAvisoTopo({
+      tipo: 'remocao',
+      titulo: 'Item removido',
+      detalhe: nomeRemovido
+        ? `${nomeRemovido} saiu da lista`
+        : 'Voce pode adicionar outro alimento.',
+    });
   }
 
   async function sincronizarTimeline(entry) {
@@ -497,7 +694,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       });
       const recordId = String(entry?.databaseId || '').trim();
       const entryId = String(entry?.id || '').trim();
-      const alreadyPresent = (experience.appState?.mealEntries || []).some((item) => {
+      const currentEntries = experience.appState?.mealEntries || [];
+      const alreadyPresent = currentEntries.some((item) => {
         const itemDbId = String(item?.databaseId || '').trim();
         const itemId = String(item?.id || '').trim();
         if (recordId && (itemDbId === recordId || itemId === `meal-ia-${recordId}`)) {
@@ -506,19 +704,17 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         return entryId && itemId === entryId;
       });
 
-      if (alreadyPresent) {
-        return;
-      }
-
       const timelineEntry = {
         ...entry,
         databaseId: recordId || entry?.databaseId || null,
         storageOrigin: entry?.storageOrigin || 'database',
       };
-      const nextState = {
-        ...experience.appState,
-        mealEntries: appendNewestEntry(experience.appState.mealEntries, timelineEntry),
-      };
+      const nextState = alreadyPresent
+        ? experience.appState
+        : {
+            ...experience.appState,
+            mealEntries: appendNewestEntry(currentEntries, timelineEntry),
+          };
 
       const canonicalId = experience.patient?.id_paciente_uuid || patientId;
 
@@ -529,7 +725,6 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         currentPatient: experience.patient,
         patientContext: usuarioLogado,
       });
-      replaceCachedPatientAppState(canonicalId, nextState);
       invalidatePatientExperienceCache(canonicalId);
     } catch (error) {
       console.log('Erro ao sincronizar timeline da refeicao IA:', error);
@@ -558,10 +753,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     const parsedValue = Number(String(mealGlucoseValue || '').replace(',', '.'));
 
     if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Informe uma glicose valida em mg/dL.',
-      });
+      mostrarToast('aviso', 'Glicose invalida', 'Informe um valor maior que zero em mg/dL.');
       return;
     }
 
@@ -582,12 +774,18 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
             ? 'Tipo da glicemia: Antes da refeicao'
             : 'Tipo da glicemia: Outro Momento',
       });
+      mostrarAvisoTopo({
+        tipo: 'sucesso',
+        titulo: 'Glicose registrada',
+        detalhe: `${parsedValue} mg/dL · antes da refeicao`,
+      });
       continueAfterMealGlucose();
     } catch (error) {
       console.log('Erro ao salvar glicemia no fluxo da refeicao:', error);
-      setMensagemTopo({
+      mostrarAvisoTopo({
         tipo: 'erro',
-        texto: 'Nao foi possivel salvar a glicose agora. Tente novamente ou continue sem ela.',
+        titulo: 'Glicose nao salva',
+        detalhe: 'Continue sem ela ou tente de novo.',
       });
     } finally {
       setSavingMealGlucose(false);
@@ -596,19 +794,26 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
   function handleConfirmMealTiming() {
     if (!canConfirmMealTiming) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto:
-          mealTimingMode === 'current'
-            ? 'Selecione o tipo da refeicao para continuar.'
-            : 'Selecione o tipo da refeicao e informe uma data e hora validas.',
-      });
+      mostrarToast(
+        'aviso',
+        'Dados incompletos',
+        mealTimingMode === 'current'
+          ? 'Selecione o tipo da refeicao.'
+          : 'Informe tipo, data e hora da refeicao.'
+      );
       return;
     }
 
     setMealTimingChoiceVisible(false);
     setMealTimingDetailsVisible(false);
     setMealTypeMenuVisible(false);
+
+    mostrarAvisoTopo({
+      tipo: 'info',
+      titulo: 'Refeicao configurada',
+      detalhe: `${mealType} · ${mealTimingDate} ${mealTimingTime}`,
+    });
+
     runPendingMealAction();
   }
 
@@ -641,18 +846,12 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
   async function confirmarSalvar() {
     if (!hasFoods) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Confirme ao menos um alimento antes de salvar.',
-      });
+      mostrarToast('aviso', 'Lista vazia', 'Adicione ao menos um alimento para salvar.');
       return;
     }
 
     if (!patientId) {
-      setMensagemTopo({
-        tipo: 'aviso',
-        texto: 'Paciente sem identificador para salvar a refeicao.',
-      });
+      mostrarToast('aviso', 'Sessao expirada', 'Faca login novamente no app.');
       return;
     }
 
@@ -712,11 +911,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       });
     } catch (error) {
       console.log('Erro ao salvar refeicao IA:', error);
-      setMensagemTopo({
+      mostrarAvisoTopo({
         tipo: 'erro',
-        texto:
-          error?.message ||
-          'Nao foi possivel salvar a refeicao. Verifique a conexao e tente novamente.',
+        titulo: 'Refeicao nao salva',
+        detalhe: error?.message || 'Verifique a conexao e tente de novo.',
       });
     } finally {
       setLoadingAction('');
@@ -730,28 +928,35 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       usuarioLogado={usuarioLogado}
       showTabBar={false}
       contentContainerStyle={styles.screenContent}
+      topOverlay={
+        notificacaoTopo ? (
+          <ToastPaciente
+            posicao="top"
+            tipo={notificacaoTopo.tipo}
+            texto={notificacaoTopo.texto}
+            subtexto={notificacaoTopo.subtexto}
+            carregando={notificacaoTopo.carregando}
+            onFechar={fecharNotificacaoTopo}
+            autoOcultarMs={notificacaoTopo.carregando ? 0 : NOTIFICACAO_AUTO_MS}
+          />
+        ) : null
+      }
       footerOverlay={
-        <TouchableOpacity
-          style={[styles.saveButton, isBusy && styles.saveButtonBusy]}
-          onPress={confirmarSalvar}
-          disabled={!hasFoods || isBusy}
-        >
-          {loadingAction === 'save' ? (
-            <ActivityIndicator color={patientTheme.colors.onPrimary} />
-          ) : (
-            <Text style={styles.saveButtonText}>Salvar Refeicao</Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.footerStack}>
+          <TouchableOpacity
+            style={[styles.saveButton, isBusy && styles.saveButtonBusy]}
+            onPress={confirmarSalvar}
+            disabled={!hasFoods || isBusy}
+          >
+            {loadingAction === 'save' ? (
+              <ActivityIndicator color={patientTheme.colors.onPrimary} />
+            ) : (
+              <Text style={styles.saveButtonText}>Salvar Refeicao</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       }
     >
-      {mensagemTopo?.texto ? (
-        <MensagemInline
-          tipo={mensagemTopo.tipo || 'aviso'}
-          texto={mensagemTopo.texto}
-          onFechar={() => setMensagemTopo(null)}
-        />
-      ) : null}
-
       <Modal
         visible={mealTimingChoiceVisible}
         transparent
@@ -1024,173 +1229,92 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </View>
       </Modal>
 
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Tipo de Refeicao</Text>
-        <TouchableOpacity style={styles.typeSelector} onPress={abrirEdicaoHorarioRefeicao}>
-          <View style={styles.typeSelectorContent}>
-            <Text style={[styles.typeSelectorValue, !mealType && styles.typeSelectorPlaceholder]}>
+      <Modal
+        visible={photoOptionsVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={fecharOpcoesFoto}
+      >
+        <View style={styles.overlayLayer}>
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Anexar foto</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={fecharOpcoesFoto}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.photoPickerOptions}>
+                <TouchableOpacity
+                  style={styles.photoPickerOption}
+                  onPress={() => void tirarFoto({ fecharModal: true })}
+                  disabled={isBusy}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="camera-outline" size={20} color={patientTheme.colors.primary} />
+                  <Text style={styles.photoPickerOptionText}>Câmera</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.photoPickerOption}
+                  onPress={() => void escolherDaGaleria({ fecharModal: true })}
+                  disabled={isBusy}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="image-outline" size={20} color={patientTheme.colors.primary} />
+                  <Text style={styles.photoPickerOptionText}>Galeria</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      <TouchableOpacity
+        style={styles.mealTypeCard}
+        onPress={abrirEdicaoHorarioRefeicao}
+        activeOpacity={0.88}
+      >
+        <View style={styles.mealTypeCardContent}>
+          <View style={styles.mealTypeCardTextCol}>
+            <Text style={styles.mealTypeCardTitle}>Tipo de refeição</Text>
+            <Text style={[styles.mealTypeCardValue, !mealType && styles.typeSelectorPlaceholder]}>
               {mealType || 'Selecione...'}
             </Text>
-            <Text style={styles.typeSelectorMeta}>
-              {getMealTimingLabel(mealTimingMode)}  {mealTimingDate}  {mealTimingTime}
+            <Text style={styles.mealTypeCardMeta} numberOfLines={1}>
+              {getMealTimingLabel(mealTimingMode)} · {mealTimingDate} · {mealTimingTime}
             </Text>
           </View>
-          <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
-        </TouchableOpacity>
-      </View>
+          <View style={styles.mealTypeCardChevron}>
+            <Ionicons name="chevron-forward" size={16} color={patientTheme.colors.textMuted} />
+          </View>
+        </View>
+      </TouchableOpacity>
 
-      <View style={styles.card}>
+      <View style={[styles.card, styles.photoCard]}>
         <TouchableOpacity
-          style={styles.photoDropzone}
-          onPress={abrirCameraRefeicao}
+          style={[
+            styles.photoDropzone,
+            selectedImage?.uri ? styles.photoDropzoneFilled : styles.photoDropzoneEmpty,
+          ]}
+          onPress={abrirOpcoesFoto}
           activeOpacity={0.88}
         >
           {selectedImage?.uri ? (
             <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="cover" />
           ) : (
             <>
-              <Ionicons name="camera-outline" size={28} color={patientTheme.colors.textMuted} />
-              <Text style={styles.photoDropzoneTitle}>Tirar foto da refeicao</Text>
-              <Text style={styles.photoDropzoneText}>Opcional: IA ou apenas anexar a foto</Text>
+              <Ionicons name="camera-outline" size={48} color={patientTheme.colors.primary} />
+              <Text style={styles.photoDropzoneTitle}>Anexar foto da refeição</Text>
+              <Text style={styles.photoDropzoneText}>Toque aqui para escolher câmera ou galeria</Text>
             </>
           )}
         </TouchableOpacity>
 
-        <View style={styles.photoActionsRow}>
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={abrirCameraRefeicao}
-            disabled={isBusy}
-          >
-            <Ionicons name="camera-outline" size={18} color={patientTheme.colors.text} />
-            <Text style={styles.secondaryButtonText}>Camera</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity
-            style={styles.secondaryButton}
-            onPress={abrirGaleriaRefeicao}
-            disabled={isBusy}
-          >
-            <Ionicons name="image-outline" size={18} color={patientTheme.colors.text} />
-            <Text style={styles.secondaryButtonText}>Galeria</Text>
-          </TouchableOpacity>
-        </View>
-
-        <TouchableOpacity
-          style={[
-            styles.primaryButton,
-            (!hasSelectedImage || isBusy) && styles.primaryButtonDisabled,
-          ]}
-          onPress={analisarImagem}
-          disabled={!hasSelectedImage || isBusy}
-        >
-          {loadingAction === 'analysis' ? (
-            <ActivityIndicator color={patientTheme.colors.onPrimary} />
-          ) : (
-            <Text style={styles.primaryButtonText}>Analisar com IA</Text>
-          )}
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={[
-            styles.secondaryButton,
-            styles.photoSecondaryFull,
-            (!hasSelectedImage || isBusy) && styles.primaryButtonDisabled,
-          ]}
-          onPress={anexarFotoSemAnalise}
-          disabled={!hasSelectedImage || isBusy}
-        >
-          {loadingAction === 'upload' ? (
-            <ActivityIndicator color={patientTheme.colors.text} />
-          ) : (
-            <>
-              <Ionicons name="attach-outline" size={18} color={patientTheme.colors.text} />
-              <Text style={styles.secondaryButtonText}>Anexar foto sem IA</Text>
-            </>
-          )}
-        </TouchableOpacity>
-
-        {loadingAction === 'upload' ? (
-          <Text style={styles.helperText}>Enviando imagem para o storage...</Text>
-        ) : null}
-        {loadingAction === 'analysis' ? (
-          <Text style={styles.helperText}>Consultando a IA alimentar (TACO + LogMeal)...</Text>
-        ) : null}
-        {analysisMeta?.source === 'foto-manual' ? (
-          <Text style={styles.helperText}>Foto anexada sem analise. Preencha os alimentos abaixo.</Text>
-        ) : null}
-        {analysisMeta?.source && analysisMeta.source !== 'foto-manual' ? (
-          <Text style={styles.helperText}>Analise concluida via {analysisMeta.source}.</Text>
-        ) : null}
-        {erroAnalise ? <Text style={styles.errorText}>{erroAnalise}</Text> : null}
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.cardTitle}>Buscar Alimento</Text>
-        <View style={styles.searchBox}>
-          <Ionicons name="search-outline" size={18} color={patientTheme.colors.textMuted} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Digite o nome do alimento..."
-            placeholderTextColor="#9aa1a8"
-            value={foodSearch}
-            onChangeText={setFoodSearch}
-          />
-        </View>
-
-        <Text style={styles.cardHint}>{foodSearchSummary}</Text>
-
-        <ScrollView
-          style={styles.suggestionListScroll}
-          contentContainerStyle={styles.suggestionList}
-          nestedScrollEnabled
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator
-        >
-          {filteredSuggestions.map((item) => (
-            <View key={`taco-${item.id}`} style={styles.suggestionRow}>
-              <View style={styles.suggestionInfo}>
-                <Text style={styles.suggestionName}>{item.nome}</Text>
-                <Text style={styles.suggestionSubtext}>
-                  {item.categoria} · {item.porcao}
-                </Text>
-              </View>
-              <View style={styles.suggestionMeta}>
-                <Text style={styles.suggestionCalories}>{Math.round(item.calorias)} kcal</Text>
-                <Text style={styles.suggestionMacros}>
-                  C:{formatNutrient(item.carboidratos)}g P:{formatNutrient(item.proteinas)}g
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.suggestionAddButton}
-                onPress={() => adicionarSugestao(item)}
-                disabled={isBusy}
-              >
-                <Ionicons name="add" size={18} color={patientTheme.colors.primaryDark} />
-              </TouchableOpacity>
-            </View>
-          ))}
-
-          {!filteredSuggestions.length ? (
-            <View style={styles.emptySuggestionState}>
-              <Text style={styles.emptySuggestionText}>Nenhum alimento encontrado.</Text>
-              <TouchableOpacity style={styles.inlineLinkButton} onPress={adicionarItemManual}>
-                <Text style={styles.inlineLinkText}>Adicionar manualmente</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-
-          {foodSearchResult.hasMore ? (
-            <TouchableOpacity
-              style={styles.loadMoreFoodsButton}
-              onPress={() => setFoodSearchLimit((current) => current + FOOD_SEARCH_PAGE_SIZE)}
-            >
-              <Text style={styles.loadMoreFoodsText}>
-                Carregar mais ({filteredSuggestions.length} de {foodSearchResult.total})
-              </Text>
-            </TouchableOpacity>
-          ) : null}
-        </ScrollView>
       </View>
 
       <View style={styles.selectedCard}>
@@ -1203,54 +1327,169 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           </View>
         </View>
 
+        <View style={styles.searchBox}>
+          <Ionicons name="search-outline" size={16} color={patientTheme.colors.textMuted} />
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Buscar alimento"
+            placeholderTextColor="#9aa1a8"
+            value={foodSearch}
+            onChangeText={setFoodSearch}
+            returnKeyType="done"
+            onSubmitEditing={adicionarTextoDigitadoBusca}
+            blurOnSubmit
+          />
+          {foodSearch ? (
+            <TouchableOpacity
+              onPress={() => setFoodSearch('')}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityLabel="Limpar busca"
+            >
+              <Ionicons name="close-circle" size={18} color={patientTheme.colors.textMuted} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <Text style={styles.cardHint} numberOfLines={1}>
+          {foodSearchSummary}
+        </Text>
+
+        {foodSearchAtivo ? (
+          <TouchableOpacity
+            style={[styles.usarDigitadoButton, isBusy && styles.buttonDisabled]}
+            onPress={adicionarTextoDigitadoBusca}
+            disabled={isBusy}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="create-outline" size={16} color={patientTheme.colors.primary} />
+            <Text style={styles.usarDigitadoButtonText} numberOfLines={2}>
+              Usar o que digitei: "{foodSearchQuery}"
+            </Text>
+            <Ionicons name="arrow-forward" size={16} color={patientTheme.colors.primary} />
+          </TouchableOpacity>
+        ) : null}
+
+        {foodSearchAtivo && filteredSuggestions.length ? (
+          <ScrollView
+            style={[styles.suggestionListScroll, { maxHeight: FOOD_SEARCH_LIST_MAX_HEIGHT }]}
+            contentContainerStyle={styles.suggestionList}
+            nestedScrollEnabled
+            keyboardShouldPersistTaps="handled"
+            showsVerticalScrollIndicator
+          >
+            {filteredSuggestions.map((item) => (
+              <TouchableOpacity
+                key={`taco-${item.id}`}
+                style={[
+                  styles.suggestionRowCompact,
+                  item.buscaInteligente && styles.suggestionRowDestaque,
+                ]}
+                onPress={() => adicionarSugestao(item)}
+                disabled={isBusy}
+                activeOpacity={0.7}
+              >
+                <View style={styles.suggestionTextCol}>
+                  <Text
+                    style={[
+                      styles.suggestionNameCompact,
+                      item.buscaInteligente && styles.suggestionNameDestaque,
+                    ]}
+                    numberOfLines={2}
+                  >
+                    {item.nome}
+                  </Text>
+                  {item.buscaInteligente && item.nomeTacoReferencia ? (
+                    <Text style={styles.suggestionRefTaco} numberOfLines={1}>
+                      Sugestão para: {item.nomeTacoReferencia}
+                    </Text>
+                  ) : item.origem === 'industrializado' ? (
+                    <Text style={styles.suggestionRefTaco} numberOfLines={1}>
+                      Produto pronto para registrar
+                    </Text>
+                  ) : null}
+                </View>
+                <Text style={styles.suggestionKcalCompact}>{Math.round(item.calorias)} kcal</Text>
+                <View
+                  style={[
+                    styles.suggestionAddButtonCompact,
+                    item.buscaInteligente && styles.suggestionAddButtonDestaque,
+                  ]}
+                >
+                  <Ionicons name="add" size={16} color={patientTheme.colors.primary} />
+                </View>
+              </TouchableOpacity>
+            ))}
+
+            {foodSearchResult.hasMore ? (
+              <TouchableOpacity
+                style={styles.loadMoreFoodsButton}
+                onPress={() => setFoodSearchLimit((current) => current + FOOD_SEARCH_PAGE_SIZE)}
+              >
+                <Text style={styles.loadMoreFoodsText}>
+                  Ver mais ({filteredSuggestions.length}/{foodSearchResult.total})
+                </Text>
+              </TouchableOpacity>
+            ) : null}
+          </ScrollView>
+        ) : null}
+
+        {foodSearchAtivo && !filteredSuggestions.length ? (
+          <View style={styles.emptySuggestionState}>
+            <Text style={styles.emptySuggestionText}>
+              Nenhum resultado para "{foodSearchQuery}". Toque em "Usar o que digitei" acima.
+            </Text>
+          </View>
+        ) : null}
+
+        <View style={styles.selectedListDivider} />
+
         {hasFoods ? (
           <View style={styles.selectedList}>
             {alimentos.map((item, index) => (
               <View key={item.id || `${item.nome}-${index}`} style={styles.selectedItemRow}>
-                <View style={styles.selectedItemMain}>
-                  <TextInput
-                    style={styles.selectedItemName}
-                    value={item.nome}
-                    onChangeText={(value) => atualizarCampo(index, 'nome', value)}
-                    placeholder="Nome do alimento"
-                    placeholderTextColor="#8a9095"
-                  />
-                  <Text style={styles.selectedItemSummary}>{buildSelectedFoodSummary(item)}</Text>
-                  <View style={styles.selectedItemControls}>
-                    <View style={styles.quantityField}>
-                      <Text style={styles.quantityLabel}>Qtd (g)</Text>
+                <View style={styles.selectedItemContent}>
+                  <View style={styles.selectedItemInfo}>
+                    <TextInput
+                      style={styles.selectedItemName}
+                      value={item.nome}
+                      onChangeText={(value) => atualizarCampo(index, 'nome', value)}
+                      placeholder="Nome do alimento"
+                      placeholderTextColor="#8a9095"
+                    />
+                    <Text style={styles.selectedItemSummary} numberOfLines={2}>
+                      {buildSelectedFoodSummary(item)}
+                    </Text>
+                  </View>
+                  <View style={styles.selectedItemActions}>
+                    <View style={styles.quantityGroup}>
+                      <Text style={styles.quantityLabel}>Qtd</Text>
                       <TextInput
                         style={styles.quantityInput}
                         value={String(item.quantidade_gramas ?? 0)}
                         onChangeText={(value) => atualizarCampo(index, 'quantidade_gramas', value)}
                         keyboardType="decimal-pad"
+                        selectTextOnFocus
                       />
+                      <Text style={styles.quantityUnit}>g</Text>
                     </View>
                     <TouchableOpacity
                       style={styles.removeItemButton}
                       onPress={() => removerItem(index)}
                       disabled={isBusy}
                     >
-                      <Ionicons name="trash-outline" size={16} color="#b75c5c" />
+                      <Ionicons name="trash-outline" size={12} color="#b75c5c" />
                     </TouchableOpacity>
                   </View>
                 </View>
               </View>
             ))}
-
-            <TouchableOpacity
-              style={[styles.addManualButton, isBusy && styles.buttonDisabled]}
-              onPress={adicionarItemManual}
-              disabled={isBusy}
-            >
-              <Ionicons name="add-circle-outline" size={18} color={patientTheme.colors.primaryDark} />
-              <Text style={styles.addManualButtonText}>Adicionar alimento manualmente</Text>
-            </TouchableOpacity>
           </View>
         ) : (
           <View style={styles.emptySelectedState}>
-            <Text style={styles.emptySelectedTitle}>Nenhum item adicionado ainda</Text>
-            <Text style={styles.emptySelectedText}>Busque e adicione alimentos acima</Text>
+            <Text style={styles.emptySelectedTitle}>Nenhum item na lista ainda</Text>
+            <Text style={styles.emptySelectedText}>
+              Busque um alimento (ex.: arroz, frango, salada) ou analise uma foto com IA
+            </Text>
           </View>
         )}
       </View>
@@ -1272,45 +1511,105 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
 const styles = StyleSheet.create({
   screenContent: {
-    paddingBottom: 108,
+    paddingBottom: 120,
   },
   card: {
     backgroundColor: '#ffffff',
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
     ...patientShadow,
+    borderColor: patientTheme.colors.border,
+  },
+  selectedListDivider: {
+    marginTop: 8,
+    marginBottom: 8,
+    borderTopWidth: 1,
+    borderTopColor: patientTheme.colors.border,
+  },
+  mealTypeCard: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    marginBottom: 12,
+    borderWidth: 0,
+  },
+  mealTypeCardContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  mealTypeCardTextCol: {
+    flex: 1,
+    minWidth: 0,
+    gap: 3,
+  },
+  mealTypeCardTitle: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: patientTheme.colors.textMuted,
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
+  },
+  mealTypeCardValue: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  mealTypeCardMeta: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 14,
+  },
+  mealTypeCardChevron: {
+    width: 32,
+    alignSelf: 'stretch',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   selectedCard: {
-    backgroundColor: '#f5fff9',
+    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     marginBottom: 16,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.primarySoft,
-    ...patientShadow,
+    borderWidth: 0,
   },
   cardTitle: {
     fontSize: 16,
-    fontWeight: '700',
+    fontWeight: '600',
     color: patientTheme.colors.text,
   },
   cardHint: {
-    marginTop: 10,
-    fontSize: 12,
+    marginTop: 3,
+    marginBottom: 1,
+    fontSize: 11,
+    lineHeight: 14,
     color: patientTheme.colors.textMuted,
   },
   typeSelector: {
     marginTop: 14,
     minHeight: 56,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     paddingHorizontal: 14,
     paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  typeSelectorCompact: {
+    minHeight: 48,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
@@ -1324,6 +1623,11 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  typeSelectorValueCompact: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   typeSelectorPlaceholder: {
     color: '#9aa1a8',
     fontWeight: '500',
@@ -1333,20 +1637,33 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontSize: 12,
   },
-  photoDropzone: {
-    minHeight: 138,
-    borderWidth: 1,
-    borderStyle: 'dashed',
+  typeSelectorMetaCompact: {
+    marginTop: 3,
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+  },
+  photoCard: {
+    padding: 0,
+    overflow: 'hidden',
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 18,
+  },
+  photoDropzone: {
+    width: '100%',
+    height: PHOTO_DROPZONE_HEIGHT,
+    minHeight: PHOTO_DROPZONE_HEIGHT,
     overflow: 'hidden',
     backgroundColor: '#ffffff',
   },
+  photoDropzoneEmpty: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+  },
+  photoDropzoneFilled: {
+    padding: 0,
+  },
   photoDropzoneTitle: {
-    marginTop: 10,
+    marginTop: 12,
     color: patientTheme.colors.text,
     fontSize: 15,
     fontWeight: '700',
@@ -1358,14 +1675,28 @@ const styles = StyleSheet.create({
   },
   previewImage: {
     width: '100%',
-    height: 180,
-    borderRadius: patientTheme.radius.lg,
+    height: PHOTO_DROPZONE_HEIGHT,
     backgroundColor: patientTheme.colors.surfaceMuted,
   },
-  photoActionsRow: {
-    flexDirection: 'row',
+  photoPickerOptions: {
     gap: 10,
-    marginTop: 12,
+    marginTop: 10,
+  },
+  photoPickerOption: {
+    minHeight: 46,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: '#ffffff',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  photoPickerOptionText: {
+    color: patientTheme.colors.text,
+    fontWeight: '800',
+    fontSize: 14,
   },
   photoSecondaryFull: {
     flex: 0,
@@ -1386,7 +1717,7 @@ const styles = StyleSheet.create({
   },
   secondaryButtonText: {
     color: patientTheme.colors.text,
-    fontWeight: '700',
+    fontWeight: '600',
     fontSize: 13,
   },
   primaryButton: {
@@ -1402,7 +1733,7 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     color: patientTheme.colors.onPrimary,
-    fontWeight: '800',
+    fontWeight: '700',
     fontSize: 14,
   },
   helperText: {
@@ -1418,10 +1749,10 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   searchBox: {
-    marginTop: 14,
-    minHeight: 46,
+    marginTop: 0,
+    minHeight: 40,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     paddingHorizontal: 12,
@@ -1433,80 +1764,121 @@ const styles = StyleSheet.create({
     flex: 1,
     color: patientTheme.colors.text,
     fontSize: 14,
+    paddingVertical: 8,
+    ...(Platform.OS === 'web'
+      ? {
+          outlineStyle: 'none',
+          outlineWidth: 0,
+        }
+      : null),
+  },
+  usarDigitadoButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 6,
+    marginBottom: 4,
     paddingVertical: 10,
+    paddingHorizontal: 12,
+    borderRadius: patientTheme.radius.md,
+    borderWidth: 1.5,
+    borderColor: patientTheme.colors.primary,
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  usarDigitadoButtonText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+    color: patientTheme.colors.primaryDark,
   },
   suggestionListScroll: {
-    marginTop: 10,
-    maxHeight: 360,
+    marginTop: 6,
   },
   suggestionList: {
-    gap: 10,
-    paddingBottom: 4,
+    gap: 4,
+    paddingBottom: 2,
   },
   loadMoreFoodsButton: {
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
-    paddingVertical: 12,
-    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: patientTheme.radius.md,
+    paddingVertical: 8,
+    backgroundColor: '#ffffff',
   },
   loadMoreFoodsText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 13,
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
     fontWeight: '700',
   },
-  suggestionRow: {
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+  suggestionRowCompact: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderRadius: patientTheme.radius.md,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
   },
-  suggestionInfo: {
+  suggestionRowDestaque: {
+    backgroundColor: '#ffffff',
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
+  },
+  suggestionTextCol: {
     flex: 1,
-  },
-  suggestionName: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  suggestionSubtext: {
-    marginTop: 3,
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-  },
-  suggestionMeta: {
-    alignItems: 'flex-end',
     gap: 2,
   },
-  suggestionCalories: {
+  suggestionNameCompact: {
     color: patientTheme.colors.text,
-    fontSize: 12,
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  suggestionNameDestaque: {
     fontWeight: '700',
+    color: patientTheme.colors.text,
   },
-  suggestionMacros: {
+  suggestionRefTaco: {
+    fontSize: 10,
+    fontWeight: '600',
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
   },
-  suggestionAddButton: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+  suggestionKcalCompact: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  suggestionAddButtonCompact: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: patientTheme.colors.primarySoft,
   },
+  suggestionAddButtonDestaque: {
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
   emptySuggestionState: {
-    alignItems: 'center',
-    paddingVertical: 12,
+    marginTop: 6,
+    paddingVertical: 8,
+    gap: 8,
   },
   emptySuggestionText: {
     color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  manualAddProminentButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    alignSelf: 'flex-start',
+    paddingVertical: 6,
+  },
+  manualAddProminentText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '700',
     fontSize: 13,
   },
   inlineLinkButton: {
@@ -1522,94 +1894,101 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 10,
+    marginBottom: 10,
   },
   selectedBadge: {
-    backgroundColor: '#0ea43e',
+    backgroundColor: patientTheme.colors.primary,
     borderRadius: 999,
     paddingHorizontal: 10,
     paddingVertical: 4,
   },
   selectedBadgeText: {
-    color: '#ffffff',
+    color: patientTheme.colors.onPrimary,
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   selectedList: {
     marginTop: 14,
-    gap: 10,
+    gap: 6,
   },
   selectedItemRow: {
-    borderWidth: 1,
-    borderColor: patientTheme.colors.primarySoft,
     borderRadius: patientTheme.radius.lg,
     backgroundColor: '#ffffff',
-    padding: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: patientTheme.colors.primary,
   },
-  selectedItemMain: {
-    gap: 8,
+  selectedItemContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  selectedItemInfo: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+    paddingRight: 2,
   },
   selectedItemName: {
     color: patientTheme.colors.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
     paddingVertical: 0,
+    margin: 0,
   },
   selectedItemSummary: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 10,
+    lineHeight: 13,
   },
-  selectedItemControls: {
+  selectedItemActions: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+    gap: 4,
+    flexShrink: 0,
   },
-  quantityField: {
-    flex: 1,
+  quantityGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    paddingHorizontal: 5,
+    paddingVertical: 3,
+    borderRadius: 10,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 0,
   },
   quantityLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
+    fontSize: 8,
     fontWeight: '700',
-    marginBottom: 4,
     textTransform: 'uppercase',
   },
   quantityInput: {
-    minHeight: 40,
-    borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 12,
+    width: 34,
+    minHeight: 20,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
     color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+    textAlign: 'right',
+    backgroundColor: 'transparent',
+  },
+  quantityUnit: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 9,
+    fontWeight: '600',
   },
   removeItemButton: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: '#ffffff',
+    width: 26,
+    height: 26,
+    borderRadius: 10,
+    backgroundColor: patientTheme.colors.surface,
     alignItems: 'center',
     justifyContent: 'center',
-    marginTop: 18,
-  },
-  addManualButton: {
-    minHeight: 44,
-    borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.primarySoft,
-    backgroundColor: '#ffffff',
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-  },
-  addManualButtonText: {
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '700',
-    fontSize: 13,
+    borderWidth: 0,
   },
   emptySelectedState: {
     marginTop: 18,
@@ -1648,8 +2027,12 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontSize: 12,
   },
+  footerStack: {
+    width: '100%',
+    gap: 0,
+  },
   saveButton: {
-    marginTop: 18,
+    marginTop: 0,
     marginBottom: 8,
     minHeight: 48,
     borderRadius: patientTheme.radius.lg,

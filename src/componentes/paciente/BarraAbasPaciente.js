@@ -7,7 +7,6 @@ import {
   Pressable,
   StyleSheet,
   useWindowDimensions,
-  Modal,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
@@ -15,7 +14,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { temaPaciente, sombraPaciente } from '../../temas/temaPaciente';
 import { TAB_BAR_COACH_SEEN_KEY } from '../../constantes/chavesArmazenamento';
 import { navigatePatientTab } from '../../utilitarios/navegacaoAbas';
-import { getPatientId, prefetchPatientPlanExperience } from '../../servicos/servicoDadosPaciente';
+import { navigatePatientFeature } from '../../utilitarios/navegacaoPaciente';
+import {
+  getPatientId,
+  prefetchPatientPlanExperience,
+  prefetchPatientProfileExperience,
+} from '../../servicos/servicoDadosPaciente';
 
 export const PATIENT_TAB_BAR_HEIGHT = 64;
 export const PATIENT_TAB_BAR_SPACE = 14;
@@ -119,12 +123,21 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
   }
 
   function navegar(rota) {
+    if (coachOverlayVisible) {
+      setCoachOverlayVisible(false);
+      dismissCoachOverlay();
+    }
+
     setMenuRapidoVisivel(false);
     setAcaoRapidaEmFoco(null);
     setRotaVisual(rota);
 
+    const patientIdPrefetch = getPatientId(usuarioLogado);
     if (rota === 'PacientePlano' && rotaAtual !== rota) {
-      prefetchPatientPlanExperience(getPatientId(usuarioLogado), usuarioLogado);
+      prefetchPatientPlanExperience(patientIdPrefetch, usuarioLogado);
+    }
+    if (rota === 'PacientePerfil' && rotaAtual !== rota) {
+      prefetchPatientProfileExperience(patientIdPrefetch, usuarioLogado);
     }
 
     if (rotaAtual === rota) {
@@ -263,9 +276,7 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
     setAcaoRapidaEmFoco(null);
 
     if (tipo === 'meal') {
-      navigation.navigate('RegistroRefeicaoIA', {
-        usuarioLogado,
-      });
+      navigatePatientFeature(navigation, 'RegistroRefeicaoIA', { usuarioLogado });
       return;
     }
 
@@ -485,144 +496,143 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                 }
               }}
             >
-              {() => {
-                return (
-                  <>
-                    <View
-                      style={[
-                        styles.iconeAbaWrap,
-                        ativo && styles.iconeAbaWrapAtivo,
-                      ]}
-                      onStartShouldSetResponder={() => ativo}
-                      onMoveShouldSetResponder={() => ativo}
-                      onResponderGrant={(event) => {
-                        menuRapidoAbertoNoInicioRef.current = menuRapidoVisivel;
-                        iniciarArrastePeloCirculo(
-                          event.nativeEvent.pageX,
-                          event.nativeEvent.pageY,
-                          aba.rota
-                        );
-                      }}
-                      onResponderMove={(event) => {
-                        moverArrastePeloCirculo(
-                          event.nativeEvent.pageX,
-                          event.nativeEvent.pageY,
-                          aba.rota
-                        );
-                      }}
-                      onResponderRelease={() => {
-                        if (
-                          ativo &&
-                          aba.rota === 'HomePaciente' &&
-                          !arrasteMovidoRef.current
-                        ) {
-                          rotaArrastadaRef.current = null;
-                          arrastePeloCirculoRef.current = false;
-                          handlePressInicio();
-                          return;
-                        }
+              <View style={styles.abaInner}>
+                <View
+                  style={[styles.iconeAbaWrap, ativo && styles.iconeAbaWrapAtivo]}
+                  onStartShouldSetResponder={() => ativo}
+                  onMoveShouldSetResponder={() => ativo}
+                  onResponderGrant={(event) => {
+                    menuRapidoAbertoNoInicioRef.current = menuRapidoVisivel;
+                    iniciarArrastePeloCirculo(
+                      event.nativeEvent.pageX,
+                      event.nativeEvent.pageY,
+                      aba.rota
+                    );
+                  }}
+                  onResponderMove={(event) => {
+                    moverArrastePeloCirculo(
+                      event.nativeEvent.pageX,
+                      event.nativeEvent.pageY,
+                      aba.rota
+                    );
+                  }}
+                  onResponderRelease={() => {
+                    if (ativo && aba.rota === 'HomePaciente' && !arrasteMovidoRef.current) {
+                      rotaArrastadaRef.current = null;
+                      arrastePeloCirculoRef.current = false;
+                      handlePressInicio();
+                      return;
+                    }
 
-                        if (ativo && aba.rota === 'HomePaciente' && menuRapidoVisivel) {
-                          const acaoFinal = acaoRapidaEmFoco;
-                          rotaArrastadaRef.current = null;
-                          arrastePeloCirculoRef.current = false;
-                          arrasteMovidoRef.current = false;
-                          direcaoArrasteRef.current = null;
+                    if (ativo && aba.rota === 'HomePaciente' && menuRapidoVisivel) {
+                      const acaoFinal = acaoRapidaEmFoco;
+                      rotaArrastadaRef.current = null;
+                      arrastePeloCirculoRef.current = false;
+                      arrasteMovidoRef.current = false;
+                      direcaoArrasteRef.current = null;
 
-                          if (acaoFinal) {
-                            acionarMenuRapido(acaoFinal);
-                            return;
-                          }
+                      if (acaoFinal) {
+                        acionarMenuRapido(acaoFinal);
+                        return;
+                      }
 
-                          if (menuRapidoAbertoNoInicioRef.current) {
-                            setMenuRapidoVisivel(false);
-                            setAcaoRapidaEmFoco(null);
-                          }
-
-                          menuRapidoAbertoNoInicioRef.current = false;
-                          return;
-                        }
-
-                        finalizarArrastePeloCirculo();
-                      }}
-                      onResponderTerminate={() => {
-                        rotaArrastadaRef.current = null;
-                        arrastePeloCirculoRef.current = false;
-                        arrasteMovidoRef.current = false;
-                        direcaoArrasteRef.current = null;
-                        menuRapidoAbertoNoInicioRef.current = false;
+                      if (menuRapidoAbertoNoInicioRef.current) {
+                        setMenuRapidoVisivel(false);
                         setAcaoRapidaEmFoco(null);
-                        setRotaVisual(rotaAtual);
-                      }}
-                    >
-                      <View
-                        style={[
-                          styles.iconeAbaInner,
-                          ativo && styles.iconeAbaInnerAtivo,
-                        ]}
-                      >
-                        {ativo && aba.rota === 'HomePaciente' && menuRapidoVisivel ? (
-                          <Ionicons name="close" size={24} color={TAB_HIGHLIGHT_COLOR} />
-                        ) : (
-                          <IconeAba aba={aba} ativo={ativo} />
-                        )}
-                      </View>
-                      {ativo ? (
-                        <Text style={styles.rotuloAbaDentroAtivo}>
-                          {aba.rota === 'HomePaciente' && menuRapidoVisivel ? 'Fechar' : aba.rotulo}
-                        </Text>
-                      ) : null}
-                    </View>
-                    {!ativo ? <Text style={styles.rotuloAba}>{aba.rotulo}</Text> : null}
-                  </>
-                );
-              }}
+                      }
+
+                      menuRapidoAbertoNoInicioRef.current = false;
+                      return;
+                    }
+
+                    finalizarArrastePeloCirculo();
+                  }}
+                  onResponderTerminate={() => {
+                    rotaArrastadaRef.current = null;
+                    arrastePeloCirculoRef.current = false;
+                    arrasteMovidoRef.current = false;
+                    direcaoArrasteRef.current = null;
+                    menuRapidoAbertoNoInicioRef.current = false;
+                    setAcaoRapidaEmFoco(null);
+                    setRotaVisual(rotaAtual);
+                  }}
+                >
+                  <View style={[styles.iconeAbaInner, ativo && styles.iconeAbaInnerAtivo]}>
+                    {ativo && aba.rota === 'HomePaciente' && menuRapidoVisivel ? (
+                      <Ionicons name="close" size={24} color={TAB_HIGHLIGHT_COLOR} />
+                    ) : (
+                      <IconeAba aba={aba} ativo={ativo} />
+                    )}
+                  </View>
+                  {ativo ? (
+                    <Text style={styles.rotuloAbaDentroAtivo}>
+                      {aba.rota === 'HomePaciente' && menuRapidoVisivel ? 'Fechar' : aba.rotulo}
+                    </Text>
+                  ) : null}
+                </View>
+                {!ativo ? <Text style={styles.rotuloAba}>{aba.rotulo}</Text> : null}
+              </View>
             </Pressable>
           );
         })}
       </View>
 
-      <Modal
-        visible={coachOverlayVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={dismissCoachOverlay}
-      >
-        <Pressable style={styles.coachBackdrop} onPress={dismissCoachOverlay}>
+      {coachOverlayVisible ? (
+        <View style={styles.coachBannerWrap} pointerEvents="box-none">
           <View style={styles.coachCard}>
             <Text style={styles.coachTitle}>Atalhos na barra inferior</Text>
             <Text style={styles.coachBody}>
-              Toque duas vezes em Início para abrir atalhos (glicose, medicação, refeição).{'\n\n'}
-              Na aba ativa, arraste pelo ícone destacado para mudar de área sem soltar o dedo.
+              Toque duas vezes em Início para atalhos rápidos. Arraste o ícone da aba ativa para
+              trocar de área.
             </Text>
-            <Pressable
-              style={styles.coachButton}
-              onPress={dismissCoachOverlay}
-              accessibilityRole="button"
-              accessibilityLabel="Entendi, fechar dica"
-            >
-              <Text style={styles.coachButtonText}>Entendi</Text>
-            </Pressable>
+            <View style={styles.coachActions}>
+              <Pressable
+                style={styles.coachButton}
+                onPress={dismissCoachOverlay}
+                accessibilityRole="button"
+                accessibilityLabel="Entendi, fechar dica"
+              >
+                <Text style={styles.coachButtonText}>Entendi</Text>
+              </Pressable>
+              <Pressable
+                style={styles.coachSkip}
+                onPress={dismissCoachOverlay}
+                accessibilityRole="button"
+                accessibilityLabel="Pular dica"
+              >
+                <Text style={styles.coachSkipText}>Pular</Text>
+              </Pressable>
+            </View>
           </View>
-        </Pressable>
-      </Modal>
+        </View>
+      ) : null}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  coachBackdrop: {
-    flex: 1,
-    backgroundColor: 'rgba(31, 38, 44, 0.52)',
-    justifyContent: 'center',
-    paddingHorizontal: 24,
+  coachBannerWrap: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: '100%',
+    marginBottom: 8,
+    zIndex: 90,
   },
   coachCard: {
     backgroundColor: '#FFFFFF',
     borderRadius: 18,
-    padding: 20,
-    gap: 12,
+    padding: 16,
+    gap: 10,
+    borderWidth: 1,
+    borderColor: '#E8EDF0',
     ...sombraPaciente,
+  },
+  coachActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    marginTop: 4,
   },
   coachTitle: {
     fontSize: 18,
@@ -646,6 +656,15 @@ const styles = StyleSheet.create({
     fontSize: 16,
     fontWeight: '800',
     color: '#1F262C',
+  },
+  coachSkip: {
+    paddingVertical: 12,
+    paddingHorizontal: 8,
+  },
+  coachSkipText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#5c656b',
   },
   areaFixa: {
     position: 'absolute',
@@ -744,6 +763,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingVertical: 3,
     overflow: 'visible',
+  },
+  abaInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconeAbaWrap: {
     alignItems: 'center',

@@ -5,8 +5,8 @@ import {
   Text,
   TouchableOpacity,
   StyleSheet,
-  ActivityIndicator,
 } from 'react-native';
+import { EsqueletoPlanoPaciente } from '../../componentes/comum/EsqueletoCarregamento';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
@@ -227,19 +227,34 @@ export default function PacientePlanoScreen({
     });
   }
 
+  function openNutritionistChat() {
+    navigation.navigate('PacienteChatNutricionista', {
+      usuarioLogado,
+    });
+  }
+
   return (
     <PatientScreenLayout
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
       contentContainerStyle={styles.contentContainer}
+      footerOverlay={
+        <TouchableOpacity
+          style={styles.floatingCtaButton}
+          activeOpacity={0.9}
+          onPress={openNutritionistChat}
+        >
+          <Ionicons
+            name="chatbubble-ellipses-outline"
+            size={16}
+            color={patientTheme.colors.onPrimary}
+          />
+          <Text style={styles.ctaButtonText}>Falar com minha Nutricionista</Text>
+        </TouchableOpacity>
+      }
     >
-      {loading ? (
-        <View style={styles.loadingCard}>
-          <ActivityIndicator color={patientTheme.colors.primaryDark} />
-          <Text style={styles.loadingText}>Carregando plano...</Text>
-        </View>
-      ) : null}
+      {loading ? <EsqueletoPlanoPaciente /> : null}
 
       {!loading ? (
         <>
@@ -457,22 +472,6 @@ export default function PacientePlanoScreen({
 
           </View>
 
-          <TouchableOpacity
-            style={styles.ctaButton}
-            activeOpacity={0.9}
-            onPress={() =>
-              navigation.navigate('PacienteChatNutricionista', {
-                usuarioLogado,
-              })
-            }
-          >
-            <Ionicons
-              name="chatbubble-ellipses-outline"
-              size={16}
-              color={patientTheme.colors.onPrimary}
-            />
-            <Text style={styles.ctaButtonText}>Falar com minha Nutricionista</Text>
-          </TouchableOpacity>
 
           <Text style={styles.weeklyAverageText}>
             Adesão média da semana: {weeklyAverage}%
@@ -485,7 +484,7 @@ export default function PacientePlanoScreen({
 
 const styles = StyleSheet.create({
   contentContainer: {
-    paddingBottom: 28,
+    paddingBottom: 112,
   },
   loadingCard: {
     backgroundColor: patientTheme.colors.surface,
@@ -792,9 +791,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: patientTheme.colors.text,
   },
-  ctaButton: {
-    marginTop: 16,
-    marginBottom: 20,
+  floatingCtaButton: {
     minHeight: 52,
     borderRadius: patientTheme.radius.pill,
     backgroundColor: patientTheme.colors.primaryDark,
@@ -802,6 +799,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
+    paddingHorizontal: 18,
   },
   ctaButtonText: {
     color: patientTheme.colors.onPrimary,

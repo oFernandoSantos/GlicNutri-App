@@ -3,6 +3,7 @@ import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
 import { replaceCachedPatientAppState } from './centralAppState';
+import { validateGlucoseValue, validateInsulinDose, validateMedicationEntry } from '../utilitarios/validacoesPaciente';
 import {
   fetchCachedPatientChat,
   fetchCachedPatientExperience,
@@ -19,6 +20,7 @@ export {
   invalidatePatientExperienceCache,
   isPatientExperienceCacheFresh,
   isPatientProfileCacheFresh,
+  PROFILE_CACHE_TTL_MS,
 } from './cacheExperienciaPaciente';
 import {
   mealPlanSections,
@@ -535,6 +537,7 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     })),
     storageOrigin: 'database',
     databaseId: recordId || null,
+    foto_url: row?.foto_url || null,
   };
 }
 
@@ -767,6 +770,25 @@ export function prefetchPatientPlanExperience(patientId, patientContext = null) 
     })
     .catch((error) => {
       console.log('Prefetch plano paciente:', error?.message || error);
+      return null;
+    });
+}
+
+export function prefetchPatientProfileExperience(patientId, patientContext = null) {
+  if (!patientId && !patientContext) return Promise.resolve(null);
+
+  return resolveCanonicalPatientId(patientId, { patientContext })
+    .then((resolvedId) => {
+      if (!resolvedId) return null;
+
+      return fetchPatientById(resolvedId, {
+        patientContext,
+        allowGoogleSync: false,
+        forceRefresh: false,
+      });
+    })
+    .catch((error) => {
+      console.log('Prefetch perfil paciente:', error?.message || error);
       return null;
     });
 }
@@ -1859,11 +1881,17 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     throw new Error('Paciente sem identificador para registrar glicemia.');
   }
 
+  const glucoseCheck = validateGlucoseValue(value);
+
+  if (!glucoseCheck.ok) {
+    throw new Error(glucoseCheck.message);
+  }
+
   const normalizedSymptoms = options.symptoms || 'Registro manual pelo app';
   const fallbackPayload = {
     id_glicemia_manual_uuid: options.id || buildUuid(),
     id_paciente_uuid: patientId,
-    valor_glicose_mgdl: Number(value),
+    valor_glicose_mgdl: glucoseCheck.value,
     data: options.date || buildTodayDateString(),
     hora: options.time || buildCurrentTimeString(),
     sintomas_associados: normalizedSymptoms,
@@ -1886,9 +1914,9 @@ export async function addGlucoseReading(patientId, value, options = {}) {
             ...fallbackPayload,
             ...saved,
           },
-          value
+          glucoseCheck.value
         )
-      : buildGlucoseReadingFromPayload(fallbackPayload, value);
+      : buildGlucoseReadingFromPayload(fallbackPayload, glucoseCheck.value);
 
     await registrarLogAuditoria({
       actor: options.actor || null,
@@ -1943,7 +1971,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
   }
 
   if (!data) {
-    const fallbackReading = buildGlucoseReadingFromPayload(payload, value);
+    const fallbackReading = buildGlucoseReadingFromPayload(payload, glucoseCheck.value);
     await registrarLogAuditoria({
       actor: options.actor || null,
       targetPatientId: patientId,
@@ -1967,7 +1995,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
       ...payload,
       ...data,
     },
-    value
+    glucoseCheck.value
   );
 
   await registrarLogAuditoria({
@@ -1995,6 +2023,21 @@ export async function addMedicationEntry(patientId, entry) {
   }
 
   const normalizedEntry = normalizeMedicationEntry(entry, 'database');
+  const medicationKind = normalizeMedicationType(normalizedEntry.medicationKind);
+
+  if (medicationKind === 'insulin') {
+    const insulinCheck = validateInsulinDose(normalizedEntry.medicineQuantity);
+
+    if (!insulinCheck.ok) {
+      throw new Error(insulinCheck.message);
+    }
+  } else {
+    const medCheck = validateMedicationEntry(normalizedEntry);
+
+    if (!medCheck.ok) {
+      throw new Error(medCheck.message);
+    }
+  }
   const normalizedQuantity = String(normalizedEntry.medicineQuantity || '').trim();
   const normalizedLegacyId = isUuidLike(normalizedEntry.legacyId)
     ? normalizedEntry.legacyId

@@ -26,6 +26,7 @@ export const LIMITES_DADOS_PACIENTE = {
     medicationLimit: 80,
     mealLimit: 100,
     skipAlertSync: true,
+    historicoPreset: true,
   },
   chat: {
     chatOnly: true,

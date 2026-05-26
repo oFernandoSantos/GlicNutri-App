@@ -2,6 +2,8 @@ import React, { useCallback, useEffect, useLayoutEffect, useMemo, useState } fro
 import {
   ActivityIndicator,
   Alert,
+  Image,
+  Modal,
   Platform,
   RefreshControl,
   ScrollView,
@@ -9,6 +11,7 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -21,11 +24,18 @@ import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientId,
   hideGlucoseReadingForPatient,
   hideMealEntryForPatient,
   hideMedicationEntryForPatient,
+  isPatientExperienceCacheFresh,
 } from '../../servicos/servicoDadosPaciente';
+import { EsqueletoListaRegistros } from '../../componentes/comum/EsqueletoCarregamento';
+import {
+  getMealEntryPhotoRef,
+  resolveMealPhotoDisplayUri,
+} from '../../servicos/servicoRefeicaoIA';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import {
@@ -337,18 +347,35 @@ export default function PacienteHistoricoRegistrosScreen({
   const [activePeriod, setActivePeriod] = useState('today');
   const [searchStartDate, setSearchStartDate] = useState('');
   const [searchEndDate, setSearchEndDate] = useState('');
-  const [loading, setLoading] = useState(true);
+  const historicoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('historico'), []);
+  const cachedHistoricoInicial = useMemo(
+    () => (patientId ? getCachedPatientExperience(patientId, historicoFetchLimits) : null),
+    [patientId, historicoFetchLimits]
+  );
+  const historicoCacheQuente = Boolean(cachedHistoricoInicial);
+  const [loading, setLoading] = useState(!historicoCacheQuente);
   const [deletingId, setDeletingId] = useState(null);
-  const [patient, setPatient] = useState(null);
-  const [objectiveText, setObjectiveText] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [patient, setPatient] = useState(cachedHistoricoInicial?.patient || null);
+  const [objectiveText, setObjectiveText] = useState(
+    () => cachedHistoricoInicial?.clinicalObjective || ''
+  );
+  const [appState, setAppState] = useState(
+    () => cachedHistoricoInicial?.appState || createDefaultAppState()
+  );
+  const [glucoseReadings, setGlucoseReadings] = useState(() => {
+    const id = cachedHistoricoInicial?.patient?.id_paciente_uuid || patientId;
+    return mergeCachedGlucoseReadings(
+      cachedHistoricoInicial?.glucoseReadings || [],
+      getCachedGlucoseReadings(id)
+    );
+  });
   const [pendingHiddenGlucoseIds, setPendingHiddenGlucoseIds] = useState([]);
   const [pendingHiddenMedicationIds, setPendingHiddenMedicationIds] = useState([]);
   const [pendingHiddenMealIds, setPendingHiddenMealIds] = useState([]);
   const [loadError, setLoadError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [bannerOperacao, setBannerOperacao] = useState(null);
+  const [mealPhotoViewer, setMealPhotoViewer] = useState(null);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
   const historicoLoadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
   const loadHistoryExperience = useCallback(async ({ forceRefresh = false } = {}) => {
@@ -363,7 +390,7 @@ export default function PacienteHistoricoRegistrosScreen({
     const experience = await fetchPatientExperience(patientId, {
       patientContext: usuarioLogado,
       forceRefresh,
-      ...mesclarLimitesDadosPaciente('historico'),
+      ...historicoFetchLimits,
     });
     const mergedReadings = mergeCachedGlucoseReadings(
       experience.glucoseReadings,
@@ -382,7 +409,7 @@ export default function PacienteHistoricoRegistrosScreen({
       experience.patient?.id_paciente_uuid || patientId,
       mergedReadings
     );
-  }, [canResolvePatient, patientId, usuarioLogado]);
+  }, [canResolvePatient, historicoFetchLimits, patientId, usuarioLogado]);
 
   const fetchHistoricoComErro = useCallback(async ({ forceRefresh = false } = {}) => {
     try {
@@ -401,8 +428,10 @@ export default function PacienteHistoricoRegistrosScreen({
 
     async function load() {
       try {
-        setLoading(true);
-        await fetchHistoricoComErro();
+        if (!historicoCacheQuente) {
+          setLoading(true);
+        }
+        await fetchHistoricoComErro({ forceRefresh: !historicoCacheQuente });
       } finally {
         if (active) {
           setLoading(false);
@@ -416,7 +445,7 @@ export default function PacienteHistoricoRegistrosScreen({
     return () => {
       active = false;
     };
-  }, [fetchHistoricoComErro]);
+  }, [fetchHistoricoComErro, historicoCacheQuente]);
 
   const onRefreshHistorico = useCallback(async () => {
     setRefreshing(true);
@@ -456,7 +485,9 @@ export default function PacienteHistoricoRegistrosScreen({
             return;
           }
 
-          await fetchHistoricoComErro({ forceRefresh: true });
+          const cacheFresco =
+            patientId && isPatientExperienceCacheFresh(patientId, historicoFetchLimits);
+          await fetchHistoricoComErro({ forceRefresh: !cacheFresco });
         } catch (error) {
           if (!active) return;
           console.log('Erro ao recarregar historico no foco:', error);
@@ -468,7 +499,7 @@ export default function PacienteHistoricoRegistrosScreen({
       return () => {
         active = false;
       };
-    }, [canResolvePatient, fetchHistoricoComErro])
+    }, [canResolvePatient, fetchHistoricoComErro, historicoFetchLimits, patientId])
   );
 
   useEffect(() => {
@@ -746,6 +777,49 @@ export default function PacienteHistoricoRegistrosScreen({
     }
   }
 
+  async function abrirFotoRefeicao(entry) {
+    const photoRef = getMealEntryPhotoRef(entry);
+
+    if (!photoRef) {
+      Alert.alert(
+        'Sem foto',
+        'Este registro alimentar não possui imagem anexada.'
+      );
+      return;
+    }
+
+    setMealPhotoViewer({
+      title: entry.title || 'Alimentação',
+      uri: null,
+      loading: true,
+    });
+
+    try {
+      const uri = await resolveMealPhotoDisplayUri(photoRef);
+
+      if (!uri) {
+        throw new Error('Não foi possível carregar a imagem desta refeição.');
+      }
+
+      setMealPhotoViewer({
+        title: entry.title || 'Alimentação',
+        uri,
+        loading: false,
+      });
+    } catch (error) {
+      console.log('Erro ao abrir foto da refeicao:', error);
+      setMealPhotoViewer(null);
+      Alert.alert(
+        'Foto indisponível',
+        error?.message || 'Não foi possível exibir a imagem agora. Tente novamente.'
+      );
+    }
+  }
+
+  function fecharVisualizadorFoto() {
+    setMealPhotoViewer(null);
+  }
+
   function confirmDeleteMeal(entry) {
     Alert.alert(
       'Ocultar registro?',
@@ -815,10 +889,7 @@ export default function PacienteHistoricoRegistrosScreen({
       usuarioLogado={usuarioLogado}
       contentContainerStyle={[
         styles.screenContent,
-        Platform.OS === 'web' &&
-          (activePeriod === 'search'
-            ? styles.screenContentWebSearchHeaderOffset
-            : styles.screenContentWebHeaderOffset),
+        Platform.OS === 'web' && styles.screenContentWebHeaderOffset,
       ]}
       scrollEnabled={false}
     >
@@ -847,9 +918,7 @@ export default function PacienteHistoricoRegistrosScreen({
         />
       ) : null}
       {loading ? (
-        <View style={styles.loadingCard}>
-          <ActivityIndicator color={patientTheme.colors.primaryDark} />
-        </View>
+        <EsqueletoListaRegistros linhas={6} />
       ) : loadError ? (
         <EstadoErroCarregamento
           loading={loading}
@@ -869,17 +938,19 @@ export default function PacienteHistoricoRegistrosScreen({
         <View style={styles.list}>
           {filteredGlucoseReadings.map((reading) => (
             <View key={reading.id} style={styles.recordCard}>
-              <View style={styles.recordIcon}>
-                <Ionicons name="water-outline" size={20} color="#E50914" />
-              </View>
-              <View style={styles.recordBody}>
-                <Text style={styles.recordTitle}>{reading.value} mg/dL</Text>
-                <Text style={styles.recordLine}>
-                  Tipo: {reading.glucoseType || 'Não informado'}
-                </Text>
-                <Text style={styles.recordLine}>
-                  Data: {formatDate(reading.date)}   Hora: {formatTime(reading.time)}
-                </Text>
+              <View style={styles.recordContentRow}>
+                <View style={[styles.recordIcon, styles.glucoseIcon]}>
+                  <Ionicons name="water" size={22} color="#E50914" />
+                </View>
+                <View style={styles.recordBody}>
+                  <Text style={styles.recordTitle}>{reading.value} mg/dL</Text>
+                  <Text style={styles.recordLine}>
+                    Tipo: {reading.glucoseType || 'Não informado'}
+                  </Text>
+                  <Text style={styles.recordLine}>
+                    Data: {formatDate(reading.date)}   Hora: {formatTime(reading.time)}
+                  </Text>
+                </View>
               </View>
               <TouchableOpacity
                 style={styles.deleteButton}
@@ -889,44 +960,46 @@ export default function PacienteHistoricoRegistrosScreen({
                 {deletingId === reading.id ? (
                   <ActivityIndicator size="small" color="#E50914" />
                 ) : (
-                  <Ionicons name="trash-outline" size={20} color="#E50914" />
+                  <Ionicons name="trash-outline" size={22} color="#E50914" />
                 )}
               </TouchableOpacity>
             </View>
           ))}
         </View>
       ) : activeTab === 'medication' ? (
-        <View style={styles.list}>
+        <View style={[styles.list, styles.listOverlap]}>
           {filteredMedicationEntries.map((entry) => {
             const medicationDisplay = getMedicationDisplay(entry);
 
             return (
-              <View key={entry.id} style={styles.recordCard}>
-                <View style={[styles.recordIcon, styles.medicationIcon]}>
-                  <MaterialCommunityIcons name="pill" size={20} color="#ffffff" />
-                </View>
-                <View style={styles.recordBody}>
-                  <Text style={styles.recordTitle}>{medicationDisplay.title}</Text>
-                  <Text style={styles.recordLine}>Tipo: {medicationDisplay.type}</Text>
-                  {medicationDisplay.unit ? (
+              <View key={entry.id} style={[styles.recordCard, styles.recordCardOverlap]}>
+                <View style={styles.recordContentRow}>
+                  <View style={[styles.recordIcon, styles.medicationIcon, styles.recordIconOverlap]}>
+                    <MaterialCommunityIcons name="pill" size={22} color="#ffffff" />
+                  </View>
+                  <View style={styles.recordBody}>
+                    <Text style={styles.recordTitle}>{medicationDisplay.title}</Text>
+                    <Text style={styles.recordLine}>Tipo: {medicationDisplay.type}</Text>
+                    {medicationDisplay.unit ? (
+                      <Text style={styles.recordLine}>
+                        Unidade de medida: {medicationDisplay.unit}
+                      </Text>
+                    ) : null}
+                    {medicationDisplay.quantity ? (
+                      <Text style={styles.recordLine}>
+                        Quantidade: {medicationDisplay.quantity}
+                      </Text>
+                    ) : null}
+                    {medicationDisplay.usage ? (
+                      <Text style={styles.recordLine}>Uso: {medicationDisplay.usage}</Text>
+                    ) : null}
+                    {medicationDisplay.notes ? (
+                      <Text style={styles.recordLine}>Observação: {medicationDisplay.notes}</Text>
+                    ) : null}
                     <Text style={styles.recordLine}>
-                      Unidade de medida: {medicationDisplay.unit}
+                      Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
                     </Text>
-                  ) : null}
-                  {medicationDisplay.quantity ? (
-                    <Text style={styles.recordLine}>
-                      Quantidade: {medicationDisplay.quantity}
-                    </Text>
-                  ) : null}
-                  {medicationDisplay.usage ? (
-                    <Text style={styles.recordLine}>Uso: {medicationDisplay.usage}</Text>
-                  ) : null}
-                  {medicationDisplay.notes ? (
-                    <Text style={styles.recordLine}>Observação: {medicationDisplay.notes}</Text>
-                  ) : null}
-                  <Text style={styles.recordLine}>
-                    Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
-                  </Text>
+                  </View>
                 </View>
                 <TouchableOpacity
                   style={styles.deleteButton}
@@ -936,7 +1009,7 @@ export default function PacienteHistoricoRegistrosScreen({
                   {deletingId === entry.id ? (
                     <ActivityIndicator size="small" color="#E50914" />
                   ) : (
-                    <Ionicons name="trash-outline" size={20} color="#E50914" />
+                    <Ionicons name="trash-outline" size={22} color="#E50914" />
                   )}
                 </TouchableOpacity>
               </View>
@@ -945,39 +1018,122 @@ export default function PacienteHistoricoRegistrosScreen({
         </View>
       ) : (
         <View style={styles.list}>
-          {filteredFoodEntries.map((entry) => (
-            <View key={entry.id} style={styles.recordCard}>
-              <View style={[styles.recordIcon, styles.foodIcon]}>
-                <MaterialCommunityIcons name="food-variant" size={20} color="#ffffff" />
+          {filteredFoodEntries.map((entry) => {
+            const possuiFoto = Boolean(getMealEntryPhotoRef(entry));
+
+            return (
+              <View key={entry.id} style={styles.recordCard}>
+                <TouchableOpacity
+                  style={styles.recordContentRow}
+                  activeOpacity={possuiFoto ? 0.72 : 1}
+                  onPress={() => abrirFotoRefeicao(entry)}
+                  accessibilityRole="button"
+                  accessibilityLabel={
+                    possuiFoto
+                      ? `Ver foto de ${entry.title || 'alimentação'}`
+                      : `Registro de ${entry.title || 'alimentação'}`
+                  }
+                >
+                  <View style={[styles.recordIcon, styles.foodIcon]}>
+                    {possuiFoto ? (
+                      <Ionicons name="image-outline" size={22} color="#ffffff" />
+                    ) : (
+                      <MaterialCommunityIcons name="food-variant" size={22} color="#ffffff" />
+                    )}
+                  </View>
+                  <View style={styles.recordBody}>
+                    <Text style={styles.recordTitle}>{entry.title || 'Alimentação'}</Text>
+                    <Text style={styles.recordLine}>
+                      Tipo:{' '}
+                      {entry.mode === 'photo'
+                        ? 'Foto'
+                        : entry.mode === 'voice'
+                          ? 'Áudio'
+                          : 'Texto'}
+                    </Text>
+                    {entry.description ? (
+                      <Text style={styles.recordLine} numberOfLines={2}>
+                        {entry.description}
+                      </Text>
+                    ) : null}
+                    <Text style={styles.recordLine}>
+                      Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
+                    </Text>
+                    {possuiFoto ? (
+                      <Text style={styles.recordPhotoHint}>Toque para ver a foto</Text>
+                    ) : null}
+                  </View>
+                  {possuiFoto ? (
+                    <View style={styles.recordChevronSlot}>
+                      <Ionicons
+                        name="chevron-forward"
+                        size={20}
+                        color={patientTheme.colors.textMuted}
+                      />
+                    </View>
+                  ) : null}
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={styles.deleteButton}
+                  onPress={() => handleDeleteMeal(entry)}
+                  disabled={deletingId === entry.id}
+                >
+                  {deletingId === entry.id ? (
+                    <ActivityIndicator size="small" color="#E50914" />
+                  ) : (
+                    <Ionicons name="trash-outline" size={22} color="#E50914" />
+                  )}
+                </TouchableOpacity>
               </View>
-              <View style={styles.recordBody}>
-                <Text style={styles.recordTitle}>{entry.title || 'Alimentação'}</Text>
-                <Text style={styles.recordLine}>
-                  Tipo: {entry.mode === 'photo' ? 'Foto' : entry.mode === 'voice' ? 'Áudio' : 'Texto'}
-                </Text>
-                {entry.description ? (
-                  <Text style={styles.recordLine}>{entry.description}</Text>
-                ) : null}
-                <Text style={styles.recordLine}>
-                  Data: {formatDate(entry.date)}   Hora: {formatTime(entry.time)}
-                </Text>
-              </View>
-              <TouchableOpacity
-                style={styles.deleteButton}
-                onPress={() => handleDeleteMeal(entry)}
-                disabled={deletingId === entry.id}
-              >
-                {deletingId === entry.id ? (
-                  <ActivityIndicator size="small" color="#E50914" />
-                ) : (
-                  <Ionicons name="trash-outline" size={20} color="#E50914" />
-                )}
-              </TouchableOpacity>
-            </View>
-          ))}
+            );
+          })}
         </View>
       )}
       </ScrollView>
+
+      <Modal
+        visible={Boolean(mealPhotoViewer)}
+        transparent
+        animationType="fade"
+        onRequestClose={fecharVisualizadorFoto}
+      >
+        <TouchableWithoutFeedback onPress={fecharVisualizadorFoto}>
+          <View style={styles.photoModalBackdrop}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.photoModalCard}>
+            <View style={styles.photoModalHeader}>
+              <Text style={styles.photoModalTitle} numberOfLines={2}>
+                {mealPhotoViewer?.title || 'Foto da refeição'}
+              </Text>
+              <TouchableOpacity
+                style={styles.photoModalCloseButton}
+                onPress={fecharVisualizadorFoto}
+                accessibilityLabel="Fechar visualização da foto"
+              >
+                <Ionicons name="close" size={22} color={patientTheme.colors.text} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.photoModalImageWrap}>
+              {mealPhotoViewer?.loading ? (
+                <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
+              ) : mealPhotoViewer?.uri ? (
+                <Image
+                  source={{ uri: mealPhotoViewer.uri }}
+                  style={styles.photoModalImage}
+                  resizeMode="contain"
+                />
+              ) : (
+                <Text style={styles.photoModalFallback}>
+                  Não foi possível carregar a imagem.
+                </Text>
+              )}
+            </View>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
+      </Modal>
     </PatientScreenLayout>
   );
 }
@@ -990,9 +1146,6 @@ const styles = StyleSheet.create({
   },
   screenContentWebHeaderOffset: {
     paddingTop: 110,
-  },
-  screenContentWebSearchHeaderOffset: {
-    paddingTop: 190,
   },
   backButton: {
     alignItems: 'center',
@@ -1022,7 +1175,7 @@ const styles = StyleSheet.create({
     paddingBottom: 8,
   },
   recordsContentWithSearch: {
-    paddingTop: 14,
+    paddingTop: 6,
   },
   tabRow: {
     flexDirection: 'row',
@@ -1084,9 +1237,11 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
-    gap: 10,
+    gap: 12,
     marginTop: 12,
-    padding: 12,
+    paddingHorizontal: 14,
+    paddingTop: 14,
+    paddingBottom: 16,
     ...patientShadow,
   },
   searchField: {
@@ -1097,7 +1252,8 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontSize: 12,
     fontWeight: '800',
-    marginBottom: 6,
+    marginBottom: 8,
+    paddingLeft: 2,
   },
   searchInput: {
     backgroundColor: '#ffffff',
@@ -1105,11 +1261,11 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     color: patientTheme.colors.text,
-    minHeight: 44,
+    minHeight: 46,
     outlineColor: 'transparent',
     outlineStyle: 'none',
     outlineWidth: 0,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     width: '100%',
   },
   loadingCard: {
@@ -1170,38 +1326,70 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   list: {
-    gap: 10,
+    gap: 12,
     marginTop: 14,
+  },
+  listOverlap: {
+    paddingLeft: 10,
   },
   recordCard: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
-    minHeight: 86,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    minHeight: 92,
+    overflow: 'visible',
+    paddingLeft: 14,
+    paddingRight: 8,
+    paddingVertical: 14,
     ...patientShadow,
+  },
+  recordCardOverlap: {
+    paddingLeft: 30,
+  },
+  recordContentRow: {
+    alignItems: 'center',
+    flex: 1,
+    flexDirection: 'row',
+    minWidth: 0,
   },
   recordIcon: {
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 20,
-    height: 40,
+    borderRadius: 22,
+    flexShrink: 0,
+    height: 44,
     justifyContent: 'center',
-    marginRight: 12,
-    width: 40,
+    marginRight: 14,
+    width: 44,
+  },
+  glucoseIcon: {
+    backgroundColor: '#ffffff',
+    borderColor: '#E50914',
+    borderWidth: 1.5,
   },
   medicationIcon: {
-    backgroundColor: '#E50914',
+    backgroundColor: patientTheme.colors.info,
+  },
+  recordIconOverlap: {
+    marginLeft: -22,
+    marginRight: 12,
   },
   foodIcon: {
     backgroundColor: patientTheme.colors.primary,
   },
   recordBody: {
     flex: 1,
-    minWidth: 0,
     justifyContent: 'center',
+    minWidth: 0,
+    paddingVertical: 1,
+  },
+  recordChevronSlot: {
+    alignItems: 'center',
+    flexShrink: 0,
+    justifyContent: 'center',
+    marginLeft: 4,
+    marginRight: 2,
+    width: 24,
   },
   recordTitle: {
     color: patientTheme.colors.text,
@@ -1214,13 +1402,75 @@ const styles = StyleSheet.create({
     lineHeight: 17,
     marginTop: 2,
   },
-  deleteButton: {
+  recordPhotoHint: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
+    marginTop: 6,
+  },
+  photoModalBackdrop: {
     alignItems: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: 'rgba(17, 24, 39, 0.82)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  photoModalCard: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    maxHeight: '88%',
+    overflow: 'hidden',
+    width: '100%',
+    ...patientShadow,
+  },
+  photoModalHeader: {
+    alignItems: 'center',
+    borderBottomColor: patientTheme.colors.border,
+    borderBottomWidth: 1,
+    flexDirection: 'row',
+    gap: 10,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+  },
+  photoModalTitle: {
+    color: patientTheme.colors.text,
+    flex: 1,
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  photoModalCloseButton: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primarySoft,
     borderRadius: 18,
     height: 36,
     justifyContent: 'center',
-    marginLeft: 8,
     width: 36,
+  },
+  photoModalImageWrap: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 280,
+    padding: 12,
+  },
+  photoModalImage: {
+    height: 360,
+    width: '100%',
+  },
+  photoModalFallback: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 14,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  deleteButton: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: 'transparent',
+    borderRadius: 20,
+    flexShrink: 0,
+    height: 40,
+    justifyContent: 'center',
+    marginLeft: 4,
+    width: 40,
   },
 });

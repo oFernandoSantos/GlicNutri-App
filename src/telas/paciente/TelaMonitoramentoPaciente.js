@@ -26,9 +26,11 @@ import {
   fetchGlucoseReadings,
   fetchMedicationEntries,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientId,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { EsqueletoBloco } from '../../componentes/comum/EsqueletoCarregamento';
 import { executarEmLotes } from '../../utilitarios/carregamentoTela';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
@@ -566,7 +568,7 @@ const eventIcons = {
     library: 'material',
     icon: 'pill',
     color: '#ffffff',
-    backgroundColor: '#E50914',
+    backgroundColor: patientTheme.colors.info,
   },
   sleep: {
     library: 'ion',
@@ -1252,8 +1254,17 @@ export default function PacienteMonitoramentoScreen({
       ),
     [patientId, usuarioLogado]
   );
+  const monitoramentoFetchLimits = useMemo(
+    () => mesclarLimitesDadosPaciente('monitoramento'),
+    []
+  );
+  const cachedMonitoramentoInicial = useMemo(
+    () => (patientId ? getCachedPatientExperience(patientId, monitoramentoFetchLimits) : null),
+    [patientId, monitoramentoFetchLimits]
+  );
+  const monitoramentoCacheQuente = Boolean(cachedMonitoramentoInicial);
   const [range, setRange] = useState('Hoje');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!monitoramentoCacheQuente);
   const [savingGlucose, setSavingGlucose] = useState(false);
   const [savingMedication, setSavingMedication] = useState(false);
   const [syncingLibreView, setSyncingLibreView] = useState(false);
@@ -1308,10 +1319,20 @@ export default function PacienteMonitoramentoScreen({
   const [medicineTime, setMedicineTime] = useState('');
   const [medicineDays, setMedicineDays] = useState('');
   const [medicineContinuousUse, setMedicineContinuousUse] = useState(false);
-  const [patient, setPatient] = useState(null);
-  const [objectiveText, setObjectiveText] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [patient, setPatient] = useState(cachedMonitoramentoInicial?.patient || null);
+  const [objectiveText, setObjectiveText] = useState(
+    () => cachedMonitoramentoInicial?.clinicalObjective || ''
+  );
+  const [appState, setAppState] = useState(
+    () => cachedMonitoramentoInicial?.appState || createDefaultAppState()
+  );
+  const [glucoseReadings, setGlucoseReadings] = useState(() => {
+    const id = cachedMonitoramentoInicial?.patient?.id_paciente_uuid || patientId;
+    return mergeCachedGlucoseReadings(
+      cachedMonitoramentoInicial?.glucoseReadings || [],
+      getCachedGlucoseReadings(id)
+    );
+  });
   const [loadError, setLoadError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [avisoUsuario, setAvisoUsuario] = useState(null);
@@ -1399,7 +1420,7 @@ export default function PacienteMonitoramentoScreen({
       const experience = await fetchPatientExperience(patientId, {
         patientContext: usuarioLogado,
         forceRefresh: options.forceRefresh === true,
-        ...mesclarLimitesDadosPaciente('monitoramento'),
+        ...monitoramentoFetchLimits,
       });
 
       const mergedReadings = mergeCachedGlucoseReadings(
@@ -1425,15 +1446,17 @@ export default function PacienteMonitoramentoScreen({
         'Não foi possível carregar o monitoramento. Verifique sua conexão com a internet e tente novamente.'
       );
     }
-  }, [canResolvePatient, patientId, usuarioLogado]);
+  }, [canResolvePatient, monitoramentoFetchLimits, patientId, usuarioLogado]);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
       try {
-        setLoading(true);
-        await loadMonitoringData();
+        if (!monitoramentoCacheQuente) {
+          setLoading(true);
+        }
+        await loadMonitoringData({ forceRefresh: !monitoramentoCacheQuente });
       } finally {
         if (active) setLoading(false);
       }
@@ -1444,7 +1467,7 @@ export default function PacienteMonitoramentoScreen({
     return () => {
       active = false;
     };
-  }, [loadMonitoringData]);
+  }, [loadMonitoringData, monitoramentoCacheQuente]);
 
   const onRefreshMonitoramento = useCallback(async () => {
     setRefreshing(true);
@@ -1514,7 +1537,7 @@ export default function PacienteMonitoramentoScreen({
 
     const timer = setTimeout(() => {
       if (quickRegister === 'glucose') {
-        handleOpenManualChoice();
+        // O fluxo de glicose deve abrir apenas por acoes explicitas do botao na tela.
       } else if (quickRegister === 'insulin') {
         handleSelectMedicationKind('insulin');
       } else if (quickRegister === 'medicine') {
@@ -2832,7 +2855,13 @@ export default function PacienteMonitoramentoScreen({
 
         {loading ? (
           <View style={styles.loadingArea}>
-            <ActivityIndicator color={patientTheme.colors.primaryDark} />
+            <EsqueletoBloco width="100%" height={168} borderRadius={16} />
+            <EsqueletoBloco
+              width="72%"
+              height={12}
+              borderRadius={8}
+              style={{ marginTop: 12 }}
+            />
           </View>
         ) : series.length > 0 ? (
           <GlucoseLineChart series={series} />
@@ -4594,7 +4623,7 @@ const styles = StyleSheet.create({
   },
   medicationIcon: {
     alignItems: 'center',
-    backgroundColor: '#E50914',
+    backgroundColor: patientTheme.colors.info,
     borderRadius: 21,
     height: 42,
     justifyContent: 'center',

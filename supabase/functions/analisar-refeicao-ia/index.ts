@@ -21,158 +21,59 @@ type FoodItem = {
   food_item_position: string | number | null;
 };
 
-const LOGMEAL_API_URL = 'https://api.logmeal.com';
 const DEFAULT_BUCKET = 'refeicoes-ia';
-const LOGMEAL_LANGUAGE = 'eng';
 const supabaseUrl = Deno.env.get('SUPABASE_URL') || '';
 const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || '';
-const logMealCompanyKey = Deno.env.get('LOGMEAL_API_KEY') || '';
-const logMealUserKey = Deno.env.get('LOGMEAL_API_USER_KEY') || '';
-const logMealBackendUsername = Deno.env.get('LOGMEAL_BACKEND_USERNAME') || 'glicnutri-backend';
+const geminiApiKey = Deno.env.get('GEMINI_API_KEY') || '';
+const geminiApiKeyFallback = Deno.env.get('GEMINI_API_KEY_FALLBACK') || '';
+const geminiVisionModelRaw = Deno.env.get('GEMINI_VISION_MODEL') || '';
+const DEFAULT_GEMINI_MODEL = 'gemini-2.0-flash';
+const GEMINI_MODEL_FALLBACKS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite'];
 
-let resolvedLogMealUserToken = '';
-
-const FOOD_TRANSLATIONS: Record<string, string> = {
-  food: 'Comida',
-  dish: 'Prato',
-  rice: 'Arroz',
-  'white rice': 'Arroz branco',
-  'brown rice': 'Arroz integral',
-  'rice with beans': 'Arroz com feijao',
-  spaghetti: 'Espaguete',
-  'spaghetti with tomato sauce': 'Espaguete ao molho de tomate',
-  pasta: 'Macarrao',
-  'pasta with tomato sauce': 'Macarrao ao molho de tomate',
-  noodles: 'Macarrao',
-  macaroni: 'Macarrao',
-  'instant noodles': 'Macarrao instantaneo',
-  tomato: 'Tomate',
-  sauce: 'Molho',
-  'tomato sauce': 'Molho de tomate',
-  bolognese: 'Bolonhesa',
-  'pasta bolognese': 'Macarrao a bolonhesa',
-  beans: 'Feijao',
-  bean: 'Feijao',
-  blackbeans: 'Feijao preto',
-  chicken: 'Frango',
-  'grilled chicken': 'Frango grelhado',
-  beef: 'Carne bovina',
-  steak: 'Bife',
-  fish: 'Peixe',
-  salad: 'Salada',
-  lettuce: 'Alface',
-  egg: 'Ovo',
-  bread: 'Pao',
-  potato: 'Batata',
-  fries: 'Batata frita',
-  cheese: 'Queijo',
-  milk: 'Leite',
-  soup: 'Sopa',
-  pizza: 'Pizza',
-  burger: 'Hamburguer',
-  sandwich: 'Sanduiche',
-  sausage: 'Salsicha',
-  pork: 'Carne suina',
-  cassava: 'Mandioca',
-  manioc: 'Mandioca',
-  farofa: 'Farofa',
-  broccoli: 'Brocolis',
-  carrot: 'Cenoura',
-  shrimp: 'Camarao',
-  lasagna: 'Lasanha',
-  pancake: 'Panqueca',
-  omelette: 'Omelete',
-  'fried egg': 'Ovo frito',
-  'mashed potato': 'Pure de batata',
-  'grilled fish': 'Peixe grelhado',
-  'fried fish': 'Peixe frito',
-  'fried chicken': 'Frango frito',
-  'breaded chicken': 'Frango a milanesa',
-  'breaded chicken fillet': 'Frango a milanesa',
-  'breaded chicken breast': 'Frango a milanesa',
-  'chicken schnitzel': 'Frango a milanesa',
-  schnitzel: 'Frango a milanesa',
-  milanesa: 'Frango a milanesa',
-  'chicken cutlet': 'Frango a milanesa',
-  cutlet: 'Milanesa',
-  'white beans': 'Feijao branco',
-  'black beans': 'Feijao preto',
-  'brown beans': 'Feijao carioca',
-  'pinto beans': 'Feijao carioca',
-  'carioca beans': 'Feijao carioca',
-  'bean stew': 'Feijao',
-  'cassava flour': 'Farinha de mandioca',
-  'cassava fries': 'Mandioca frita',
-  'fried cassava': 'Mandioca frita',
-  yucca: 'Mandioca',
-  plantain: 'Banana da terra',
-  okra: 'Quiabo',
-  kale: 'Couve',
-  'collard greens': 'Couve',
-  'minced beef': 'Carne moida',
-  'ground beef': 'Carne moida',
-  barbecue: 'Churrasco',
-  barbecuebeef: 'Churrasco',
-  'pork sausage': 'Linguica',
-  'beef stew': 'Carne cozida',
-  'chicken stew': 'Frango cozido',
-  feijoada: 'Feijoada',
-  stroganoff: 'Estrogonofe',
-  'beef stroganoff': 'Estrogonofe de carne',
-  'chicken stroganoff': 'Estrogonofe de frango',
-  cuscuz: 'Cuscuz',
-  polenta: 'Polenta',
+const DEPRECATED_MODEL_ALIASES: Record<string, string> = {
+  'gemini-1.5-flash': 'gemini-2.0-flash',
+  'gemini-1.5-flash-8b': 'gemini-2.0-flash-lite',
+  'gemini-1.5-pro': 'gemini-2.0-flash',
 };
 
-const CATEGORY_TRANSLATIONS: Record<string, string> = {
-  cereal: 'Cereal',
-  cereals: 'Cereais',
-  grain: 'Grao',
-  grains: 'Graos',
-  pasta: 'Massas',
-  noodle: 'Massas',
-  noodles: 'Massas',
-  rice: 'Arroz',
-  vegetable: 'Vegetal',
-  vegetables: 'Vegetais',
-  meat: 'Carne',
-  fish: 'Peixe',
-  seafood: 'Frutos do mar',
-  salad: 'Salada',
-  sauce: 'Molho',
-  legumes: 'Legumes',
-  fruit: 'Fruta',
-  fruits: 'Frutas',
-  dessert: 'Sobremesa',
-  drink: 'Bebida',
-  side: 'Acompanhamento',
-  main: 'Prato principal',
-  traditional: 'Comida caseira',
-  homemade: 'Comida caseira',
-};
+function resolveGeminiModelName(raw: string) {
+  let name = String(raw || '').trim();
+  name = name.replace(/^models\//i, '');
+  name = name.replace(/:generatecontent$/i, '');
+  name = name.replace(/['"]/g, '');
 
-const BRAZILIAN_NAME_ALIASES: Array<{ patterns: string[]; result: string; scoreBoost?: number }> = [
-  { patterns: ['white rice'], result: 'Arroz branco', scoreBoost: 40 },
-  { patterns: ['brown rice'], result: 'Arroz integral', scoreBoost: 40 },
-  { patterns: ['rice'], result: 'Arroz', scoreBoost: 15 },
-  { patterns: ['beans', 'bean stew'], result: 'Feijao', scoreBoost: 20 },
-  { patterns: ['black beans'], result: 'Feijao preto', scoreBoost: 45 },
-  { patterns: ['brown beans', 'pinto beans', 'carioca beans'], result: 'Feijao carioca', scoreBoost: 45 },
-  { patterns: ['spaghetti', 'pasta', 'noodles', 'macaroni'], result: 'Macarrao', scoreBoost: 15 },
-  { patterns: ['spaghetti with tomato sauce', 'pasta with tomato sauce'], result: 'Macarrao ao molho de tomate', scoreBoost: 50 },
-  { patterns: ['pasta bolognese'], result: 'Macarrao a bolonhesa', scoreBoost: 55 },
-  { patterns: ['fried egg', 'egg'], result: 'Ovo', scoreBoost: 25 },
-  { patterns: ['breaded chicken', 'breaded chicken fillet', 'breaded chicken breast', 'chicken schnitzel', 'schnitzel', 'chicken cutlet', 'milanesa'], result: 'Frango a milanesa', scoreBoost: 70 },
-  { patterns: ['cassava', 'manioc', 'yucca'], result: 'Mandioca', scoreBoost: 35 },
-  { patterns: ['cassava flour'], result: 'Farinha de mandioca', scoreBoost: 45 },
-  { patterns: ['farofa'], result: 'Farofa', scoreBoost: 55 },
-  { patterns: ['collard greens', 'kale'], result: 'Couve', scoreBoost: 30 },
-  { patterns: ['okra'], result: 'Quiabo', scoreBoost: 35 },
-  { patterns: ['barbecue', 'barbecuebeef'], result: 'Churrasco', scoreBoost: 30 },
-  { patterns: ['beef stroganoff', 'chicken stroganoff', 'stroganoff'], result: 'Estrogonofe', scoreBoost: 45 },
-  { patterns: ['feijoada'], result: 'Feijoada', scoreBoost: 80 },
-  { patterns: ['cuscuz'], result: 'Cuscuz', scoreBoost: 60 },
-];
+  if (!name || /gpt|openai|sk-/i.test(name)) {
+    return DEFAULT_GEMINI_MODEL;
+  }
+
+  if (DEPRECATED_MODEL_ALIASES[name]) {
+    return DEPRECATED_MODEL_ALIASES[name];
+  }
+
+  if (!/^gemini[\d.]*-[\w.-]+$/i.test(name)) {
+    return DEFAULT_GEMINI_MODEL;
+  }
+
+  return name;
+}
+
+function buildGeminiModelCandidates(preferredRaw: string) {
+  const preferred = resolveGeminiModelName(preferredRaw);
+  const ordered = [preferred, ...GEMINI_MODEL_FALLBACKS];
+  return [...new Set(ordered)];
+}
+
+function isPlaceholderGeminiKey(key: string) {
+  const normalized = String(key || '').trim().toLowerCase();
+  if (!normalized) return true;
+  return (
+    normalized.includes('sua-chave') ||
+    normalized.includes('your-key') ||
+    normalized.includes('cole_aqui') ||
+    normalized === 'aiza...' ||
+    normalized.startsWith('aiza...')
+  );
+}
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -186,91 +87,15 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
 
 function unwrapErrorMessage(raw: string) {
   const trimmed = String(raw || '').trim();
-
-  if (!trimmed) {
-    return '';
-  }
+  if (!trimmed) return '';
 
   try {
     const parsed = JSON.parse(trimmed) as Record<string, unknown>;
-    return String(parsed.message || parsed.error || trimmed);
+    const error = parsed.error as Record<string, unknown> | undefined;
+    return String(error?.message || parsed.message || parsed.error || trimmed);
   } catch (_error) {
     return trimmed;
   }
-}
-
-function isLogMealAccessError(message: string) {
-  const normalized = String(message || '').toLowerCase();
-
-  return (
-    normalized.includes('not allowed') ||
-    normalized.includes('upgrade your logmeal plan') ||
-    normalized.includes('nao permitido')
-  );
-}
-
-function friendlyLogMealAccessMessage() {
-  return (
-    'A analise por foto usa o token de usuario LogMeal (APIUser), nao a chave da empresa. ' +
-    'No painel LogMeal > Users, copie o token do usuario de teste e configure LOGMEAL_API_USER_KEY no Supabase. ' +
-    'Se o plano gratuito expirou, ative o plano Analyse ou superior. ' +
-    'Enquanto isso, use "Anexar foto sem IA" e busque o alimento na tabela TACO.'
-  );
-}
-
-async function createLogMealApiUserToken() {
-  if (!logMealCompanyKey) {
-    throw new Error('LOGMEAL_API_KEY da empresa obrigatoria para criar usuario LogMeal.');
-  }
-
-  const response = await fetch(`${LOGMEAL_API_URL}/v2/users/signUp`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${logMealCompanyKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      username: logMealBackendUsername,
-      language: 'por',
-    }),
-  });
-
-  if (response.status === 201) {
-    const data = (await response.json()) as Record<string, unknown>;
-    const token = String(data?.token || data?.access_token || data?.api_token || '').trim();
-
-    if (token) {
-      return token;
-    }
-  }
-
-  if (response.status === 409) {
-    throw new Error(
-      `O usuario LogMeal "${logMealBackendUsername}" ja existe. ` +
-        'Copie o token APIUser no painel LogMeal e defina LOGMEAL_API_USER_KEY no Supabase.'
-    );
-  }
-
-  throw new Error(
-    unwrapErrorMessage(await response.text()) || 'Nao foi possivel criar usuario LogMeal para analise.'
-  );
-}
-
-async function resolveLogMealImageToken() {
-  if (logMealUserKey) {
-    return logMealUserKey;
-  }
-
-  if (resolvedLogMealUserToken) {
-    return resolvedLogMealUserToken;
-  }
-
-  if (logMealCompanyKey) {
-    resolvedLogMealUserToken = await createLogMealApiUserToken();
-    return resolvedLogMealUserToken;
-  }
-
-  throw new Error('LOGMEAL_API_USER_KEY ou LOGMEAL_API_KEY obrigatoria.');
 }
 
 function getSupabaseAdmin() {
@@ -279,10 +104,7 @@ function getSupabaseAdmin() {
   }
 
   return createClient(supabaseUrl, serviceRoleKey, {
-    auth: {
-      persistSession: false,
-      autoRefreshToken: false,
-    },
+    auth: { persistSession: false, autoRefreshToken: false },
   });
 }
 
@@ -290,12 +112,10 @@ function normalizeNumber(value: unknown) {
   if (typeof value === 'number') {
     return Number.isFinite(value) ? value : 0;
   }
-
   if (typeof value === 'string') {
     const parsed = Number(value.replace(',', '.'));
     return Number.isFinite(parsed) ? parsed : 0;
   }
-
   return 0;
 }
 
@@ -303,574 +123,289 @@ function roundValue(value: unknown) {
   return Math.round(normalizeNumber(value) * 10) / 10;
 }
 
-function normalizeText(value: unknown) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase()
-    .trim();
-}
-
-function normalizeKey(value: unknown) {
-  return normalizeText(value).replace(/[^a-z0-9]/g, '');
-}
-
-function titleCase(value: string) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ');
-}
-
-function normalizeReadableText(value: unknown) {
-  return String(value || '')
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function isMostlyNumericText(value: unknown) {
-  const text = normalizeReadableText(value);
-
-  if (!text) {
-    return true;
-  }
-
-  const lettersOnly = text.replace(/[^a-zA-ZÀ-ÿ]/g, '');
-
-  if (lettersOnly.length > 0) {
-    return false;
-  }
-
-  return /[0-9]/.test(text);
-}
-
-function includesNormalizedTerm(text: string, term: string) {
-  const normalizedText = normalizeText(text);
-  const normalizedTerm = normalizeText(term);
-
-  return normalizedText.includes(normalizedTerm);
-}
-
-function translateLabel(value: unknown, dictionary: Record<string, string>, fallback: string) {
-  const raw = normalizeReadableText(value);
-
-  if (!raw) {
-    return fallback;
-  }
-
-  const normalized = normalizeText(raw);
-
-  if (dictionary[normalized]) {
-    return dictionary[normalized];
-  }
-
-  for (const [key, translated] of Object.entries(dictionary)) {
-    if (normalized === key) {
-      return translated;
-    }
-  }
-
-  let translatedText = raw;
-
-  Object.entries(dictionary).forEach(([key, translated]) => {
-    const regex = new RegExp(`\\b${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'gi');
-    translatedText = translatedText.replace(regex, translated);
-  });
-
-  return titleCase(normalizeReadableText(translatedText));
-}
-
-function makeFoodId(position: unknown, index: number) {
-  const normalized = String(position ?? index).trim();
-  return `food-${normalized || index}`;
-}
-
-function walkValues(value: unknown, visitor: (key: string, current: unknown) => void) {
-  if (Array.isArray(value)) {
-    value.forEach((item) => walkValues(item, visitor));
-    return;
-  }
-
-  if (!value || typeof value !== 'object') {
-    return;
-  }
-
-  Object.entries(value as Record<string, unknown>).forEach(([key, current]) => {
-    visitor(key, current);
-    walkValues(current, visitor);
-  });
-}
-
-function findNumberByVariants(value: unknown, variants: string[]) {
-  const normalizedVariants = variants.map(normalizeKey);
-  let found = 0;
-  let matched = false;
-
-  walkValues(value, (key, current) => {
-    if (matched) return;
-
-    if (typeof current !== 'number' && typeof current !== 'string') {
-      return;
-    }
-
-    const normalized = normalizeKey(key);
-
-    if (
-      normalizedVariants.some(
-        (variant) => normalized === variant || normalized.includes(variant) || variant.includes(normalized)
-      )
-    ) {
-      const parsed = roundValue(current);
-
-      if (parsed || String(current) === '0') {
-        found = parsed;
-        matched = true;
-      }
-    }
-  });
-
-  return found;
-}
-
-function findTextByVariants(value: unknown, variants: string[]) {
-  const normalizedVariants = variants.map(normalizeKey);
-  let found = '';
-
-  walkValues(value, (key, current) => {
-    if (found) return;
-    if (typeof current !== 'string') return;
-
-    const normalized = normalizeKey(key);
-
-    if (
-      normalizedVariants.some(
-        (variant) => normalized === variant || normalized.includes(variant) || variant.includes(normalized)
-      )
-    ) {
-      const text = String(current).trim();
-
-      if (text) {
-        found = text;
-      }
-    }
-  });
-
-  return found;
-}
-
-function getDirectString(record: Record<string, unknown>, keys: string[]) {
+function pickNumber(record: Record<string, unknown>, keys: string[]) {
   for (const key of keys) {
     const value = record[key];
-
-    if (typeof value === 'string') {
-      const normalized = normalizeReadableText(value);
-
-      if (normalized && !isMostlyNumericText(normalized)) {
-        return normalized;
-      }
-    }
-
-    if (Array.isArray(value)) {
-      for (const item of value) {
-        if (typeof item === 'string') {
-          const normalized = normalizeReadableText(item);
-
-          if (normalized && !isMostlyNumericText(normalized)) {
-            return normalized;
-          }
-        }
-      }
+    if (value !== null && typeof value !== 'undefined' && String(value).trim() !== '') {
+      const parsed = normalizeNumber(value);
+      if (parsed > 0) return parsed;
     }
   }
-
-  return '';
+  return 0;
 }
 
-function getRecognitionCandidates(segmentationItem: Record<string, unknown>) {
-  const recognitionResults = Array.isArray(segmentationItem.recognition_results)
-    ? segmentationItem.recognition_results
-    : Array.isArray(segmentationItem.recognitionResults)
-      ? segmentationItem.recognitionResults
-      : [];
-
-  return recognitionResults
-    .filter((item) => item && typeof item === 'object')
-    .map((item) => {
-      const record = item as Record<string, unknown>;
-      const label =
-        findTextByVariants(record, ['foodname', 'dishname', 'label', 'name']) || '';
-      const score =
-        findNumberByVariants(record, ['confidence', 'prob', 'probability', 'score']) || 0;
-
-      return {
-        label,
-        score,
-      };
-    })
-    .filter((item) => item.label);
-}
-
-function collectFoodNameCandidates(
-  segmentationItem: Record<string, unknown>,
-  nutritionItem: Record<string, unknown>
-) {
-  const candidates: Array<{ label: string; score: number }> = [];
-
-  const pushCandidate = (label: unknown, score: number) => {
-    const text = normalizeReadableText(label);
-
-    if (!text || isMostlyNumericText(text)) {
-      return;
-    }
-
-    candidates.push({
-      label: text,
-      score,
-    });
-  };
-
-  [
-    segmentationItem.foodName,
-    segmentationItem.food_name,
-    segmentationItem.dishName,
-    segmentationItem.dish_name,
-    segmentationItem.name,
-    getDirectString(segmentationItem, ['food_label', 'label', 'class_name', 'className']),
-    getDirectString(nutritionItem, ['foodName', 'food_name', 'dishName', 'dish_name', 'label']),
-  ].forEach((value) => {
-    if (Array.isArray(value)) {
-      value.forEach((item, index) => pushCandidate(item, 100 - index));
-      return;
-    }
-
-    pushCandidate(value, 100);
-  });
-
-  getRecognitionCandidates(segmentationItem).forEach((candidate) => {
-    pushCandidate(candidate.label, candidate.score || 0);
-  });
-
-  BRAZILIAN_NAME_ALIASES.forEach((alias) => {
-    const matched = candidates.find((candidate) =>
-      alias.patterns.some((pattern) => includesNormalizedTerm(candidate.label, pattern))
-    );
-
-    if (matched) {
-      candidates.push({
-        label: alias.result,
-        score: matched.score + (alias.scoreBoost || 25),
-      });
-    }
-  });
-
-  return candidates
-    .filter((candidate) => candidate.label)
-    .sort((left, right) => right.score - left.score);
-}
-
-function extractFoodName(
-  segmentationItem: Record<string, unknown>,
-  nutritionItem: Record<string, unknown>
-) {
-  const bestCandidate = collectFoodNameCandidates(segmentationItem, nutritionItem)[0];
-  return translateLabel(bestCandidate?.label || '', FOOD_TRANSLATIONS, 'Alimento nao identificado');
-}
-
-function extractCategory(
-  segmentationItem: Record<string, unknown>,
-  nutritionItem: Record<string, unknown>
-) {
-  const rawCategory =
-    getDirectString(segmentationItem, ['groupName', 'group_name', 'foodGroup', 'food_group', 'foodType', 'food_type', 'category', 'subgroupName', 'subgroup_name']) ||
-    getDirectString(nutritionItem, ['groupName', 'group_name', 'foodGroup', 'food_group', 'foodType', 'food_type', 'category', 'subgroupName', 'subgroup_name']) ||
-    'Nao informada';
-
-  return translateLabel(rawCategory, CATEGORY_TRANSLATIONS, 'Nao informada');
-}
-
-function extractQuantityGrams(segmentationItem: Record<string, unknown>) {
-  const servingSize = segmentationItem.serving_size as
-    | Record<string, unknown>
-    | number
-    | undefined;
-
-  if (servingSize && typeof servingSize === 'object') {
-    const grams = findNumberByVariants(servingSize, ['grams', 'gram', 'weight', 'quantity']);
-    if (grams) return grams;
-  }
-
-  if (typeof servingSize === 'number') {
-    return roundValue(servingSize);
-  }
-
-  return (
-    findNumberByVariants(segmentationItem, [
-      'servingsizegrams',
-      'quantitygrams',
-      'grams',
-      'gram',
-      'weightgrams',
-      'weight',
-      'quantity',
-    ]) || 0
-  );
-}
-
-function parseNutritionPerItem(payload: Record<string, unknown>) {
-  const items = Array.isArray(payload.nutritional_info_per_item)
-    ? payload.nutritional_info_per_item
-    : [];
-  const map = new Map<string, Record<string, unknown>>();
-
-  items.forEach((item, index) => {
-    if (!item || typeof item !== 'object') return;
-
-    const record = item as Record<string, unknown>;
-    const key = String(
-      record.food_item_position ??
-        record.foodItemPosition ??
-        record.position ??
-        index
-    );
-
-    map.set(key, record);
-  });
-
-  return map;
-}
-
-function buildFoodItems(
-  segmentationPayload: Record<string, unknown>,
-  nutritionPayload: Record<string, unknown>
-) {
-  const segmentationResults = Array.isArray(segmentationPayload.segmentation_results)
-    ? segmentationPayload.segmentation_results
-    : [];
-  const nutritionByPosition = parseNutritionPerItem(nutritionPayload);
-
-  const foods = segmentationResults
-    .map((item, index) => {
-      if (!item || typeof item !== 'object') {
-        return null;
-      }
-
-      const segmentationItem = item as Record<string, unknown>;
-      const position =
-        segmentationItem.food_item_position ??
-        segmentationItem.foodItemPosition ??
-        index;
-      const nutritionItem =
-        nutritionByPosition.get(String(position)) ||
-        nutritionByPosition.get(String(index)) ||
-        {};
-
-      const food: FoodItem = {
-        id: makeFoodId(position, index),
-        nome: extractFoodName(segmentationItem, nutritionItem),
-        categoria: extractCategory(segmentationItem, nutritionItem),
-        quantidade_gramas: extractQuantityGrams(segmentationItem) || 100,
-        calorias: findNumberByVariants(nutritionItem, ['calories', 'energykcal', 'energy', 'kcal']),
-        carboidratos: findNumberByVariants(nutritionItem, ['carbohydrates', 'carbs', 'carbohydrate']),
-        proteinas: findNumberByVariants(nutritionItem, ['proteins', 'protein']),
-        gorduras: findNumberByVariants(nutritionItem, ['fat', 'fats', 'lipids', 'totalfat']),
-        food_item_position: position as string | number,
-      };
-
-      if (!food.nome || isMostlyNumericText(food.nome)) {
-        return null;
-      }
-
-      return food;
-    })
-    .filter((item): item is FoodItem => Boolean(item));
-
-  const hasRice = foods.some((item) => includesNormalizedTerm(item.nome, 'arroz'));
-  const hasBeans = foods.some((item) => includesNormalizedTerm(item.nome, 'feijao'));
-
-  if (hasRice && hasBeans) {
-    return foods.map((item) => {
-      if (includesNormalizedTerm(item.nome, 'arroz') && item.categoria === 'Nao informada') {
-        return {
-          ...item,
-          categoria: 'Comida caseira',
-        };
-      }
-
-      if (includesNormalizedTerm(item.nome, 'feijao') && item.categoria === 'Nao informada') {
-        return {
-          ...item,
-          categoria: 'Comida caseira',
-        };
-      }
-
-      return item;
-    });
-  }
-
-  return foods;
-}
-
-function buildFallbackFoodItemFromTopLevel(
-  segmentationPayload: Record<string, unknown>,
-  nutritionPayload: Record<string, unknown>
-) {
-  const topLevelName =
-    findTextByVariants(segmentationPayload, ['foodname', 'dishname', 'label', 'name']) || '';
-
-  if (!topLevelName) {
-    return [];
-  }
-
-  return [
-    {
-      id: makeFoodId('top-level', 0),
-      nome: translateLabel(topLevelName, FOOD_TRANSLATIONS, 'Alimento'),
-      categoria: translateLabel(
-        findTextByVariants(segmentationPayload, ['groupname', 'foodgroup', 'category']) || '',
-        CATEGORY_TRANSLATIONS,
-        'Nao informada'
-      ),
-      quantidade_gramas:
-        findNumberByVariants(segmentationPayload, ['grams', 'gram', 'weight', 'quantity']) || 0,
-      calorias: findNumberByVariants(nutritionPayload, ['calories', 'energykcal', 'energy', 'kcal']),
-      carboidratos: findNumberByVariants(nutritionPayload, ['carbohydrates', 'carbs', 'carbohydrate']),
-      proteinas: findNumberByVariants(nutritionPayload, ['proteins', 'protein']),
-      gorduras: findNumberByVariants(nutritionPayload, ['fat', 'fats', 'lipids', 'totalfat']),
-      food_item_position: 'top-level',
-    },
-  ];
+function makeFoodId(prefix: string, index: number) {
+  return `${prefix}-${index}-${crypto.randomUUID().slice(0, 8)}`;
 }
 
 function calculateTotals(foods: FoodItem[]) {
   return foods.reduce(
-    (totals, item) => ({
-      carboidratos_total: roundValue(totals.carboidratos_total + item.carboidratos),
-      calorias_total: roundValue(totals.calorias_total + item.calorias),
-      proteinas_total: roundValue(totals.proteinas_total + item.proteinas),
-      gorduras_total: roundValue(totals.gorduras_total + item.gorduras),
+    (totais, item) => ({
+      carboidratos_total: roundValue(totais.carboidratos_total + item.carboidratos),
+      calorias_total: roundValue(totais.calorias_total + item.calorias),
+      proteinas_total: roundValue(totais.proteinas_total + item.proteinas),
+      gorduras_total: roundValue(totais.gorduras_total + item.gorduras),
     }),
-    {
-      carboidratos_total: 0,
-      calorias_total: 0,
-      proteinas_total: 0,
-      gorduras_total: 0,
-    }
+    { carboidratos_total: 0, calorias_total: 0, proteinas_total: 0, gorduras_total: 0 }
   );
 }
 
 function inferMimeType(path = '', fallback = 'image/jpeg') {
   const normalized = path.toLowerCase();
-
-  if (normalized.endsWith('.png')) {
-    return 'image/png';
-  }
-
-  if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) {
-    return 'image/jpeg';
-  }
-
+  if (normalized.endsWith('.png')) return 'image/png';
+  if (normalized.endsWith('.webp')) return 'image/webp';
+  if (normalized.endsWith('.jpg') || normalized.endsWith('.jpeg')) return 'image/jpeg';
   return fallback;
 }
 
 async function loadImageBlob(payload: AnalyzePayload) {
   if (payload.imageUrl) {
     const response = await fetch(payload.imageUrl);
-
     if (!response.ok) {
       throw new Error('Nao foi possivel baixar a imagem enviada para analise.');
     }
-
     return {
       blob: await response.blob(),
-      fileName: payload.fileName || 'refeicao.jpg',
       mimeType: payload.mimeType || inferMimeType(payload.imageUrl),
     };
   }
 
   const bucket = payload.bucket || DEFAULT_BUCKET;
   const path = String(payload.path || '').trim();
-
   if (!path) {
     throw new Error('Informe o caminho da imagem no Storage.');
   }
 
   const supabaseAdmin = getSupabaseAdmin();
   const { data, error } = await supabaseAdmin.storage.from(bucket).download(path);
-
   if (error || !data) {
     throw new Error('Nao foi possivel ler a imagem salva no Storage.');
   }
 
   return {
     blob: data,
-    fileName: payload.fileName || path.split('/').pop() || 'refeicao.jpg',
     mimeType: payload.mimeType || inferMimeType(path),
   };
 }
 
-async function callLogMealSegmentation(imageBlob: Blob, fileName: string, authToken: string) {
-  const urls = [
-    `${LOGMEAL_API_URL}/v2/image/segmentation/complete/v1.0?language=${LOGMEAL_LANGUAGE}`,
-    `${LOGMEAL_API_URL}/v2/image/segmentation/complete/quantity/v1.0?language=${LOGMEAL_LANGUAGE}`,
-  ];
-
-  let lastError = '';
-
-  for (const url of urls) {
-    const formData = new FormData();
-    formData.append('image', imageBlob, fileName);
-
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${authToken}`,
-      },
-      body: formData,
-    });
-
-    if (response.ok) {
-      return await response.json();
-    }
-
-    lastError = unwrapErrorMessage(await response.text());
-
-    if (isLogMealAccessError(lastError)) {
-      break;
-    }
+async function blobToBase64(blob: Blob) {
+  const buffer = await blob.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
   }
-
-  if (isLogMealAccessError(lastError)) {
-    throw new Error(friendlyLogMealAccessMessage());
-  }
-
-  throw new Error(lastError || 'Falha ao consultar reconhecimento alimentar.');
+  return btoa(binary);
 }
 
-async function callLogMealNutrition(imageId: number | string, authToken: string) {
-  const response = await fetch(`${LOGMEAL_API_URL}/v2/nutrition/recipe/nutritionalInfo?language=${LOGMEAL_LANGUAGE}`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${authToken}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      imageId,
-    }),
-  });
+function isGenericMealLabel(nome: string) {
+  const texto = nome
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return (
+    /prato feito|refeicao completa|almoco completo|jantar completo|comida no prato/.test(texto) ||
+    texto.length < 3
+  );
+}
 
-  if (!response.ok) {
-    const message = unwrapErrorMessage(await response.text());
+function mapVisionFoodsToItems(rawFoods: unknown[]): FoodItem[] {
+  return (Array.isArray(rawFoods) ? rawFoods : [])
+    .map((item, index) => {
+      if (!item || typeof item !== 'object') return null;
 
-    if (isLogMealAccessError(message)) {
-      throw new Error(friendlyLogMealAccessMessage());
-    }
+      const record = item as Record<string, unknown>;
+      const nome = String(record.nome || record.name || record.alimento || '').trim();
+      if (!nome || isGenericMealLabel(nome)) return null;
 
-    throw new Error(message || 'Falha ao obter dados nutricionais da refeicao.');
+      const grams = roundValue(
+        pickNumber(record, ['gramas_estimados', 'quantidade_gramas', 'grams', 'gram', 'porcao_gramas']) ||
+          100
+      );
+
+      return {
+        id: makeFoodId('ia', index),
+        nome,
+        categoria: String(record.categoria || record.category || 'Reconhecido por IA').trim(),
+        quantidade_gramas: grams > 0 ? grams : 100,
+        calorias: roundValue(pickNumber(record, ['calorias', 'kcal', 'calories'])),
+        carboidratos: roundValue(pickNumber(record, ['carboidratos', 'carbs', 'carbohydrates'])),
+        proteinas: roundValue(pickNumber(record, ['proteinas', 'protein', 'proteins'])),
+        gorduras: roundValue(pickNumber(record, ['gorduras', 'fat', 'fats', 'lipids'])),
+        food_item_position: index,
+      };
+    })
+    .filter((item): item is FoodItem => Boolean(item));
+}
+
+function extractGeminiText(payload: Record<string, unknown>) {
+  const candidates = Array.isArray(payload.candidates) ? payload.candidates : [];
+  const first = candidates[0] as Record<string, unknown> | undefined;
+  const content =
+    first?.content && typeof first.content === 'object'
+      ? (first.content as Record<string, unknown>)
+      : null;
+  const parts = Array.isArray(content?.parts) ? content.parts : [];
+
+  return parts
+    .map((part) => {
+      if (!part || typeof part !== 'object') return '';
+      return String((part as Record<string, unknown>).text || '').trim();
+    })
+    .filter(Boolean)
+    .join('\n')
+    .trim();
+}
+
+const VISION_PROMPT =
+  'Voce e nutricionista analisando uma foto de refeicao tipica do Brasil. ' +
+  'Liste SOMENTE alimentos claramente visiveis (maximo 8). ' +
+  'Use nomes em portugues brasileiro adequados a tabela TACO (ex: "Arroz, tipo 1, cozido", "Mandioca, cozida", "Carne, bovina, acém, sem gordura, cozido"). ' +
+  'Cada alimento em um item separado — nunca "prato feito" ou "refeicao completa". ' +
+  'Estime gramas por porcao visivel. Macros podem ser 0 — o app corrige com TACO. ' +
+  'Responda APENAS JSON valido: {"alimentos":[{"nome":"string","gramas_estimados":number,"categoria":"string","calorias":0,"carboidratos":0,"proteinas":0,"gorduras":0}]}';
+
+function sleep(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function isQuotaOrRateLimitError(details: string, status: number) {
+  const lower = String(details || '').toLowerCase();
+  return (
+    status === 429 ||
+    lower.includes('resource exhausted') ||
+    lower.includes('quota') ||
+    lower.includes('rate limit')
+  );
+}
+
+function isRetryableModelError(details: string) {
+  const lower = String(details || '').toLowerCase();
+  return (
+    lower.includes('not found') ||
+    lower.includes('not supported') ||
+    lower.includes('unexpected model name')
+  );
+}
+
+function collectGeminiApiKeys() {
+  return [geminiApiKey, geminiApiKeyFallback].filter((key) => key && !isPlaceholderGeminiKey(key));
+}
+
+async function analyzeMealImageWithGemini(blob: Blob, mimeType: string) {
+  const apiKeys = collectGeminiApiKeys();
+  if (!apiKeys.length) {
+    throw new Error(
+      'GEMINI_API_KEY invalida ou ausente. Configure no Supabase (Edge Functions → Secrets).'
+    );
   }
 
-  return await response.json();
+  const base64 = await blobToBase64(blob);
+  const modelCandidates = buildGeminiModelCandidates(geminiVisionModelRaw);
+  const requestBody = JSON.stringify({
+    contents: [
+      {
+        parts: [
+          { text: VISION_PROMPT },
+          { inline_data: { mime_type: mimeType, data: base64 } },
+        ],
+      },
+    ],
+    generationConfig: {
+      temperature: 0.15,
+      maxOutputTokens: 1200,
+      responseMimeType: 'application/json',
+    },
+  });
+
+  let response: Response | null = null;
+  let lastError = 'Falha ao consultar a IA de visao (Gemini).';
+  let sawQuotaError = false;
+
+  for (const apiKey of apiKeys) {
+    for (const modelId of modelCandidates) {
+      for (let retryIndex = 0; retryIndex < 2; retryIndex += 1) {
+        const endpoint =
+          `https://generativelanguage.googleapis.com/v1beta/models/${modelId}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const attempt = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: requestBody,
+        });
+
+        if (attempt.ok) {
+          response = attempt;
+          break;
+        }
+
+        const details = unwrapErrorMessage(await attempt.text());
+        lastError = details || lastError;
+
+        if (isQuotaOrRateLimitError(details, attempt.status)) {
+          sawQuotaError = true;
+          if (retryIndex === 0) {
+            await sleep(2500);
+            continue;
+          }
+          break;
+        }
+
+        if (!isRetryableModelError(details)) {
+          console.log(`Gemini (${modelId}):`, lastError);
+        }
+      }
+      if (response) break;
+    }
+    if (response) break;
+  }
+
+  if (!response) {
+    if (sawQuotaError) {
+      const quotaError = new Error(
+        'Limite da API Gemini atingido. Aguarde alguns minutos ou verifique o plano em aistudio.google.com.'
+      );
+      (quotaError as Error & { code?: string }).code = 'QUOTA_EXCEEDED';
+      throw quotaError;
+    }
+    throw new Error(lastError);
+  }
+
+  const payload = (await response.json()) as Record<string, unknown>;
+  const content = extractGeminiText(payload);
+  if (!content) {
+    throw new Error('A IA nao retornou sugestoes de alimentos para esta imagem.');
+  }
+
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(content) as Record<string, unknown>;
+  } catch (_error) {
+    const start = content.indexOf('{');
+    const end = content.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      parsed = JSON.parse(content.slice(start, end + 1)) as Record<string, unknown>;
+    } else {
+      throw new Error('Resposta da IA em formato invalido. Tente outra foto.');
+    }
+  }
+
+  const rawList = Array.isArray(parsed.alimentos)
+    ? parsed.alimentos
+    : Array.isArray(parsed.foods)
+      ? parsed.foods
+      : [];
+
+  const alimentos = mapVisionFoodsToItems(rawList);
+  if (!alimentos.length) {
+    throw new Error('Nao foi possivel identificar alimentos nesta foto. Use busca TACO ou outra imagem.');
+  }
+
+  return {
+    source: 'gemini-vision',
+    imageId: null,
+    alimentos,
+    totais: calculateTotals(alimentos),
+  };
 }
 
 Deno.serve(async (request) => {
@@ -883,65 +418,35 @@ Deno.serve(async (request) => {
   }
 
   try {
-    if (!logMealUserKey && !logMealCompanyKey) {
-      throw new Error('Variavel LOGMEAL_API_USER_KEY ou LOGMEAL_API_KEY obrigatoria.');
-    }
-
     const payload = (await request.json().catch(() => ({}))) as AnalyzePayload;
-    const { blob, fileName } = await loadImageBlob(payload);
-    const logMealImageToken = await resolveLogMealImageToken();
-    const segmentationPayload = await callLogMealSegmentation(blob, fileName, logMealImageToken);
-    const imageId =
-      segmentationPayload.imageId ||
-      segmentationPayload.image_id ||
-      segmentationPayload.id ||
-      null;
-
-    if (!imageId) {
-      return jsonResponse(
-        {
-          ok: false,
-          message: 'A IA nao retornou um identificador valido para a imagem analisada.',
-        },
-        422
-      );
-    }
-
-    const nutritionPayload = await callLogMealNutrition(imageId, logMealImageToken);
-    const alimentos = buildFoodItems(segmentationPayload, nutritionPayload);
-
-    if (!alimentos.length) {
-      return jsonResponse(
-        {
-          ok: false,
-          message: 'A IA nao conseguiu reconhecer alimentos nessa imagem.',
-          imageId,
-        },
-        422
-      );
-    }
+    const { blob, mimeType } = await loadImageBlob(payload);
+    const analysis = await analyzeMealImageWithGemini(blob, mimeType);
 
     return jsonResponse({
       ok: true,
-      source: 'logmeal',
-      imageId,
-      alimentos,
-      totais: calculateTotals(alimentos),
+      source: analysis.source,
+      imageId: analysis.imageId,
+      alimentos: analysis.alimentos,
+      totais: analysis.totais,
+      requiresReview: true,
     });
   } catch (error) {
-    console.log('Erro ao analisar refeicao por IA:', error);
-
-    const message =
-      error instanceof Error ? error.message : 'Nao foi possivel analisar a refeicao agora.';
-    const status = isLogMealAccessError(message) ? 403 : 500;
+    console.log('Erro ao analisar refeicao por IA (Gemini):', error);
+    const message = error instanceof Error ? error.message : 'Nao foi possivel analisar a refeicao agora.';
+    const lower = message.toLowerCase();
+    const isConfigError = lower.includes('gemini_api_key') || lower.includes('google ai studio');
+    const isQuotaError =
+      (error as Error & { code?: string })?.code === 'QUOTA_EXCEEDED' ||
+      lower.includes('quota') ||
+      lower.includes('resource exhausted');
 
     return jsonResponse(
       {
         ok: false,
-        code: isLogMealAccessError(message) ? 'LOGMEAL_ACCESS' : 'ANALYSIS_ERROR',
+        code: isConfigError ? 'IA_NOT_CONFIGURED' : isQuotaError ? 'QUOTA_EXCEEDED' : 'ANALYSIS_ERROR',
         message,
       },
-      status
+      isConfigError ? 503 : isQuotaError ? 429 : 500
     );
   }
 });

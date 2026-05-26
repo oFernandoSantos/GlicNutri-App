@@ -9,6 +9,16 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export const READER_HEADER_HEIGHT = 58;
+export const READER_HEADER_TOAST_GAP = 8;
+
+/** Posicao Y do toast flutuante logo abaixo do CabecalhoLeitor. */
+export function getToastTopAbaixoHeaderLeitor(insets = {}) {
+  if (Platform.OS === 'web') {
+    return READER_HEADER_HEIGHT + READER_HEADER_TOAST_GAP;
+  }
+
+  return READER_HEADER_TOAST_GAP;
+}
 
 export function getKeyboardVerticalOffset(insets = {}) {
   if (Platform.OS === 'web') {

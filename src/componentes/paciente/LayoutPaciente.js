@@ -19,6 +19,7 @@ import {
   getKeyboardVerticalOffset,
   useKeyboardBottomInset,
 } from '../comum/RolagemComTeclado';
+import GuardiaoSessaoPaciente from './GuardiaoSessaoPaciente';
 
 export default function PatientScreenLayout({
   navigation,
@@ -32,19 +33,24 @@ export default function PatientScreenLayout({
   showTabBar,
   scrollEnabled = true,
   footerOverlay,
+  topOverlay,
   refreshControl,
   lockFixedContent = false,
   keyboardAware = true,
 }) {
   const insets = useSafeAreaInsets();
+  const hasFloatingFooterOverlay = Boolean(footerOverlay);
   const shouldShowTabBar =
-    typeof showTabBar === 'boolean' ? showTabBar : isPatientMainTabRoute(route?.name);
+    typeof showTabBar === 'boolean'
+      ? showTabBar
+      : isPatientMainTabRoute(route?.name) && !hasFloatingFooterOverlay;
   const showHeader = Boolean(title || subtitle || rightAction);
   const tabBarExtra = shouldShowTabBar ? PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16 : 32;
   const keyboardBottomPadding = useKeyboardBottomInset(tabBarExtra);
   const keyboardOffset = getKeyboardVerticalOffset(insets);
 
   return (
+    <GuardiaoSessaoPaciente navigation={navigation} usuarioLogado={usuarioLogado}>
     <SafeAreaView
       edges={Platform.OS === 'web' ? undefined : []}
       style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
@@ -102,6 +108,15 @@ export default function PatientScreenLayout({
           </View>
         )}
 
+        {topOverlay ? (
+          <View
+            style={[styles.topOverlay, Platform.OS === 'web' && styles.topOverlayWeb]}
+            pointerEvents="box-none"
+          >
+            {topOverlay}
+          </View>
+        ) : null}
+
         {footerOverlay ? (
           <View
             style={[
@@ -125,6 +140,7 @@ export default function PatientScreenLayout({
         />
       ) : null}
     </SafeAreaView>
+    </GuardiaoSessaoPaciente>
   );
 }
 
@@ -200,6 +216,17 @@ const styles = StyleSheet.create({
   webContent: {
     flexGrow: 1,
     minHeight: '100%',
+  },
+  topOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 120,
+  },
+  topOverlayWeb: {
+    position: 'fixed',
+    zIndex: 1200,
   },
   footerOverlay: {
     position: 'absolute',

@@ -1,4 +1,5 @@
 import * as ImagePicker from 'expo-image-picker';
+import { Platform } from 'react-native';
 import { invalidatePatientExperienceCache } from './cacheExperienciaPaciente';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
 import { buscarAlimentosBrasil } from './servicoBuscaAlimentosBrasil';
@@ -25,12 +26,35 @@ function normalizeErrorMessage(error) {
     return 'A Edge Function "analisar-refeicao-ia" ainda nao foi publicada no Supabase.';
   }
 
-  if (message.includes('non-2xx status code') || message.includes('unauthorized')) {
-    return 'A funcao de analise retornou erro. Tente novamente agora que a integracao foi atualizada.';
+  if (message.includes('non-2xx status code')) {
+    return 'A funcao de analise retornou erro. Tente novamente em alguns segundos.';
   }
 
-  if (message.includes('confirm your apicompany email') || message.includes('confirmation link')) {
-    return 'A conta da LogMeal ainda nao foi ativada. Confirme o e-mail da conta LogMeal e tente novamente.';
+  if (message.includes('unauthorized') || message.includes('401')) {
+    return 'Sessao expirada. Faca login novamente e tente analisar a foto.';
+  }
+
+  if (
+    message.includes('resource exhausted') ||
+    message.includes('quota') ||
+    message.includes('rate limit') ||
+    message.includes('429')
+  ) {
+    return (
+      'Limite da API Gemini atingido. Aguarde alguns minutos ou verifique o plano em aistudio.google.com. ' +
+      'Enquanto isso, use "Anexar foto sem IA" e busque na TACO.'
+    );
+  }
+
+  if (
+    message.includes('api key not valid') ||
+    message.includes('invalid api key') ||
+    message.includes('gemini_api_key') ||
+    message.includes('google ai studio')
+  ) {
+    return (
+      'Chave Gemini invalida no servidor. Configure GEMINI_API_KEY no Supabase e publique analisar-refeicao-ia.'
+    );
   }
 
   if (message.includes('provided file does not have a valid format') || message.includes('valid formats are')) {
@@ -41,17 +65,8 @@ function normalizeErrorMessage(error) {
     return 'A foto ficou maior que o limite aceito pela IA. O app reduziu a imagem; tente analisar novamente.';
   }
 
-  if (
-    message.includes('not allowed') ||
-    message.includes('upgrade your logmeal plan') ||
-    message.includes('logmeal_api_user_key') ||
-    message.includes('token de usuario logmeal') ||
-    message.includes('apiuser')
-  ) {
-    return (
-      'A analise automatica por foto nao esta disponivel no momento (configuracao ou plano LogMeal). ' +
-      'Use "Anexar foto sem IA" e busque o alimento na tabela TACO abaixo.'
-    );
+  if (message.includes('nao foi possivel identificar alimentos')) {
+    return 'Nao identificamos alimentos nesta foto. Tente outro angulo, mais luz, ou use a busca TACO.';
   }
 
   return error?.message || String(error || 'Ocorreu um erro inesperado.');
@@ -317,6 +332,23 @@ function looksLikeScreenshot(asset) {
   );
 }
 
+function buildPickerAsset(asset, uri, extra = {}) {
+  const fileName =
+    asset?.fileName ||
+    asset?.file_name ||
+    `refeicao-${Date.now()}.jpg`;
+
+  return {
+    uri,
+    fileName,
+    mimeType: asset?.mimeType || asset?.type || 'image/jpeg',
+    width: extra.width || asset?.width || null,
+    height: extra.height || asset?.height || null,
+    fileSize: extra.fileSize || asset?.fileSize || asset?.file_size || null,
+    isScreenshot: looksLikeScreenshot(asset),
+  };
+}
+
 async function normalizePickerAsset(asset) {
   if (!asset?.uri) {
     return null;
@@ -337,23 +369,41 @@ async function normalizePickerAsset(asset) {
       ]
     : [];
 
-  const ImageManipulator = await import('expo-image-manipulator');
-  const manipulated = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
-    compress: 0.85,
-    format: ImageManipulator.SaveFormat.JPEG,
-  });
-  const normalizedUri = manipulated.uri;
-  const fileName = `refeicao-${Date.now()}.jpg`;
-  const mimeType = 'image/jpeg';
+  try {
+    const ImageManipulator = await import('expo-image-manipulator');
+    const manipulated = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
+      compress: 0.85,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
 
+    return buildPickerAsset(asset, manipulated.uri, {
+      width: manipulated.width,
+      height: manipulated.height,
+      fileSize: manipulated.fileSize,
+    });
+  } catch (error) {
+    console.warn('Falha ao normalizar imagem, usando original:', error);
+    return buildPickerAsset(asset, asset.uri);
+  }
+}
+
+function getImagePickerMediaTypes() {
+  if (ImagePicker.MediaType?.Images) {
+    return ImagePicker.MediaType.Images;
+  }
+
+  if (ImagePicker.MediaTypeOptions?.Images) {
+    return ImagePicker.MediaTypeOptions.Images;
+  }
+
+  return ['images'];
+}
+
+function getImagePickerOptions() {
   return {
-    uri: normalizedUri,
-    fileName,
-    mimeType,
-    width: manipulated.width || asset.width || null,
-    height: manipulated.height || asset.height || null,
-    fileSize: manipulated.fileSize || asset.fileSize || asset.file_size || null,
-    isScreenshot: looksLikeScreenshot(asset),
+    allowsEditing: Platform.OS !== 'web',
+    mediaTypes: getImagePickerMediaTypes(),
+    quality: 0.9,
   };
 }
 
@@ -376,9 +426,7 @@ export async function escolherImagemRefeicaoDaGaleria() {
 
   return openPicker(() =>
     ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
+      ...getImagePickerOptions(),
       selectionLimit: 1,
     })
   );
@@ -393,9 +441,7 @@ export async function tirarFotoRefeicao() {
 
   return openPicker(() =>
     ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
+      ...getImagePickerOptions(),
     })
   );
 }
@@ -545,24 +591,67 @@ export function getMealEntryNutrition(entry) {
 export function criarAlimentoEditavel(alimento = {}) {
   const inferred = inferFoodNutrientDefaults(alimento);
 
+  const quantidadeBase = roundNutrient(
+    alimento.base_quantidade_gramas || alimento.quantidade_base || alimento.quantidade_gramas || alimento.quantity_grams
+  );
+
+  const caloriasBase = roundNutrient(alimento.base_calorias || alimento.calorias || alimento.calories);
+  const carboidratosBase = roundNutrient(alimento.base_carboidratos || alimento.carboidratos || alimento.carbs);
+  const proteinasBase = roundNutrient(alimento.base_proteinas || alimento.proteinas || alimento.proteins);
+  const gordurasBase = roundNutrient(alimento.base_gorduras || alimento.gorduras || alimento.fats);
+
+  const fibrasBase = pickNutrientValue(
+    alimento,
+    'base_fibras',
+    'fiber',
+    pickNutrientValue(alimento, 'fibras', 'fiber', inferred.fibras)
+  );
+  const acucaresBase = pickNutrientValue(
+    alimento,
+    'base_acucares',
+    'sugar',
+    pickNutrientValue(alimento, 'acucares', 'sugar', inferred.acucares)
+  );
+  const gordurasSaturadasBase = pickNutrientValue(
+    alimento,
+    'base_gorduras_saturadas',
+    'saturatedFat',
+    pickNutrientValue(alimento, 'gorduras_saturadas', 'saturatedFat', inferred.gorduras_saturadas)
+  );
+  const sodioBase = pickNutrientValue(
+    alimento,
+    'base_sodio',
+    'sodium',
+    pickNutrientValue(alimento, 'sodio', 'sodium', inferred.sodio)
+  );
+
+  const baseForScaling = quantidadeBase > 0 ? quantidadeBase : 100;
+  const quantidadeAtual = roundNutrient(alimento.quantidade_gramas || alimento.quantity_grams) || baseForScaling;
+  const factor = baseForScaling > 0 ? quantidadeAtual / baseForScaling : 1;
+
   return {
     id: alimento.id || buildUuid(),
     nome: String(alimento.nome || alimento.foodName || 'Alimento').trim(),
     categoria: String(alimento.categoria || alimento.category || 'Nao informada').trim(),
-    quantidade_gramas: roundNutrient(alimento.quantidade_gramas || alimento.quantity_grams),
-    calorias: roundNutrient(alimento.calorias || alimento.calories),
-    carboidratos: roundNutrient(alimento.carboidratos || alimento.carbs),
-    proteinas: roundNutrient(alimento.proteinas || alimento.proteins),
-    gorduras: roundNutrient(alimento.gorduras || alimento.fats),
-    fibras: pickNutrientValue(alimento, 'fibras', 'fiber', inferred.fibras),
-    acucares: pickNutrientValue(alimento, 'acucares', 'sugar', inferred.acucares),
-    gorduras_saturadas: pickNutrientValue(
-      alimento,
-      'gorduras_saturadas',
-      'saturatedFat',
-      inferred.gorduras_saturadas
-    ),
-    sodio: pickNutrientValue(alimento, 'sodio', 'sodium', inferred.sodio),
+    base_quantidade_gramas: roundNutrient(baseForScaling),
+    base_calorias: roundNutrient(caloriasBase),
+    base_carboidratos: roundNutrient(carboidratosBase),
+    base_proteinas: roundNutrient(proteinasBase),
+    base_gorduras: roundNutrient(gordurasBase),
+    base_fibras: roundNutrient(fibrasBase),
+    base_acucares: roundNutrient(acucaresBase),
+    base_gorduras_saturadas: roundNutrient(gordurasSaturadasBase),
+    base_sodio: roundNutrient(sodioBase),
+
+    quantidade_gramas: roundNutrient(quantidadeAtual),
+    calorias: roundNutrient(caloriasBase * factor),
+    carboidratos: roundNutrient(carboidratosBase * factor),
+    proteinas: roundNutrient(proteinasBase * factor),
+    gorduras: roundNutrient(gordurasBase * factor),
+    fibras: roundNutrient(fibrasBase * factor),
+    acucares: roundNutrient(acucaresBase * factor),
+    gorduras_saturadas: roundNutrient(gordurasSaturadasBase * factor),
+    sodio: roundNutrient(sodioBase * factor),
     ferro: pickNutrientValue(alimento, 'ferro', 'iron', inferred.ferro),
     calcio: pickNutrientValue(alimento, 'calcio', 'calcium', inferred.calcio),
     magnesio: pickNutrientValue(alimento, 'magnesio', 'magnesium', inferred.magnesio),
