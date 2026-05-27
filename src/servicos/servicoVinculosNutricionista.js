@@ -1,10 +1,11 @@
 import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
 const PATIENT_LIST_COLUMNS =
-  'id_paciente_uuid, nome_completo, nome_pac, email_pac, cpf_paciente, objetivo_principal_consulta, objetivo_principal, objetivo, diagnostico_principal, id_nutricionista_uuid, peso_atual_kg, imc_atual, imc, data_nascimento, data_hora_ultima_atualizacao, glicemia_atual, ultima_glicemia_mgdl, adesao_percentual, aderencia_percentual, risco, nivel_risco, observacoes, condicoes_saude, tendencia_glicemica';
+  'id_paciente_uuid, nome_completo, email_pac, cpf_paciente, objetivo_principal_consulta, id_nutricionista_uuid, peso_atual_kg, imc_calculado, data_nascimento, data_hora_ultima_atualizacao, comorbidades_texto, excluido';
 
 const CONSULTA_WITH_PATIENT_COLUMNS =
-  'id, paciente_id, nutricionista_id, scheduled_at, status, motivo, paciente:paciente_id(id_paciente_uuid, nome_completo, nome_pac, email_pac, objetivo_principal_consulta, objetivo_principal, objetivo, id_nutricionista_uuid, peso_atual_kg, imc_atual, imc, data_nascimento, data_hora_ultima_atualizacao, glicemia_atual, ultima_glicemia_mgdl, adesao_percentual, aderencia_percentual, risco, nivel_risco, observacoes, condicoes_saude, tendencia_glicemica)';
+  `id, paciente_id, nutricionista_id, scheduled_at, status, motivo,
+  paciente:paciente_id(${PATIENT_LIST_COLUMNS})`;
 
 const MAX_PATIENTS_PER_NUTRI = 500;
 const PATIENT_ID_CHUNK = 80;
@@ -83,7 +84,7 @@ function normalizePatientCard(patient, meta = {}) {
     name: patient?.nome_completo || patient?.nome_pac || patient?.email_pac || 'Paciente',
     email: patient?.email_pac || '',
     age: age ?? '--',
-    bmi: patient?.imc_atual || patient?.imc || '--',
+    bmi: patient?.imc_calculado || patient?.imc_atual || patient?.imc || '--',
     specialtyTag: String(objective).slice(0, 80),
     objective,
     risk,
@@ -94,7 +95,7 @@ function normalizePatientCard(patient, meta = {}) {
     appointmentTime: meta.nextConsultaAt ? formatTimeShort(meta.nextConsultaAt) : 'Sem horario',
     lastConsultaAt: meta.lastConsultaAt || null,
     nextConsultaAt: meta.nextConsultaAt || null,
-    notes: patient?.observacoes || patient?.condicoes_saude || 'Paciente vinculado por consulta.',
+    notes: patient?.observacoes || patient?.condicoes_saude || patient?.comorbidades_texto || 'Paciente vinculado por consulta.',
     trendText: patient?.tendencia_glicemica || 'Acompanhar evolucao nos proximos registros.',
     unread: 0,
   };
