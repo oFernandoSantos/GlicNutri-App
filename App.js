@@ -27,6 +27,9 @@ import NutriProntuarioPacienteScreen from './src/telas/nutricionista/TelaProntua
 import NutriConsultaScreen from './src/telas/nutricionista/TelaConsultaNutri';
 import NutricionistaMensagensScreen from './src/telas/nutricionista/TelaMensagensNutricionista';
 import NutricionistaRelatoriosScreen from './src/telas/nutricionista/TelaRelatoriosNutricionista';
+import HomeMedico from './src/telas/medico/TelaInicioMedico';
+import MedicoPacientesScreen from './src/telas/medico/TelaPacientesMedico';
+import MedicoProntuarioPacienteScreen from './src/telas/medico/TelaProntuarioPacienteMedico';
 import TelaAuditoriaAdmin from './src/telas/admin/TelaAuditoriaAdmin';
 import TelaHomeAdmin from './src/telas/admin/TelaHomeAdmin';
 import TelaCadastrosAdmin from './src/telas/admin/TelaCadastrosAdmin';
@@ -65,10 +68,15 @@ import {
   limparSessaoNutricionista,
 } from './src/servicos/servicoSessaoNutricionista';
 import {
+  carregarSessaoMedico,
+  limparSessaoMedico,
+} from './src/servicos/servicoSessaoMedico';
+import {
   carregarSessaoPaciente,
   limparSessaoPaciente,
   salvarSessaoPaciente,
 } from './src/servicos/servicoSessaoPaciente';
+import { garantirSessaoRpcClinicaComPerfil } from './src/servicos/servicoSessaoRpc';
 import { resolveInitialRouteName, isPatientUser } from './src/utilitarios/perfisApp';
 import {
   getPatientId,
@@ -193,6 +201,8 @@ export default function App() {
   const [adminReady, setAdminReady] = useState(false);
   const [nutriSession, setNutriSession] = useState(null);
   const [nutriReady, setNutriReady] = useState(false);
+  const [medicoSession, setMedicoSession] = useState(null);
+  const [medicoReady, setMedicoReady] = useState(false);
   const onboardingUserIdRef = useRef(null);
 
   useEffect(() => {
@@ -200,6 +210,9 @@ export default function App() {
 
     async function carregarPacienteLocal() {
       const paciente = await carregarSessaoPaciente();
+      if (paciente) {
+        await garantirSessaoRpcClinicaComPerfil(paciente);
+      }
       if (isMounted) {
         setPatientLocalSession(paciente);
         setPatientLocalReady(true);
@@ -220,6 +233,7 @@ export default function App() {
     }
 
     const sanitized = await salvarSessaoPaciente(user);
+    await garantirSessaoRpcClinicaComPerfil(sanitized);
     setPatientLocalSession(sanitized);
     return sanitized;
   }
@@ -246,6 +260,9 @@ export default function App() {
 
     async function carregarNutri() {
       const nutri = await carregarSessaoNutricionista();
+      if (nutri) {
+        await garantirSessaoRpcClinicaComPerfil(nutri);
+      }
       if (isMounted) {
         setNutriSession(nutri);
         setNutriReady(true);
@@ -253,6 +270,26 @@ export default function App() {
     }
 
     carregarNutri();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function carregarMedico() {
+      const medico = await carregarSessaoMedico();
+      if (medico) {
+        await garantirSessaoRpcClinicaComPerfil(medico);
+      }
+      if (isMounted) {
+        setMedicoSession(medico);
+        setMedicoReady(true);
+      }
+    }
+
+    carregarMedico();
     return () => {
       isMounted = false;
     };
@@ -271,6 +308,13 @@ export default function App() {
       setNutriSession(null);
     }
   }, [session, nutriSession]);
+
+  useEffect(() => {
+    if (session?.user && medicoSession) {
+      limparSessaoMedico();
+      setMedicoSession(null);
+    }
+  }, [session, medicoSession]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -564,7 +608,8 @@ export default function App() {
     !patientOnboardingReady ||
     !patientLocalReady ||
     !adminReady ||
-    !nutriReady
+    !nutriReady ||
+    !medicoReady
   ) {
     return (
       <GestureHandlerRootView style={styles.gestureRoot}>
@@ -620,6 +665,35 @@ export default function App() {
     };
   }
 
+  function getMedicoProps(props) {
+    const sessionMedico = medicoSession || null;
+    const routeMeta = props.route?.params?.usuarioLogado || null;
+
+    return {
+      ...props,
+      route: {
+        ...props.route,
+        params: {
+          ...props.route?.params,
+          usuarioLogado: sessionMedico
+            ? {
+                ...(routeMeta && typeof routeMeta === 'object' ? routeMeta : {}),
+                ...sessionMedico,
+                id_medico_uuid:
+                  sessionMedico?.id_medico_uuid || routeMeta?.id_medico_uuid || null,
+              }
+            : null,
+          onMedicoLogout: async () => {
+            await limparSessaoMedico();
+            setMedicoSession(null);
+            props.navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+          },
+        },
+      },
+      navigation: props.navigation,
+    };
+  }
+
   function getNutriProps(props) {
     const sessionNutri = nutriSession || null;
     const routeMeta = props.route?.params?.usuarioLogado || null;
@@ -662,6 +736,7 @@ export default function App() {
   const initialRouteName = resolveInitialRouteName({
     adminSession,
     nutriSession,
+    medicoSession,
     supabaseSession: session,
     patientLocalSession,
     patientOnboardingSeen,
@@ -743,6 +818,7 @@ export default function App() {
                           ...(props.route?.params || {}),
                           onAdminLogin: (adminUser) => setAdminSession(adminUser),
                           onNutriLogin: (nutriUser) => setNutriSession(nutriUser),
+                          onMedicoLogin: (medicoUser) => setMedicoSession(medicoUser),
                           onPatientLogin: (patientUser) => persistirSessaoPacienteApp(patientUser),
                         },
                       }}
@@ -882,6 +958,28 @@ export default function App() {
                 options={readerScreenOptions}
               >
                 {(props) => withSwipeBack(props, <RegistroRefeicaoIAScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen
+                name="HomeMedico"
+                initialParams={
+                  medicoSession ? { usuarioLogado: medicoSession } : undefined
+                }
+                options={mainTabReaderOptions}
+              >
+                {(props) => withSwipeBack(props, <HomeMedico {...getMedicoProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="MedicoPacientes" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(props, <MedicoPacientesScreen {...getMedicoProps(props)} />)
+                }
+              </Stack.Screen>
+
+              <Stack.Screen name="MedicoProntuarioPaciente" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(props, <MedicoProntuarioPacienteScreen {...getMedicoProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen

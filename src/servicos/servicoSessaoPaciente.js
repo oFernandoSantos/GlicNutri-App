@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { isPatientUser } from '../utilitarios/perfisApp';
+import { limparRpcSessionToken } from './servicoSessaoRpc';
 
 export const PATIENT_SESSION_STORAGE_KEY = '@glicnutri:patientSession';
 
@@ -34,6 +35,7 @@ export async function carregarSessaoPaciente() {
 
 export async function limparSessaoPaciente() {
   try {
+    await limparRpcSessionToken();
     await AsyncStorage.removeItem(PATIENT_SESSION_STORAGE_KEY);
   } catch (_error) {
     return null;

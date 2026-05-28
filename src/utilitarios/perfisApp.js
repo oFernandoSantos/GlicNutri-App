@@ -1,4 +1,5 @@
 import { isAdminUser } from '../servicos/servicoAdmin';
+import { isMedicoUser } from '../servicos/servicoSessaoMedico';
 import { isNutriUser } from '../servicos/servicoSessaoNutricionista';
 import { isGoogleUser } from '../servicos/sincronizarPacienteGoogle';
 
@@ -16,7 +17,7 @@ export function getSessionPatientId(user) {
 
 export function isPatientUser(user) {
   if (!user || typeof user !== 'object') return false;
-  if (isAdminUser(user) || isNutriUser(user)) return false;
+  if (isAdminUser(user) || isNutriUser(user) || isMedicoUser(user)) return false;
   if (getSessionPatientId(user)) return true;
   return Boolean(
     user.tipo_perfil === 'paciente' ||
@@ -28,7 +29,7 @@ export function isPatientUser(user) {
 export function isSupabasePatientSession(session) {
   const user = session?.user;
   if (!user) return false;
-  if (isNutriUser(user) || isAdminUser(user)) return false;
+  if (isNutriUser(user) || isAdminUser(user) || isMedicoUser(user)) return false;
   return isPatientUser(user);
 }
 
@@ -42,12 +43,14 @@ function resolvePatientHomeRoute(patientOnboardingSeen) {
 export function resolveInitialRouteName({
   adminSession,
   nutriSession,
+  medicoSession,
   supabaseSession,
   patientLocalSession,
   patientOnboardingSeen,
   introSeen,
 }) {
   if (adminSession) return 'AdminHome';
+  if (medicoSession) return 'HomeMedico';
   if (nutriSession) return 'HomeNutricionista';
 
   if (patientLocalSession && isPatientUser(patientLocalSession)) {

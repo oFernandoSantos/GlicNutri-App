@@ -2,6 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 import { invalidatePatientExperienceCache } from './cacheExperienciaPaciente';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
+import { enrichRpcClinicalParams } from './servicoSessaoRpc';
 import { buscarAlimentosBrasil } from './servicoBuscaAlimentosBrasil';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { AppLogger, MODULOS_LOG_SISTEMA } from './servicoLogSistema';
@@ -974,29 +975,66 @@ export async function salvarRefeicaoIA({
     ...(createdAt ? { created_at: createdAt } : {}),
   };
 
-  let { data, error } = await supabase
-    .from('refeicao_ia')
-    .insert([payload])
-    .select('*')
-    .maybeSingle();
+  const rpcParams = {
+    p_paciente_id: patientId,
+    p_foto_url: payload.foto_url,
+    p_alimentos: payload.alimentos,
+    p_carboidratos_total: payload.carboidratos_total,
+    p_calorias_total: payload.calorias_total,
+    p_proteinas_total: payload.proteinas_total,
+    p_gorduras_total: payload.gorduras_total,
+    p_fibras_total: payload.fibras_total,
+    p_acucares_total: payload.acucares_total,
+    p_gorduras_saturadas_total: payload.gorduras_saturadas_total,
+    p_sodio_total: payload.sodio_total,
+    p_confirmado: payload.confirmado,
+    p_created_at: createdAt || null,
+  };
 
-  if (isMissingMealTotalColumnError(error)) {
-    const {
-      fibras_total,
-      acucares_total,
-      gorduras_saturadas_total,
-      sodio_total,
-      ...legacyPayload
-    } = payload;
+  let data = null;
+  let error = null;
 
-    const retry = await supabase
-      .from('refeicao_ia')
-      .insert([legacyPayload])
-      .select('*')
-      .maybeSingle();
+  const rpcResult = await supabase.rpc(
+    'registrar_refeicao_ia_paciente',
+    await enrichRpcClinicalParams(rpcParams, patientId)
+  );
+  if (!rpcResult.error) {
+    data = Array.isArray(rpcResult.data) ? rpcResult.data[0] : rpcResult.data;
+  } else {
+    const rpcMessage = String(rpcResult.error?.message || '').toLowerCase();
+    const rpcMissing =
+      rpcMessage.includes('could not find the function') ||
+      rpcMessage.includes('schema cache') ||
+      rpcMessage.includes('registrar_refeicao_ia_paciente');
 
-    data = retry.data;
-    error = retry.error;
+    if (!rpcMissing) {
+      error = rpcResult.error;
+    } else {
+      let directResult = await supabase
+        .from('refeicao_ia')
+        .insert([payload])
+        .select('*')
+        .maybeSingle();
+
+      if (isMissingMealTotalColumnError(directResult.error)) {
+        const {
+          fibras_total,
+          acucares_total,
+          gorduras_saturadas_total,
+          sodio_total,
+          ...legacyPayload
+        } = payload;
+
+        directResult = await supabase
+          .from('refeicao_ia')
+          .insert([legacyPayload])
+          .select('*')
+          .maybeSingle();
+      }
+
+      data = directResult.data;
+      error = directResult.error;
+    }
   }
 
   if (error) {

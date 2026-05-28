@@ -32,7 +32,17 @@ import {
   limparSessaoNutricionista,
   salvarSessaoNutricionista,
 } from '../../servicos/servicoSessaoNutricionista';
+import {
+  limparSessaoMedico,
+  salvarSessaoMedico,
+  sanitizeMedicoUser,
+} from '../../servicos/servicoSessaoMedico';
 import { salvarSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
+import {
+  emitirSessaoRpcOAuthPaciente,
+  emitirSessaoRpcPosCredencial,
+  limparRpcSessionToken,
+} from '../../servicos/servicoSessaoRpc';
 import { patientAppAlreadyActive } from '../../utilitarios/navegacaoPaciente';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
@@ -59,6 +69,8 @@ export default function TelaLogin({ navigation, route, session }) {
       ? 'Admin'
       : route?.params?.roleInicial === 'Nutricionista'
       ? 'Nutricionista'
+      : route?.params?.roleInicial === 'Medico'
+      ? 'Medico'
       : 'Paciente';
 
   const [role, setRole] = useState(roleInicial);
@@ -157,6 +169,22 @@ export default function TelaLogin({ navigation, route, session }) {
     identificadorInformado,
     senhaInformada
   ) {
+    if (perfil === 'Medico') {
+      const { data, error } = await supabase.rpc('verificar_login_medico', {
+        p_identificador: identificadorInformado.trim(),
+        p_senha: senhaInformada,
+      });
+      if (error) throw error;
+      const usuarioEncontrado = Array.isArray(data) ? data[0] : data;
+      if (usuarioEncontrado) {
+        return {
+          usuario: sanitizeMedicoUser({ ...usuarioEncontrado, tipo_perfil: 'medico' }),
+          motivo: '',
+        };
+      }
+      return { usuario: null, motivo: 'usuario_nao_encontrado' };
+    }
+
     const tabela =
       perfil === 'Paciente'
         ? 'paciente'
@@ -335,7 +363,9 @@ export default function TelaLogin({ navigation, route, session }) {
                 ? 'Paciente nao encontrado. Confira o e-mail informado.'
                 : role === 'Nutricionista'
                   ? 'Nutricionista nao encontrado. Confira o e-mail informado.'
-                  : 'Administrador nao encontrado. Confira o e-mail informado.',
+                  : role === 'Medico'
+                    ? 'Medico nao encontrado. Confira o e-mail ou CRM.'
+                    : 'Administrador nao encontrado. Confira o e-mail informado.',
           senha:
             motivo === 'senha_incorreta'
               ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
@@ -346,6 +376,8 @@ export default function TelaLogin({ navigation, route, session }) {
 
       await limparSessaoAdmin();
       await limparSessaoNutricionista();
+      await limparSessaoMedico();
+      await limparRpcSessionToken();
 
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
@@ -396,13 +428,20 @@ export default function TelaLogin({ navigation, route, session }) {
         return;
       }
 
-      const actorTipo = role === 'Paciente' ? 'paciente' : 'nutricionista';
+      const actorTipo =
+        role === 'Paciente' ? 'paciente' : role === 'Medico' ? 'medico' : 'nutricionista';
       const loginOkAction =
-        role === 'Paciente' ? 'login_sucesso_paciente' : 'login_sucesso_nutricionista';
+        role === 'Paciente'
+          ? 'login_sucesso_paciente'
+          : role === 'Medico'
+            ? 'login_sucesso_medico'
+            : 'login_sucesso_nutricionista';
       const sessaoEntityId =
         role === 'Paciente'
           ? usuario?.id_paciente_uuid || null
-          : usuario?.id_nutricionista_uuid || null;
+          : role === 'Medico'
+            ? usuario?.id_medico_uuid || null
+            : usuario?.id_nutricionista_uuid || null;
 
       await registrarLogAuditoria({
         actor: usuario,
@@ -422,10 +461,28 @@ export default function TelaLogin({ navigation, route, session }) {
         if (route?.params?.onNutriLogin) {
           route.params.onNutriLogin(usuarioSessao);
         }
+      } else if (role === 'Medico') {
+        usuarioSessao = await salvarSessaoMedico(usuario);
+        if (route?.params?.onMedicoLogin) {
+          route.params.onMedicoLogin(usuarioSessao);
+        }
       } else if (role === 'Paciente') {
         usuarioSessao = await salvarSessaoPaciente(usuario);
         if (route?.params?.onPatientLogin) {
           route.params.onPatientLogin(usuarioSessao);
+        }
+      }
+
+      if (usuario?.tipo_perfil !== 'admin') {
+        const rpcToken = await emitirSessaoRpcPosCredencial({
+          role,
+          identificador,
+          senha,
+        });
+        if (!rpcToken) {
+          setErrorMessage(
+            'Login ok, mas sessao clinica nao iniciou. Saia e entre novamente antes de registrar dados.'
+          );
         }
       }
 
@@ -434,7 +491,9 @@ export default function TelaLogin({ navigation, route, session }) {
           ? 'PacienteOnboarding'
           : role === 'Paciente'
             ? 'HomePaciente'
-            : 'HomeNutricionista';
+            : role === 'Medico'
+              ? 'HomeMedico'
+              : 'HomeNutricionista';
 
       navigation.reset({
         index: 0,
@@ -482,6 +541,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
     const usuarioPaciente = (await salvarSessaoPaciente(pacienteGoogle || user)) || pacienteGoogle || user;
+    await emitirSessaoRpcOAuthPaciente();
 
     if (route?.params?.onPatientLogin) {
       route.params.onPatientLogin(usuarioPaciente);
@@ -845,6 +905,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
         <SeletorPerfil
           role={role}
+          opcoes={isAdminAccess ? ['Paciente', 'Nutricionista'] : ['Paciente', 'Nutricionista', 'Medico']}
           onChangeRole={(perfil) => {
             setRole(perfil);
             setIdentificador('');

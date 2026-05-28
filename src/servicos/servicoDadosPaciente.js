@@ -1,4 +1,5 @@
 import { supabase } from './configSupabase';
+import { enrichRpcClinicalParams } from './servicoSessaoRpc';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
@@ -341,6 +342,78 @@ function normalizeMedicationType(value) {
   return value === 'insulin' ? 'insulin' : 'medicine';
 }
 
+function normalizeInsulinCategoryForDatabase(value) {
+  const raw = String(value || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+
+  if (['basal'].includes(raw)) return 'basal';
+  if (['bolus', 'prandial', 'prandial_bolus', 'correcao'].includes(raw)) return 'bolus';
+  if (['rapida', 'ultrarrapida', 'ultra_rapida'].includes(raw)) return 'rapida';
+  if (['intermediaria', 'nph'].includes(raw)) return 'intermediaria';
+  if (['premisturada', 'mista', 'mixed'].includes(raw)) return 'premisturada';
+  if (['basal', 'bolus', 'rapida', 'intermediaria', 'premisturada'].includes(raw)) return raw;
+
+  return 'basal';
+}
+
+function isInsulinMedicationEntry(entry) {
+  return normalizeMedicationType(entry?.medicationKind || entry?.tipo_registro) === 'insulin';
+}
+
+function normalizeInsulinEntry(item, storageOrigin = 'insulin_database', index = 0) {
+  const observation = String(item?.observacao || '').trim();
+  const parsedObservation = parseMedicationObservation(observation);
+
+  return normalizeMedicationEntry(
+    {
+      id: item?.id,
+      insulinDatabaseId: item?.id || item?.insulinDatabaseId || null,
+      id_registro_medicacao_uuid: item?.id_registro_medicacao_origem || null,
+      id_paciente_uuid: item?.id_paciente_uuid,
+      medicationKind: 'insulin',
+      tipo_registro: 'insulin',
+      nome_medicamento: item?.nome_insulina,
+      medicineName: item?.nome_insulina,
+      quantidade: item?.dose_ui,
+      medicineQuantity: item?.dose_ui,
+      unidade_medida: item?.unidade_medida || 'UI',
+      medicineUnit: item?.unidade_medida || 'UI',
+      data: item?.data,
+      hora: item?.hora,
+      descricao: item?.descricao || 'Insulina',
+      label: item?.descricao || item?.label || 'Insulina',
+      observacao: observation,
+      insulinCategory:
+        item?.categoria_insulina ||
+        item?.insulinCategory ||
+        parsedObservation.insulinCategory,
+      insulinUsage: item?.objetivo_uso || item?.insulinUsage || parsedObservation.insulinUsage,
+      insulinNotes: item?.insulinNotes || parsedObservation.insulinNotes,
+      local_aplicacao: item?.local_aplicacao,
+    },
+    storageOrigin,
+    index
+  );
+}
+
+function mergeInsulinEntries(dedicatedEntries, legacyMedicationInsulinEntries) {
+  const migratedOriginIds = new Set(
+    ensureArray(dedicatedEntries)
+      .map((entry) => entry?.id_registro_medicacao_origem || entry?.databaseId)
+      .filter(Boolean)
+  );
+
+  const legacyOnly = ensureArray(legacyMedicationInsulinEntries).filter((entry) => {
+    const legacyMedicationId = entry?.databaseId || entry?.id_registro_medicacao_uuid;
+    return !legacyMedicationId || !migratedOriginIds.has(legacyMedicationId);
+  });
+
+  return mergeMedicationEntries(dedicatedEntries, legacyOnly);
+}
+
 function normalizeMedicationDate(value) {
   return String(value || buildTodayDateString()).slice(0, 10);
 }
@@ -425,6 +498,7 @@ function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
     : String(daysValue).trim();
   const medicineContinuousUse = Boolean(item?.medicineContinuousUse ?? item?.uso_continuo);
   const label = String(item?.label || item?.descricao || '').trim() || 'Medicacao / insulina';
+  const insulinDatabaseId = item?.insulinDatabaseId || null;
   const databaseId = item?.id_registro_medicacao_uuid || null;
   const observation = String(item?.observacao || '').trim();
   const parsedObservation = parseMedicationObservation(observation);
@@ -432,6 +506,7 @@ function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
   return {
     id:
       item?.id ||
+      insulinDatabaseId ||
       databaseId ||
       item?.id_registro_legado ||
       `med-${date}-${time}-${index}`,
@@ -440,19 +515,27 @@ function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
     date,
     time,
     medicationKind: normalizedType,
+    tipo_registro: normalizedType,
     medicineName,
     medicineUnit,
     medicineQuantity,
     medicineDays,
     medicineContinuousUse,
     patientId: item?.id_paciente_uuid || item?.patientId || null,
-    insulinCategory: String(item?.insulinCategory || parsedObservation.insulinCategory || '').trim(),
-    insulinUsage: String(item?.insulinUsage || parsedObservation.insulinUsage || '').trim(),
+    insulinCategory: String(
+      item?.insulinCategory ||
+        item?.categoria_insulina ||
+        parsedObservation.insulinCategory ||
+        ''
+    ).trim(),
+    insulinUsage: String(item?.insulinUsage || item?.objetivo_uso || parsedObservation.insulinUsage || '').trim(),
     insulinNotes: String(item?.insulinNotes || parsedObservation.insulinNotes || '').trim(),
+    localAplicacao: String(item?.local_aplicacao || item?.localAplicacao || '').trim(),
     observation,
     storageOrigin,
     databaseId,
-    legacyId: item?.id || item?.id_registro_legado || null,
+    insulinDatabaseId,
+    legacyId: item?.id_registro_legado || item?.legacyId || null,
   };
 }
 
@@ -1303,11 +1386,17 @@ async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
 
   for (let index = 0; index < patientIds.length; index += NUTRI_INBOX_ID_CHUNK) {
     const chunk = patientIds.slice(index, index + NUTRI_INBOX_ID_CHUNK);
-    const { data, error } = await supabase.rpc('listar_mensagens_chat_inbox', {
-      p_nutricionista_id: nutricionistaId,
-      p_paciente_ids: chunk,
-      p_mensagens_por_paciente: NUTRI_INBOX_MESSAGES_PER_PATIENT,
-    });
+    const { data, error } = await supabase.rpc(
+      'listar_mensagens_chat_inbox',
+      await enrichRpcClinicalParams(
+        {
+          p_nutricionista_id: nutricionistaId,
+          p_paciente_ids: chunk,
+          p_mensagens_por_paciente: NUTRI_INBOX_MESSAGES_PER_PATIENT,
+        },
+        null
+      )
+    );
 
     if (!error && Array.isArray(data)) {
       aggregated.push(...data);
@@ -1333,13 +1422,17 @@ async function fetchInboxMessagesFallback(nutricionistaId, patientIds = []) {
   const aggregated = [];
 
   await executarEmLotes(patientIds, NUTRI_INBOX_FALLBACK_BATCH, async (patientId) => {
-    const { data: rows, error: rowError } = await supabase
-      .from('mensagem_chat')
-      .select('id, paciente_id, nutricionista_id, autor_role, texto, created_at')
-      .eq('nutricionista_id', nutricionistaId)
-      .eq('paciente_id', patientId)
-      .order('created_at', { ascending: false })
-      .limit(NUTRI_INBOX_MESSAGES_PER_PATIENT);
+    const { data: rows, error: rowError } = await supabase.rpc(
+      'listar_mensagens_chat',
+      await enrichRpcClinicalParams(
+        {
+          p_paciente_id: patientId,
+          p_nutricionista_id: nutricionistaId,
+          p_limite: NUTRI_INBOX_MESSAGES_PER_PATIENT,
+        },
+        patientId
+      )
+    );
 
     if (rowError) {
       console.log('Inbox fallback paciente:', rowError.message);
@@ -1500,23 +1593,9 @@ export async function fetchNutritionistChatSummariesByPatientIds(
 
   if (resolvedNutriId) {
     try {
-      const { data: messages, error: messagesError } = await supabase
-        .from('mensagem_chat')
-        .select('id, paciente_id, nutricionista_id, autor_role, texto, created_at')
-        .in('paciente_id', resolvedIds)
-        .eq('nutricionista_id', resolvedNutriId)
-        .order('created_at', { ascending: true })
-        .limit(Math.min(resolvedIds.length * NUTRI_INBOX_MESSAGES_PER_PATIENT, 2000));
-
-      if (!messagesError) {
-        (messages || []).forEach((row) => {
-          const list = messagesByPatient.get(row.paciente_id) || [];
-          list.push(row);
-          messagesByPatient.set(row.paciente_id, list);
-        });
-      }
+      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
     } catch (chatError) {
-      console.log('Chat summaries indisponivel (tabela/RPC):', chatError);
+      console.log('Chat summaries indisponivel (RPC):', chatError);
     }
   }
 
@@ -1813,49 +1892,131 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
   let rpcReadings = [];
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     'listar_glicemias_manuais_paciente',
-    {
-      p_id_paciente_uuid: patientId,
-      p_limite: limit,
-    }
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_limite: limit,
+      },
+      patientId
+    )
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
     rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
-    return mergeCachedGlucoseReadings(rpcReadings).slice(0, limit);
   } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
-    console.log('Erro ao buscar glicemia por RPC:', rpcError.message);
+    console.log('Erro ao buscar glicemia manual por RPC:', rpcError.message);
   }
 
-  let { data, error } = await supabase
-    .from('registro_glicemia_manual')
-    .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora, sintomas_associados')
-    .eq('id_paciente_uuid', patientId)
-    .order('data', { ascending: false })
-    .order('hora', { ascending: false })
-    .limit(limit);
+  let cgmReadings = [];
+  const { data: cgmData, error: cgmError } = await supabase.rpc(
+    'listar_glicemias_cgm_paciente',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_limite: limit,
+      },
+      patientId
+    )
+  );
 
-  if (String(error?.message || '').toLowerCase().includes('sintomas_associados')) {
-    const retry = await supabase
-      .from('registro_glicemia_manual')
-      .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora')
-      .eq('id_paciente_uuid', patientId)
-      .order('data', { ascending: false })
-      .order('hora', { ascending: false })
-      .limit(limit);
-
-    data = retry.data;
-    error = retry.error;
+  if (!cgmError && Array.isArray(cgmData)) {
+    cgmReadings = cgmData.map((row) =>
+      normalizeGlucoseReadingRow({
+        id_glicemia_manual_uuid: row.id,
+        id_paciente_uuid: row.id_paciente_uuid,
+        valor_glicose_mgdl: row.valor_glicose_mgdl,
+        data: row.data,
+        hora: row.hora,
+        sintomas_associados: row.tendencia
+          ? `Fonte: ${row.fonte || 'cgm'} | Tendencia: ${row.tendencia}`
+          : `Fonte: ${row.fonte || 'cgm'}`,
+      })
+    );
+  } else if (cgmError && !isRpcFunctionMissing(cgmError, 'listar_glicemias_cgm_paciente')) {
+    console.log('Erro ao buscar glicemia CGM por RPC:', cgmError.message);
   }
 
-  if (error) {
-    console.log('Erro ao buscar glicemia:', error.message);
-    return rpcReadings;
+  const merged = mergeCachedGlucoseReadings(rpcReadings, cgmReadings);
+  return merged.slice(0, limit);
+}
+
+async function fetchMedicationEntriesOnly(patientId, limit = 120) {
+  let rpcEntries = [];
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'listar_medicacoes_paciente',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_limite: limit,
+      },
+      patientId
+    )
+  );
+
+  if (!rpcError && Array.isArray(rpcData)) {
+    rpcEntries = rpcData
+      .filter((item) => !isInsulinMedicationEntry(item))
+      .map((item, index) => normalizeMedicationEntry(item, 'database', index));
+    return rpcEntries.slice(0, limit);
   }
 
-  return mergeCachedGlucoseReadings(
-    (data || []).map(normalizeGlucoseReadingRow),
-    rpcReadings
-  ).slice(0, limit);
+  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
+    console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
+  }
+
+  return rpcEntries.slice(0, limit);
+}
+
+async function fetchLegacyInsulinFromMedicacaoTable(patientId, limit = 120) {
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'listar_medicacoes_paciente',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_limite: limit,
+      },
+      patientId
+    )
+  );
+
+  if (!rpcError && Array.isArray(rpcData)) {
+    return rpcData
+      .filter((item) => isInsulinMedicationEntry(item))
+      .map((item, index) => normalizeMedicationEntry(item, 'legacy_medicacao', index));
+  }
+
+  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
+    console.log('Erro ao buscar insulina legada por RPC:', rpcError.message);
+  }
+
+  return [];
+}
+
+export async function fetchInsulinEntries(patientId, limit = 120) {
+  if (!patientId) {
+    return [];
+  }
+
+  let dedicatedEntries = [];
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'listar_insulinas_paciente',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_limite: limit,
+      },
+      patientId
+    )
+  );
+
+  if (!rpcError && Array.isArray(rpcData)) {
+    dedicatedEntries = rpcData.map((item, index) => normalizeInsulinEntry(item, 'insulin_rpc', index));
+  } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_insulinas_paciente')) {
+    console.log('Erro ao buscar insulina por RPC:', rpcError.message);
+  }
+
+  const legacyEntries = await fetchLegacyInsulinFromMedicacaoTable(patientId, limit);
+  return mergeInsulinEntries(dedicatedEntries, legacyEntries).slice(0, limit);
 }
 
 export async function fetchMedicationEntries(patientId, limit = 120) {
@@ -1863,81 +2024,12 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
     return [];
   }
 
-  let rpcEntries = [];
-  const { data: rpcData, error: rpcError } = await supabase.rpc(
-    'listar_medicacoes_paciente',
-    {
-      p_id_paciente_uuid: patientId,
-      p_limite: limit,
-    }
-  );
+  const [medicines, insulins] = await Promise.all([
+    fetchMedicationEntriesOnly(patientId, limit),
+    fetchInsulinEntries(patientId, limit),
+  ]);
 
-  if (!rpcError && Array.isArray(rpcData)) {
-    rpcEntries = rpcData.map((item, index) =>
-      normalizeMedicationEntry(item, 'database', index)
-    );
-    return rpcEntries.slice(0, limit);
-  } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
-    console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
-  }
-
-  let { data, error } = await supabase
-    .from('registro_medicacao')
-    .select([
-      'id_registro_medicacao_uuid',
-      'id_paciente_uuid',
-      'tipo_registro',
-      'descricao',
-      'nome_medicamento',
-      'unidade_medida',
-      'quantidade',
-      'data',
-      'hora',
-      'dias_tratamento',
-      'uso_continuo',
-      'observacao',
-      'id_registro_legado',
-    ].join(', '))
-    .eq('id_paciente_uuid', patientId)
-    .order('data', { ascending: false })
-    .order('hora', { ascending: false })
-    .limit(limit);
-
-  if (String(error?.message || '').toLowerCase().includes('id_registro_legado')) {
-    const retry = await supabase
-      .from('registro_medicacao')
-      .select([
-        'id_registro_medicacao_uuid',
-        'id_paciente_uuid',
-        'tipo_registro',
-        'descricao',
-        'nome_medicamento',
-        'unidade_medida',
-        'quantidade',
-        'data',
-        'hora',
-        'dias_tratamento',
-        'uso_continuo',
-        'observacao',
-      ].join(', '))
-      .eq('id_paciente_uuid', patientId)
-      .order('data', { ascending: false })
-      .order('hora', { ascending: false })
-      .limit(limit);
-
-    data = retry.data;
-    error = retry.error;
-  }
-
-  if (error) {
-    console.log('Erro ao buscar medicacoes:', error.message);
-    return rpcEntries;
-  }
-
-  return mergeMedicationEntries(
-    (data || []).map((item, index) => normalizeMedicationEntry(item, 'database', index)),
-    rpcEntries
-  ).slice(0, limit);
+  return mergeMedicationEntries(medicines, insulins).slice(0, limit);
 }
 
 export async function fetchMealEntries(patientId, limit = 120) {
@@ -1945,36 +2037,79 @@ export async function fetchMealEntries(patientId, limit = 120) {
     return [];
   }
 
-  const mealColumns =
-    'id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, fibras_total, acucares_total, gorduras_saturadas_total, sodio_total, confirmado, created_at';
-  const legacyMealColumns =
-    'id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, confirmado, created_at';
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'listar_refeicoes_ia_paciente',
+    await enrichRpcClinicalParams(
+      {
+        p_paciente_id: patientId,
+        p_limite: limit,
+      },
+      patientId
+    )
+  );
 
-  let { data, error } = await supabase
-    .from('refeicao_ia')
-    .select(mealColumns)
-    .eq('paciente_id', patientId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-
-  if (isMissingMealTotalColumnError(error)) {
-    const retry = await supabase
-      .from('refeicao_ia')
-      .select(legacyMealColumns)
-      .eq('paciente_id', patientId)
-      .order('created_at', { ascending: false })
-      .limit(limit);
-
-    data = retry.data;
-    error = retry.error;
+  if (!rpcError && Array.isArray(rpcData)) {
+    return rpcData.map((row, index) => normalizeMealEntryFromDatabase(row, index));
   }
+
+  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_refeicoes_ia_paciente')) {
+    console.log('Erro ao buscar refeicoes IA por RPC:', rpcError.message);
+  }
+
+  return [];
+}
+
+export async function syncCgmGlucoseReadings(
+  patientId,
+  readings = [],
+  { fonte = 'librelinkup', actor = null } = {}
+) {
+  if (!patientId || !readings.length) {
+    return { inseridos: 0, ignorados: 0 };
+  }
+
+  const payload = readings
+    .map((reading) => ({
+      value: Number(reading?.value),
+      date: reading?.date,
+      time: reading?.time,
+      tendencia: reading?.tendencia || reading?.trend || null,
+      fonte: reading?.fonte || fonte,
+      device_serial: reading?.device_serial || null,
+      raw: reading?.raw || null,
+    }))
+    .filter((item) => Number.isFinite(item.value) && item.value > 0 && item.date && item.time);
+
+  if (!payload.length) {
+    return { inseridos: 0, ignorados: 0 };
+  }
+
+  const { data, error } = await supabase.rpc(
+    'sincronizar_glicemia_cgm',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_readings: payload,
+        p_fonte: fonte,
+      },
+      patientId,
+      actor
+    )
+  );
 
   if (error) {
-    console.log('Erro ao buscar refeicoes IA:', error.message);
-    return [];
+    if (isRpcFunctionMissing(error, 'sincronizar_glicemia_cgm')) {
+      return { inseridos: 0, ignorados: payload.length };
+    }
+    throw error;
   }
 
-  return (data || []).map((row, index) => normalizeMealEntryFromDatabase(row, index));
+  const row = Array.isArray(data) ? data[0] : data;
+  invalidatePatientExperienceCache(patientId);
+  return {
+    inseridos: Number(row?.inseridos || 0),
+    ignorados: Number(row?.ignorados || 0),
+  };
 }
 
 export async function addGlucoseReading(patientId, value, options = {}) {
@@ -1998,14 +2133,20 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     sintomas_associados: normalizedSymptoms,
   };
 
-  const { data: rpcData, error: rpcError } = await supabase
-    .rpc('registrar_glicemia_manual_paciente', {
-      p_id_paciente_uuid: patientId,
-      p_valor_glicose_mgdl: fallbackPayload.valor_glicose_mgdl,
-      p_data: fallbackPayload.data,
-      p_hora: fallbackPayload.hora,
-      p_sintomas_associados: normalizedSymptoms,
-    });
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'registrar_glicemia_manual_paciente',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_valor_glicose_mgdl: fallbackPayload.valor_glicose_mgdl,
+        p_data: fallbackPayload.data,
+        p_hora: fallbackPayload.hora,
+        p_sintomas_associados: normalizedSymptoms,
+      },
+      patientId,
+      options.actor || null
+    )
+  );
 
   if (!rpcError) {
     const saved = Array.isArray(rpcData) ? rpcData[0] : rpcData;
@@ -2038,84 +2179,84 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     return savedReading;
   }
 
-  if (!isRpcFunctionMissing(rpcError, 'registrar_glicemia_manual_paciente')) {
-    console.log('RPC de glicemia falhou; tentando insert direto:', rpcError?.message);
-  }
-
-  const payload = {
-    ...fallbackPayload,
-  };
-
-  let { data, error } = await supabase
-    .from('registro_glicemia_manual')
-    .insert([payload])
-    .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora')
-    .maybeSingle();
-
-  const columnMissing = String(error?.message || '').toLowerCase().includes('sintomas_associados');
-
-  if (columnMissing) {
-    const payloadWithoutSymptoms = { ...payload };
-    delete payloadWithoutSymptoms.sintomas_associados;
-    const retry = await supabase
-      .from('registro_glicemia_manual')
-      .insert([payloadWithoutSymptoms])
-      .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora')
-      .maybeSingle();
-
-    data = retry.data;
-    error = retry.error;
-  }
-
-  if (error) {
-    throw error;
-  }
-
-  if (!data) {
-    const fallbackReading = buildGlucoseReadingFromPayload(payload, glucoseCheck.value);
-    await registrarLogAuditoria({
-      actor: options.actor || null,
-      targetPatientId: patientId,
-      action: 'glicemia_manual_cadastrada',
-      entity: 'registro_glicemia_manual',
-      entityId: fallbackReading.id,
-      origin: options.auditSource || 'monitoramento_manual',
-      details: {
-        valorMgDl: fallbackReading.value,
-        data: fallbackReading.date,
-        hora: fallbackReading.time,
-        tipoGlicemia: fallbackReading.glucoseType || '',
-      },
-    });
+  if (isRpcFunctionMissing(rpcError, 'registrar_glicemia_manual_paciente')) {
+    const fallbackReading = buildGlucoseReadingFromPayload(fallbackPayload, glucoseCheck.value);
     invalidatePatientExperienceCache(patientId);
     return fallbackReading;
   }
 
-  const savedReading = buildGlucoseReadingFromPayload(
-    {
-      ...payload,
-      ...data,
-    },
-    glucoseCheck.value
+  throw rpcError || new Error('Nao foi possivel registrar glicemia. Faca login novamente.');
+}
+
+async function addInsulinEntry(patientId, normalizedEntry, sourceEntry = {}) {
+  const doseValue = normalizeMedicationNumber(normalizedEntry.medicineQuantity);
+  const rpcParams = {
+    p_id_paciente_uuid: patientId,
+    p_categoria: normalizeInsulinCategoryForDatabase(normalizedEntry.insulinCategory),
+    p_nome_insulina: normalizedEntry.medicineName || null,
+    p_dose_ui: doseValue,
+    p_unidade_medida: normalizedEntry.medicineUnit || 'UI',
+    p_local_aplicacao: normalizedEntry.localAplicacao || null,
+    p_data: normalizedEntry.date,
+    p_hora: normalizedEntry.time,
+    p_objetivo_uso: normalizedEntry.insulinUsage || null,
+    p_observacao: buildMedicationObservation(normalizedEntry),
+  };
+
+  const { data: rpcData, error: rpcError } = await supabase.rpc(
+    'registrar_insulina_paciente',
+    await enrichRpcClinicalParams(rpcParams, patientId)
   );
 
-  await registrarLogAuditoria({
-    actor: options.actor || null,
-    targetPatientId: patientId,
-    action: 'glicemia_manual_cadastrada',
-    entity: 'registro_glicemia_manual',
-    entityId: savedReading.id,
-    origin: options.auditSource || 'monitoramento_manual',
-    details: {
-      valorMgDl: savedReading.value,
-      data: savedReading.date,
-      hora: savedReading.time,
-      tipoGlicemia: savedReading.glucoseType || '',
-    },
-  });
+  if (!rpcError) {
+    const saved = Array.isArray(rpcData) ? rpcData[0] : rpcData;
+    const savedEntry = normalizeInsulinEntry(saved, 'insulin_rpc');
 
-  invalidatePatientExperienceCache(patientId);
-  return savedReading;
+    try {
+      await registrarLogAuditoria({
+        actor: sourceEntry?.actor || null,
+        targetPatientId: patientId,
+        action: 'insulina_cadastrada',
+        entity: 'registro_insulina',
+        entityId: savedEntry.insulinDatabaseId || savedEntry.id,
+        origin: sourceEntry?.auditSource || 'monitoramento_manual',
+        details: {
+          categoria: savedEntry.insulinCategory || '',
+          nome: savedEntry.medicineName || '',
+          doseUi: savedEntry.medicineQuantity || '',
+          data: savedEntry.date,
+          hora: savedEntry.time,
+        },
+      });
+    } catch (auditError) {
+      console.log('Auditoria de insulina falhou apos salvar por RPC:', auditError);
+    }
+
+    invalidatePatientExperienceCache(patientId);
+    return savedEntry;
+  }
+
+  const localPayload = {
+    id: buildUuid(),
+    id_paciente_uuid: patientId,
+    categoria_insulina: rpcParams.p_categoria,
+    nome_insulina: rpcParams.p_nome_insulina,
+    dose_ui: rpcParams.p_dose_ui,
+    unidade_medida: rpcParams.p_unidade_medida,
+    local_aplicacao: rpcParams.p_local_aplicacao,
+    data: rpcParams.p_data,
+    hora: rpcParams.p_hora,
+    objetivo_uso: rpcParams.p_objetivo_uso,
+    observacao: rpcParams.p_observacao,
+  };
+
+  if (!isRpcFunctionMissing(rpcError, 'registrar_insulina_paciente')) {
+    console.log('RPC de insulina falhou:', rpcError?.message);
+    throw rpcError || new Error('Nao foi possivel registrar insulina. Faca login novamente.');
+  }
+
+  console.log('RPC registrar_insulina_paciente indisponivel; mantendo registro local.');
+  return normalizeInsulinEntry(localPayload, 'local_shadow');
 }
 
 export async function addMedicationEntry(patientId, entry) {
@@ -2131,6 +2272,15 @@ export async function addMedicationEntry(patientId, entry) {
 
     if (!insulinCheck.ok) {
       throw new Error(insulinCheck.message);
+    }
+
+    try {
+      return await addInsulinEntry(patientId, normalizedEntry, entry);
+    } catch (insulinError) {
+      console.log(
+        'Falha ao salvar insulina em registro_insulina; usando fallback registro_medicacao:',
+        insulinError?.message || insulinError
+      );
     }
   } else {
     const medCheck = validateMedicationEntry(normalizedEntry);
@@ -2219,7 +2369,10 @@ export async function addMedicationEntry(patientId, entry) {
   let rpcError = null;
 
   for (const rpcParams of rpcAttempts) {
-    const response = await supabase.rpc('registrar_medicacao_paciente', rpcParams);
+    const response = await supabase.rpc(
+      'registrar_medicacao_paciente',
+      await enrichRpcClinicalParams(rpcParams, patientId)
+    );
     rpcData = response.data;
     rpcError = response.error;
 
@@ -2425,7 +2578,7 @@ export async function hideMedicationEntryForPatient({
   currentPatient,
   patientContext,
 }) {
-  const hiddenId = entry?.databaseId || entry?.legacyId || entry?.id;
+  const hiddenId = entry?.insulinDatabaseId || entry?.databaseId || entry?.legacyId || entry?.id;
   const nextState = {
     ...normalizeAppState(appState),
     hiddenMedicationEntryIds: appendUniqueId(appState?.hiddenMedicationEntryIds, hiddenId),
@@ -2439,14 +2592,14 @@ export async function hideMedicationEntryForPatient({
     patientContext,
   });
 
+  const isInsulinEntry = entry?.medicationKind === 'insulin' || entry?.insulinDatabaseId;
+
   await registrarLogAuditoria({
     actor: currentPatient || patientContext || null,
     targetPatientId: patientId,
-    action: entry?.medicationKind === 'insulin'
-      ? 'insulina_ocultada_historico'
-      : 'medicacao_ocultada_historico',
-    entity: 'registro_medicacao',
-    entityId: hiddenId || null,
+    action: isInsulinEntry ? 'insulina_ocultada_historico' : 'medicacao_ocultada_historico',
+    entity: isInsulinEntry ? 'registro_insulina' : 'registro_medicacao',
+    entityId: entry?.insulinDatabaseId || hiddenId || null,
     origin: 'historico',
     details: {
       nome: entry?.medicineName || '',
