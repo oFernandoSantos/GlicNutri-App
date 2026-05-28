@@ -550,8 +550,8 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
 
 const styles = StyleSheet.create({
   clinicalAlertsCard: {
-    borderColor: '#ffd6d6',
-    backgroundColor: '#fff7f7',
+    borderColor: patientTheme.colors.dangerSoft,
+    backgroundColor: patientTheme.colors.dangerSoft,
     gap: 8,
   },
   clinicalAlertsHeader: {
@@ -584,7 +584,7 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     shadowColor: 'transparent',
     elevation: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surface,
   },
   metricHeader: {
     flexDirection: 'row',
@@ -664,12 +664,12 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     shadowColor: 'transparent',
     elevation: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surface,
   },
   priorityBanner: {
     minHeight: 44,
     paddingHorizontal: 16,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surfaceMuted,
     borderBottomWidth: 1,
     borderBottomColor: patientTheme.colors.border,
     flexDirection: 'row',
@@ -708,7 +708,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surface,
     padding: 12,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -765,14 +765,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   riskBadgeHigh: {
-    backgroundColor: '#fff7f7',
+    backgroundColor: patientTheme.colors.dangerSoft,
     borderColor: patientTheme.colors.danger,
   },
   riskBadgeTextHigh: {
     color: patientTheme.colors.text,
   },
   riskBadgeMedium: {
-    backgroundColor: '#fffaf1',
+    backgroundColor: patientTheme.colors.warningSoft,
     borderColor: patientTheme.colors.warning,
   },
   riskBadgeTextMedium: {
@@ -790,7 +790,7 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     shadowColor: 'transparent',
     elevation: 0,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surface,
   },
   recentHeader: {
     flexDirection: 'row',
@@ -808,7 +808,7 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.pill,
     paddingHorizontal: 10,
     paddingVertical: 6,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surface,
   },
   viewAllText: {
     color: patientTheme.colors.text,
@@ -824,7 +824,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
-    backgroundColor: '#ffffff',
+    backgroundColor: patientTheme.colors.surface,
     padding: 10,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -854,7 +854,7 @@ const styles = StyleSheet.create({
   },
   alertsPill: {
     borderRadius: patientTheme.radius.pill,
-    backgroundColor: '#fffaf1',
+    backgroundColor: patientTheme.colors.warningSoft,
     paddingHorizontal: 8,
     paddingVertical: 3,
   },

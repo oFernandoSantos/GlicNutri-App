@@ -581,6 +581,17 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   };
 }
 
+function isMissingMealTotalColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('fibras_total') ||
+    message.includes('acucares_total') ||
+    message.includes('gorduras_saturadas_total') ||
+    message.includes('sodio_total') ||
+    message.includes('schema cache')
+  );
+}
+
 function mergeMealEntries(databaseEntries, legacyEntries) {
   const merged = [];
   const seenDatabaseIds = new Set();
@@ -1946,7 +1957,7 @@ export async function fetchMealEntries(patientId, limit = 120) {
     .order('created_at', { ascending: false })
     .limit(limit);
 
-  if (String(error?.message || '').toLowerCase().includes('schema cache')) {
+  if (isMissingMealTotalColumnError(error)) {
     const retry = await supabase
       .from('refeicao_ia')
       .select(legacyMealColumns)

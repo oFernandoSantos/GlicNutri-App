@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: '#fff4f4',
+    backgroundColor: patientTheme.colors.dangerSoft,
   },
   logoutButtonCompact: {
     paddingHorizontal: 12,

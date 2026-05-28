@@ -444,14 +444,14 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   riskBadgeHigh: {
-    backgroundColor: '#fff7f7',
+    backgroundColor: patientTheme.colors.dangerSoft,
     borderColor: patientTheme.colors.danger,
   },
   riskBadgeTextHigh: {
     color: patientTheme.colors.text,
   },
   riskBadgeMedium: {
-    backgroundColor: '#fffaf1',
+    backgroundColor: patientTheme.colors.warningSoft,
     borderColor: patientTheme.colors.warning,
   },
   riskBadgeTextMedium: {

@@ -51,7 +51,7 @@ export default function BarraAbasNutricionista({
           return (
             <Pressable
               key={aba.rota}
-              style={styles.aba}
+              style={[styles.aba, ativo && styles.abaAtiva]}
               accessibilityRole="tab"
               accessibilityState={{ selected: ativo }}
               accessibilityLabel={`Aba ${aba.rotulo}${ativo ? ', selecionada' : ''}`}
@@ -69,7 +69,7 @@ export default function BarraAbasNutricionista({
               <Ionicons
                 name={aba.icone}
                 size={22}
-                color={ativo ? patientTheme.colors.primaryDark : '#98A2A7'}
+                color={ativo ? patientTheme.colors.onPrimary : patientTheme.colors.textMuted}
               />
               <Text style={[styles.rotuloAba, ativo && styles.rotuloAbaAtivo]}>
                 {aba.rotulo}
@@ -91,38 +91,51 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: 40,
     elevation: 14,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderTopWidth: 1,
-    borderTopColor: '#ffffff',
+    borderTopColor: patientTheme.colors.surfaceBorder,
   },
   barra: {
     width: '100%',
     minHeight: NUTRI_TAB_BAR_HEIGHT,
-    paddingTop: 2,
-    paddingBottom: 4,
-    paddingHorizontal: 6,
-    backgroundColor: patientTheme.colors.background,
+    paddingTop: 7,
+    paddingBottom: 7,
+    paddingHorizontal: 8,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     ...patientShadow,
-    borderColor: '#ffffff',
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   aba: {
     flex: 1,
-    height: 44,
-    marginHorizontal: 1,
+    height: 50,
+    marginHorizontal: 2,
+    borderRadius: patientTheme.radius.lg,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 3,
+    paddingVertical: 4,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  abaAtiva: {
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderColor: patientTheme.colors.primaryDark,
+    elevation: 3,
+    shadowColor: patientTheme.colors.primaryDark,
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
   },
   rotuloAba: {
     marginTop: 3,
     fontSize: 11,
     fontWeight: '700',
-    color: '#98A2A7',
+    color: patientTheme.colors.textMuted,
   },
   rotuloAbaAtivo: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.onPrimary,
   },
 });

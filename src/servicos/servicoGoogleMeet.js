@@ -42,17 +42,15 @@ export function buildGoogleMeetLinkFromConsulta(consultaId) {
 
 export function resolveMeetLink({ consulta, nutricionista }) {
   const stored = normalizeGoogleMeetUrl(consulta?.meet_link);
-  if (stored && isValidGoogleMeetUrl(stored)) {
+  const generatedPlaceholder = consulta?.id ? buildGoogleMeetLinkFromConsulta(consulta.id) : '';
+
+  if (stored && isValidGoogleMeetUrl(stored) && stored !== generatedPlaceholder) {
     return stored;
   }
 
   const padrao = normalizeGoogleMeetUrl(nutricionista?.meet_link_padrao);
   if (padrao && isValidGoogleMeetUrl(padrao)) {
     return padrao;
-  }
-
-  if (consulta?.id) {
-    return buildGoogleMeetLinkFromConsulta(consulta.id);
   }
 
   return '';

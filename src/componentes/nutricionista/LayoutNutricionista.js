@@ -41,7 +41,7 @@ export default function LayoutNutricionista({
       edges={Platform.OS === 'web' ? undefined : []}
       style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
     >
-      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.backgroundSoft} />
 
       <WrapperTeclado
         style={styles.body}
@@ -121,8 +121,11 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: patientTheme.spacing.screen,
-    paddingTop: 10,
-    paddingBottom: 8,
+    paddingTop: 14,
+    paddingBottom: 12,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderBottomWidth: 1,
+    borderBottomColor: patientTheme.colors.surfaceBorder,
   },
   headerText: {
     marginRight: 72,
@@ -156,7 +159,7 @@ const styles = StyleSheet.create({
   content: {
     flexGrow: 1,
     paddingHorizontal: patientTheme.spacing.screen,
-    paddingTop: 8,
+    paddingTop: 14,
     paddingBottom: 36,
   },
   fixedContent: {
@@ -165,7 +168,7 @@ const styles = StyleSheet.create({
   },
   fixedContentPadding: {
     paddingHorizontal: patientTheme.spacing.screen,
-    paddingTop: 8,
+    paddingTop: 14,
     paddingBottom: 36,
   },
   fixedContentLocked: {

@@ -22,7 +22,6 @@ import { formatValorConsulta } from '../../servicos/servicoGoogleMeet';
 import {
   createConsulta,
   listConsultasByNutricionista,
-  updateConsultaSchedule,
 } from '../../servicos/servicoConsultas';
 import { createFollowUpRequest } from '../../servicos/servicoSolicitacoesAcompanhamento';
 import {
@@ -72,11 +71,9 @@ export default function PacientePerfilNutricionistaScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const nutricionistaBase = route?.params?.nutricionista || null;
-  const consultaEdicao = route?.params?.editingConsulta || null;
   const tipoConsulta = route?.params?.tipoConsulta || 'Teleconsulta';
   const convenio = route?.params?.convenio || 'Particular';
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
-  const isEditing = Boolean(consultaEdicao?.id);
   const [nutricionista, setNutricionista] = useState(nutricionistaBase);
 
   const [loadingAgenda, setLoadingAgenda] = useState(false);
@@ -190,10 +187,7 @@ export default function PacientePerfilNutricionistaScreen({
       ]);
 
       const generated = generateSlotsForNextDays(availability, { days: 21 });
-      const occupiedBase = isEditing
-        ? (consultas || []).filter((item) => item.id !== consultaEdicao?.id)
-        : consultas;
-      const marked = markSlotsWithBooking(generated, occupiedBase);
+      const marked = markSlotsWithBooking(generated, consultas);
       setSlots(marked);
       setSelectedSlot(null);
     } catch (error) {
@@ -203,7 +197,7 @@ export default function PacientePerfilNutricionistaScreen({
     } finally {
       setLoadingAgenda(false);
     }
-  }, [nutricionista?.id_nutricionista_uuid, isEditing, consultaEdicao?.id]);
+  }, [nutricionista?.id_nutricionista_uuid]);
 
   useEffect(() => {
     carregarAgenda();
@@ -333,26 +327,6 @@ export default function PacientePerfilNutricionistaScreen({
         .filter(Boolean)
         .join(' · ');
 
-      if (isEditing) {
-        await updateConsultaSchedule({
-          consultaId: consultaEdicao.id,
-          scheduledAt: selectedSlot.scheduledAt,
-          motivo,
-          tipoConsulta,
-          convenio,
-          especialidade,
-          valorCentavos: nutricionista.valor_consulta_centavos,
-          nutricionista,
-          actor: usuarioLogado,
-        });
-
-        handleFecharAgenda();
-        navigation.navigate('PacienteAgendamentos', {
-          usuarioLogado,
-          activeSection: 'consultas',
-        });
-        return;
-      }
       if (!linkedToNutri) {
         setErroAgenda(
           'Solicite o acompanhamento primeiro. Depois da aprovacao do nutricionista, o agendamento fica liberado.'
@@ -541,7 +515,7 @@ export default function PacientePerfilNutricionistaScreen({
             <Text style={styles.errorText}>{erroAgenda}</Text>
           ) : null}
 
-          {(linkedToNutri || isEditing) && calendarDays.length ? (
+          {linkedToNutri && calendarDays.length ? (
             <>
               <Text style={styles.fieldLabel}>Observações (opcional)</Text>
               <TextInput
@@ -559,7 +533,7 @@ export default function PacientePerfilNutricionistaScreen({
 
               <View style={styles.inlineAgendaActions}>
                 <BotaoAgendamento
-                  label={isEditing ? 'Salvar novo horário' : 'Confirmar Agendamento'}
+                  label="Confirmar Agendamento"
                   onPress={handleConfirmarAgendamento}
                   loading={confirmando}
                 />
@@ -570,7 +544,7 @@ export default function PacientePerfilNutricionistaScreen({
 
         {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
 
-        {!linkedToNutri && !isEditing ? (
+        {!linkedToNutri ? (
           <BotaoAgendamento
             label="Solicitar acompanhamento"
             icon="person-add-outline"
@@ -579,7 +553,7 @@ export default function PacientePerfilNutricionistaScreen({
           />
         ) : null}
 
-        {linkedToNutri && !isEditing ? (
+        {linkedToNutri ? (
           <BotaoAgendamento
             label="Desvincular nutricionista"
             icon="close-circle-outline"
@@ -605,7 +579,7 @@ export default function PacientePerfilNutricionistaScreen({
               >
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
-                    {isEditing ? 'Editar Agendamento' : 'Agendar Consulta'}
+                    Agendar Consulta
                   </Text>
                   <TouchableOpacity onPress={handleFecharAgenda}>
                     <Ionicons name="close" size={18} color={patientTheme.colors.textMuted} />
@@ -744,7 +718,7 @@ export default function PacientePerfilNutricionistaScreen({
                     style={styles.cancelButton}
                   />
                   <BotaoAgendamento
-                    label={isEditing ? 'Salvar novo horário' : 'Confirmar Agendamento'}
+                    label="Confirmar Agendamento"
                     onPress={handleConfirmarAgendamento}
                     loading={confirmando}
                     style={styles.confirmButton}

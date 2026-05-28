@@ -1,5 +1,14 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
@@ -7,10 +16,12 @@ import {
   SectionCard,
   nutriDesktopStyles,
 } from '../../componentes/nutricionista/NutriDesktopUI';
-import { updateConsultaStatus } from '../../servicos/servicoConsultas';
+import { abrirLinkGoogleMeet, createConsulta, updateConsultaStatus } from '../../servicos/servicoConsultas';
+import { resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import {
   getNutritionistId,
   listConsultasNutricionistaComPaciente,
+  listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
 import {
   listFollowUpRequestsByNutritionist,
@@ -53,30 +64,109 @@ function isWithinRange(dateValue, start, end) {
   return time >= start.getTime() && time <= end.getTime();
 }
 
+function formatDateInput(date) {
+  const safeDate = date instanceof Date ? date : new Date();
+  const year = safeDate.getFullYear();
+  const month = String(safeDate.getMonth() + 1).padStart(2, '0');
+  const day = String(safeDate.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+function buildScheduledAt(dateValue, timeValue) {
+  const date = String(dateValue || '').trim();
+  const time = String(timeValue || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    throw new Error('Informe a data no formato AAAA-MM-DD.');
+  }
+  if (!/^\d{2}:\d{2}$/.test(time)) {
+    throw new Error('Informe o horario no formato HH:MM.');
+  }
+  const scheduled = new Date(`${date}T${time}:00`);
+  if (Number.isNaN(scheduled.getTime())) {
+    throw new Error('Data ou horario invalido.');
+  }
+  if (scheduled.getTime() <= Date.now()) {
+    throw new Error('Escolha um horario futuro para agendar.');
+  }
+  const hour = scheduled.getHours();
+  const minutes = scheduled.getMinutes();
+  if (hour < 7 || hour > 20 || (hour === 20 && minutes > 0)) {
+    throw new Error('Escolha um horario entre 07:00 e 20:00.');
+  }
+  if (minutes !== 0 && minutes !== 30) {
+    throw new Error('Use horarios fechados em intervalos de 30 minutos, como 09:00 ou 09:30.');
+  }
+  return scheduled.toISOString();
+}
+
+function formatDateTimePreview(dateValue, timeValue) {
+  try {
+    const date = new Date(`${dateValue}T${timeValue}:00`);
+    if (Number.isNaN(date.getTime())) return 'Data e horario ainda nao definidos';
+    return date.toLocaleString('pt-BR', {
+      weekday: 'long',
+      day: '2-digit',
+      month: 'long',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return 'Data e horario ainda nao definidos';
+  }
+}
+
+const QUICK_DATES = [
+  { id: 'today', label: 'Hoje', offset: 0 },
+  { id: 'tomorrow', label: 'Amanha', offset: 1 },
+  { id: 'week', label: '+7 dias', offset: 7 },
+];
+
+const QUICK_TIMES = ['08:00', '08:30', '09:00', '09:30', '10:00', '14:00', '14:30', '15:00', '15:30', '16:00'];
+
 export default function TelaAgendaNutricionista({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
   const [selectedDay, setSelectedDay] = useState('hoje');
   const [consultas, setConsultas] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
   const [respondingRequestId, setRespondingRequestId] = useState('');
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [savingConsulta, setSavingConsulta] = useState(false);
+  const [createError, setCreateError] = useState('');
+  const [form, setForm] = useState({
+    pacienteId: '',
+    date: formatDateInput(startOfDay(1)),
+    time: '09:00',
+    tipoConsulta: 'Teleconsulta',
+    convenio: 'Particular',
+    meetLink: '',
+    motivo: '',
+  });
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
 
   const loadAgenda = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError('');
-      const [items, pendingRequests] = await Promise.all([
+      const [items, pendingRequests, linkedPatients] = await Promise.all([
         listConsultasNutricionistaComPaciente(nutricionistaId, {
           from: startOfDay(0).toISOString(),
           to: endOfDay(30).toISOString(),
           limit: 120,
         }),
         listFollowUpRequestsByNutritionist(nutricionistaId, { status: 'pending' }),
+        listPatientsByNutritionist(nutricionistaId, { limit: 120 }),
       ]);
       setConsultas(items || []);
       setRequests(pendingRequests || []);
+      setPatients(linkedPatients || []);
+      setForm((current) =>
+        !current.pacienteId && linkedPatients?.[0]?.id
+          ? { ...current, pacienteId: linkedPatients[0].id }
+          : current
+      );
     } catch (error) {
       console.log('Erro ao carregar agenda do nutricionista:', error);
       setLoadError('Nao foi possivel carregar a agenda.');
@@ -136,6 +226,31 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     ];
   }, [consultas, consultasHoje, consultasMes, consultasSemana, requests.length]);
 
+  const selectedPatient = useMemo(
+    () => patients.find((patient) => patient.id === form.pacienteId) || null,
+    [form.pacienteId, patients]
+  );
+
+  const occupiedSlots = useMemo(() => {
+    return new Set(
+      consultas
+        .filter((consulta) => consulta?.status !== 'cancelled')
+        .map((consulta) => {
+          const date = new Date(consulta.scheduled_at || 0);
+          if (Number.isNaN(date.getTime())) return '';
+          return `${formatDateInput(date)}T${date.toLocaleTimeString('pt-BR', {
+            hour: '2-digit',
+            minute: '2-digit',
+          })}`;
+        })
+        .filter(Boolean)
+    );
+  }, [consultas]);
+
+  const currentSlotKey = `${form.date}T${form.time}`;
+  const currentSlotBusy = occupiedSlots.has(currentSlotKey);
+  const canCreateConsulta = Boolean(patients.length && form.pacienteId && !savingConsulta && !currentSlotBusy);
+
   async function updateStatus(consultaId, nextStatus) {
     await updateConsultaStatus({
       consultaId,
@@ -164,10 +279,283 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     }
   }
 
+  async function handleAbrirMeet(consulta) {
+    const link = resolveMeetLink({ consulta, nutricionista: usuarioLogado });
+    try {
+      await abrirLinkGoogleMeet(link);
+    } catch (error) {
+      setLoadError(error?.message || 'Nao foi possivel abrir o Google Meet.');
+    }
+  }
+
+  async function handleCriarConsulta() {
+    try {
+      setSavingConsulta(true);
+      setCreateError('');
+
+      if (!form.pacienteId) {
+        throw new Error('Selecione um paciente antes de agendar.');
+      }
+      if (currentSlotBusy) {
+        throw new Error('Este horario ja tem consulta ativa. Escolha outro slot.');
+      }
+      const scheduledAt = buildScheduledAt(form.date, form.time);
+
+      await createConsulta({
+        nutricionistaId,
+        pacienteId: form.pacienteId,
+        scheduledAt,
+        motivo: form.motivo,
+        tipoConsulta: form.tipoConsulta,
+        convenio: form.convenio,
+        meetLink: form.meetLink,
+        nutricionista: usuarioLogado,
+        pacienteNome: selectedPatient?.name,
+        actor: usuarioLogado,
+        origin: 'agenda_nutricionista',
+      });
+
+      setShowCreateForm(false);
+      setForm((current) => ({
+        ...current,
+        date: formatDateInput(startOfDay(1)),
+        time: '09:00',
+        motivo: '',
+        meetLink: '',
+      }));
+      await loadAgenda();
+    } catch (error) {
+      console.log('Erro ao criar consulta pelo nutricionista:', error);
+      setCreateError(error?.message || 'Nao foi possivel agendar a consulta.');
+    } finally {
+      setSavingConsulta(false);
+    }
+  }
+
+  function renderCreateConsultaForm() {
+    return (
+      <SectionCard style={[styles.flatCard, styles.createPanel]}>
+        <View style={styles.panelHeader}>
+          <View style={styles.createTitleBlock}>
+            <Text style={styles.panelTitle}>Agendar consulta</Text>
+            <Text style={styles.panelHelper}>Fluxo rapido com validacao de horario e sala Google Meet.</Text>
+          </View>
+          <TouchableOpacity
+            style={styles.closeCreateButton}
+            activeOpacity={0.9}
+            onPress={() => {
+              setShowCreateForm(false);
+              setCreateError('');
+            }}
+          >
+            <Ionicons name="close" size={18} color={patientTheme.colors.text} />
+          </TouchableOpacity>
+        </View>
+
+        {createError ? <Text style={styles.createError}>{createError}</Text> : null}
+
+        <View style={styles.meetInfoCard}>
+          <View style={styles.meetIconWrap}>
+            <Ionicons name="videocam" size={20} color={patientTheme.colors.onPrimary} />
+          </View>
+          <View style={styles.meetInfoCopy}>
+            <Text style={styles.meetInfoTitle}>Google Meet incluido</Text>
+            <Text style={styles.meetInfoText}>
+              Cole um link real do Google Meet ou deixe em branco para usar o link padrao do seu perfil.
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.formStepHeader}>
+          <Text style={styles.stepBadge}>1</Text>
+          <Text style={styles.formLabel}>Paciente</Text>
+        </View>
+        {patients.length ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.patientPicker}
+          >
+            {patients.map((patient) => {
+              const selected = form.pacienteId === patient.id;
+              return (
+                <TouchableOpacity
+                  key={patient.id}
+                  style={[styles.patientChip, selected && styles.patientChipActive]}
+                  activeOpacity={0.9}
+                  onPress={() => setForm((current) => ({ ...current, pacienteId: patient.id }))}
+                >
+                  <Text style={[styles.patientChipText, selected && styles.patientChipTextActive]}>
+                    {patient.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        ) : (
+          <Text style={styles.emptyText}>Nenhum paciente vinculado encontrado para agendar.</Text>
+        )}
+
+        <View style={styles.formStepHeader}>
+          <Text style={styles.stepBadge}>2</Text>
+          <Text style={styles.formLabel}>Data</Text>
+        </View>
+        <View style={styles.quickRow}>
+          {QUICK_DATES.map((item) => {
+            const date = formatDateInput(startOfDay(item.offset));
+            const selected = form.date === date;
+            return (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.quickButton, selected && styles.quickButtonActive]}
+                activeOpacity={0.9}
+                onPress={() => setForm((current) => ({ ...current, date }))}
+              >
+                <Text style={[styles.quickButtonText, selected && styles.quickButtonTextActive]}>
+                  {item.label}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TextInput
+          style={styles.input}
+          value={form.date}
+          onChangeText={(date) => setForm((current) => ({ ...current, date }))}
+          placeholder="AAAA-MM-DD"
+          placeholderTextColor={patientTheme.colors.textMuted}
+        />
+
+        <View style={styles.formStepHeader}>
+          <Text style={styles.stepBadge}>3</Text>
+          <Text style={styles.formLabel}>Horario disponivel</Text>
+        </View>
+        <View style={styles.quickRow}>
+          {QUICK_TIMES.map((time) => {
+            const selected = form.time === time;
+            const busy = occupiedSlots.has(`${form.date}T${time}`);
+            return (
+              <TouchableOpacity
+                key={time}
+                style={[
+                  styles.quickButton,
+                  selected && styles.quickButtonActive,
+                  busy && styles.quickButtonBusy,
+                ]}
+                activeOpacity={0.9}
+                disabled={busy}
+                onPress={() => setForm((current) => ({ ...current, time }))}
+              >
+                <Text
+                  style={[
+                    styles.quickButtonText,
+                    selected && styles.quickButtonTextActive,
+                    busy && styles.quickButtonTextBusy,
+                  ]}
+                >
+                  {busy ? `${time} ocupado` : time}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TextInput
+          style={styles.input}
+          value={form.time}
+          onChangeText={(time) => setForm((current) => ({ ...current, time }))}
+          placeholder="HH:MM"
+          placeholderTextColor={patientTheme.colors.textMuted}
+        />
+        {currentSlotBusy ? (
+          <Text style={styles.slotWarning}>Este horario ja possui uma consulta ativa.</Text>
+        ) : null}
+
+        <View style={styles.formRow}>
+          <View style={styles.formColumn}>
+            <Text style={styles.formLabel}>Tipo</Text>
+            <TextInput
+              style={styles.input}
+              value={form.tipoConsulta}
+              onChangeText={(tipoConsulta) => setForm((current) => ({ ...current, tipoConsulta }))}
+              placeholder="Teleconsulta"
+              placeholderTextColor={patientTheme.colors.textMuted}
+            />
+          </View>
+          <View style={styles.formColumn}>
+            <Text style={styles.formLabel}>Convenio</Text>
+            <TextInput
+              style={styles.input}
+              value={form.convenio}
+              onChangeText={(convenio) => setForm((current) => ({ ...current, convenio }))}
+              placeholder="Particular"
+              placeholderTextColor={patientTheme.colors.textMuted}
+            />
+          </View>
+        </View>
+
+        <Text style={styles.formLabel}>Motivo</Text>
+        <TextInput
+          style={[styles.input, styles.textArea]}
+          value={form.motivo}
+          onChangeText={(motivo) => setForm((current) => ({ ...current, motivo }))}
+          placeholder="Ex.: retorno mensal, ajuste de plano alimentar..."
+          placeholderTextColor={patientTheme.colors.textMuted}
+          multiline
+        />
+
+        <Text style={styles.formLabel}>Link do Google Meet</Text>
+        <TextInput
+          style={styles.input}
+          value={form.meetLink}
+          onChangeText={(meetLink) => setForm((current) => ({ ...current, meetLink }))}
+          placeholder="https://meet.google.com/xxx-yyyy-zzz"
+          placeholderTextColor={patientTheme.colors.textMuted}
+          autoCapitalize="none"
+        />
+
+        <View style={styles.schedulePreview}>
+          <View style={styles.previewRow}>
+            <Ionicons name="person" size={16} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.previewText}>{selectedPatient?.name || 'Selecione um paciente'}</Text>
+          </View>
+          <View style={styles.previewRow}>
+            <Ionicons name="time" size={16} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.previewText}>{formatDateTimePreview(form.date, form.time)}</Text>
+          </View>
+          <View style={styles.previewRow}>
+            <Ionicons name="videocam" size={16} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.previewText}>
+              {form.meetLink || usuarioLogado?.meet_link_padrao
+                ? 'Meet real sera anexado ao agendamento.'
+                : 'Nenhum Meet real informado. A consulta sera salva sem link.'}
+            </Text>
+          </View>
+        </View>
+
+        <TouchableOpacity
+          style={[styles.saveConsultaButton, !canCreateConsulta && styles.disabledButton]}
+          activeOpacity={0.9}
+          disabled={!canCreateConsulta}
+          onPress={handleCriarConsulta}
+        >
+          {savingConsulta ? (
+            <ActivityIndicator color={patientTheme.colors.onPrimary} />
+          ) : (
+            <>
+              <Ionicons name="calendar" size={16} color={patientTheme.colors.onPrimary} />
+              <Text style={styles.saveConsultaButtonText}>Agendar consulta</Text>
+            </>
+          )}
+        </TouchableOpacity>
+      </SectionCard>
+    );
+  }
+
   function renderConsultaCard(consulta) {
     const patient = consulta.paciente || {};
     const patientName =
       patient.nome_completo || patient.nome_pac || patient.email_pac || 'Paciente';
+    const meetLink = resolveMeetLink({ consulta, nutricionista: usuarioLogado });
 
     return (
       <TouchableOpacity
@@ -193,6 +581,11 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
               {consulta.convenio || 'Particular'}
             </Text>
             <ConsultaStatusBadge status={consulta.status} persona="nutricionista" style={styles.consultaStatusBadge} />
+            {meetLink ? (
+              <Text style={styles.meetLinkText} numberOfLines={1}>
+                Meet: {meetLink}
+              </Text>
+            ) : null}
           </View>
         </View>
 
@@ -209,6 +602,19 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
             >
               <Text style={styles.inlineActionButtonText}>Confirmar</Text>
             </TouchableOpacity>
+            {meetLink ? (
+              <TouchableOpacity
+                style={styles.meetActionButton}
+                onPress={(event) => {
+                  event?.stopPropagation?.();
+                  handleAbrirMeet(consulta);
+                }}
+                activeOpacity={0.9}
+              >
+                <Ionicons name="videocam-outline" size={14} color={patientTheme.colors.onPrimary} />
+                <Text style={styles.meetActionButtonText}>Meet</Text>
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
       </TouchableOpacity>
@@ -301,10 +707,16 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
           </SectionCard>
         </View>
 
+        {showCreateForm ? renderCreateConsultaForm() : null}
+
         <SectionCard style={[styles.futurePanel, styles.flatCard]}>
           <View style={styles.panelHeader}>
             <Text style={styles.panelTitle}>Próximas Consultas</Text>
-            <TouchableOpacity style={styles.primaryHeaderButton} activeOpacity={0.9}>
+            <TouchableOpacity
+              style={styles.primaryHeaderButton}
+              activeOpacity={0.9}
+              onPress={() => setShowCreateForm(true)}
+            >
               <Ionicons name="add" size={14} color="#ffffff" />
               <Text style={styles.primaryHeaderButtonText}>Nova Consulta</Text>
             </TouchableOpacity>
@@ -321,7 +733,11 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
             <View style={styles.emptyPanelLarge}>
               <Ionicons name="calendar-outline" size={58} color={patientTheme.colors.border} />
               <Text style={styles.emptyMessageCenter}>Nenhuma consulta futura agendada</Text>
-              <TouchableOpacity style={styles.greenCenterButton} activeOpacity={0.9}>
+              <TouchableOpacity
+                style={styles.greenCenterButton}
+                activeOpacity={0.9}
+                onPress={() => setShowCreateForm(true)}
+              >
                 <Text style={styles.greenCenterButtonText}>Agendar Consulta</Text>
               </TouchableOpacity>
             </View>
@@ -465,6 +881,217 @@ const styles = StyleSheet.create({
   requestsPanel: {
     minHeight: 180,
   },
+  createPanel: {
+    gap: 14,
+    backgroundColor: patientTheme.colors.surface,
+  },
+  createTitleBlock: {
+    flex: 1,
+    paddingRight: 12,
+  },
+  closeCreateButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  createError: {
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.dangerSoft,
+    padding: 10,
+    color: patientTheme.colors.danger,
+    fontSize: 13,
+    fontWeight: '700',
+    lineHeight: 18,
+  },
+  meetInfoCard: {
+    flexDirection: 'row',
+    gap: 12,
+    padding: 14,
+    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.primary,
+  },
+  meetIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  meetInfoCopy: {
+    flex: 1,
+  },
+  meetInfoTitle: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  meetInfoText: {
+    marginTop: 4,
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '600',
+  },
+  formStepHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 4,
+  },
+  stepBadge: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    overflow: 'hidden',
+    textAlign: 'center',
+    textAlignVertical: 'center',
+    color: patientTheme.colors.onPrimary,
+    backgroundColor: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  formLabel: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  patientPicker: {
+    gap: 8,
+    paddingVertical: 2,
+  },
+  patientChip: {
+    minHeight: 36,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  patientChipActive: {
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  patientChipText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  patientChipTextActive: {
+    color: patientTheme.colors.onPrimary,
+  },
+  quickRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  quickButton: {
+    minHeight: 34,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  quickButtonActive: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  quickButtonBusy: {
+    backgroundColor: patientTheme.colors.dangerSoft,
+    borderColor: patientTheme.colors.dangerSoft,
+    opacity: 0.75,
+  },
+  quickButtonText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  quickButtonTextActive: {
+    color: patientTheme.colors.primaryDark,
+  },
+  quickButtonTextBusy: {
+    color: patientTheme.colors.danger,
+  },
+  slotWarning: {
+    marginTop: -4,
+    color: patientTheme.colors.danger,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  input: {
+    minHeight: 44,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+    backgroundColor: patientTheme.colors.surface,
+    paddingHorizontal: 12,
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  textArea: {
+    minHeight: 82,
+    paddingTop: 12,
+    textAlignVertical: 'top',
+  },
+  schedulePreview: {
+    gap: 8,
+    padding: 14,
+    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  previewRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  previewText: {
+    flex: 1,
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  formRow: {
+    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
+    gap: 12,
+  },
+  formColumn: {
+    flex: 1,
+    gap: 8,
+  },
+  saveConsultaButton: {
+    minHeight: 44,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primaryDark,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  disabledButton: {
+    opacity: 0.55,
+  },
+  saveConsultaButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 13,
+    fontWeight: '900',
+  },
   panelHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -582,6 +1209,12 @@ const styles = StyleSheet.create({
   consultaStatusBadge: {
     marginTop: 6,
   },
+  meetLinkText: {
+    marginTop: 6,
+    color: patientTheme.colors.primaryDark,
+    fontSize: 11,
+    fontWeight: '800',
+  },
   consultaRight: {
     alignItems: 'flex-end',
     gap: 8,
@@ -609,6 +1242,21 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
     fontSize: 11,
     fontWeight: '700',
+  },
+  meetActionButton: {
+    minHeight: 28,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 5,
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  meetActionButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 11,
+    fontWeight: '900',
   },
   primaryHeaderButton: {
     minHeight: 30,

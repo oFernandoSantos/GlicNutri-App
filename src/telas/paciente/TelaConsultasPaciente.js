@@ -753,15 +753,29 @@ export default function PacienteAgendamentosScreen({
     }
   }
 
-  function handleEditarConsulta(item, nutri) {
-    navigation.push('PacientePerfilNutricionista', {
-      usuarioLogado,
-      nutricionista: nutri,
-      tipoConsulta: item.tipo_consulta || tipoConsulta,
-      convenio: item.convenio || convenio,
-      openSchedulePopup: true,
-      editingConsulta: item,
-    });
+  async function handleConfirmarConsultaAgendada(item, nutri) {
+    try {
+      await updateConsultaStatus({
+        consultaId: item.id,
+        status: 'confirmed',
+        nutricionista: nutri,
+        actor: usuarioLogado,
+        origin: 'agendamentos_paciente',
+      });
+      setMensagem({
+        tipo: 'sucesso',
+        texto: 'Consulta confirmada com sucesso.',
+      });
+      await loadBase();
+      if (selectedNutri?.id_nutricionista_uuid === nutri?.id_nutricionista_uuid) {
+        await loadSlots();
+      }
+    } catch (error) {
+      setMensagem({
+        tipo: 'erro',
+        texto: error?.message || 'Nao foi possivel confirmar a consulta.',
+      });
+    }
   }
 
   const footerOverlay = resumoVisivel ? (
@@ -1301,7 +1315,7 @@ export default function PacienteAgendamentosScreen({
               <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
                 <View>
                   <Text style={styles.sectionTitle}>Minhas consultas agendadas</Text>
-                  <Text style={styles.sectionSubtitle}>Edite horário ou cancele quando precisar</Text>
+                  <Text style={styles.sectionSubtitle}>Confirme, cancele ou entre pelo Google Meet</Text>
                 </View>
               </View>
 
@@ -1334,12 +1348,14 @@ export default function PacienteAgendamentosScreen({
                       </View>
 
                       <View style={styles.bookingActions}>
-                        <BotaoAgendamento
-                          label="Editar"
-                          variant="ghost"
-                          onPress={() => handleEditarConsulta(item, nutri)}
-                          style={styles.bookingActionSecondary}
-                        />
+                        {String(item.status || 'scheduled') === 'scheduled' ? (
+                          <BotaoAgendamento
+                            label="Confirmar"
+                            icon="checkmark-circle-outline"
+                            onPress={() => handleConfirmarConsultaAgendada(item, nutri)}
+                            style={styles.bookingActionPrimary}
+                          />
+                        ) : null}
                         <BotaoAgendamento
                           label="Cancelar"
                           variant="ghost"
