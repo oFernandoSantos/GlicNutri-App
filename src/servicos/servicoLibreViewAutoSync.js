@@ -1,6 +1,6 @@
 import {
-  addGlucoseReading,
   fetchGlucoseReadings,
+  syncCgmGlucoseReadings,
 } from './servicoDadosPaciente';
 import { executarEmLotes } from '../utilitarios/carregamentoTela';
 import { mesclarLimitesDadosPaciente } from './limitesDadosPaciente';
@@ -84,14 +84,12 @@ export async function syncLinkedLibreViewReadings({
   const mergedExisting = mergeCachedGlucoseReadings(fetchedReadings, cachedReadings);
   const newReadings = filterNewReadings(result.readings, mergedExisting);
 
-  await executarEmLotes(newReadings, 5, (reading) =>
-    addGlucoseReading(patientId, reading.value, {
-      date: reading.date,
-      time: reading.time,
+  if (newReadings.length) {
+    await syncCgmGlucoseReadings(patientId, newReadings, {
+      fonte: 'librelinkup',
       actor,
-      auditSource: 'libreview_sync',
-    })
-  );
+    });
+  }
 
   const refreshedReadings = await fetchGlucoseReadings(patientId, glucoseLimit);
   const mergedReadings = mergeCachedGlucoseReadings(refreshedReadings, cachedReadings);

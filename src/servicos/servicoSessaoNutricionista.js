@@ -1,4 +1,5 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { limparRpcSessionToken } from './servicoSessaoRpc';
 
 export const NUTRI_SESSION_STORAGE_KEY = '@glicnutri:nutriSession';
 
@@ -47,6 +48,7 @@ export async function carregarSessaoNutricionista() {
 
 export async function limparSessaoNutricionista() {
   try {
+    await limparRpcSessionToken();
     await AsyncStorage.removeItem(NUTRI_SESSION_STORAGE_KEY);
   } catch (_error) {
     return null;

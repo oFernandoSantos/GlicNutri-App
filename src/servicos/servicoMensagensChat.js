@@ -1,4 +1,5 @@
 import { supabase } from './configSupabase';
+import { enrichRpcClinicalParams } from './servicoSessaoRpc';
 
 function normalizeThreadEntry(
   item,
@@ -84,11 +85,17 @@ export async function fetchChatThreadFromDatabase({
   const resolvedNutriId = await resolveNutricionistaIdForPatient(pacienteId, nutricionistaId);
   if (!pacienteId || !resolvedNutriId) return [];
 
-  const { data, error } = await supabase.rpc('listar_mensagens_chat', {
-    p_paciente_id: pacienteId,
-    p_nutricionista_id: resolvedNutriId,
-    p_limite: limit,
-  });
+  const { data, error } = await supabase.rpc(
+    'listar_mensagens_chat',
+    await enrichRpcClinicalParams(
+      {
+        p_paciente_id: pacienteId,
+        p_nutricionista_id: resolvedNutriId,
+        p_limite: limit,
+      },
+      pacienteId
+    )
+  );
 
   if (error) {
     if (isMissingRpc(error, 'listar_mensagens_chat')) return null;
@@ -113,12 +120,18 @@ export async function sendChatMessage({
 
   const role = autorRole === 'nutri' || autorRole === 'nutricionista' ? 'nutricionista' : 'paciente';
 
-  const { data, error } = await supabase.rpc('enviar_mensagem_chat', {
-    p_paciente_id: pacienteId,
-    p_nutricionista_id: resolvedNutriId,
-    p_autor_role: role,
-    p_texto: String(texto || '').trim(),
-  });
+  const { data, error } = await supabase.rpc(
+    'enviar_mensagem_chat',
+    await enrichRpcClinicalParams(
+      {
+        p_paciente_id: pacienteId,
+        p_nutricionista_id: resolvedNutriId,
+        p_autor_role: role,
+        p_texto: String(texto || '').trim(),
+      },
+      pacienteId
+    )
+  );
 
   if (error) {
     if (isMissingRpc(error, 'enviar_mensagem_chat')) return null;

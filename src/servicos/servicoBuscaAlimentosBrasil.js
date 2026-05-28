@@ -316,20 +316,42 @@ function buildItemFromCacheRow(row) {
 async function buscarProdutosRotuloCache(query, { limit = 12 } = {}) {
   const trimmed = String(query || '').trim();
   if (trimmed.length < 2) return [];
-  const barcodeOnly = /^\d{8,14}$/.test(trimmed);
+  const safeLimit = Math.max(1, Math.min(Number(limit) || 12, 24));
 
   try {
+    const { data: rpcData, error: rpcError } = await supabase.rpc('buscar_produtos_rotulo_cache', {
+      p_query: trimmed,
+      p_limite: safeLimit,
+    });
+
+    if (!rpcError && Array.isArray(rpcData)) {
+      return rpcData.map(buildItemFromCacheRow).filter(Boolean);
+    }
+
+    const rpcMessage = String(rpcError?.message || '').toLowerCase();
+    const rpcMissing =
+      rpcMessage.includes('could not find the function') ||
+      rpcMessage.includes('schema cache') ||
+      rpcMessage.includes('buscar_produtos_rotulo_cache');
+
+    if (!rpcMissing) {
+      return [];
+    }
+
+    const barcodeOnly = /^\d{8,14}$/.test(trimmed);
     let queryBuilder = supabase.from('produtos_rotulo_cache').select('*');
 
     if (barcodeOnly) {
       queryBuilder = queryBuilder.eq('code', trimmed);
     } else {
-      queryBuilder = queryBuilder.or(`nome.ilike.%${trimmed}%,marca.ilike.%${trimmed}%,categoria.ilike.%${trimmed}%`);
+      queryBuilder = queryBuilder.or(
+        `nome.ilike.%${trimmed}%,marca.ilike.%${trimmed}%,categoria.ilike.%${trimmed}%`
+      );
     }
 
     const { data, error } = await queryBuilder
       .order('updated_at', { ascending: false })
-      .limit(Math.max(1, Math.min(Number(limit) || 12, 24)));
+      .limit(safeLimit);
 
     if (error) return [];
     return (Array.isArray(data) ? data : []).map(buildItemFromCacheRow).filter(Boolean);
@@ -343,6 +365,24 @@ async function salvarProdutosRotuloCache(rows) {
   if (!payload.length) return;
 
   try {
+    const { error: rpcError } = await supabase.rpc('upsert_produtos_rotulo_cache', {
+      p_rows: payload,
+    });
+
+    if (!rpcError) {
+      return;
+    }
+
+    const rpcMessage = String(rpcError?.message || '').toLowerCase();
+    const rpcMissing =
+      rpcMessage.includes('could not find the function') ||
+      rpcMessage.includes('schema cache') ||
+      rpcMessage.includes('upsert_produtos_rotulo_cache');
+
+    if (!rpcMissing) {
+      return;
+    }
+
     await supabase.from('produtos_rotulo_cache').upsert(payload, { onConflict: 'code' });
   } catch (_error) {
     // Cache é melhoria de performance; falha aqui não deve quebrar a busca.
