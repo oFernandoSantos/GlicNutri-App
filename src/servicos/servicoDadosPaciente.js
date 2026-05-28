@@ -3,23 +3,42 @@ import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
 import { replaceCachedPatientAppState } from './centralAppState';
+import { validateGlucoseValue, validateInsulinDose, validateMedicationEntry } from '../utilitarios/validacoesPaciente';
 import {
+  fetchCachedPatientChat,
   fetchCachedPatientExperience,
   fetchCachedPatientProfile,
+  getCachedPatientChat,
+  getCachedPatientExperience,
   invalidatePatientExperienceCache,
 } from './cacheExperienciaPaciente';
 
 export {
+  getCachedPatientChat,
   getCachedPatientExperience,
   getCachedPatientProfile,
   invalidatePatientExperienceCache,
   isPatientExperienceCacheFresh,
   isPatientProfileCacheFresh,
+  PROFILE_CACHE_TTL_MS,
 } from './cacheExperienciaPaciente';
 import {
   mealPlanSections,
-  nutritionistThread,
 } from '../dados/dadosExperienciaPaciente';
+import { mesclarLimitesDadosPaciente } from './limitesDadosPaciente';
+import { fetchActiveMealPlanForPatient } from './servicoPlanoAlimentar';
+import {
+  fetchPacienteAppStateFromTable,
+  savePacienteAppStateToTable,
+} from './servicoPacienteAppState';
+import {
+  fetchChatThreadFromDatabase,
+  migrateLegacyThreadToDatabase,
+  resolveNutricionistaIdForPatient,
+  sendChatMessage,
+} from './servicoMensagensChat';
+import { syncGlucoseAlertsForPatient } from './servicoAlertasClinicos';
+import { executarEmLotes } from '../utilitarios/carregamentoTela';
 
 const META_START = '[GLICNUTRI_APP_META_START]';
 const META_END = '[GLICNUTRI_APP_META_END]';
@@ -70,7 +89,7 @@ export function createDefaultAppState() {
     assistantMessages: [],
     patientNotifications: [],
     hiddenGlucoseReadingIds: [],
-    nutritionistThread,
+    nutritionistThread: [],
     planSections: mealPlanSections,
     wellness: {
       selectedSymptoms: ['focused'],
@@ -78,6 +97,81 @@ export function createDefaultAppState() {
       selectedStress: 2,
     },
   };
+}
+
+export function sanitizeChatMessageText(text) {
+  let value = String(text || '').trim();
+  if (!value) return '';
+
+  value = value.replace(/\[hist-seed[^\]]*\]/gi, '').trim();
+  value = value
+    .replace(
+      new RegExp(`${META_START}[\\s\\S]*?${META_END}`, 'g'),
+      ''
+    )
+    .trim();
+
+  return value;
+}
+
+export function normalizeNutritionistThreadEntry(
+  item,
+  { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
+) {
+  const role = item?.role === 'nutri' ? 'nutri' : 'user';
+  const text = sanitizeChatMessageText(item?.text);
+
+  return {
+    id: item?.id || `thread-${role}-${Date.now()}`,
+    author:
+      String(item?.author || '').trim() ||
+      (role === 'nutri' ? nutritionistName : patientName),
+    role,
+    time: String(item?.time || '').trim(),
+    text,
+  };
+}
+
+export function buildNutritionistThreadPreview(thread = []) {
+  const normalized = ensureArray(thread)
+    .map((item) => normalizeNutritionistThreadEntry(item))
+    .filter((item) => item.text);
+  const lastMessage = normalized[normalized.length - 1] || null;
+  let unread = 0;
+
+  for (let index = normalized.length - 1; index >= 0; index -= 1) {
+    if (normalized[index]?.role !== 'user') break;
+    unread += 1;
+  }
+
+  return {
+    lastMessage: lastMessage?.text || 'Sem mensagens ainda.',
+    lastMessageAt: lastMessage?.time || '',
+    unread,
+  };
+}
+
+function ensureThreadContainsMessage(thread = [], message = null) {
+  const normalizedThread = ensureArray(thread).map((item) => normalizeNutritionistThreadEntry(item));
+  const normalizedMessage = message ? normalizeNutritionistThreadEntry(message) : null;
+
+  if (!normalizedMessage?.text) {
+    return normalizedThread;
+  }
+
+  const alreadyPresent = normalizedThread.some((item) => {
+    return (
+      item.role === normalizedMessage.role &&
+      item.text === normalizedMessage.text &&
+      item.time === normalizedMessage.time
+    );
+  });
+
+  if (alreadyPresent) {
+    return normalizedThread;
+  }
+
+  return [...normalizedThread, normalizedMessage];
 }
 
 function ensureArray(value) {
@@ -113,9 +207,7 @@ function normalizeAppState(rawState) {
     assistantMessages: ensureArray(appState.assistantMessages),
     patientNotifications: ensureArray(appState.patientNotifications),
     hiddenGlucoseReadingIds: ensureArray(appState.hiddenGlucoseReadingIds),
-    nutritionistThread: ensureArray(appState.nutritionistThread).length
-      ? appState.nutritionistThread
-      : defaults.nutritionistThread,
+    nutritionistThread: ensureArray(appState.nutritionistThread),
     planSections: ensureArray(appState.planSections).length
       ? appState.planSections
       : defaults.planSections,
@@ -422,6 +514,26 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   const calories = Number(row?.calorias_total) || 0;
   const protein = Number(row?.proteinas_total) || 0;
   const fat = Number(row?.gorduras_total) || 0;
+  const firstFoodWithMealMeta = foods.find(
+    (item) => item?.mealLabel || item?.mealTypeLabel || item?.planSectionId
+  );
+  const mealLabel =
+    firstFoodWithMealMeta?.mealLabel ||
+    firstFoodWithMealMeta?.mealTypeLabel ||
+    'Refeição Registrada';
+  const planSectionId = firstFoodWithMealMeta?.planSectionId || null;
+  const fiber =
+    Number(row?.fibras_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.fibras) || 0), 0);
+  const sugars =
+    Number(row?.acucares_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.acucares) || 0), 0);
+  const saturatedFat =
+    Number(row?.gorduras_saturadas_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.gorduras_saturadas) || 0), 0);
+  const sodium =
+    Number(row?.sodio_total) ||
+    foods.reduce((sum, item) => sum + (Number(item?.sodio) || 0), 0);
 
   return {
     id: recordId ? `meal-ia-${recordId}` : `meal-db-${date}-${time}-${index}`,
@@ -429,7 +541,11 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     mode: row?.foto_url ? 'photo' : 'manual',
     date,
     time,
-    title: 'Refeição Registrada',
+    title: mealLabel,
+    mealLabel,
+    mealTypeLabel: firstFoodWithMealMeta?.mealTypeLabel || mealLabel,
+    planSectionId,
+    mealId: planSectionId,
     description: description || 'Refeição registrada.',
     glucoseNote: 'Macros salvos no banco',
     glucoseDelta: `${Math.round(carbs)} g carbos`,
@@ -438,14 +554,48 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     kcal: calories,
     proteinG: protein,
     fatG: fat,
+    fiberG: fiber,
+    sugarsG: sugars,
+    saturatedFatG: saturatedFat,
+    sodiumMg: sodium,
+    foods: foods.map((item) => ({
+      name: String(item?.nome || '').trim(),
+      alimento: String(item?.nome || '').trim(),
+      grams: Math.round(Number(item?.quantidade_gramas) || 0),
+      unit: item?.unidade_quantidade || null,
+      calories: Number(item?.calorias) || 0,
+      carbs: Number(item?.carboidratos) || 0,
+      protein: Number(item?.proteinas) || 0,
+      fat: Number(item?.gorduras) || 0,
+      fiber: Number(item?.fibras) || 0,
+      sugars: Number(item?.acucares) || 0,
+      saturatedFat: Number(item?.gorduras_saturadas) || 0,
+      sodium: Number(item?.sodio) || 0,
+      mealLabel: item?.mealLabel || null,
+      mealTypeLabel: item?.mealTypeLabel || null,
+      planSectionId: item?.planSectionId || null,
+    })),
     storageOrigin: 'database',
     databaseId: recordId || null,
+    foto_url: row?.foto_url || null,
   };
+}
+
+function isMissingMealTotalColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('fibras_total') ||
+    message.includes('acucares_total') ||
+    message.includes('gorduras_saturadas_total') ||
+    message.includes('sodio_total') ||
+    message.includes('schema cache')
+  );
 }
 
 function mergeMealEntries(databaseEntries, legacyEntries) {
   const merged = [];
-  const seenIds = new Set();
+  const seenDatabaseIds = new Set();
+  const seenEntryIds = new Set();
 
   [...ensureArray(databaseEntries), ...ensureArray(legacyEntries)].forEach((entry, index) => {
     const normalized =
@@ -457,13 +607,23 @@ function mergeMealEntries(databaseEntries, legacyEntries) {
           };
     const databaseId = String(normalized?.databaseId || '').trim();
     const id = String(normalized?.id || '').trim();
+    const derivedDatabaseId =
+      databaseId || (id.startsWith('meal-ia-') ? id.slice('meal-ia-'.length) : '');
 
-    if (databaseId && seenIds.has(databaseId)) {
+    if (derivedDatabaseId && seenDatabaseIds.has(derivedDatabaseId)) {
       return;
     }
 
-    if (databaseId) {
-      seenIds.add(databaseId);
+    if (id && seenEntryIds.has(id)) {
+      return;
+    }
+
+    if (derivedDatabaseId) {
+      seenDatabaseIds.add(derivedDatabaseId);
+    }
+
+    if (id) {
+      seenEntryIds.add(id);
     }
 
     merged.push({
@@ -500,6 +660,24 @@ function buildGlucoseReadingFromPayload(payload, fallbackValue) {
   };
 }
 
+function normalizeGlucoseDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return buildTodayDateString();
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    return parsed.toISOString().slice(0, 10);
+  }
+  return buildTodayDateString();
+}
+
+function normalizeGlucoseTime(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return buildCurrentTimeString();
+  if (/^\d{2}:\d{2}/.test(raw)) return raw.slice(0, 8);
+  return buildCurrentTimeString();
+}
+
 function normalizeGlucoseReadingRow(item, index = 0) {
   const symptoms = item.sintomas_associados || '';
   const glucoseTypeMatch = String(symptoms).match(/Tipo da glicemia:\s*(.+)$/i);
@@ -508,8 +686,8 @@ function normalizeGlucoseReadingRow(item, index = 0) {
     id: item.id_glicemia_manual_uuid || `${item.data || 'sem-data'}-${item.hora || 'sem-hora'}-${index}`,
     patientId: item.id_paciente_uuid,
     value: Number(item.valor_glicose_mgdl) || 0,
-    date: item.data || buildTodayDateString(),
-    time: item.hora || buildCurrentTimeString(),
+    date: normalizeGlucoseDate(item.data),
+    time: normalizeGlucoseTime(item.hora),
     glucoseType: item.glucoseType || glucoseTypeMatch?.[1] || '',
   };
 }
@@ -580,6 +758,110 @@ async function fetchPatientByEmail(email) {
   return sanitizeSensitivePatientData((data || [])[0] || null);
 }
 
+const PATIENT_HOME_PROFILE_COLUMNS =
+  'id_paciente_uuid, nome_completo, email_pac, cpf_paciente, objetivo_principal_consulta, id_nutricionista_uuid, peso_atual_kg, data_nascimento, data_hora_ultima_atualizacao';
+
+export async function fetchPatientProfileMinimal(patientId, options = {}) {
+  if (!patientId) return null;
+
+  return fetchCachedPatientProfile(patientId, options, async () => {
+    const { data, error } = await supabase
+      .from('paciente')
+      .select(PATIENT_HOME_PROFILE_COLUMNS)
+      .eq('id_paciente_uuid', patientId)
+      .maybeSingle();
+
+    if (error) throw error;
+    return sanitizeSensitivePatientData(data || null);
+  });
+}
+
+export function prefetchPatientHomeExperience(patientId, patientContext = null) {
+  if (!patientId && !patientContext) return Promise.resolve(null);
+
+  return resolveCanonicalPatientId(patientId, { patientContext })
+    .then((resolvedId) => {
+      if (!resolvedId) return null;
+
+      return fetchPatientExperience(resolvedId, {
+        patientContext,
+        homeOnly: true,
+        skipChat: true,
+        minimalProfile: true,
+        allowGoogleSync: false,
+        glucoseLimit: 7,
+        medicationLimit: 0,
+        mealLimit: 0,
+        skipAlertSync: true,
+      });
+    })
+    .catch((error) => {
+      console.log('Prefetch home paciente:', error?.message || error);
+      return null;
+    });
+}
+
+export function prefetchPatientPlanExperience(patientId, patientContext = null) {
+  if (!patientId && !patientContext) return Promise.resolve(null);
+
+  return resolveCanonicalPatientId(patientId, { patientContext })
+    .then(async (resolvedId) => {
+      if (!resolvedId) return null;
+
+      const limits = mesclarLimitesDadosPaciente('plano');
+      await Promise.all([
+        fetchPatientExperience(resolvedId, {
+          patientContext,
+          ...limits,
+        }),
+        fetchActiveMealPlanForPatient(resolvedId).catch(() => null),
+      ]);
+
+      return true;
+    })
+    .catch((error) => {
+      console.log('Prefetch plano paciente:', error?.message || error);
+      return null;
+    });
+}
+
+export function prefetchPatientScreenExperience(patientId, patientContext = null, preset = 'diario') {
+  if (!patientId && !patientContext) return Promise.resolve(null);
+
+  return resolveCanonicalPatientId(patientId, { patientContext })
+    .then((resolvedId) => {
+      if (!resolvedId) return null;
+
+      return fetchPatientExperience(resolvedId, {
+        patientContext,
+        ...mesclarLimitesDadosPaciente(preset),
+      });
+    })
+    .catch((error) => {
+      console.log(`Prefetch ${preset} paciente:`, error?.message || error);
+      return null;
+    });
+}
+
+export function prefetchPatientProfileExperience(patientId, patientContext = null) {
+  if (!patientId && !patientContext) return Promise.resolve(null);
+
+  return resolveCanonicalPatientId(patientId, { patientContext })
+    .then((resolvedId) => {
+      if (!resolvedId) return null;
+
+      return fetchPatientById(resolvedId, {
+        patientContext,
+        allowGoogleSync: false,
+        forceRefresh: false,
+      });
+    })
+    .catch((error) => {
+      console.log('Prefetch perfil paciente:', error?.message || error);
+      return null;
+    });
+}
+
 async function fetchPatientByCpf(cpf) {
   if (!cpf) return null;
 
@@ -601,11 +883,20 @@ async function resolvePatientRecord({
   patientContext,
   currentPatient,
   allowGoogleSync = false,
+  minimalProfile = false,
 }) {
   const candidateIds = uniqueValues([
     patientId,
     ...getContextIds(currentPatient, patientContext),
   ]);
+
+  if (minimalProfile && candidateIds[0]) {
+    const minimal = await fetchPatientProfileMinimal(candidateIds[0], {
+      patientContext,
+      currentPatient,
+    });
+    if (minimal) return minimal;
+  }
 
   for (const candidateId of candidateIds) {
     const { data, error } = await supabase
@@ -657,22 +948,182 @@ export async function fetchPatientById(patientId, options = {}) {
       patientContext: options.patientContext,
       currentPatient: options.currentPatient,
       allowGoogleSync: options.allowGoogleSync !== false,
+      minimalProfile: options.minimalProfile === true,
     })
   );
 }
 
-async function loadPatientExperience(patientId, options = {}) {
+async function resolvePatientChatThread({
+  effectivePatientId,
+  patient,
+  options,
+  mergedLegacyState,
+}) {
+  const nutricionistaId = await resolveNutricionistaIdForPatient(
+    effectivePatientId,
+    patient?.id_nutricionista_uuid
+  );
+  const patientName = getPatientDisplayName(patient || options.patientContext);
+  let chatThread = await fetchChatThreadFromDatabase({
+    pacienteId: effectivePatientId,
+    nutricionistaId,
+    patientName,
+    nutritionistName: 'Nutricionista',
+  });
+
+  if (chatThread === null) {
+    chatThread = ensureArray(mergedLegacyState.nutritionistThread);
+  } else if (!chatThread.length && ensureArray(mergedLegacyState.nutritionistThread).length) {
+    const migrated = await migrateLegacyThreadToDatabase({
+      pacienteId: effectivePatientId,
+      nutricionistaId,
+      legacyThread: mergedLegacyState.nutritionistThread,
+      patientName,
+    });
+    chatThread = migrated === null ? mergedLegacyState.nutritionistThread : migrated || [];
+  }
+
+  return { chatThread, nutricionistaId };
+}
+
+async function loadPatientChatOnly(patientId, options = {}) {
   const patient = await fetchPatientById(patientId, options);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
-  const normalizedAppState = normalizeAppState(parsed.appState);
-  const glucoseLimit = options.glucoseLimit ?? 120;
-  const medicationLimit = options.medicationLimit ?? 120;
-  const mealLimit = options.mealLimit ?? 120;
-  const [glucoseReadings, databaseMedicationEntries, databaseMealEntries] = await Promise.all([
-    fetchGlucoseReadings(effectivePatientId, glucoseLimit),
-    fetchMedicationEntries(effectivePatientId, medicationLimit),
-    fetchMealEntries(effectivePatientId, mealLimit),
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const mergedLegacyState = tableAppState
+    ? { ...parsed.appState, ...tableAppState }
+    : parsed.appState;
+  const { chatThread, nutricionistaId } = await resolvePatientChatThread({
+    effectivePatientId,
+    patient,
+    options,
+    mergedLegacyState,
+  });
+  const normalizedAppState = normalizeAppState({
+    ...mergedLegacyState,
+    nutritionistThread: chatThread,
+  });
+
+  return {
+    patient,
+    clinicalObjective: parsed.objectiveText,
+    appState: normalizedAppState,
+    glucoseReadings: [],
+    nutricionistaId,
+  };
+}
+
+async function loadPatientHomeSummary(patientId, options = {}) {
+  const effectivePatientId = patientId || getPatientId(options.patientContext);
+  const glucoseLimit = options.glucoseLimit ?? 7;
+  const mealLimit = options.mealLimit ?? 0;
+
+  const [patient, tableAppState, glucoseReadings, databaseMealEntries, activeMealPlan] = await Promise.all([
+    effectivePatientId
+      ? fetchPatientById(effectivePatientId, options)
+      : fetchPatientById(patientId, options),
+    effectivePatientId
+      ? fetchPacienteAppStateFromTable(effectivePatientId).catch(() => null)
+      : Promise.resolve(null),
+    glucoseLimit > 0 && effectivePatientId
+      ? fetchGlucoseReadings(effectivePatientId, glucoseLimit)
+      : Promise.resolve([]),
+    mealLimit > 0 && effectivePatientId
+      ? fetchMealEntries(effectivePatientId, mealLimit)
+      : Promise.resolve([]),
+    options.includeMealPlan && effectivePatientId
+      ? fetchActiveMealPlanForPatient(effectivePatientId).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+  const mergedLegacyState = tableAppState
+    ? { ...parsed.appState, ...tableAppState }
+    : parsed.appState;
+  const normalizedAppState = normalizeAppState(mergedLegacyState);
+  const legacyMealEntries = ensureArray(normalizedAppState.mealEntries);
+  const mealEntries =
+    mealLimit > 0
+      ? mergeMealEntries(databaseMealEntries, legacyMealEntries)
+      : legacyMealEntries;
+  const includeHidden = Boolean(options.includeHidden);
+  const visibleMealEntries = includeHidden
+    ? mealEntries
+    : mealEntries.filter((entry) => !normalizedAppState.hiddenMealEntryIds.includes(entry?.id));
+  const mergedGlucoseReadings = mergeCachedGlucoseReadings(glucoseReadings);
+  const visibleGlucoseReadings = includeHidden
+    ? mergedGlucoseReadings
+    : mergedGlucoseReadings.filter(
+        (entry) => !normalizedAppState.hiddenGlucoseReadingIds.includes(entry?.id)
+      );
+
+  return {
+    patient,
+    clinicalObjective: parsed.objectiveText,
+    appState: {
+      ...normalizedAppState,
+      activeMealPlan,
+      mealEntries: visibleMealEntries,
+      medicationEntries: ensureArray(normalizedAppState.medicationEntries),
+    },
+    glucoseReadings: visibleGlucoseReadings,
+    nutricionistaId: patient?.id_nutricionista_uuid || null,
+  };
+}
+
+async function loadPatientExperience(patientId, options = {}) {
+  if (options.chatOnly === true) {
+    return loadPatientChatOnly(patientId, options);
+  }
+
+  if (options.homeOnly === true || options.planOnly === true) {
+    return loadPatientHomeSummary(patientId, options);
+  }
+
+  if (options.skipChat === true) {
+    return loadPatientHomeSummary(patientId, options);
+  }
+
+  const patient = await fetchPatientById(patientId, options);
+  const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+  const effectivePatientId = patient?.id_paciente_uuid || patientId;
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const mergedLegacyState = tableAppState
+    ? { ...parsed.appState, ...tableAppState }
+    : parsed.appState;
+  const { chatThread, nutricionistaId } = await resolvePatientChatThread({
+    effectivePatientId,
+    patient,
+    options,
+    mergedLegacyState,
+  });
+  const normalizedAppState = normalizeAppState({
+    ...mergedLegacyState,
+    nutritionistThread: chatThread,
+  });
+
+  const glucoseLimit = options.glucoseLimit ?? 60;
+  const medicationLimit = options.medicationLimit ?? 60;
+  const mealLimit = options.mealLimit ?? 60;
+  const [
+    glucoseReadings,
+    databaseMedicationEntries,
+    databaseMealEntries,
+    activeMealPlan,
+  ] = await Promise.all([
+    glucoseLimit > 0
+      ? fetchGlucoseReadings(effectivePatientId, glucoseLimit)
+      : Promise.resolve([]),
+    medicationLimit > 0
+      ? fetchMedicationEntries(effectivePatientId, medicationLimit)
+      : Promise.resolve([]),
+    mealLimit > 0
+      ? fetchMealEntries(effectivePatientId, mealLimit)
+      : Promise.resolve([]),
+    options.includeMealPlan
+      ? fetchActiveMealPlanForPatient(effectivePatientId).catch(() => null)
+      : Promise.resolve(null),
   ]);
   const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
     (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
@@ -697,28 +1148,490 @@ async function loadPatientExperience(patientId, options = {}) {
             entry?.databaseId || entry?.legacyId || entry?.id
           )
       );
+  const mergedGlucoseReadings = mergeCachedGlucoseReadings(glucoseReadings);
   const visibleGlucoseReadings = includeHidden
-    ? glucoseReadings
-    : glucoseReadings.filter(
+    ? mergedGlucoseReadings
+    : mergedGlucoseReadings.filter(
         (entry) => !normalizedAppState.hiddenGlucoseReadingIds.includes(entry?.id)
       );
+
+  if (effectivePatientId && !options.skipAlertSync) {
+    syncGlucoseAlertsForPatient({
+      pacienteId: effectivePatientId,
+      nutricionistaId,
+      glucoseReadings: visibleGlucoseReadings,
+    }).catch((error) => console.log('Sync alertas glicemia:', error));
+  }
 
   return {
     patient,
     clinicalObjective: parsed.objectiveText,
     appState: {
       ...normalizedAppState,
+      activeMealPlan,
       mealEntries: visibleMealEntries,
       medicationEntries: visibleMedicationEntries,
     },
     glucoseReadings: visibleGlucoseReadings,
+    nutricionistaId,
   };
 }
 
-export async function fetchPatientExperience(patientId, options = {}) {
-  return fetchCachedPatientExperience(patientId, options, () =>
-    loadPatientExperience(patientId, options)
+/** UUID do paciente na tabela `paciente` (resolve por e-mail/CPF/Google antes de buscar dados). */
+export async function resolveCanonicalPatientId(patientId, options = {}) {
+  if (options.currentPatient?.id_paciente_uuid) {
+    return options.currentPatient.id_paciente_uuid;
+  }
+
+  const patient = await fetchPatientById(patientId, {
+    ...options,
+    allowGoogleSync: options.allowGoogleSync !== false,
+  });
+
+  return (
+    patient?.id_paciente_uuid ||
+    patientId ||
+    getPatientId(options.patientContext) ||
+    null
   );
+}
+
+export async function fetchPatientExperience(patientId, options = {}) {
+  const canonicalId = await resolveCanonicalPatientId(patientId, options);
+
+  if (patientId && canonicalId && patientId !== canonicalId) {
+    invalidatePatientExperienceCache(patientId);
+  }
+
+  const loader = () =>
+    loadPatientExperience(canonicalId || patientId, {
+      ...options,
+      patientContext: options.patientContext,
+    });
+
+  if (!canonicalId) {
+    return loader();
+  }
+
+  return fetchCachedPatientExperience(canonicalId, options, loader);
+}
+
+export async function fetchPatientNutritionistChat(patientId, options = {}) {
+  const loader = () =>
+    options.chatOnly === true
+      ? loadPatientChatOnly(patientId, options)
+      : loadPatientExperience(patientId, options);
+
+  const experience =
+    options.chatOnly === true
+      ? await fetchCachedPatientChat(patientId, options, loader)
+      : await fetchCachedPatientExperience(patientId, options, loader);
+
+  return {
+    ...experience,
+    thread: ensureArray(experience?.appState?.nutritionistThread),
+  };
+}
+
+const NUTRI_INBOX_MESSAGES_PER_PATIENT = 12;
+const NUTRI_INBOX_FALLBACK_BATCH = 12;
+const NUTRI_INBOX_ID_CHUNK = 60;
+const NUTRI_THREAD_RECENT_LIMIT = 80;
+
+function formatChatRowTime(createdAt) {
+  const date = createdAt ? new Date(createdAt) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  const now = new Date();
+  const sameDay =
+    date.getDate() === now.getDate() &&
+    date.getMonth() === now.getMonth() &&
+    date.getFullYear() === now.getFullYear();
+  if (sameDay) {
+    return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+  }
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+}
+
+function mapChatRowToThreadEntry(row, patientName) {
+  const entry = normalizeNutritionistThreadEntry(
+    {
+      id: row.id,
+      role: row.autor_role === 'nutricionista' ? 'nutri' : 'user',
+      author: row.autor_role === 'nutricionista' ? 'Nutricionista' : patientName,
+      time: formatChatRowTime(row.created_at),
+      text: row.texto,
+    },
+    { nutritionistName: 'Nutricionista', patientName }
+  );
+
+  return {
+    ...entry,
+    createdAt: row?.created_at || null,
+  };
+}
+
+function groupRecentChatRows(messages = []) {
+  const grouped = new Map();
+
+  (messages || []).forEach((row) => {
+    const patientId = row?.paciente_id;
+    if (!patientId) return;
+    const list = grouped.get(patientId) || [];
+    list.push(row);
+    grouped.set(patientId, list);
+  });
+
+  grouped.forEach((rows, patientId) => {
+    rows.sort((left, right) => new Date(left.created_at) - new Date(right.created_at));
+    grouped.set(patientId, rows);
+  });
+
+  return grouped;
+}
+
+async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
+  if (!nutricionistaId || !patientIds.length) {
+    return new Map();
+  }
+
+  const aggregated = [];
+
+  for (let index = 0; index < patientIds.length; index += NUTRI_INBOX_ID_CHUNK) {
+    const chunk = patientIds.slice(index, index + NUTRI_INBOX_ID_CHUNK);
+    const { data, error } = await supabase.rpc('listar_mensagens_chat_inbox', {
+      p_nutricionista_id: nutricionistaId,
+      p_paciente_ids: chunk,
+      p_mensagens_por_paciente: NUTRI_INBOX_MESSAGES_PER_PATIENT,
+    });
+
+    if (!error && Array.isArray(data)) {
+      aggregated.push(...data);
+      continue;
+    }
+
+    if (error && !isRpcFunctionMissing(error, 'listar_mensagens_chat_inbox')) {
+      console.log('RPC listar_mensagens_chat_inbox:', error.message);
+    }
+
+    const fallbackChunk = await fetchInboxMessagesFallback(nutricionistaId, chunk);
+    aggregated.push(...fallbackChunk);
+  }
+
+  if (aggregated.length) {
+    return groupRecentChatRows(aggregated);
+  }
+
+  return new Map();
+}
+
+async function fetchInboxMessagesFallback(nutricionistaId, patientIds = []) {
+  const aggregated = [];
+
+  await executarEmLotes(patientIds, NUTRI_INBOX_FALLBACK_BATCH, async (patientId) => {
+    const { data: rows, error: rowError } = await supabase
+      .from('mensagem_chat')
+      .select('id, paciente_id, nutricionista_id, autor_role, texto, created_at')
+      .eq('nutricionista_id', nutricionistaId)
+      .eq('paciente_id', patientId)
+      .order('created_at', { ascending: false })
+      .limit(NUTRI_INBOX_MESSAGES_PER_PATIENT);
+
+    if (rowError) {
+      console.log('Inbox fallback paciente:', rowError.message);
+      return;
+    }
+
+    aggregated.push(...(rows || []));
+  });
+
+  return aggregated;
+}
+
+/** Inbox apenas para um subconjunto de pacientes (paginacao / scroll). */
+export async function fetchNutritionistChatInboxForPatientIds(
+  patientIds = [],
+  nutricionistaId = null,
+  patientCardsById = new Map()
+) {
+  const resolvedIds = uniqueValues(patientIds);
+  if (!resolvedIds.length) return [];
+
+  const resolvedNutriId = nutricionistaId || null;
+  let messagesByPatient = new Map();
+
+  if (resolvedNutriId) {
+    try {
+      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
+    } catch (chatError) {
+      console.log('Chat inbox parcial indisponivel:', chatError);
+    }
+  }
+
+  return resolvedIds
+    .map((patientId) => {
+      const card = patientCardsById.get(patientId);
+      const patient = card?.raw || card || { id_paciente_uuid: patientId, nome_completo: card?.name };
+      if (!patient) return null;
+
+      const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+      const patientName = patient?.nome_completo || patient?.email_pac || card?.name || 'Paciente';
+      const rows = messagesByPatient.get(patientId) || [];
+      const thread = rows.map((row) => mapChatRowToThreadEntry(row, patientName)).filter((item) => item.text);
+      const preview = buildNutritionistThreadPreview(thread);
+      const lastRow = rows.length ? rows[rows.length - 1] : null;
+
+      return {
+        patient,
+        clinicalObjective: parsed.objectiveText,
+        preview,
+        lastMessageCreatedAt: lastRow?.created_at || null,
+        thread: [],
+      };
+    })
+    .filter(Boolean);
+}
+
+/** Lista leve: ultima mensagem + nao lidas, sem thread completa nem app_state por paciente. */
+export async function fetchNutritionistChatInbox(patientIds = [], nutricionistaId = null) {
+  const resolvedIds = uniqueValues(patientIds);
+  if (!resolvedIds.length) return [];
+
+  const { data: patients, error } = await supabase
+    .from('paciente')
+    .select('id_paciente_uuid, nome_completo, email_pac, objetivo_principal_consulta, id_nutricionista_uuid')
+    .in('id_paciente_uuid', resolvedIds);
+
+  if (error) throw error;
+
+  const resolvedNutriId =
+    nutricionistaId ||
+    patients?.find((item) => item?.id_nutricionista_uuid)?.id_nutricionista_uuid ||
+    null;
+
+  let messagesByPatient = new Map();
+
+  if (resolvedNutriId) {
+    try {
+      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
+    } catch (chatError) {
+      console.log('Chat inbox indisponivel:', chatError);
+    }
+  }
+
+  const patientById = new Map(
+    (patients || []).map((patient) => [patient.id_paciente_uuid, patient])
+  );
+
+  return resolvedIds.map((patientId) => {
+    const patient = patientById.get(patientId);
+    if (!patient) {
+      return null;
+    }
+
+    const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+    const patientName = patient?.nome_completo || patient?.email_pac || 'Paciente';
+    const rows = messagesByPatient.get(patientId) || [];
+    const thread = rows.map((row) => mapChatRowToThreadEntry(row, patientName)).filter((item) => item.text);
+    const preview = buildNutritionistThreadPreview(thread);
+    const lastRow = rows.length ? rows[rows.length - 1] : null;
+
+    return {
+      patient,
+      clinicalObjective: parsed.objectiveText,
+      preview,
+      lastMessageCreatedAt: lastRow?.created_at || null,
+      thread: [],
+    };
+  }).filter(Boolean);
+}
+
+export async function fetchNutritionistChatThreadForPatient(
+  patientId,
+  nutricionistaId,
+  { patientName = 'Paciente', limit = NUTRI_THREAD_RECENT_LIMIT } = {}
+) {
+  if (!patientId) return [];
+
+  const thread = await fetchChatThreadFromDatabase({
+    pacienteId: patientId,
+    nutricionistaId,
+    nutritionistName: 'Nutricionista',
+    patientName,
+    limit,
+  });
+
+  if (Array.isArray(thread)) {
+    return thread.filter((item) => item.text);
+  }
+
+  return [];
+}
+
+export async function fetchNutritionistChatSummariesByPatientIds(
+  patientIds = [],
+  nutricionistaId = null,
+  options = {}
+) {
+  if (options.inboxOnly === true) {
+    return fetchNutritionistChatInbox(patientIds, nutricionistaId);
+  }
+
+  const resolvedIds = uniqueValues(patientIds);
+  if (!resolvedIds.length) return [];
+
+  const { data: patients, error } = await supabase
+    .from('paciente')
+    .select('id_paciente_uuid, nome_completo, email_pac, objetivo_principal_consulta, id_nutricionista_uuid')
+    .in('id_paciente_uuid', resolvedIds);
+
+  if (error) throw error;
+
+  const resolvedNutriId =
+    nutricionistaId ||
+    patients?.find((item) => item?.id_nutricionista_uuid)?.id_nutricionista_uuid ||
+    null;
+
+  let messagesByPatient = new Map();
+
+  if (resolvedNutriId) {
+    try {
+      const { data: messages, error: messagesError } = await supabase
+        .from('mensagem_chat')
+        .select('id, paciente_id, nutricionista_id, autor_role, texto, created_at')
+        .in('paciente_id', resolvedIds)
+        .eq('nutricionista_id', resolvedNutriId)
+        .order('created_at', { ascending: true })
+        .limit(Math.min(resolvedIds.length * NUTRI_INBOX_MESSAGES_PER_PATIENT, 2000));
+
+      if (!messagesError) {
+        (messages || []).forEach((row) => {
+          const list = messagesByPatient.get(row.paciente_id) || [];
+          list.push(row);
+          messagesByPatient.set(row.paciente_id, list);
+        });
+      }
+    } catch (chatError) {
+      console.log('Chat summaries indisponivel (tabela/RPC):', chatError);
+    }
+  }
+
+  const patientsWithMeta = await Promise.all(
+    (patients || []).map(async (patient) => {
+      const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
+      const tableState = messagesByPatient.has(patient.id_paciente_uuid)
+        ? null
+        : await fetchPacienteAppStateFromTable(patient.id_paciente_uuid);
+      return { patient, parsed, tableState };
+    })
+  );
+
+  return patientsWithMeta.map(({ patient, parsed, tableState }) => {
+    const patientName = patient?.nome_completo || patient?.email_pac || 'Paciente';
+    const rows = messagesByPatient.get(patient.id_paciente_uuid) || [];
+    let thread = [];
+
+    if (rows.length) {
+      thread = rows
+        .map((row) => mapChatRowToThreadEntry(row, patientName))
+        .filter((item) => item.text);
+    } else {
+      const legacy = ensureArray(
+        tableState?.nutritionistThread || parsed?.appState?.nutritionistThread
+      );
+      thread = legacy.map((item, index) =>
+        normalizeNutritionistThreadEntry(item, {
+          nutritionistName: 'Nutricionista',
+          patientName,
+          index,
+        })
+      );
+    }
+
+    return {
+      patient,
+      clinicalObjective: parsed.objectiveText,
+      appState: normalizeAppState({
+        ...(tableState || parsed.appState),
+        nutritionistThread: thread,
+      }),
+      lastMessageCreatedAt: rows[rows.length - 1]?.created_at || null,
+      thread: ensureArray(thread),
+    };
+  });
+}
+
+export async function savePatientNutritionistChat({
+  patientId,
+  thread,
+  actor,
+  patientContext,
+  newMessage,
+}) {
+  const effectivePatientId = patientId || getPatientId(patientContext || actor);
+  const nutricionistaId = await resolveNutricionistaIdForPatient(
+    effectivePatientId,
+    actor?.id_nutricionista_uuid
+  );
+
+  if (newMessage?.text && effectivePatientId && nutricionistaId) {
+    const sent = await sendChatMessage({
+      pacienteId: effectivePatientId,
+      nutricionistaId,
+      autorRole: newMessage.role === 'nutri' ? 'nutricionista' : 'paciente',
+      texto: newMessage.text,
+      nutritionistName: newMessage.nutritionistName || 'Nutricionista',
+      patientName: newMessage.patientName || getPatientDisplayName(patientContext || actor),
+    });
+
+    if (sent) {
+      const cached =
+        getCachedPatientExperience(effectivePatientId, {
+          patientContext: patientContext || actor || null,
+        }) ||
+        getCachedPatientChat(effectivePatientId);
+
+      const baseThread = ensureArray(thread).length
+        ? thread
+        : cached?.appState?.nutritionistThread || cached?.thread || [];
+      const nextThread = ensureThreadContainsMessage(baseThread, sent);
+
+      return {
+        patient: cached?.patient || patientContext || actor || null,
+        clinicalObjective: cached?.clinicalObjective || '',
+        appState: {
+          ...(cached?.appState || createDefaultAppState()),
+          nutritionistThread: nextThread,
+        },
+        glucoseReadings: cached?.glucoseReadings || [],
+        thread: nextThread,
+      };
+    }
+  }
+
+  const experience = await fetchPatientNutritionistChat(effectivePatientId || patientId, {
+    patientContext: patientContext || actor || null,
+    skipAlertSync: true,
+    forceRefresh: true,
+    chatOnly: true,
+  });
+
+  const nextState = {
+    ...experience.appState,
+    nutritionistThread: ensureArray(thread),
+  };
+
+  return savePatientAppState({
+    patientId: effectivePatientId || patientId,
+    objectiveText: experience.clinicalObjective,
+    appState: nextState,
+    currentPatient: null,
+    patientContext: patientContext || actor || null,
+  });
 }
 
 export async function savePatientAppState({
@@ -769,11 +1682,17 @@ export async function savePatientAppState({
     currentPatient?.nivel_atividade_fisica_atual ||
     null;
 
+  const stateForTable = prepareAppStateForStorage({
+    ...normalizedWithHiddenPreserved,
+    nutritionistThread: [],
+  });
+
+  const tableSaved = await savePacienteAppStateToTable(effectivePatientId, stateForTable);
+
   const patch = {
-    objetivo_principal_consulta: serializeObjectiveAndAppState(
-      nextObjectiveText,
-      normalizedWithHiddenPreserved
-    ),
+    objetivo_principal_consulta: tableSaved
+      ? nextObjectiveText
+      : serializeObjectiveAndAppState(nextObjectiveText, normalizedWithHiddenPreserved),
     qualidade_sono_media: mapSleepToLabel(normalizedWithHiddenPreserved.wellness.selectedSleep),
     nivel_atividade_fisica_atual: latestActivity,
     data_hora_ultima_atualizacao: new Date().toISOString(),
@@ -901,10 +1820,9 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
-    return mergeCachedGlucoseReadings(rpcData.map(normalizeGlucoseReadingRow)).slice(0, limit);
-  }
-
-  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
+    rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
+    return mergeCachedGlucoseReadings(rpcReadings).slice(0, limit);
+  } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
     console.log('Erro ao buscar glicemia por RPC:', rpcError.message);
   }
 
@@ -955,12 +1873,11 @@ export async function fetchMedicationEntries(patientId, limit = 120) {
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
-    return rpcData
-      .map((item, index) => normalizeMedicationEntry(item, 'database', index))
-      .slice(0, limit);
-  }
-
-  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
+    rpcEntries = rpcData.map((item, index) =>
+      normalizeMedicationEntry(item, 'database', index)
+    );
+    return rpcEntries.slice(0, limit);
+  } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_medicacoes_paciente')) {
     console.log('Erro ao buscar medicacoes por RPC:', rpcError.message);
   }
 
@@ -1028,12 +1945,29 @@ export async function fetchMealEntries(patientId, limit = 120) {
     return [];
   }
 
-  const { data, error } = await supabase
+  const mealColumns =
+    'id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, fibras_total, acucares_total, gorduras_saturadas_total, sodio_total, confirmado, created_at';
+  const legacyMealColumns =
+    'id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, confirmado, created_at';
+
+  let { data, error } = await supabase
     .from('refeicao_ia')
-    .select('id, paciente_id, foto_url, alimentos, carboidratos_total, calorias_total, proteinas_total, gorduras_total, confirmado, created_at')
+    .select(mealColumns)
     .eq('paciente_id', patientId)
     .order('created_at', { ascending: false })
     .limit(limit);
+
+  if (isMissingMealTotalColumnError(error)) {
+    const retry = await supabase
+      .from('refeicao_ia')
+      .select(legacyMealColumns)
+      .eq('paciente_id', patientId)
+      .order('created_at', { ascending: false })
+      .limit(limit);
+
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.log('Erro ao buscar refeicoes IA:', error.message);
@@ -1048,11 +1982,17 @@ export async function addGlucoseReading(patientId, value, options = {}) {
     throw new Error('Paciente sem identificador para registrar glicemia.');
   }
 
+  const glucoseCheck = validateGlucoseValue(value);
+
+  if (!glucoseCheck.ok) {
+    throw new Error(glucoseCheck.message);
+  }
+
   const normalizedSymptoms = options.symptoms || 'Registro manual pelo app';
   const fallbackPayload = {
     id_glicemia_manual_uuid: options.id || buildUuid(),
     id_paciente_uuid: patientId,
-    valor_glicose_mgdl: Number(value),
+    valor_glicose_mgdl: glucoseCheck.value,
     data: options.date || buildTodayDateString(),
     hora: options.time || buildCurrentTimeString(),
     sintomas_associados: normalizedSymptoms,
@@ -1075,9 +2015,9 @@ export async function addGlucoseReading(patientId, value, options = {}) {
             ...fallbackPayload,
             ...saved,
           },
-          value
+          glucoseCheck.value
         )
-      : buildGlucoseReadingFromPayload(fallbackPayload, value);
+      : buildGlucoseReadingFromPayload(fallbackPayload, glucoseCheck.value);
 
     await registrarLogAuditoria({
       actor: options.actor || null,
@@ -1132,7 +2072,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
   }
 
   if (!data) {
-    const fallbackReading = buildGlucoseReadingFromPayload(payload, value);
+    const fallbackReading = buildGlucoseReadingFromPayload(payload, glucoseCheck.value);
     await registrarLogAuditoria({
       actor: options.actor || null,
       targetPatientId: patientId,
@@ -1156,7 +2096,7 @@ export async function addGlucoseReading(patientId, value, options = {}) {
       ...payload,
       ...data,
     },
-    value
+    glucoseCheck.value
   );
 
   await registrarLogAuditoria({
@@ -1184,6 +2124,21 @@ export async function addMedicationEntry(patientId, entry) {
   }
 
   const normalizedEntry = normalizeMedicationEntry(entry, 'database');
+  const medicationKind = normalizeMedicationType(normalizedEntry.medicationKind);
+
+  if (medicationKind === 'insulin') {
+    const insulinCheck = validateInsulinDose(normalizedEntry.medicineQuantity);
+
+    if (!insulinCheck.ok) {
+      throw new Error(insulinCheck.message);
+    }
+  } else {
+    const medCheck = validateMedicationEntry(normalizedEntry);
+
+    if (!medCheck.ok) {
+      throw new Error(medCheck.message);
+    }
+  }
   const normalizedQuantity = String(normalizedEntry.medicineQuantity || '').trim();
   const normalizedLegacyId = isUuidLike(normalizedEntry.legacyId)
     ? normalizedEntry.legacyId
@@ -1588,7 +2543,32 @@ export function buildSymptomEntry(selectedSymptoms, sleep, stress) {
 }
 
 export function appendNewestEntry(array, entry, max = 30) {
-  return [entry, ...ensureArray(array)].slice(0, max);
+  if (!entry) {
+    return ensureArray(array).slice(0, max);
+  }
+
+  const entryId = String(entry?.id || '').trim();
+  const databaseId = String(entry?.databaseId || '').trim();
+  const filtered = ensureArray(array).filter((item) => {
+    const itemId = String(item?.id || '').trim();
+    const itemDatabaseId = String(item?.databaseId || '').trim();
+
+    if (entryId && itemId === entryId) {
+      return false;
+    }
+
+    if (databaseId && itemDatabaseId === databaseId) {
+      return false;
+    }
+
+    if (databaseId && itemId === `meal-ia-${databaseId}`) {
+      return false;
+    }
+
+    return true;
+  });
+
+  return [entry, ...filtered].slice(0, max);
 }
 
 export function getLatestGlucose(glucoseReadings) {
@@ -1596,7 +2576,7 @@ export function getLatestGlucose(glucoseReadings) {
 }
 
 export function buildMonitorSeries(glucoseReadings, range = 'Hoje') {
-  const normalized = ensureArray(glucoseReadings).map((item) => ({
+  const normalized = mergeCachedGlucoseReadings(ensureArray(glucoseReadings)).map((item) => ({
     label: range === 'Hoje' ? item.time.slice(0, 5) : item.date.slice(5),
     value: item.value,
     date: item.date,

@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { RolagemModalTeclado } from '../../componentes/comum/RolagemComTeclado';
 import BarraAbasAdmin, {
   ADMIN_TAB_BAR_HEIGHT,
   ADMIN_TAB_BAR_SPACE,
@@ -852,7 +853,13 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
 
   useEffect(() => {
     navigation.setOptions({
-      readerBackAction: () => navigation.navigate('AdminHome', { usuarioLogado: adminUser }),
+      readerBackAction: () => {
+        if (navigation.canGoBack?.()) {
+          navigation.goBack();
+          return;
+        }
+        navigation.navigate('AdminHome', { usuarioLogado: adminUser });
+      },
       readerOnMenuPress: undefined,
       readerMenuDisabled: true,
       readerRightAction: () => carregar({ isRefresh: true }),
@@ -1018,7 +1025,7 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <ScrollView
+            <RolagemModalTeclado
               style={styles.modalScroll}
               contentContainerStyle={styles.modalScrollContent}
               showsVerticalScrollIndicator={false}
@@ -1312,7 +1319,7 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
                   )}
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+            </RolagemModalTeclado>
           </View>
         </View>
       </Modal>
@@ -1325,7 +1332,7 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
       >
         <View style={styles.modalBackdrop}>
           <View style={styles.modalCard}>
-            <ScrollView
+            <RolagemModalTeclado
               style={styles.modalScroll}
               contentContainerStyle={styles.modalScrollContent}
               showsVerticalScrollIndicator={false}
@@ -1572,7 +1579,7 @@ export default function TelaCadastrosAdmin({ navigation, route, usuarioLogado, o
                   )}
                 </TouchableOpacity>
               </View>
-            </ScrollView>
+            </RolagemModalTeclado>
           </View>
         </View>
       </Modal>

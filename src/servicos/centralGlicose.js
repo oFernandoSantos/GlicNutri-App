@@ -13,13 +13,17 @@ function sortReadings(readings) {
   );
 }
 
-function buildFingerprint(item) {
+export function buildGlucoseFingerprint(item) {
   return [
     item?.patientId || item?.id_paciente_uuid || '',
     item?.date || '',
     String(item?.time || '').slice(0, 8),
     Number(item?.value) || Number(item?.valor_glicose_mgdl) || 0,
   ].join('|');
+}
+
+function buildFingerprint(item) {
+  return buildGlucoseFingerprint(item);
 }
 
 export function mergeCachedGlucoseReadings(primaryReadings, fallbackReadings = []) {
@@ -60,10 +64,7 @@ export function prependCachedGlucoseReading(patientId, reading) {
   if (!patientId || !reading) return;
 
   const current = glucoseCache.get(patientId) || [];
-  const next = sortReadings([
-    reading,
-    ...current.filter((item) => item.id !== reading.id),
-  ]);
+  const next = mergeCachedGlucoseReadings([reading], current);
 
   glucoseCache.set(patientId, next);
   notify(patientId);

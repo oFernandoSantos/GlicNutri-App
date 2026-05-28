@@ -13,6 +13,24 @@ npx expo start
 
 Ou: `npm start` (equivale a `expo start`).
 
+## Sincronizacao LibreView
+
+O projeto agora possui 2 pecas preparadas para sincronizacao automatica:
+
+- `machine-learning/api/app/main.py`
+  Endpoint `POST /libreview/sync`
+- `supabase/functions/libreview-sync`
+  Proxy server-side para o app
+
+Fluxo:
+
+1. App chama a Function `libreview-sync`
+2. A Function chama o middleware/servidor
+3. O middleware chama o provedor real do LibreView
+4. As leituras voltam normalizadas para o app
+
+Para ativar em producao ainda e necessario configurar a URL/token do provedor real do LibreView.
+
 ## Outras pastas
 
 | Pasta | Função |

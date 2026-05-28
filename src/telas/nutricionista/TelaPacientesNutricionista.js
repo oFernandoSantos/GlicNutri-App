@@ -1,11 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Ionicons } from '@expo/vector-icons';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
   AvatarBadge,
-  FilterTabs,
-  ProgressBar,
-  RiskBadge,
   SearchInput,
   SectionCard,
   nutriDesktopStyles,
@@ -13,17 +11,39 @@ import {
 import {
   getNutritionistId,
   listPatientsByNutritionist,
-  unlinkPatientNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 
-const filterItems = [
+function getRiskMeta(patient) {
+  const risk = String(patient?.risk || '').toLowerCase();
+  if (risk.includes('alto')) {
+    return {
+      label: 'Alto Risco',
+      badgeStyle: styles.riskBadgeHigh,
+      badgeTextStyle: styles.riskBadgeTextHigh,
+    };
+  }
+  if (risk.includes('moderado') || risk.includes('medio')) {
+    return {
+      label: 'Médio Risco',
+      badgeStyle: styles.riskBadgeMedium,
+      badgeTextStyle: styles.riskBadgeTextMedium,
+    };
+  }
+  return {
+    label: 'Baixo Risco',
+    badgeStyle: styles.riskBadgeLow,
+    badgeTextStyle: styles.riskBadgeTextLow,
+  };
+}
+
+const FILTER_ORDER = [
   { value: 'Todos', label: 'Todos' },
   { value: 'Diabetes', label: 'Diabetes' },
   { value: 'Emagrecimento', label: 'Emagrecimento' },
   { value: 'Ganho de Massa', label: 'Ganho de Massa' },
-  { value: 'Reeducacao', label: 'Reeducacao' },
-  { value: 'Prioritarios', label: 'Prioritarios' },
+  { value: 'Reeducacao', label: 'Reeducação Alimentar' },
+  { value: 'Prioritarios', label: 'Prioritários' },
 ];
 
 export default function GerenciarPacientesStyled({ navigation, route }) {
@@ -32,7 +52,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const [activeFilter, setActiveFilter] = useState('Todos');
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [unlinkingPatientId, setUnlinkingPatientId] = useState('');
   const [loadError, setLoadError] = useState('');
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
 
@@ -74,7 +93,7 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
         (activeFilter === 'Emagrecimento' && patient.objective === 'Emagrecimento') ||
         (activeFilter === 'Ganho de Massa' && patient.objective === 'Ganho de Massa') ||
         (activeFilter === 'Reeducacao' && patient.objective === 'Reeducacao') ||
-        (activeFilter === 'Prioritarios' && (patient.risk === 'Alto' || patient.alerts >= 3));
+        (activeFilter === 'Prioritarios' && (patient.risk === 'Alto' || Number(patient.alerts || 0) > 0));
 
       return matchesSearch && matchesFilter;
     });
@@ -83,164 +102,178 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
   const summary = useMemo(() => {
     const total = patients.length;
     const highRisk = patients.filter((item) => item.risk === 'Alto').length;
-    const withAlerts = patients.filter((item) => item.alerts > 0).length;
+    const withAlerts = patients.filter((item) => Number(item.alerts || 0) > 0).length;
     const avgAdherence = total
       ? Math.round(patients.reduce((sum, item) => sum + Number(item.adherence || 0), 0) / total)
       : 0;
 
     return [
-      { id: 's1', label: 'Na carteira', value: total },
-      { id: 's2', label: 'Alto risco', value: highRisk },
-      { id: 's3', label: 'Com alertas', value: withAlerts },
-      { id: 's4', label: 'Adesao media', value: `${avgAdherence}%` },
+      { id: 'total', label: 'Total Pacientes', value: total, valueStyle: styles.metricValueDefault },
+      { id: 'high-risk', label: 'Alto Risco', value: highRisk, valueStyle: styles.metricValueHighRisk },
+      { id: 'adherence', label: 'Adesão Média', value: `${avgAdherence}%`, valueStyle: styles.metricValueAdherence },
+      { id: 'alerts', label: 'Alertas Ativos', value: withAlerts, valueStyle: styles.metricValueAlerts },
     ];
   }, [patients]);
 
-  async function handleDesvincularPaciente(patient) {
-    try {
-      setUnlinkingPatientId(patient.id);
-      setLoadError('');
-      await unlinkPatientNutritionist({
-        pacienteId: patient.id,
-        nutricionistaId,
-        actor: usuarioLogado,
-        origin: 'nutricionista',
-      });
-      await loadPatients();
-    } catch (error) {
-      console.log('Erro ao desvincular paciente:', error);
-      setLoadError(error?.message || 'Nao foi possivel desvincular o paciente.');
-    } finally {
-      setUnlinkingPatientId('');
-    }
-  }
+  const filterItems = useMemo(() => {
+    const total = patients.length;
+    const diabetes = patients.filter((patient) => patient.objective === 'Diabetes').length;
+    const emagrecimento = patients.filter((patient) => patient.objective === 'Emagrecimento').length;
+    const ganho = patients.filter((patient) => patient.objective === 'Ganho de Massa').length;
+    const reeducacao = patients.filter((patient) => patient.objective === 'Reeducacao').length;
+    const prioritarios = patients.filter(
+      (patient) => patient.risk === 'Alto' || Number(patient.alerts || 0) > 0
+    ).length;
+
+    return FILTER_ORDER.map((item) => {
+      const count =
+        item.value === 'Todos'
+          ? total
+          : item.value === 'Diabetes'
+            ? diabetes
+            : item.value === 'Emagrecimento'
+              ? emagrecimento
+              : item.value === 'Ganho de Massa'
+                ? ganho
+                : item.value === 'Reeducacao'
+                  ? reeducacao
+                  : prioritarios;
+
+      return {
+        ...item,
+        fullLabel: `${item.label} (${count})`,
+      };
+    });
+  }, [patients]);
 
   return (
     <LayoutNutricionista
       navigation={navigation}
       route={route}
       usuarioLogado={usuarioLogado}
-      title="Pacientes"
-      subtitle="CRM clinico com busca rapida, filtros por objetivo e triagem metabolica."
+      title=""
+      subtitle=""
       showTabBar={route?.name === 'GerenciarPacientes'}
     >
       <View style={nutriDesktopStyles.pageGap}>
-        <SearchInput
-          value={search}
-          onChangeText={setSearch}
-          placeholder="Buscar por nome, objetivo, risco ou observacao"
-        />
+        <SectionCard style={styles.searchCard}>
+          <SearchInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar paciente por nome..."
+          />
+        </SectionCard>
 
         <View style={styles.summaryGrid}>
           {summary.map((item) => (
-            <SectionCard key={item.id} style={styles.summaryCard}>
+            <SectionCard key={item.id} style={[styles.summaryCard, styles.flatCard]}>
               <Text style={styles.summaryLabel}>{item.label}</Text>
-              <Text style={styles.summaryValue}>{item.value}</Text>
+              <Text style={[styles.summaryValue, item.valueStyle]}>{item.value}</Text>
             </SectionCard>
           ))}
         </View>
 
-        <FilterTabs items={filterItems} active={activeFilter} onChange={setActiveFilter} />
+        <SectionCard style={[styles.filtersCard, styles.flatCard]}>
+          <View style={styles.filtersRow}>
+            {filterItems.map((item) => {
+              const selected = item.value === activeFilter;
+              return (
+                <TouchableOpacity
+                  key={item.value}
+                  style={[styles.filterChip, selected && styles.filterChipActive]}
+                  onPress={() => setActiveFilter(item.value)}
+                  activeOpacity={0.9}
+                >
+                  <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>
+                    {item.fullLabel}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        </SectionCard>
 
         {loading ? (
-          <SectionCard style={styles.loadingCard}>
+          <SectionCard style={[styles.emptyCard, styles.flatCard]}>
             <ActivityIndicator color={patientTheme.colors.primaryDark} />
             <Text style={styles.emptyText}>Carregando pacientes vinculados...</Text>
           </SectionCard>
         ) : loadError ? (
-          <SectionCard style={styles.emptyCard}>
+          <SectionCard style={[styles.emptyCard, styles.flatCard]}>
             <Text style={styles.emptyTitle}>{loadError}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={loadPatients}>
+            <TouchableOpacity style={styles.retryButton} onPress={loadPatients} activeOpacity={0.9}>
               <Text style={styles.retryButtonText}>Tentar novamente</Text>
             </TouchableOpacity>
           </SectionCard>
         ) : null}
 
         {!loading && !loadError && !filteredPatients.length ? (
-          <SectionCard style={styles.emptyCard}>
-            <Text style={styles.emptyTitle}>Nenhum paciente vinculado</Text>
+          <SectionCard style={[styles.emptyCard, styles.flatCard]}>
+            <Text style={styles.emptyTitle}>Nenhum paciente encontrado</Text>
             <Text style={styles.emptyText}>
-              Quando um paciente agendar uma consulta com voce, ele aparecera aqui.
+              Ajuste os filtros ou aguarde novos pacientes vinculados.
             </Text>
           </SectionCard>
         ) : null}
 
-        <View style={styles.patientGrid}>
-          {filteredPatients.map((patient) => (
-            <TouchableOpacity
-              key={patient.id}
-              style={[styles.patientCard, patient.risk === 'Alto' && styles.patientCardAlert]}
-              activeOpacity={0.92}
-              onPress={() =>
-                navigation.navigate('NutriProntuarioPaciente', {
-                  usuarioLogado,
-                  pacienteId: patient.id,
-                  paciente: patient,
-                })
-              }
-            >
-              <View style={styles.patientHeader}>
-                <AvatarBadge name={patient.name} size={48} subtle />
-                <View style={styles.patientCopy}>
-                  <Text style={styles.patientName}>{patient.name}</Text>
-                  <Text style={styles.patientMeta}>
-                    {patient.specialtyTag} · {patient.age} anos · IMC {patient.bmi}
-                  </Text>
-                </View>
-                <RiskBadge risk={`${patient.risk} risco`} />
-              </View>
+        <View style={styles.patientList}>
+          {filteredPatients.map((patient) => {
+            const riskMeta = getRiskMeta(patient);
+            const alerts = Number(patient.alerts || 0);
 
-              <View style={styles.patientTags}>
-                <View style={styles.tagPill}>
-                  <Text style={styles.tagText}>{patient.objective}</Text>
-                </View>
-                {patient.unread ? (
-                  <View style={styles.tagPillGreen}>
-                    <Text style={styles.tagTextGreen}>{patient.unread} mensagens</Text>
+            return (
+              <TouchableOpacity
+                key={patient.id}
+                style={[styles.patientCard, styles.flatCard]}
+                activeOpacity={0.92}
+                onPress={() =>
+                  navigation.navigate('NutriProntuarioPaciente', {
+                    usuarioLogado,
+                    pacienteId: patient.id,
+                    paciente: patient,
+                  })
+                }
+              >
+                <View style={styles.patientLeft}>
+                  <AvatarBadge name={patient.name} size={40} subtle />
+                  <View style={styles.patientCopy}>
+                    <View style={styles.patientTopRow}>
+                      <Text style={styles.patientName}>{patient.name}</Text>
+                      <View style={[styles.riskBadgePill, riskMeta.badgeStyle]}>
+                        <Text style={[styles.riskBadgePillText, riskMeta.badgeTextStyle]}>
+                          {riskMeta.label}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <Text style={styles.patientMeta}>
+                      {patient.specialtyTag} · {patient.age} anos
+                    </Text>
+
+                    <View style={styles.patientStatusRow}>
+                      <View style={styles.statusItem}>
+                        <Ionicons name="trending-up-outline" size={10} color="#5c6e83" />
+                        <Text style={styles.statusItemText}>Adesão: {patient.adherence}%</Text>
+                      </View>
+                      {alerts ? (
+                        <View style={styles.statusItem}>
+                          <Ionicons name="alert-circle-outline" size={10} color={patientTheme.colors.danger} />
+                          <Text style={[styles.statusItemText, styles.statusItemAlertText]}>
+                            {alerts} {alerts === 1 ? 'alerta' : 'alertas'}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </View>
                   </View>
-                ) : null}
-                <TouchableOpacity
-                  style={styles.unlinkPill}
-                  activeOpacity={0.9}
-                  disabled={unlinkingPatientId === patient.id}
-                  onPress={(event) => {
-                    event?.stopPropagation?.();
-                    handleDesvincularPaciente(patient);
-                  }}
-                >
-                  <Text style={styles.unlinkPillText}>
-                    {unlinkingPatientId === patient.id ? 'Removendo...' : 'Desvincular'}
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              <Text style={styles.patientNote}>{patient.notes}</Text>
-
-              <View style={styles.metricInlineRow}>
-                <Text style={styles.metricInlineLabel}>Adesao</Text>
-                <Text style={styles.metricInlineValue}>{patient.adherence}%</Text>
-              </View>
-              <ProgressBar
-                value={patient.adherence}
-                tone={patient.adherence < 70 ? 'danger' : patient.adherence < 80 ? 'warning' : 'success'}
-              />
-
-              <View style={styles.bottomRow}>
-                <View style={styles.bottomMetric}>
-                  <Text style={styles.bottomMetricLabel}>Alertas</Text>
-                  <Text style={styles.bottomMetricValue}>{patient.alerts}</Text>
                 </View>
-                <View style={styles.bottomMetric}>
-                  <Text style={styles.bottomMetricLabel}>Glicose</Text>
-                  <Text style={styles.bottomMetricValue}>{patient.latestGlucose} mg/dL</Text>
+
+                <View style={styles.patientRight}>
+                  <Text style={styles.updatedLabel}>Atualizado</Text>
+                  <Text style={styles.updatedTime}>{patient.updatedAt || '--'}</Text>
                 </View>
-                <View style={styles.bottomMetric}>
-                  <Text style={styles.bottomMetricLabel}>Ultima atualizacao</Text>
-                  <Text style={styles.bottomMetricValue}>{patient.updatedAt}</Text>
-                </View>
-              </View>
-            </TouchableOpacity>
-          ))}
+              </TouchableOpacity>
+            );
+          })}
         </View>
       </View>
     </LayoutNutricionista>
@@ -248,6 +281,21 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
+  flatCard: {
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.xl,
+    shadowColor: 'transparent',
+    elevation: 0,
+  },
+  searchCard: {
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    shadowColor: 'transparent',
+    elevation: 0,
+  },
   summaryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -257,41 +305,176 @@ const styles = StyleSheet.create({
     width: Platform.OS === 'web' ? '24%' : '48%',
     minWidth: 160,
     flexGrow: 1,
-    minHeight: 108,
+    minHeight: 74,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   summaryLabel: {
-    fontSize: 12,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
+    fontSize: 11,
     color: patientTheme.colors.textMuted,
-    fontWeight: '800',
+    fontWeight: '500',
+    textAlign: 'center',
   },
   summaryValue: {
-    marginTop: 10,
-    fontSize: 28,
+    marginTop: 8,
+    fontSize: 18,
     fontWeight: '900',
+    textAlign: 'center',
+  },
+  metricValueDefault: {
     color: patientTheme.colors.text,
   },
-  patientGrid: {
+  metricValueHighRisk: {
+    color: patientTheme.colors.danger,
+  },
+  metricValueAdherence: {
+    color: patientTheme.colors.primaryDark,
+  },
+  metricValueAlerts: {
+    color: patientTheme.colors.warning,
+  },
+  filtersCard: {
+    paddingVertical: 6,
+    paddingHorizontal: 0,
+  },
+  filtersRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 12,
-  },
-  loadingCard: {
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 6,
+    paddingHorizontal: 4,
+  },
+  filterChip: {
+    minHeight: 24,
+    paddingHorizontal: 14,
+    borderRadius: patientTheme.radius.pill,
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  filterChipActive: {
+    backgroundColor: patientTheme.colors.background,
+  },
+  filterChipText: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '500',
+  },
+  filterChipTextActive: {
+    fontWeight: '700',
+  },
+  patientList: {
     gap: 10,
   },
+  patientCard: {
+    minHeight: 76,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+  },
+  patientLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    flex: 1,
+  },
+  patientCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  patientTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flexWrap: 'wrap',
+  },
+  patientName: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: patientTheme.colors.text,
+  },
+  patientMeta: {
+    marginTop: 4,
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+  },
+  patientStatusRow: {
+    marginTop: 6,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    alignItems: 'center',
+  },
+  statusItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  statusItemText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+  },
+  statusItemAlertText: {
+    color: patientTheme.colors.warning,
+  },
+  patientRight: {
+    alignItems: 'flex-end',
+  },
+  updatedLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+  },
+  updatedTime: {
+    marginTop: 4,
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  riskBadgePill: {
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderWidth: 1,
+  },
+  riskBadgePillText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  riskBadgeHigh: {
+    backgroundColor: patientTheme.colors.dangerSoft,
+    borderColor: patientTheme.colors.danger,
+  },
+  riskBadgeTextHigh: {
+    color: patientTheme.colors.text,
+  },
+  riskBadgeMedium: {
+    backgroundColor: patientTheme.colors.warningSoft,
+    borderColor: patientTheme.colors.warning,
+  },
+  riskBadgeTextMedium: {
+    color: patientTheme.colors.text,
+  },
+  riskBadgeLow: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primary,
+  },
+  riskBadgeTextLow: {
+    color: patientTheme.colors.primaryDark,
+  },
   emptyCard: {
+    alignItems: 'flex-start',
     gap: 10,
   },
   emptyTitle: {
     color: patientTheme.colors.text,
     fontSize: 16,
-    fontWeight: '900',
+    fontWeight: '700',
   },
   emptyText: {
     color: patientTheme.colors.textMuted,
-    fontWeight: '700',
     lineHeight: 20,
   },
   retryButton: {
@@ -304,125 +487,5 @@ const styles = StyleSheet.create({
   retryButtonText: {
     color: patientTheme.colors.onPrimary,
     fontWeight: '900',
-  },
-  patientCard: {
-    width: Platform.OS === 'web' ? '49%' : '100%',
-    minWidth: 280,
-    flexGrow: 1,
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
-  },
-  patientCardAlert: {
-    borderColor: '#f0d2d2',
-    backgroundColor: '#faf5f5',
-  },
-  patientHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-  },
-  patientCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  patientName: {
-    fontSize: 17,
-    fontWeight: '900',
-    color: patientTheme.colors.text,
-  },
-  patientMeta: {
-    marginTop: 4,
-    color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
-  },
-  patientTags: {
-    marginTop: 14,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tagPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: patientTheme.colors.background,
-    ...patientShadow,
-  },
-  tagPillGreen: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    backgroundColor: patientTheme.colors.primarySoft,
-  },
-  tagText: {
-    color: patientTheme.colors.text,
-    fontWeight: '800',
-    fontSize: 12,
-  },
-  tagTextGreen: {
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '900',
-    fontSize: 12,
-  },
-  unlinkPill: {
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    borderRadius: 999,
-    borderWidth: 1,
-    borderColor: '#f0d2d2',
-    backgroundColor: '#fff7f7',
-  },
-  unlinkPillText: {
-    color: '#9f3d3d',
-    fontWeight: '900',
-    fontSize: 12,
-  },
-  patientNote: {
-    marginTop: 12,
-    color: patientTheme.colors.textMuted,
-    lineHeight: 20,
-  },
-  metricInlineRow: {
-    marginTop: 16,
-    marginBottom: 8,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  metricInlineLabel: {
-    color: patientTheme.colors.textMuted,
-    fontWeight: '700',
-  },
-  metricInlineValue: {
-    color: patientTheme.colors.text,
-    fontWeight: '900',
-  },
-  bottomRow: {
-    marginTop: 16,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-  },
-  bottomMetric: {
-    flex: 1,
-    minWidth: 110,
-    padding: 12,
-    borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.background,
-    ...patientShadow,
-  },
-  bottomMetricLabel: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 11,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-  },
-  bottomMetricValue: {
-    marginTop: 6,
-    color: patientTheme.colors.text,
-    fontWeight: '900',
-    fontSize: 13,
   },
 });

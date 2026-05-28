@@ -1,10 +1,14 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Alert,
+  Platform,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
@@ -12,13 +16,27 @@ import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientDisplayName,
   getPatientId,
+  isPatientExperienceCacheFresh,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { mergeCachedGlucoseReadings } from '../../servicos/centralGlicose';
+import { subscribeToPatientAppState } from '../../servicos/centralAppState';
+import { exportPatientProgressReport } from '../../servicos/servicoRelatorioPaciente';
+import {
+  buildPlanAdherenceSeries,
+  resolvePlanSections,
+} from '../../utilitarios/vinculoPlanoRefeicao';
 
-const WEEKLY_FALLBACK = [84, 91, 78, 88, 67, 72, 58];
-const WEIGHT_LABELS = ['01/03', '05/03', '10/03', '15/03', '20/03', '25/03', '29/03'];
 const WEEKDAY_LABELS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+const PROGRESS_PERIOD_TABS = [
+  { key: 'today', label: 'Hoje' },
+  { key: '7days', label: '7 dias' },
+  { key: '14days', label: '14 dias' },
+  { key: 'search', label: 'Pesquisa' },
+];
 
 function toNumber(value, fallback = 0) {
   const numeric = Number(String(value ?? '').replace(',', '.'));
@@ -45,55 +63,213 @@ function getBarTone(value) {
   return '#ff5a6b';
 }
 
+function formatDateInput(value) {
+  const digits = String(value || '').replace(/\D/g, '').slice(0, 8);
+
+  if (digits.length <= 2) return digits;
+  if (digits.length <= 4) return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+
+  return `${digits.slice(0, 2)}/${digits.slice(2, 4)}/${digits.slice(4)}`;
+}
+
+function normalizeDateInput(value) {
+  const rawValue = String(value || '').trim();
+  const brMatch = rawValue.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  const isoMatch = rawValue.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  let year = '';
+  let month = '';
+  let day = '';
+
+  if (brMatch) {
+    [, day, month, year] = brMatch;
+  } else if (isoMatch) {
+    [, year, month, day] = isoMatch;
+  } else {
+    return '';
+  }
+
+  const parsedDate = new Date(Number(year), Number(month) - 1, Number(day));
+  const validDate =
+    parsedDate.getFullYear() === Number(year) &&
+    parsedDate.getMonth() === Number(month) - 1 &&
+    parsedDate.getDate() === Number(day);
+
+  if (!validDate) {
+    return '';
+  }
+
+  return `${year}-${month}-${day}`;
+}
+
+function formatDateLabel(value) {
+  const normalized = normalizeDateInput(value) || String(value || '').slice(0, 10);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '--/--';
+  const [, year, month, day] = match;
+  return `${day}/${month}/${year}`;
+}
+
+function formatShortDateLabel(value) {
+  const normalized = normalizeDateInput(value) || String(value || '').slice(0, 10);
+  const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return '--/--';
+  const [, , month, day] = match;
+  return `${day}/${month}`;
+}
+
+function getTodayDateString() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+
+  return `${year}-${month}-${day}`;
+}
+
+function addDays(dateString, amount) {
+  const [year, month, day] = String(dateString).split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + amount);
+
+  const nextYear = date.getFullYear();
+  const nextMonth = String(date.getMonth() + 1).padStart(2, '0');
+  const nextDay = String(date.getDate()).padStart(2, '0');
+
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function getPeriodBounds(period, startDateInput, endDateInput) {
+  const today = getTodayDateString();
+  let startDate = today;
+  let endDate = today;
+
+  if (period === '7days') {
+    startDate = addDays(today, -6);
+  } else if (period === '14days') {
+    startDate = addDays(today, -13);
+  } else if (period === 'search') {
+    startDate = normalizeDateInput(startDateInput) || normalizeDateInput(endDateInput) || today;
+    endDate = normalizeDateInput(endDateInput) || normalizeDateInput(startDateInput) || today;
+  }
+
+  if (startDate > endDate) {
+    return { startDate: endDate, endDate: startDate };
+  }
+
+  return { startDate, endDate };
+}
+
+function buildDateRange(startDate, endDate) {
+  const items = [];
+  let current = startDate;
+
+  while (current <= endDate) {
+    items.push(current);
+    current = addDays(current, 1);
+  }
+
+  return items;
+}
+
+function extractIsoDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const normalized = normalizeDateInput(raw);
+  if (normalized) return normalized;
+  return normalizeDateInput(raw.slice(0, 10));
+}
+
+function filterEntriesByPeriod(items, period, startDateInput, endDateInput, getDate) {
+  const { startDate, endDate } = getPeriodBounds(period, startDateInput, endDateInput);
+  return (Array.isArray(items) ? items : []).filter((item) => {
+    const itemDate = extractIsoDate(getDate(item));
+    if (!itemDate) return false;
+    return itemDate >= startDate && itemDate <= endDate;
+  });
+}
+
 function buildWeightSeries(currentWeight) {
-  const current = currentWeight > 0 ? currentWeight : 74.8;
-  const initial = current + 3.7;
+  if (!(currentWeight > 0)) {
+    return {
+      initial: null,
+      current: null,
+      goal: null,
+      loss: 0,
+      hasData: false,
+      points: [],
+    };
+  }
+
+  const current = currentWeight;
+  const initial = current;
   const goal = Math.max(current - 4.8, 50);
-  const delta = initial - current;
-  const step = delta / Math.max(WEIGHT_LABELS.length - 1, 1);
 
   return {
     initial,
     current,
     goal,
-    loss: -delta,
-    points: WEIGHT_LABELS.map((label, index) => ({
-      id: `weight-${label}`,
-      label,
-      value: Number((initial - step * index).toFixed(1)),
-    })),
+    loss: 0,
+    hasData: true,
+    points: [
+      {
+        id: 'weight-current',
+        label: 'Atual',
+        value: Number(current.toFixed(1)),
+      },
+    ],
   };
 }
 
-function buildWeeklyAdherence(mealEntries, targetMeals) {
+function countMealsByDate(mealEntries) {
+  const counts = new Map();
+  (Array.isArray(mealEntries) ? mealEntries : []).forEach((entry) => {
+    const date = String(entry?.date || '').trim();
+    const entryId = String(entry?.databaseId || entry?.id || '').trim();
+    if (!date) return;
+    const bucket = counts.get(date) || { total: 0, ids: new Set() };
+    if (entryId && bucket.ids.has(entryId)) {
+      return;
+    }
+    if (entryId) {
+      bucket.ids.add(entryId);
+    }
+    bucket.total += 1;
+    counts.set(date, bucket);
+  });
+  return counts;
+}
+
+function buildAdherenceSeries(mealEntries, targetMeals, period, startDateInput, endDateInput) {
   const safeTarget = Math.max(targetMeals || 3, 1);
-  const entries = Array.isArray(mealEntries) ? mealEntries : [];
-  const today = new Date();
+  const mealCountsByDate = countMealsByDate(mealEntries);
+  const { startDate, endDate } = getPeriodBounds(period, startDateInput, endDateInput);
+  const range = buildDateRange(startDate, endDate);
   const items = [];
   let hasRealData = false;
 
-  for (let index = 6; index >= 0; index -= 1) {
-    const date = new Date(today);
-    date.setHours(0, 0, 0, 0);
-    date.setDate(today.getDate() - index);
-    const isoDate = date.toISOString().slice(0, 10);
-    const total = entries.filter((entry) => entry?.date === isoDate).length;
+  range.forEach((isoDate, index) => {
+    const total = mealCountsByDate.get(isoDate)?.total || 0;
     if (total > 0) {
       hasRealData = true;
     }
 
     items.push({
       id: `adherence-${isoDate}`,
-      label: WEEKDAY_LABELS[6 - index],
+      label:
+        period === 'today'
+          ? 'Hoje'
+          : period === '7days'
+            ? WEEKDAY_LABELS[index % WEEKDAY_LABELS.length]
+            : formatShortDateLabel(isoDate),
       value: clamp(Math.round((total / safeTarget) * 100), 0, 100),
     });
-  }
+  });
 
   if (!hasRealData) {
-    return WEEKDAY_LABELS.map((label, index) => ({
-      id: `adherence-fallback-${index}`,
-      label,
-      value: WEEKLY_FALLBACK[index],
+    return items.map((item, index) => ({
+      id: `adherence-empty-${index}`,
+      label: item.label,
+      value: 0,
     }));
   }
 
@@ -101,17 +277,18 @@ function buildWeeklyAdherence(mealEntries, targetMeals) {
 }
 
 function buildGlycemicMetrics(glucoseReadings) {
-  const values = (Array.isArray(glucoseReadings) ? glucoseReadings : [])
+  const values = mergeCachedGlucoseReadings(Array.isArray(glucoseReadings) ? glucoseReadings : [])
     .map((item) => Number(item?.value))
     .filter((value) => Number.isFinite(value) && value > 0);
 
   if (!values.length) {
     return {
-      average: 115,
-      gmi: 6.2,
-      variability: 32,
-      tir: 78,
+      average: null,
+      gmi: null,
+      variability: null,
+      tir: null,
       total: 0,
+      hasData: false,
     };
   }
 
@@ -130,6 +307,7 @@ function buildGlycemicMetrics(glucoseReadings) {
     variability,
     tir,
     total,
+    hasData: true,
   };
 }
 
@@ -237,14 +415,16 @@ function buildMonthlySummary(appState, glucoseReadings, weeklyAdherence) {
   ];
 }
 
-function buildTodayMealRecords(mealEntries) {
-  const entries = Array.isArray(mealEntries) ? mealEntries : [];
-  const today = new Date().toISOString().slice(0, 10);
-  const todayEntries = entries
-    .filter((entry) => entry?.date === today)
-    .sort((a, b) => String(a?.time || '').localeCompare(String(b?.time || '')));
+function buildMealRecords(mealEntries) {
+  const entries = (Array.isArray(mealEntries) ? mealEntries : [])
+    .slice()
+    .sort((left, right) => {
+      const leftStamp = `${left?.date || '1970-01-01'}T${left?.time || '00:00:00'}`;
+      const rightStamp = `${right?.date || '1970-01-01'}T${right?.time || '00:00:00'}`;
+      return rightStamp.localeCompare(leftStamp);
+    });
 
-  return todayEntries.slice(0, 4).map((entry, index) => {
+  return entries.slice(0, 4).map((entry, index) => {
     const foods = Array.isArray(entry?.foods) ? entry.foods : [];
     const foodSummary = foods
       .map((item) => item?.name || item?.alimento || item?.title || '')
@@ -254,10 +434,14 @@ function buildTodayMealRecords(mealEntries) {
 
     return {
       id: entry?.id || `meal-record-${index}`,
+      date: entry?.date || '',
       time: String(entry?.time || entry?.hora || '--:--').slice(0, 5),
       title: entry?.mealLabel || entry?.mealTypeLabel || entry?.typeLabel || entry?.title || 'Refeição',
       summary: foodSummary || 'Registro alimentar do dia',
       calories: Math.round(Number(entry?.calories || entry?.kcal || 0)) || 0,
+      fiber: Math.round(Number(entry?.fiberG || 0)) || 0,
+      sugars: Math.round(Number(entry?.sugarsG || 0)) || 0,
+      sodium: Math.round(Number(entry?.sodiumMg || 0)) || 0,
     };
   });
 }
@@ -375,21 +559,31 @@ export default function PacienteProgressoScreen({
       ),
     [patientId, usuarioLogado]
   );
+  const progressoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('progresso'), []);
+  const cachedProgressoInicial = useMemo(
+    () => (patientId ? getCachedPatientExperience(patientId, progressoFetchLimits) : null),
+    [patientId, progressoFetchLimits]
+  );
 
-  const [loading, setLoading] = useState(true);
-  const [patient, setPatient] = useState(null);
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [loading, setLoading] = useState(!cachedProgressoInicial);
+  const [patient, setPatient] = useState(cachedProgressoInicial?.patient || null);
+  const [appState, setAppState] = useState(
+    cachedProgressoInicial?.appState || createDefaultAppState()
+  );
+  const [glucoseReadings, setGlucoseReadings] = useState(
+    cachedProgressoInicial?.glucoseReadings || []
+  );
+  const [selectedPeriod, setSelectedPeriod] = useState('today');
+  const [searchStartDate, setSearchStartDate] = useState('');
+  const [searchEndDate, setSearchEndDate] = useState('');
+  const hasLoadedRef = useRef(false);
 
-  useEffect(() => {
-    let active = true;
-
-    async function load() {
+  const loadProgresso = useCallback(
+    async ({ silent = false, forceRefresh = false } = {}) => {
       try {
-        setLoading(true);
+        if (!silent) setLoading(true);
 
         if (!canResolvePatient) {
-          if (!active) return;
           setPatient(null);
           setAppState(createDefaultAppState());
           setGlucoseReadings([]);
@@ -398,9 +592,9 @@ export default function PacienteProgressoScreen({
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          forceRefresh,
+          ...progressoFetchLimits,
         });
-
-        if (!active) return;
 
         setPatient(experience?.patient || null);
         setAppState(experience?.appState || createDefaultAppState());
@@ -408,47 +602,183 @@ export default function PacienteProgressoScreen({
       } catch (error) {
         console.log('Erro ao carregar progresso:', error);
       } finally {
-        if (active) setLoading(false);
+        if (!silent) setLoading(false);
       }
+    },
+    [canResolvePatient, patientId, progressoFetchLimits, usuarioLogado]
+  );
+
+  useFocusEffect(
+    useCallback(() => {
+      const cacheFresco =
+        patientId && isPatientExperienceCacheFresh(patientId, progressoFetchLimits);
+      loadProgresso({
+        silent: hasLoadedRef.current || cacheFresco,
+        forceRefresh: false,
+      });
+      hasLoadedRef.current = true;
+    }, [loadProgresso, patientId, progressoFetchLimits])
+  );
+
+  useEffect(() => {
+    const activePatientId = patient?.id_paciente_uuid || patientId;
+    if (!activePatientId) return undefined;
+
+    return subscribeToPatientAppState(activePatientId, (nextAppState) => {
+      if (nextAppState) {
+        setAppState(nextAppState);
+      }
+    });
+  }, [patient?.id_paciente_uuid, patientId]);
+
+  const periodBounds = useMemo(
+    () => getPeriodBounds(selectedPeriod, searchStartDate, searchEndDate),
+    [selectedPeriod, searchStartDate, searchEndDate]
+  );
+
+  const filteredMealEntries = useMemo(
+    () =>
+      filterEntriesByPeriod(
+        appState?.mealEntries,
+        selectedPeriod,
+        searchStartDate,
+        searchEndDate,
+        (item) => item?.date
+      ),
+    [appState?.mealEntries, selectedPeriod, searchStartDate, searchEndDate]
+  );
+
+  const filteredGlucoseReadings = useMemo(
+    () =>
+      filterEntriesByPeriod(
+        glucoseReadings,
+        selectedPeriod,
+        searchStartDate,
+        searchEndDate,
+        (item) => item?.date
+      ),
+    [glucoseReadings, selectedPeriod, searchStartDate, searchEndDate]
+  );
+
+  const filteredNotifications = useMemo(
+    () =>
+      filterEntriesByPeriod(
+        appState?.patientNotifications,
+        selectedPeriod,
+        searchStartDate,
+        searchEndDate,
+        (item) => item?.date || item?.created_at || item?.createdAt
+      ),
+    [appState?.patientNotifications, selectedPeriod, searchStartDate, searchEndDate]
+  );
+
+  const filteredAppState = useMemo(
+    () => ({
+      ...appState,
+      mealEntries: filteredMealEntries,
+      patientNotifications: filteredNotifications,
+    }),
+    [appState, filteredMealEntries, filteredNotifications]
+  );
+
+  function handleSelectPeriod(periodKey) {
+    setSelectedPeriod(periodKey);
+    if (periodKey === 'search' && !searchStartDate && !searchEndDate) {
+      const today = formatDateLabel(getTodayDateString());
+      setSearchStartDate(today);
+      setSearchEndDate(today);
     }
+  }
 
-    load();
-
-    return () => {
-      active = false;
-    };
-  }, [patientId, canResolvePatient, usuarioLogado]);
+  const periodLabel = useMemo(() => {
+    if (selectedPeriod === 'today') return 'Hoje';
+    if (selectedPeriod === '7days') return '7 dias';
+    if (selectedPeriod === '14days') return '14 dias';
+    return `${formatShortDateLabel(periodBounds.startDate)} - ${formatShortDateLabel(periodBounds.endDate)}`;
+  }, [periodBounds.endDate, periodBounds.startDate, selectedPeriod]);
 
   const displayName = getPatientDisplayName(patient || usuarioLogado).split(' ')[0] || 'Paciente';
-  const targetMeals = appState?.planSections?.length || 3;
-  const weeklyAdherence = useMemo(
-    () => buildWeeklyAdherence(appState?.mealEntries, targetMeals),
-    [appState?.mealEntries, targetMeals]
+  const planSections = useMemo(
+    () => resolvePlanSections({ mealPlan: appState?.activeMealPlan, appState }),
+    [appState]
+  );
+  const adherenceSeries = useMemo(
+    () => {
+      const { items } = buildPlanAdherenceSeries({
+        mealEntries: appState?.mealEntries,
+        sections: planSections,
+        startDate: periodBounds.startDate,
+        endDate: periodBounds.endDate,
+        labelForDate: (isoDate, index) =>
+          selectedPeriod === 'today'
+            ? 'Hoje'
+            : selectedPeriod === '7days'
+              ? WEEKDAY_LABELS[index % WEEKDAY_LABELS.length]
+              : formatShortDateLabel(isoDate),
+      });
+      return items;
+    },
+    [appState?.mealEntries, periodBounds.endDate, periodBounds.startDate, planSections, selectedPeriod]
   );
   const adherenceAverage = Math.round(
-    weeklyAdherence.reduce((sum, item) => sum + item.value, 0) / Math.max(weeklyAdherence.length, 1)
+    adherenceSeries.reduce((sum, item) => sum + item.value, 0) / Math.max(adherenceSeries.length, 1)
   );
   const weightSeries = useMemo(
-    () => buildWeightSeries(toNumber(patient?.peso_atual_kg, 74.8)),
+    () => buildWeightSeries(toNumber(patient?.peso_atual_kg, 0)),
     [patient?.peso_atual_kg]
   );
   const glycemicMetrics = useMemo(
-    () => buildGlycemicMetrics(glucoseReadings),
-    [glucoseReadings]
+    () => buildGlycemicMetrics(filteredGlucoseReadings),
+    [filteredGlucoseReadings]
   );
   const achievements = useMemo(
     () =>
-      buildAchievements(weeklyAdherence, weightSeries, appState?.mealEntries, glucoseReadings),
-    [weeklyAdherence, weightSeries, appState?.mealEntries, glucoseReadings]
+      buildAchievements(adherenceSeries, weightSeries, filteredMealEntries, filteredGlucoseReadings),
+    [adherenceSeries, weightSeries, filteredMealEntries, filteredGlucoseReadings]
   );
   const monthlySummary = useMemo(
-    () => buildMonthlySummary(appState, glucoseReadings, weeklyAdherence),
-    [appState, glucoseReadings, weeklyAdherence]
+    () => buildMonthlySummary(filteredAppState, filteredGlucoseReadings, adherenceSeries),
+    [filteredAppState, filteredGlucoseReadings, adherenceSeries]
   );
-  const todayMealRecords = useMemo(
-    () => buildTodayMealRecords(appState?.mealEntries),
-    [appState?.mealEntries]
+  const periodMealRecords = useMemo(
+    () => buildMealRecords(filteredMealEntries),
+    [filteredMealEntries]
   );
+  const [exportingReport, setExportingReport] = useState(false);
+
+  async function handleExportProgress() {
+    try {
+      setExportingReport(true);
+      const result = await exportPatientProgressReport({
+        patientName: getPatientDisplayName(patient || usuarioLogado),
+        generatedAt: new Date().toLocaleString('pt-BR'),
+        weightSeries,
+        weeklyAdherence: adherenceSeries,
+        glycemicMetrics,
+        monthlySummary: {
+          adherenceAverage,
+          activeDays: new Set(filteredMealEntries.map((entry) => entry?.date).filter(Boolean))
+            .size,
+          summaryItems: monthlySummary,
+        },
+        achievements,
+        mealEntries: filteredMealEntries,
+        glucoseReadings: filteredGlucoseReadings,
+      });
+      if (result?.ok) {
+        Alert.alert(
+          'Relatorio exportado',
+          Platform.OS === 'web'
+            ? 'O arquivo foi baixado.'
+            : 'Use o compartilhamento para salvar o relatorio completo.'
+        );
+      }
+    } catch (error) {
+      Alert.alert('Exportacao', error?.message || 'Nao foi possivel exportar o relatorio.');
+    } finally {
+      setExportingReport(false);
+    }
+  }
 
   return (
     <PatientScreenLayout
@@ -467,6 +797,58 @@ export default function PacienteProgressoScreen({
 
       {!loading ? (
         <>
+          <View style={styles.periodSelectorWrap}>
+            {PROGRESS_PERIOD_TABS.map((item) => {
+              const active = selectedPeriod === item.key;
+              return (
+                <TouchableOpacity
+                  key={item.key}
+                  style={[styles.periodChip, active && styles.periodChipActive]}
+                  activeOpacity={0.88}
+                  onPress={() => handleSelectPeriod(item.key)}
+                >
+                  <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
+                    {item.label}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+
+          {selectedPeriod === 'search' ? (
+            <View style={styles.searchFiltersCard}>
+              <View style={styles.searchDateRow}>
+                <View style={styles.searchDateField}>
+                  <Text style={styles.searchDateLabel}>Data inicial</Text>
+                  <TextInput
+                    style={styles.searchDateInput}
+                    value={searchStartDate}
+                    onChangeText={(value) => setSearchStartDate(formatDateInput(value))}
+                    placeholder="DD/MM/AAAA"
+                    placeholderTextColor={patientTheme.colors.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={10}
+                  />
+                </View>
+                <View style={styles.searchDateField}>
+                  <Text style={styles.searchDateLabel}>Data final</Text>
+                  <TextInput
+                    style={styles.searchDateInput}
+                    value={searchEndDate}
+                    onChangeText={(value) => setSearchEndDate(formatDateInput(value))}
+                    placeholder="DD/MM/AAAA"
+                    placeholderTextColor={patientTheme.colors.textMuted}
+                    keyboardType="number-pad"
+                    maxLength={10}
+                  />
+                </View>
+              </View>
+              <Text style={styles.searchDateHint}>
+                Exibindo progresso de {formatDateLabel(periodBounds.startDate)} ate {formatDateLabel(periodBounds.endDate)}.
+              </Text>
+            </View>
+          ) : null}
+
           <View style={styles.metricsRow}>
             <View style={[styles.topMetricCard, styles.topMetricCardPrimary]}>
               <Ionicons
@@ -474,7 +856,9 @@ export default function PacienteProgressoScreen({
                 size={18}
                 color={patientTheme.colors.primaryDark}
               />
-              <Text style={styles.topMetricValue}>{formatSignedWeight(weightSeries.loss)}</Text>
+              <Text style={styles.topMetricValue}>
+                {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
+              </Text>
               <Text style={styles.topMetricLabel}>Perda de peso</Text>
             </View>
 
@@ -485,7 +869,7 @@ export default function PacienteProgressoScreen({
                 color={patientTheme.colors.primaryDark}
               />
               <Text style={styles.topMetricValue}>{adherenceAverage}%</Text>
-              <Text style={styles.topMetricLabel}>Adesao media</Text>
+              <Text style={styles.topMetricLabel}>Adesao media ({periodLabel})</Text>
             </View>
           </View>
 
@@ -493,61 +877,76 @@ export default function PacienteProgressoScreen({
             <View style={styles.sectionHeader}>
               <Text style={styles.sectionTitle}>Sua evolução</Text>
               <View style={styles.badgeSoft}>
-                <Text style={styles.badgeSoftText}>{formatSignedWeight(weightSeries.loss)}</Text>
-              </View>
-            </View>
-
-            <View style={styles.weightStatsRow}>
-              <View style={styles.weightStat}>
-                <Text style={styles.weightStatLabel}>Inicial</Text>
-                <Text style={styles.weightStatValue}>{formatDecimal(weightSeries.initial)}kg</Text>
-              </View>
-              <View style={styles.weightStat}>
-                <Text style={styles.weightStatLabel}>Atual</Text>
-                <Text style={[styles.weightStatValue, styles.weightStatValueHighlight]}>
-                  {formatDecimal(weightSeries.current)}kg
+                <Text style={styles.badgeSoftText}>
+                  {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : 'Sem peso'}
                 </Text>
               </View>
-              <View style={styles.weightStat}>
-                <Text style={styles.weightStatLabel}>Meta</Text>
-                <Text style={styles.weightStatValue}>{formatDecimal(weightSeries.goal)}kg</Text>
-              </View>
             </View>
 
-            <WeightChart points={weightSeries.points} />
+            {weightSeries.hasData ? (
+              <>
+                <View style={styles.weightStatsRow}>
+                  <View style={styles.weightStat}>
+                    <Text style={styles.weightStatLabel}>Atual</Text>
+                    <Text style={[styles.weightStatValue, styles.weightStatValueHighlight]}>
+                      {formatDecimal(weightSeries.current)}kg
+                    </Text>
+                  </View>
+                  <View style={styles.weightStat}>
+                    <Text style={styles.weightStatLabel}>Meta sugerida</Text>
+                    <Text style={styles.weightStatValue}>{formatDecimal(weightSeries.goal)}kg</Text>
+                  </View>
+                </View>
+
+                <WeightChart points={weightSeries.points} />
+              </>
+            ) : (
+              <Text style={styles.emptyMealText}>
+                Informe seu peso no perfil para acompanhar a evolução.
+              </Text>
+            )}
           </View>
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Registro de hoje</Text>
+              <Text style={styles.sectionTitle}>Registros do periodo</Text>
               <View style={styles.badgeSoft}>
                 <Text style={styles.badgeSoftText}>
-                  {todayMealRecords.length} refeiç{todayMealRecords.length === 1 ? 'ão' : 'ões'}
+                  {periodMealRecords.length} refeiç{periodMealRecords.length === 1 ? 'ão' : 'ões'}
                 </Text>
               </View>
             </View>
 
-            {todayMealRecords.length ? (
+            {periodMealRecords.length ? (
               <View style={styles.todayMealsList}>
-                {todayMealRecords.map((item) => (
+                {periodMealRecords.map((item) => (
                   <View key={item.id} style={styles.todayMealCard}>
                     <View style={styles.todayMealTimeBlock}>
-                      <Text style={styles.todayMealTimeLabel}>Horário</Text>
-                      <Text style={styles.todayMealTimeValue}>{item.time}</Text>
+                      <Text style={styles.todayMealTimeLabel}>
+                        {selectedPeriod === 'today' ? 'Horario' : 'Data'}
+                      </Text>
+                      <Text style={styles.todayMealTimeValue}>{selectedPeriod === 'today' ? item.time : formatShortDateLabel(item.date)}</Text>
                     </View>
 
                     <View style={styles.todayMealCopy}>
                       <Text style={styles.todayMealTitle}>{item.title}</Text>
-                      <Text style={styles.todayMealSummary}>{item.summary}</Text>
+                      <Text style={styles.todayMealSummary}>
+                        {selectedPeriod === 'today' ? item.summary : `${item.time} - ${item.summary}`}
+                      </Text>
                       <View style={styles.todayMealBadge}>
                         <Text style={styles.todayMealBadgeText}>{item.calories} kcal</Text>
                       </View>
+                      {(item.fiber || item.sugars || item.sodium) ? (
+                        <Text style={styles.todayMealSummary}>
+                          Fibra {item.fiber}g · Açúcares {item.sugars}g · Sódio {item.sodium}mg
+                        </Text>
+                      ) : null}
                     </View>
                   </View>
                 ))}
               </View>
             ) : (
-              <Text style={styles.emptyMealText}>Nenhum registro alimentar feito hoje.</Text>
+              <Text style={styles.emptyMealText}>Nenhum registro alimentar encontrado no periodo.</Text>
             )}
           </View>
 
@@ -559,8 +958,8 @@ export default function PacienteProgressoScreen({
               </View>
             </View>
 
-            <AdherenceBars items={weeklyAdherence} />
-            <Text style={styles.sectionFootnote}>Media semanal: {adherenceAverage}%</Text>
+            <AdherenceBars items={adherenceSeries} />
+            <Text style={styles.sectionFootnote}>Media do periodo: {adherenceAverage}%</Text>
           </View>
 
           <View style={styles.sectionCard}>
@@ -575,36 +974,46 @@ export default function PacienteProgressoScreen({
               </View>
             </View>
 
-            <View style={styles.glycemicTrackHeader}>
-              <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
-              <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
-            </View>
-            <View style={styles.glycemicTrack}>
-              <View
-                style={[
-                  styles.glycemicTrackFill,
-                  { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
-                ]}
-              />
-            </View>
+            {glycemicMetrics.hasData ? (
+              <>
+                <View style={styles.glycemicTrackHeader}>
+                  <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
+                  <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
+                </View>
+                <View style={styles.glycemicTrack}>
+                  <View
+                    style={[
+                      styles.glycemicTrackFill,
+                      { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
+                    ]}
+                  />
+                </View>
 
-            <View style={styles.glycemicMetricsRow}>
-              <View style={styles.glycemicMetricCard}>
-                <Text style={styles.glycemicMetricLabel}>Media</Text>
-                <Text style={styles.glycemicMetricValue}>{glycemicMetrics.average}</Text>
-                <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
-              </View>
-              <View style={styles.glycemicMetricCard}>
-                <Text style={styles.glycemicMetricLabel}>A1C estimada</Text>
-                <Text style={styles.glycemicMetricValue}>{glycemicMetrics.gmi.toFixed(1)}</Text>
-                <Text style={styles.glycemicMetricUnit}>%</Text>
-              </View>
-              <View style={styles.glycemicMetricCard}>
-                <Text style={styles.glycemicMetricLabel}>Variabilidade</Text>
-                <Text style={styles.glycemicMetricValue}>{glycemicMetrics.variability}</Text>
-                <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
-              </View>
-            </View>
+                <View style={styles.glycemicMetricsRow}>
+                  <View style={styles.glycemicMetricCard}>
+                    <Text style={styles.glycemicMetricLabel}>Media</Text>
+                    <Text style={styles.glycemicMetricValue}>{glycemicMetrics.average}</Text>
+                    <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
+                  </View>
+                  <View style={styles.glycemicMetricCard}>
+                    <Text style={styles.glycemicMetricLabel}>A1C estimada</Text>
+                    <Text style={styles.glycemicMetricValue}>
+                      {glycemicMetrics.gmi?.toFixed(1)}
+                    </Text>
+                    <Text style={styles.glycemicMetricUnit}>%</Text>
+                  </View>
+                  <View style={styles.glycemicMetricCard}>
+                    <Text style={styles.glycemicMetricLabel}>Variabilidade</Text>
+                    <Text style={styles.glycemicMetricValue}>{glycemicMetrics.variability}</Text>
+                    <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <Text style={styles.emptyMealText}>
+                Registre glicemias no monitoramento para ver tendências aqui.
+              </Text>
+            )}
           </View>
 
           <View style={styles.sectionCard}>
@@ -643,7 +1052,7 @@ export default function PacienteProgressoScreen({
           </View>
 
           <View style={styles.summaryCard}>
-            <Text style={styles.sectionTitle}>Resumo do mes</Text>
+            <Text style={styles.sectionTitle}>Resumo do periodo</Text>
 
             <View style={styles.summaryGrid}>
               {monthlySummary.map((item) => (
@@ -667,6 +1076,20 @@ export default function PacienteProgressoScreen({
               <Text style={styles.summaryButtonText}>Ver plano alimentar</Text>
             </TouchableOpacity>
           </View>
+
+          <TouchableOpacity
+            style={styles.exportButton}
+            onPress={handleExportProgress}
+            disabled={exportingReport}
+            activeOpacity={0.9}
+          >
+            {exportingReport ? (
+              <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+            ) : (
+              <Ionicons name="download-outline" size={18} color={patientTheme.colors.primaryDark} />
+            )}
+            <Text style={styles.exportButtonText}>Baixar relatorio completo</Text>
+          </TouchableOpacity>
         </>
       ) : null}
     </PatientScreenLayout>
@@ -690,6 +1113,87 @@ const styles = StyleSheet.create({
     fontSize: 14,
     marginTop: 10,
   },
+  exportButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    marginBottom: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.primarySoft,
+  },
+  exportButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  periodSelectorWrap: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  periodChip: {
+    flex: 1,
+    minHeight: 40,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.surface,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+    ...patientShadow,
+  },
+  periodChipActive: {
+    backgroundColor: patientTheme.colors.primary,
+  },
+  periodChipText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  periodChipTextActive: {
+    color: patientTheme.colors.onPrimary,
+  },
+  searchFiltersCard: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.xl,
+    marginBottom: 12,
+    padding: patientTheme.spacing.card,
+    ...patientShadow,
+  },
+  searchDateRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  searchDateField: {
+    flex: 1,
+  },
+  searchDateLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+    marginBottom: 6,
+  },
+  searchDateInput: {
+    minHeight: 46,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 9,
+  },
+  searchDateHint: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    marginTop: 10,
+  },
   metricsRow: {
     flexDirection: 'row',
     gap: 12,
@@ -701,10 +1205,11 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.lg,
     padding: 16,
     ...patientShadow,
+    borderColor: 'transparent',
+    borderWidth: 0,
   },
   topMetricCardPrimary: {
     backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.border,
   },
   topMetricValue: {
     color: patientTheme.colors.primaryDark,

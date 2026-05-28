@@ -12,6 +12,9 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 from typing import Any
 
 import joblib
@@ -76,6 +79,24 @@ class PredictOut(BaseModel):
     vizinhos_mais_proximos_indices: list[int]
 
 
+class LibreViewSyncIn(BaseModel):
+    patientId: str | None = None
+    patientEmail: str | None = None
+    limit: int = Field(24, ge=1, le=1000)
+
+
+class LibreViewReading(BaseModel):
+    value: float
+    date: str
+    time: str
+
+
+class LibreViewSyncOut(BaseModel):
+    readings: list[LibreViewReading]
+    count: int
+    synced_at: str
+
+
 def _ensure_artifacts() -> None:
     required = [
         "model_classification.joblib",
@@ -95,6 +116,145 @@ def _ensure_artifacts() -> None:
                 + ". Execute: python machine-learning/api/scripts/fit_demo_models.py"
             ),
         )
+
+
+def _normalize_date(value: Any) -> str:
+    if not value:
+        return datetime.utcnow().strftime("%Y-%m-%d")
+
+    text = str(value).strip()
+
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%Y-%m-%d")
+    except ValueError:
+        pass
+
+    if len(text) >= 10 and text[4] == "-" and text[7] == "-":
+        return text[:10]
+
+    return datetime.utcnow().strftime("%Y-%m-%d")
+
+
+def _normalize_time(value: Any) -> str:
+    if not value:
+        return datetime.utcnow().strftime("%H:%M:%S")
+
+    text = str(value).strip()
+
+    try:
+        return datetime.fromisoformat(text.replace("Z", "+00:00")).strftime("%H:%M:%S")
+    except ValueError:
+        pass
+
+    if len(text) == 5 and text[2] == ":":
+        return f"{text}:00"
+
+    if len(text) >= 8 and text[2] == ":":
+        return text[:8]
+
+    return datetime.utcnow().strftime("%H:%M:%S")
+
+
+def _normalize_libreview_item(item: dict[str, Any]) -> LibreViewReading | None:
+    timestamp = (
+        item.get("timestamp")
+        or item.get("dateTime")
+        or item.get("date_time")
+        or item.get("datetime")
+        or item.get("createdAt")
+        or item.get("time")
+    )
+
+    value = (
+        item.get("valueMgDl")
+        or item.get("value_mg_dl")
+        or item.get("value_in_mg_per_dl")
+        or item.get("glucose")
+        or item.get("glucoseMgDl")
+        or item.get("value")
+    )
+
+    try:
+        numeric_value = float(value)
+    except (TypeError, ValueError):
+        return None
+
+    if numeric_value <= 0:
+        return None
+
+    return LibreViewReading(
+        value=numeric_value,
+        date=_normalize_date(item.get("date") or timestamp),
+        time=_normalize_time(item.get("hour") or item.get("hora") or item.get("time") or timestamp),
+    )
+
+
+def _normalize_libreview_payload(payload: Any) -> list[LibreViewReading]:
+    raw_readings = payload if isinstance(payload, list) else payload.get("readings", []) if isinstance(payload, dict) else []
+    readings: list[LibreViewReading] = []
+
+    for item in raw_readings:
+        if not isinstance(item, dict):
+          continue
+        normalized = _normalize_libreview_item(item)
+        if normalized:
+            readings.append(normalized)
+
+    return readings
+
+
+def _call_libreview_provider(body: LibreViewSyncIn) -> list[LibreViewReading]:
+    provider_url = os.environ.get("LIBREVIEW_PROVIDER_URL", "").strip()
+    provider_token = os.environ.get("LIBREVIEW_PROVIDER_TOKEN", "").strip()
+    provider_auth_header = os.environ.get("LIBREVIEW_PROVIDER_AUTH_HEADER", "Authorization").strip() or "Authorization"
+
+    if not provider_url:
+        raise HTTPException(
+            status_code=501,
+            detail="LIBREVIEW_PROVIDER_URL nao configurada no middleware.",
+        )
+
+    payload = json.dumps(
+        {
+            "patientId": body.patientId,
+            "patientEmail": body.patientEmail,
+            "limit": body.limit,
+        }
+    ).encode("utf-8")
+
+    headers = {
+        "Content-Type": "application/json",
+    }
+
+    if provider_token:
+        headers[provider_auth_header] = provider_token
+
+    req = urllib_request.Request(provider_url, data=payload, headers=headers, method="POST")
+
+    try:
+        with urllib_request.urlopen(req, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+    except urllib_error.HTTPError as exc:
+        raw_error = exc.read().decode("utf-8", errors="ignore")
+        raise HTTPException(
+            status_code=502,
+            detail=f"Falha do provedor LibreView ({exc.code}): {raw_error or exc.reason}",
+        ) from exc
+    except urllib_error.URLError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Nao foi possivel conectar ao provedor LibreView: {exc.reason}",
+        ) from exc
+
+    try:
+        parsed = json.loads(raw) if raw else {}
+    except json.JSONDecodeError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="O provedor LibreView retornou uma resposta invalida.",
+        ) from exc
+
+    return _normalize_libreview_payload(parsed)
 
 
 @app.get("/health")
@@ -132,4 +292,18 @@ def predict(body: PredictIn) -> PredictOut:
         glucose_mean_previsto_mg_dl=reg_val,
         cluster_id=cluster,
         vizinhos_mais_proximos_indices=neighbors,
+    )
+
+
+@app.post("/libreview/sync", response_model=LibreViewSyncOut)
+def libreview_sync(body: LibreViewSyncIn) -> LibreViewSyncOut:
+    if not body.patientId and not body.patientEmail:
+        raise HTTPException(status_code=400, detail="Informe patientId ou patientEmail.")
+
+    readings = _call_libreview_provider(body)
+
+    return LibreViewSyncOut(
+        readings=readings,
+        count=len(readings),
+        synced_at=datetime.utcnow().isoformat() + "Z",
     )

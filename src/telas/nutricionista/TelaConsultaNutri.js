@@ -7,13 +7,19 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import MensagemInline from '../../componentes/comum/MensagemInline';
 import { supabase } from '../../servicos/configSupabase';
 import TelaProntuarioPacienteNutri from './TelaProntuarioPacienteNutri';
-import { updateConsultaStatus, formatConsultaDateTime } from '../../servicos/servicoConsultas';
+import {
+  abrirLinkGoogleMeet,
+  updateConsultaStatus,
+  formatConsultaDateTime,
+} from '../../servicos/servicoConsultas';
+import { resolveMeetLink } from '../../servicos/servicoGoogleMeet';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 
 function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -25,6 +31,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
   const [consulta, setConsulta] = useState(null);
   const [loadError, setLoadError] = useState(null);
   const [mensagemAcao, setMensagemAcao] = useState(null);
+  const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
 
   const effectivePacienteId = pacienteId || consulta?.paciente_id || null;
 
@@ -55,13 +62,18 @@ export default function TelaConsultaNutri({ navigation, route }) {
 
   useEffect(() => {
     load();
-    const unsubscribe = navigation.addListener('focus', () => load());
+    loadGuardRef.current.marcarCarregado();
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (loadGuardRef.current.deveIgnorarCarregamentoFocus()) return;
+      load();
+    });
     return unsubscribe;
   }, [navigation, load]);
 
   const status = String(consulta?.status || 'scheduled');
   const headerDate = consulta?.scheduled_at || scheduledAt || null;
   const headerText = headerDate ? formatConsultaDateTime(headerDate) : 'Consulta';
+  const meetLink = consulta ? resolveMeetLink({ consulta, nutricionista: usuarioLogado }) : '';
 
   async function markStatus(nextStatus) {
     try {
@@ -78,6 +90,14 @@ export default function TelaConsultaNutri({ navigation, route }) {
         error?.message ||
           'Não foi possível atualizar a consulta. Verifique a conexão e tente novamente.'
       );
+    }
+  }
+
+  async function handleAbrirMeet() {
+    try {
+      await abrirLinkGoogleMeet(meetLink);
+    } catch (error) {
+      setMensagemAcao(error?.message || 'Nao foi possivel abrir o Google Meet.');
     }
   }
 
@@ -111,20 +131,43 @@ export default function TelaConsultaNutri({ navigation, route }) {
         ) : loadError ? (
           <EstadoErroCarregamento onTentarNovamente={load} loading={loading} />
         ) : (
-          <SectionCard style={styles.statusCard}>
-            <Text style={styles.statusTitle}>Status: {status}</Text>
-            <View style={styles.statusActions}>
-              <TouchableOpacity style={styles.primaryButton} onPress={() => markStatus('confirmed')}>
-                <Text style={styles.primaryButtonText}>Confirmar</Text>
+          <>
+            <SectionCard style={styles.meetCard}>
+              <View style={styles.meetHeader}>
+                <View style={styles.meetIcon}>
+                  <Ionicons name="videocam" size={22} color={patientTheme.colors.onPrimary} />
+                </View>
+                <View style={styles.meetCopy}>
+                  <Text style={styles.meetTitle}>Sala Google Meet</Text>
+                  <Text style={styles.meetLink} numberOfLines={1}>
+                    {meetLink || 'Link indisponivel'}
+                  </Text>
+                </View>
+              </View>
+              <TouchableOpacity
+                style={[styles.primaryButton, styles.meetButton]}
+                onPress={handleAbrirMeet}
+                disabled={!meetLink}
+              >
+                <Text style={styles.primaryButtonText}>Entrar no Meet</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={styles.secondaryButton} onPress={() => markStatus('done')}>
-                <Text style={styles.secondaryButtonText}>Finalizar</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.dangerButton} onPress={() => markStatus('cancelled')}>
-                <Text style={styles.dangerButtonText}>Cancelar</Text>
-              </TouchableOpacity>
-            </View>
-          </SectionCard>
+            </SectionCard>
+
+            <SectionCard style={styles.statusCard}>
+              <Text style={styles.statusTitle}>Status: {status}</Text>
+              <View style={styles.statusActions}>
+                <TouchableOpacity style={styles.primaryButton} onPress={() => markStatus('confirmed')}>
+                  <Text style={styles.primaryButtonText}>Confirmar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.secondaryButton} onPress={() => markStatus('done')}>
+                  <Text style={styles.secondaryButtonText}>Finalizar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={styles.dangerButton} onPress={() => markStatus('cancelled')}>
+                  <Text style={styles.dangerButtonText}>Cancelar</Text>
+                </TouchableOpacity>
+              </View>
+            </SectionCard>
+          </>
         )}
 
         {effectivePacienteId ? (
@@ -150,7 +193,9 @@ export default function TelaConsultaNutri({ navigation, route }) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     ...patientShadow,
@@ -159,13 +204,27 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     alignItems: 'center',
     justifyContent: 'center',
     ...patientShadow,
   },
   loadingCard: { marginTop: 16, alignItems: 'center', gap: 10 },
   loadingText: { color: patientTheme.colors.textMuted, fontWeight: '700' },
+  meetCard: { marginTop: 16, gap: 14, backgroundColor: patientTheme.colors.primarySoft },
+  meetHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  meetIcon: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: patientTheme.colors.primaryDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meetCopy: { flex: 1, minWidth: 0 },
+  meetTitle: { color: patientTheme.colors.primaryDark, fontSize: 15, fontWeight: '900' },
+  meetLink: { marginTop: 4, color: patientTheme.colors.text, fontSize: 12, fontWeight: '800' },
+  meetButton: { alignSelf: 'flex-start' },
   statusCard: { marginTop: 16 },
   statusTitle: { fontWeight: '900', color: patientTheme.colors.text, fontSize: 16 },
   statusActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },

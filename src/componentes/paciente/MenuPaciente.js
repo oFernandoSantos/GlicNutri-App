@@ -14,29 +14,60 @@ import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 
 const menuItems = [
-  { label: 'Início', route: 'HomePaciente', icon: 'home-outline', library: 'ion' },
-  { label: 'Diário', route: 'PacienteDiario', icon: 'book-outline', library: 'ion' },
-  { label: 'Glicose', route: 'PacienteMonitoramento', icon: 'pulse-outline', library: 'ion' },
-  { label: 'Bem-estar', route: 'PacienteBemEstar', icon: 'body-outline', library: 'ion' },
-  { label: 'Meu plano', route: 'PacientePlano', icon: 'food-apple-outline', library: 'material' },
-  { label: 'Previsão (IA)', route: 'PacientePrevisaoML', icon: 'analytics-outline', library: 'ion' },
   {
-    label: 'Ver Histórico de Registros',
+    label: 'Agendamentos',
+    route: 'PacienteAgendamentos',
+    icon: 'calendar-outline',
+    library: 'ion',
+  },
+  { label: 'Alimentação', route: 'PacienteDiario', icon: 'book-outline', library: 'ion' },
+  { label: 'Bem-estar', route: 'PacienteBemEstar', icon: 'body-outline', library: 'ion' },
+  {
+    label: 'Conversas',
+    route: 'PacienteChatNutricionista',
+    icon: 'chatbubble-ellipses-outline',
+    library: 'ion',
+  },
+  { label: 'Glicose', route: 'PacienteMonitoramento', icon: 'pulse-outline', library: 'ion' },
+  {
+    label: 'Histórico de Registros',
     route: 'PacienteHistoricoRegistros',
     icon: 'document-text-outline',
     library: 'ion',
   },
-  { label: 'Suporte', route: 'PacienteAssistente', icon: 'headset', library: 'material' },
+  {
+    label: 'Insulina Basal',
+    route: 'PacientePerfilInsulinas',
+    params: { initialInsulinProfileKey: 'basal' },
+    icon: 'needle',
+    library: 'material',
+  },
+  {
+    label: 'Insulina Bolus',
+    route: 'PacientePerfilInsulinas',
+    params: { initialInsulinProfileKey: 'bolus' },
+    icon: 'needle',
+    library: 'material',
+  },
+  { label: 'Plano', route: 'PacientePlano', icon: 'food-apple-outline', library: 'material' },
+  { label: 'Previsão (IA)', route: 'PacientePrevisaoML', icon: 'analytics-outline', library: 'ion' },
+  {
+    label: 'Progresso',
+    route: 'PacienteProgresso',
+    icon: 'stats-chart-outline',
+    library: 'ion',
+  },
+  { label: 'Suporte', route: 'PacienteSuporte', icon: 'headset', library: 'material' },
 ];
 
 function DrawerIcon({ item, active }) {
   const color = active ? patientTheme.colors.primaryDark : patientTheme.colors.textMuted;
 
   if (item.library === 'material') {
-    return <MaterialCommunityIcons name={item.icon} size={22} color={color} />;
+    return <MaterialCommunityIcons name={item.icon} size={20} color={color} />;
   }
 
-  return <Ionicons name={item.icon} size={22} color={color} />;
+  return <Ionicons name={item.icon} size={20} color={color} />;
 }
 
 function getFirstName(name) {
@@ -265,27 +296,27 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
     borderRadius: patientTheme.radius.lg,
   },
   menuItemCompact: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
   },
   menuItemActive: {
     backgroundColor: patientTheme.colors.primarySoft,
   },
   menuLabel: {
     flexShrink: 1,
-    marginLeft: 12,
-    fontSize: 15,
+    marginLeft: 10,
+    fontSize: 14,
     color: patientTheme.colors.text,
     fontWeight: '600',
   },
   menuLabelCompact: {
-    marginLeft: 10,
-    fontSize: 14,
+    marginLeft: 9,
+    fontSize: 13,
   },
   menuLabelActive: {
     color: patientTheme.colors.primaryDark,

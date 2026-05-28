@@ -17,17 +17,21 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { supabase } from '../../servicos/configSupabase';
+import { limparSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
 import {
   extractObjectiveAndAppState,
   fetchPatientById,
+  getCachedPatientProfile,
   getPatientDisplayName,
   getPatientId,
   isPatientProfileCacheFresh,
   updatePatientProfile,
 } from '../../servicos/servicoDadosPaciente';
+import { EsqueletoPerfilPaciente } from '../../componentes/comum/EsqueletoCarregamento';
 import {
   buildPatientHealthInfoRows,
   buildPatientProfileSections,
@@ -39,6 +43,7 @@ import {
   ProfileDataSectionCard,
   TherapyQuickStrip,
 } from '../../componentes/paciente/PerfilDadosSecoes';
+import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
 import {
   getPatientLocalOnboardingData,
   mergePatientOnboardingData,
@@ -55,6 +60,7 @@ import {
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
 import { isLibreViewSyncConfigured } from '../../servicos/servicoLibreView';
+import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 
 const EMPTY_PROFILE_FORM = {
@@ -2408,12 +2414,26 @@ export default function PacientePerfilScreen({
   usuarioLogado: usuarioProp,
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
+  const requestedInsulinProfileKey =
+    route?.params?.initialInsulinProfileKey === 'bolus' ? 'bolus' : 'basal';
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const fallbackName = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
+  const cachedProfileInicial = useMemo(
+    () => (patientId ? getCachedPatientProfile(patientId) : null),
+    [patientId]
+  );
+  const perfilTemDadosIniciais = Boolean(
+    cachedProfileInicial?.nome_completo ||
+      usuarioLogado?.nome_completo ||
+      cachedProfileInicial?.email_pac ||
+      usuarioLogado?.email_pac
+  );
 
-  const [paciente, setPaciente] = useState(usuarioLogado || null);
+  const [paciente, setPaciente] = useState(
+    () => cachedProfileInicial || usuarioLogado || null
+  );
   const [linkedNutritionist, setLinkedNutritionist] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => !perfilTemDadosIniciais);
   const [openSections, setOpenSections] = useState({
     patient: false,
     clinical: false,
@@ -2496,6 +2516,11 @@ export default function PacientePerfilScreen({
 
   latestPatientRef.current = paciente;
 
+  useEffect(() => {
+    if (route?.name !== 'PacientePerfilInsulinas') return;
+    setActiveInsulinProfileKey(requestedInsulinProfileKey);
+  }, [route?.name, requestedInsulinProfileKey]);
+
   const profileBolusSuggestion = useMemo(() => {
     if (!therapyEditorVisible || therapyDraft.categoria_funcional !== 'bolus') return null;
     const carbsN = Number(String(profileBolusCarbs || '').replace(',', '.'));
@@ -2570,7 +2595,23 @@ export default function PacientePerfilScreen({
     const showLoading = options.showLoading !== false;
 
     try {
-      if (showLoading) {
+      if (!forceRefresh && patientId) {
+        const emCache = getCachedPatientProfile(patientId);
+        if (emCache) {
+          const onboardingLocalCache = await getPatientLocalOnboardingData(
+            emCache || usuarioLogado
+          );
+          setPaciente(
+            mergePatientOnboardingData(emCache || usuarioLogado || null, onboardingLocalCache) ||
+              emCache ||
+              usuarioLogado ||
+              null
+          );
+          setLoading(false);
+        }
+      }
+
+      if (showLoading && !getCachedPatientProfile(patientId)) {
         setLoading(true);
       }
 
@@ -2578,6 +2619,7 @@ export default function PacientePerfilScreen({
         patientContext: usuarioLogado,
         currentPatient: latestPatientRef.current,
         forceRefresh,
+        allowGoogleSync: false,
       });
       const onboardingLocal = await getPatientLocalOnboardingData(registro || usuarioLogado);
       const registroComOnboarding = mergePatientOnboardingData(
@@ -2596,14 +2638,20 @@ export default function PacientePerfilScreen({
     }
   }, [patientId, usuarioLogado]);
 
+  const perfilLoadGuardRef = useRef(criarGuardiaoCarregamentoInicial());
+
   useFocusEffect(
     React.useCallback(() => {
+      if (perfilLoadGuardRef.current.deveIgnorarCarregamentoFocus()) {
+        return undefined;
+      }
+
       carregarPerfil({
         forceRefresh: false,
         showLoading: !isPatientProfileCacheFresh(patientId),
       });
       return undefined;
-  }, [carregarPerfil, patientId])
+    }, [carregarPerfil, patientId])
   );
 
   useEffect(() => {
@@ -3929,6 +3977,8 @@ export default function PacientePerfilScreen({
         console.log('Erro ao sair da conta:', error.message);
       }
 
+      await limparSessaoPaciente();
+
       navigation.reset({
         index: 0,
         routes: [{ name: 'Login' }],
@@ -4319,14 +4369,7 @@ export default function PacientePerfilScreen({
     };
   };
 
-  if (loading) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-        <Text style={styles.loadingText}>Carregando perfil...</Text>
-      </View>
-    );
-  }
+  const exibirEsqueletoPerfil = loading && !perfilTemDadosIniciais && !paciente?.nome_completo;
 
   return (
     <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
@@ -4348,6 +4391,10 @@ export default function PacientePerfilScreen({
           nestedScrollEnabled
           showsVerticalScrollIndicator={false}
         >
+        {exibirEsqueletoPerfil ? (
+          <EsqueletoPerfilPaciente />
+        ) : (
+        <>
         {isOverviewProfile ? (
         <>
         <SectionCard style={styles.heroCard}>
@@ -4769,18 +4816,20 @@ export default function PacientePerfilScreen({
           <TouchableOpacity
             activeOpacity={0.78}
             onPress={openLibreIntegration}
-            style={styles.settingsRow}
+            style={[styles.settingsRow, styles.settingsRowLibre]}
           >
             <View style={styles.settingsRowLeft}>
-              <Ionicons name="sync-outline" size={18} color={patientTheme.colors.text} />
-              <Text style={styles.settingsRowText}>Integração do sensor</Text>
+              <IconeSensorLibre size={18} />
+              <Text style={[styles.settingsRowText, styles.settingsRowTextLibre]}>
+                Integração do sensor
+              </Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+            <Ionicons name="chevron-forward" size={18} color={LIBRE_BLUE} />
           </TouchableOpacity>
 
           <TouchableOpacity
             activeOpacity={0.78}
-            onPress={() => navigation.navigate('PacienteAssistente', { usuarioLogado })}
+            onPress={() => navigation.navigate('PacienteSuporte', { usuarioLogado })}
             style={styles.settingsRow}
           >
             <View style={styles.settingsRowLeft}>
@@ -4848,13 +4897,17 @@ export default function PacientePerfilScreen({
         {isIntegrationProfileScreen ? (
         <View onLayout={registerFieldLayout('integration-card')}>
         <SectionCard style={styles.integrationCard}>
-          <Text style={styles.profileSummaryTitle}>Integração FreeStyle Libre</Text>
+          <Text style={[styles.profileSummaryTitle, styles.integrationTitle]}>
+            Integração FreeStyle Libre
+          </Text>
 
           <View style={styles.integrationHeader}>
             <View>
               <Text style={styles.integrationLabel}>Status</Text>
               <Text style={styles.integrationHelper}>
-                {libreConnected ? 'Sincronização disponível no app.' : 'Integração ainda não configurada.'}
+                {libreConnected
+                  ? 'Sincronizacao automatica disponivel no app.'
+                  : 'Importacao manual de CSV do LibreView disponivel no monitoramento.'}
               </Text>
             </View>
             <View
@@ -4871,18 +4924,24 @@ export default function PacientePerfilScreen({
                     : styles.integrationBadgeTextPending,
                 ]}
               >
-                {libreConnected ? 'Conectado' : 'Pendente'}
+                {libreConnected ? 'Conectado' : 'Importacao'}
               </Text>
             </View>
           </View>
 
           <TouchableOpacity
             activeOpacity={0.82}
-            onPress={() => navigation.navigate('PacienteMonitoramento', { usuarioLogado })}
+            onPress={() =>
+              navigation.navigate('PacienteMonitoramento', {
+                usuarioLogado,
+                openQuickRegister: undefined,
+                openMedication: undefined,
+              })
+            }
             style={styles.integrationButton}
           >
             <Text style={styles.integrationButtonText}>
-              {libreConnected ? 'Abrir monitoramento' : 'Configurar conexão'}
+              {libreConnected ? 'Abrir monitoramento' : 'Importar leituras'}
             </Text>
           </TouchableOpacity>
         </SectionCard>
@@ -4933,6 +4992,8 @@ export default function PacientePerfilScreen({
             isClinicalProfileEditor || isPatientProfileEditor ? styles.footerSpaceFloatingButton : null,
           ]}
         />
+        </>
+        )}
         </ScrollView>
 
         {isClinicalProfileEditor || isPatientProfileEditor ? (
@@ -6847,6 +6908,17 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 12,
   },
+  settingsRowLibre: {
+    backgroundColor: 'rgba(255, 209, 0, 0.14)',
+    borderRadius: patientTheme.radius.lg,
+    borderBottomWidth: 0,
+    marginTop: 4,
+    paddingHorizontal: 10,
+  },
+  settingsRowTextLibre: {
+    color: LIBRE_BLUE,
+    fontWeight: '700',
+  },
   preferenceRow: {
     alignItems: 'center',
     borderBottomColor: patientTheme.colors.border,
@@ -6872,9 +6944,12 @@ const styles = StyleSheet.create({
   },
   integrationCard: {
     marginTop: 14,
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.border,
+    backgroundColor: LIBRE_YELLOW,
+    borderColor: LIBRE_BLUE,
     borderWidth: 1,
+  },
+  integrationTitle: {
+    color: LIBRE_BLUE,
   },
   integrationHeader: {
     alignItems: 'center',
@@ -6883,12 +6958,12 @@ const styles = StyleSheet.create({
     marginBottom: 14,
   },
   integrationLabel: {
-    color: patientTheme.colors.text,
+    color: LIBRE_BLUE,
     fontSize: 13,
     fontWeight: '700',
   },
   integrationHelper: {
-    color: patientTheme.colors.textMuted,
+    color: LIBRE_BLUE_SOFT,
     fontSize: 11,
     marginTop: 4,
   },
@@ -6898,11 +6973,11 @@ const styles = StyleSheet.create({
     paddingVertical: 5,
   },
   integrationBadgeConnected: {
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: LIBRE_BLUE,
   },
   integrationBadgePending: {
     backgroundColor: '#ffffff',
-    borderColor: patientTheme.colors.border,
+    borderColor: LIBRE_BLUE,
     borderWidth: 1,
   },
   integrationBadgeText: {
@@ -6913,19 +6988,19 @@ const styles = StyleSheet.create({
     color: '#ffffff',
   },
   integrationBadgeTextPending: {
-    color: patientTheme.colors.textMuted,
+    color: LIBRE_BLUE,
   },
   integrationButton: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    borderColor: patientTheme.colors.border,
+    backgroundColor: '#ffffff',
+    borderColor: LIBRE_BLUE,
     borderRadius: patientTheme.radius.lg,
-    borderWidth: 1,
+    borderWidth: 1.5,
     justifyContent: 'center',
     minHeight: 42,
   },
   integrationButtonText: {
-    color: patientTheme.colors.text,
+    color: LIBRE_BLUE,
     fontSize: 13,
     fontWeight: '700',
   },

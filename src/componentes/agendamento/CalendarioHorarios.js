@@ -12,16 +12,33 @@ export default function CalendarioHorarios({
 }) {
   const fade = useRef(new Animated.Value(0)).current;
 
+  const visibleDays = useMemo(() => {
+    return (days || []).map((day) => {
+      const seen = new Set();
+      const uniqueSlots = (day?.slots || []).filter((slot) => {
+        const key = String(slot?.scheduledAt || '');
+        if (!key || seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
+
+      return {
+        ...day,
+        slots: uniqueSlots,
+      };
+    });
+  }, [days]);
+
   useEffect(() => {
     Animated.timing(fade, { toValue: 1, duration: 280, useNativeDriver: true }).start();
-  }, [days, fade]);
+  }, [visibleDays, fade]);
 
   const activeDay = useMemo(
-    () => days.find((day) => day.dateKey === selectedDayKey) || days[0] || null,
-    [days, selectedDayKey]
+    () => visibleDays.find((day) => day.dateKey === selectedDayKey) || visibleDays[0] || null,
+    [visibleDays, selectedDayKey]
   );
 
-  if (!days.length) {
+  if (!visibleDays.length) {
     return (
       <View style={styles.empty}>
         <Text style={styles.emptyText}>Nenhum horário disponível no período.</Text>
@@ -36,7 +53,7 @@ export default function CalendarioHorarios({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.daysRow}
       >
-        {days.map((day) => {
+        {visibleDays.map((day) => {
           const active = day.dateKey === (selectedDayKey || activeDay?.dateKey);
           const hasAvailable = day.slots?.some((slot) => slot.status === 'available');
 

@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 
 const menuItems = [
   { label: 'Agenda', route: 'NutricionistaAgenda', icon: 'calendar-outline' },
@@ -288,7 +288,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: '#fff4f4',
+    backgroundColor: patientTheme.colors.dangerSoft,
   },
   logoutButtonCompact: {
     paddingHorizontal: 12,

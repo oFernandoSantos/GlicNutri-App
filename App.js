@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   StatusBar,
   View,
@@ -36,14 +36,18 @@ import TelaLogsSistemaAdmin from './src/telas/admin/TelaLogsSistemaAdmin';
 import TelaDetalheLogSistemaAdmin from './src/telas/admin/TelaDetalheLogSistemaAdmin';
 import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
+import PacienteIntegracaoSensorScreen from './src/telas/paciente/TelaIntegracaoSensorPaciente';
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
 import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
+import PacienteSuporteScreen from './src/telas/paciente/TelaSuportePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
 import PacientePerfilNutricionistaScreen from './src/telas/paciente/TelaPerfilNutricionistaAgendamento';
 import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacienteProgressoScreen from './src/telas/paciente/TelaProgressoPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
+import PacienteChatNutricionistaScreen from './src/telas/paciente/TelaChatNutricionistaPaciente';
+import PacienteChatNutricionistaDetalheScreen from './src/telas/paciente/TelaChatNutricionistaDetalhePaciente';
 import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
 import TelaPrevisaoMl from './src/telas/paciente/TelaPrevisaoMl';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
@@ -56,6 +60,26 @@ import { patientTheme } from './src/temas/temaVisualPaciente';
 import { INTRO_SEEN_STORAGE_KEY } from './src/constantes/chavesArmazenamento';
 import { hasPatientOnboardingSeen } from './src/servicos/servicoOnboardingPaciente';
 import { carregarSessaoAdmin, limparSessaoAdmin } from './src/servicos/servicoAdmin';
+import {
+  carregarSessaoNutricionista,
+  limparSessaoNutricionista,
+} from './src/servicos/servicoSessaoNutricionista';
+import {
+  carregarSessaoPaciente,
+  limparSessaoPaciente,
+  salvarSessaoPaciente,
+} from './src/servicos/servicoSessaoPaciente';
+import { resolveInitialRouteName, isPatientUser } from './src/utilitarios/perfisApp';
+import {
+  getPatientId,
+  prefetchPatientHomeExperience,
+  prefetchPatientProfileExperience,
+} from './src/servicos/servicoDadosPaciente';
+import {
+  hasLibreLinkUpLinked,
+  startLibreViewAutoSync,
+  stopLibreViewAutoSync,
+} from './src/servicos/servicoLibreViewAutoSync';
 
 const Stack = createStackNavigator();
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
@@ -163,8 +187,42 @@ export default function App() {
   const [patientOnboardingReady, setPatientOnboardingReady] = useState(false);
   const [patientOnboardingSeen, setPatientOnboardingSeen] = useState(false);
   const [patientSessionOverride, setPatientSessionOverride] = useState(null);
+  const [patientLocalSession, setPatientLocalSession] = useState(null);
+  const [patientLocalReady, setPatientLocalReady] = useState(false);
   const [adminSession, setAdminSession] = useState(null);
   const [adminReady, setAdminReady] = useState(false);
+  const [nutriSession, setNutriSession] = useState(null);
+  const [nutriReady, setNutriReady] = useState(false);
+  const onboardingUserIdRef = useRef(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function carregarPacienteLocal() {
+      const paciente = await carregarSessaoPaciente();
+      if (isMounted) {
+        setPatientLocalSession(paciente);
+        setPatientLocalReady(true);
+      }
+    }
+
+    carregarPacienteLocal();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  async function persistirSessaoPacienteApp(user) {
+    if (!user || !isPatientUser(user)) {
+      await limparSessaoPaciente();
+      setPatientLocalSession(null);
+      return null;
+    }
+
+    const sanitized = await salvarSessaoPaciente(user);
+    setPatientLocalSession(sanitized);
+    return sanitized;
+  }
 
   useEffect(() => {
     let isMounted = true;
@@ -184,11 +242,35 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    let isMounted = true;
+
+    async function carregarNutri() {
+      const nutri = await carregarSessaoNutricionista();
+      if (isMounted) {
+        setNutriSession(nutri);
+        setNutriReady(true);
+      }
+    }
+
+    carregarNutri();
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
     if (session?.user && adminSession) {
       limparSessaoAdmin();
       setAdminSession(null);
     }
   }, [session, adminSession]);
+
+  useEffect(() => {
+    if (session?.user && nutriSession) {
+      limparSessaoNutricionista();
+      setNutriSession(null);
+    }
+  }, [session, nutriSession]);
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
@@ -208,17 +290,24 @@ export default function App() {
         const pacienteGoogle = await syncGooglePatientRecord(nextSession.user);
 
         if (!pacienteGoogle) {
+          if (isPatientUser(nextSession.user)) {
+            await persistirSessaoPacienteApp(nextSession.user);
+          }
           return nextSession;
         }
 
+        const mergedUser = {
+          ...nextSession.user,
+          ...pacienteGoogle,
+          id_paciente_uuid:
+            pacienteGoogle.id_paciente_uuid || nextSession.user.id || null,
+        };
+
+        await persistirSessaoPacienteApp(mergedUser);
+
         return {
           ...nextSession,
-          user: {
-            ...nextSession.user,
-            ...pacienteGoogle,
-            id_paciente_uuid:
-              pacienteGoogle.id_paciente_uuid || nextSession.user.id || null,
-          },
+          user: mergedUser,
         };
       } catch (error) {
         console.log('Erro ao sincronizar Google com tabela paciente:', error);
@@ -248,17 +337,40 @@ export default function App() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+    } = supabase.auth.onAuthStateChange((event, nextSession) => {
       (async () => {
         if (!isMounted) return;
 
-        setAuthReady(false);
-        const sessaoPreparada = await prepararSessao(nextSession || null);
+        const isSilentEvent =
+          event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED';
+
+        if (!isSilentEvent) {
+          setAuthReady(false);
+        }
+
+        if (!nextSession?.user) {
+          if (event === 'SIGNED_OUT') {
+            await limparSessaoPaciente();
+            if (isMounted) {
+              setPatientLocalSession(null);
+            }
+          }
+          if (!isMounted) return;
+          setSession(null);
+          if (!isSilentEvent) {
+            setAuthReady(true);
+          }
+          return;
+        }
+
+        const sessaoPreparada = await prepararSessao(nextSession);
 
         if (!isMounted) return;
 
         setSession(sessaoPreparada);
-        setAuthReady(true);
+        if (!isSilentEvent) {
+          setAuthReady(true);
+        }
       })();
     });
 
@@ -273,12 +385,87 @@ export default function App() {
   }, [session?.user?.id]);
 
   useEffect(() => {
+    if (!authReady) return undefined;
+
+    let cancelled = false;
+
+    (async () => {
+      const paciente = await carregarSessaoPaciente();
+      if (!cancelled && paciente) {
+        setPatientLocalSession(paciente);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [authReady, session?.user?.id]);
+
+  useEffect(() => {
+    const perfilPaciente = session?.user || patientLocalSession;
+    const patientId = getPatientId(perfilPaciente);
+    if (!patientId || adminSession || nutriSession) return;
+
+    prefetchPatientHomeExperience(patientId, perfilPaciente);
+    prefetchPatientProfileExperience(patientId, perfilPaciente);
+  }, [adminSession, nutriSession, patientLocalSession, session?.user]);
+
+  useEffect(() => {
+    const perfilPaciente =
+      patientSessionOverride || patientLocalSession || session?.user || null;
+
+    if (!perfilPaciente || !isPatientUser(perfilPaciente) || adminSession || nutriSession) {
+      stopLibreViewAutoSync();
+      return undefined;
+    }
+
+    const patientId = getPatientId(perfilPaciente);
+    if (!patientId) {
+      stopLibreViewAutoSync();
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    (async () => {
+      const linked = await hasLibreLinkUpLinked(patientId);
+      if (cancelled) return;
+
+      if (!linked) {
+        stopLibreViewAutoSync();
+        return;
+      }
+
+      startLibreViewAutoSync({
+        patientId,
+        patientEmail: perfilPaciente.email_pac || perfilPaciente.email,
+        actor: perfilPaciente,
+        runImmediately: true,
+      });
+    })();
+
+    return () => {
+      cancelled = true;
+      stopLibreViewAutoSync();
+    };
+  }, [
+    adminSession,
+    nutriSession,
+    patientLocalSession,
+    patientSessionOverride,
+    session?.user,
+  ]);
+
+  useEffect(() => {
     let isMounted = true;
 
     async function carregarOnboardingPaciente() {
-      if (!authReady) return;
+      if (!authReady || !patientLocalReady) return;
 
-      if (!session?.user) {
+      const perfilPaciente =
+        patientSessionOverride || patientLocalSession || session?.user || null;
+
+      if (!perfilPaciente || !isPatientUser(perfilPaciente)) {
         if (isMounted) {
           setPatientOnboardingSeen(false);
           setPatientOnboardingReady(true);
@@ -286,11 +473,15 @@ export default function App() {
         return;
       }
 
-      setPatientOnboardingReady(false);
+      const userKey = perfilPaciente.id_paciente_uuid || perfilPaciente.id || perfilPaciente.email;
+      if (onboardingUserIdRef.current === userKey && patientOnboardingReady) {
+        return;
+      }
 
-      const onboardingVisto = await hasPatientOnboardingSeen(session.user);
+      const onboardingVisto = await hasPatientOnboardingSeen(perfilPaciente);
 
       if (isMounted) {
+        onboardingUserIdRef.current = userKey;
         setPatientOnboardingSeen(onboardingVisto);
         setPatientOnboardingReady(true);
       }
@@ -301,7 +492,14 @@ export default function App() {
     return () => {
       isMounted = false;
     };
-  }, [authReady, session]);
+  }, [
+    authReady,
+    patientLocalReady,
+    patientLocalSession,
+    patientSessionOverride,
+    patientOnboardingReady,
+    session?.user?.id,
+  ]);
 
   useEffect(() => {
     let isMounted = true;
@@ -360,32 +558,54 @@ export default function App() {
     );
   }
 
-  if (!authReady || !introReady || !patientOnboardingReady || !adminReady) {
+  if (
+    !authReady ||
+    !introReady ||
+    !patientOnboardingReady ||
+    !patientLocalReady ||
+    !adminReady ||
+    !nutriReady
+  ) {
     return (
-      <View
-        style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
-      >
-        <StatusBar
-          barStyle="dark-content"
-          backgroundColor={patientTheme.colors.background}
-        />
-        <View
-          style={styles.loadingBody}
-        >
-          <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
-        </View>
-      </View>
+      <GestureHandlerRootView style={styles.gestureRoot}>
+        <SafeAreaProvider>
+          <View
+            style={[styles.appRoot, Platform.OS === 'web' && styles.webDocumentRoot]}
+          >
+            <StatusBar
+              barStyle="dark-content"
+              backgroundColor={patientTheme.colors.background}
+            />
+            <View style={styles.loadingBody}>
+              <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
+            </View>
+          </View>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
     );
   }
 
   function getPacienteProps(props) {
+    const routeMeta = props.route?.params?.usuarioLogado || null;
+    const sessionUser =
+      patientSessionOverride || patientLocalSession || session?.user || routeMeta || null;
+
+    const usuarioLogado = sessionUser
+      ? {
+          ...(routeMeta && typeof routeMeta === 'object' ? routeMeta : {}),
+          ...(sessionUser && typeof sessionUser === 'object' ? sessionUser : {}),
+          id_paciente_uuid:
+            getPatientId(sessionUser) ||
+            getPatientId(routeMeta) ||
+            routeMeta?.id_paciente_uuid ||
+            sessionUser?.user_metadata?.id_paciente_uuid ||
+            null,
+        }
+      : null;
+
     return {
       ...props,
-      usuarioLogado:
-        props.route?.params?.usuarioLogado ||
-        patientSessionOverride ||
-        session?.user ||
-        null,
+      usuarioLogado,
     };
   }
 
@@ -400,6 +620,37 @@ export default function App() {
     };
   }
 
+  function getNutriProps(props) {
+    const sessionNutri = nutriSession || null;
+    const routeMeta = props.route?.params?.usuarioLogado || null;
+
+    return {
+      ...props,
+      route: {
+        ...props.route,
+        params: {
+          ...props.route?.params,
+          usuarioLogado: sessionNutri
+            ? {
+                ...(routeMeta && typeof routeMeta === 'object' ? routeMeta : {}),
+                ...sessionNutri,
+                id_nutricionista_uuid:
+                  sessionNutri?.id_nutricionista_uuid ||
+                  routeMeta?.id_nutricionista_uuid ||
+                  null,
+              }
+            : null,
+        },
+      },
+      navigation: props.navigation,
+      onNutriLogout: async () => {
+        await limparSessaoNutricionista();
+        setNutriSession(null);
+        props.navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      },
+    };
+  }
+
   function withSwipeBack(props, content) {
     return (
       <SwipeBackContainer navigation={props.navigation}>
@@ -408,20 +659,20 @@ export default function App() {
     );
   }
 
-  const initialRouteName = adminSession
-    ? 'AdminHome'
-    : session
-      ? patientOnboardingSeen
-        ? 'HomePaciente'
-        : 'PacienteOnboarding'
-      : introSeen
-        ? 'Login'
-        : 'Intro';
+  const initialRouteName = resolveInitialRouteName({
+    adminSession,
+    nutriSession,
+    supabaseSession: session,
+    patientLocalSession,
+    patientOnboardingSeen,
+    introSeen,
+  });
   const useFullBleedIntro = initialRouteName === 'Intro';
 
   const readerScreenOptions = {
     animationEnabled: true,
-    cardStyle: Platform.OS === 'web' ? styles.webStackCard : undefined,
+    cardStyle:
+      Platform.OS === 'web' ? styles.webStackCard : styles.nativeStackCard,
     cardStyleInterpolator: fadeCardInterpolator,
     gestureEnabled: Platform.OS !== 'web',
     gestureDirection: 'horizontal',
@@ -430,6 +681,11 @@ export default function App() {
     },
     header: (props) => <ReaderTopo {...props} />,
     headerShown: true,
+  };
+
+  const mainTabReaderOptions = {
+    ...readerScreenOptions,
+    animationEnabled: false,
   };
 
   return (
@@ -447,17 +703,6 @@ export default function App() {
           >
             <NavigationContainer>
               <Stack.Navigator
-                key={
-                  adminSession
-                    ? 'admin-auth'
-                    : session
-                      ? patientOnboardingSeen
-                        ? 'auth'
-                        : 'auth-onboarding'
-                      : introSeen
-                        ? 'guest-seen'
-                        : 'guest-first'
-                }
                 initialRouteName={initialRouteName}
                 screenOptions={{
                   animationEnabled: true,
@@ -497,6 +742,8 @@ export default function App() {
                         params: {
                           ...(props.route?.params || {}),
                           onAdminLogin: (adminUser) => setAdminSession(adminUser),
+                          onNutriLogin: (nutriUser) => setNutriSession(nutriUser),
+                          onPatientLogin: (patientUser) => persistirSessaoPacienteApp(patientUser),
                         },
                       }}
                     />
@@ -526,6 +773,7 @@ export default function App() {
                       onOnboardingFinished={(updatedPatient) => {
                         if (updatedPatient) {
                           setPatientSessionOverride(updatedPatient);
+                          persistirSessaoPacienteApp(updatedPatient);
                         }
                         setPatientOnboardingSeen(true);
                       }}
@@ -534,15 +782,15 @@ export default function App() {
                 )}
               </Stack.Screen>
 
-              <Stack.Screen name="HomePaciente" options={readerScreenOptions}>
+              <Stack.Screen name="HomePaciente" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <HomePaciente {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteDiario" options={readerScreenOptions}>
+              <Stack.Screen name="PacienteDiario" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacienteDiarioScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteMonitoramento" options={readerScreenOptions}>
+              <Stack.Screen name="PacienteMonitoramento" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacienteMonitoramentoScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
@@ -554,7 +802,11 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacienteAssistenteScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteAgendamentos" options={readerScreenOptions}>
+              <Stack.Screen name="PacienteSuporte" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacienteSuporteScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteAgendamentos" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacienteAgendamentosScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
@@ -568,8 +820,23 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacienteBemEstarScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacientePlano" options={readerScreenOptions}>
+              <Stack.Screen name="PacientePlano" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <PacientePlanoScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteChatNutricionista" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(props, <PacienteChatNutricionistaScreen {...getPacienteProps(props)} />)
+                }
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteChatNutricionistaDetalhe" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(
+                    props,
+                    <PacienteChatNutricionistaDetalheScreen {...getPacienteProps(props)} />
+                  )
+                }
               </Stack.Screen>
 
               <Stack.Screen name="PacienteProgresso" options={readerScreenOptions}>
@@ -597,7 +864,9 @@ export default function App() {
               </Stack.Screen>
 
               <Stack.Screen name="PacientePerfilIntegracao" options={readerScreenOptions}>
-                {(props) => withSwipeBack(props, <PacientePerfilScreen {...getPacienteProps(props)} />)}
+                {(props) =>
+                  withSwipeBack(props, <PacienteIntegracaoSensorScreen {...getPacienteProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen name="PacientePerfilInsulinas" options={readerScreenOptions}>
@@ -617,23 +886,30 @@ export default function App() {
 
               <Stack.Screen
                 name="HomeNutricionista"
-                options={readerScreenOptions}
+                initialParams={
+                  nutriSession ? { usuarioLogado: nutriSession } : undefined
+                }
+                options={mainTabReaderOptions}
               >
-                {(props) => withSwipeBack(props, <HomeNutricionista {...props} />)}
+                {(props) => withSwipeBack(props, <HomeNutricionista {...getNutriProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen
                 name="GerenciarPacientes"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
-                {(props) => withSwipeBack(props, <GerenciarPacientesScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <GerenciarPacientesScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaAgenda"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaAgendaScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <NutricionistaAgendaScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen
@@ -641,7 +917,7 @@ export default function App() {
                 options={readerScreenOptions}
               >
                 {(props) =>
-                  withSwipeBack(props, <NutriProntuarioPacienteScreen {...props} />)
+                  withSwipeBack(props, <NutriProntuarioPacienteScreen {...getNutriProps(props)} />)
                 }
               </Stack.Screen>
 
@@ -649,24 +925,28 @@ export default function App() {
                 name="NutriConsultaNutri"
                 options={readerScreenOptions}
               >
-                {(props) => withSwipeBack(props, <NutriConsultaScreen {...props} />)}
+                {(props) => withSwipeBack(props, <NutriConsultaScreen {...getNutriProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaMensagens"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaMensagensScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <NutricionistaMensagensScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
               <Stack.Screen
                 name="NutricionistaRelatorios"
-                options={readerScreenOptions}
+                options={mainTabReaderOptions}
               >
-                {(props) => withSwipeBack(props, <NutricionistaRelatoriosScreen {...props} />)}
+                {(props) =>
+                  withSwipeBack(props, <NutricionistaRelatoriosScreen {...getNutriProps(props)} />)
+                }
               </Stack.Screen>
 
-              <Stack.Screen name="AdminHome" options={readerScreenOptions}>
+              <Stack.Screen name="AdminHome" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaHomeAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
@@ -674,7 +954,7 @@ export default function App() {
                 {(props) => withSwipeBack(props, <TelaAuditoriaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="AdminCadastros" options={readerScreenOptions}>
+              <Stack.Screen name="AdminCadastros" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaCadastrosAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
@@ -682,11 +962,11 @@ export default function App() {
                 {(props) => withSwipeBack(props, <TelaCadastroAdministradorAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="AdminOperacoes" options={readerScreenOptions}>
+              <Stack.Screen name="AdminOperacoes" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaOperacoesAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="AdminLogsSistema" options={readerScreenOptions}>
+              <Stack.Screen name="AdminLogsSistema" options={mainTabReaderOptions}>
                 {(props) => withSwipeBack(props, <TelaLogsSistemaAdmin {...getAdminProps(props)} />)}
               </Stack.Screen>
 
@@ -732,5 +1012,9 @@ const styles = StyleSheet.create({
   webStackCard: {
     overflow: 'visible',
     paddingTop: READER_TOPO_WEB_HEIGHT,
+  },
+  nativeStackCard: {
+    flex: 1,
+    backgroundColor: patientTheme.colors.background,
   },
 });

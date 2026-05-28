@@ -1,10 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
-  Modal,
   Platform,
-  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -18,13 +15,13 @@ import {
   BotaoAgendamento,
   CartaoAgendamento,
 } from '../../componentes/agendamento/uiAgendamento';
+import CalendarioHorarios from '../../componentes/agendamento/CalendarioHorarios';
 import { patientTheme } from '../../temas/temaVisualPaciente';
 import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
 import { formatValorConsulta } from '../../servicos/servicoGoogleMeet';
 import {
   createConsulta,
   listConsultasByNutricionista,
-  updateConsultaSchedule,
 } from '../../servicos/servicoConsultas';
 import { createFollowUpRequest } from '../../servicos/servicoSolicitacoesAcompanhamento';
 import {
@@ -74,14 +71,11 @@ export default function PacientePerfilNutricionistaScreen({
 }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const nutricionistaBase = route?.params?.nutricionista || null;
-  const consultaEdicao = route?.params?.editingConsulta || null;
   const tipoConsulta = route?.params?.tipoConsulta || 'Teleconsulta';
   const convenio = route?.params?.convenio || 'Particular';
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
-  const isEditing = Boolean(consultaEdicao?.id);
   const [nutricionista, setNutricionista] = useState(nutricionistaBase);
 
-  const [agendaVisible, setAgendaVisible] = useState(Boolean(isEditing && route?.params?.openSchedulePopup));
   const [loadingAgenda, setLoadingAgenda] = useState(false);
   const [confirmando, setConfirmando] = useState(false);
   const [solicitando, setSolicitando] = useState(false);
@@ -94,7 +88,6 @@ export default function PacientePerfilNutricionistaScreen({
   const [selectedSlot, setSelectedSlot] = useState(null);
   const [erroAgenda, setErroAgenda] = useState('');
   const [observacoes, setObservacoes] = useState('');
-  const [selectorAberto, setSelectorAberto] = useState('');
 
   useEffect(() => {
     setNutricionista(nutricionistaBase);
@@ -148,7 +141,8 @@ export default function PacientePerfilNutricionistaScreen({
 
   const especialidade = getNutriEspecialidadeLabel(nutricionista);
   const valorLabel = formatValorConsulta(nutricionista?.valor_consulta_centavos);
-  const calendarDays = useMemo(() => groupSlotsByDay(slots), [slots]);
+  const normalizedSlots = useMemo(() => uniqueSlotsByScheduledAt(slots), [slots]);
+  const calendarDays = useMemo(() => groupSlotsByDay(normalizedSlots), [normalizedSlots]);
   const availableDays = useMemo(
     () =>
       calendarDays.filter((day) =>
@@ -156,18 +150,6 @@ export default function PacientePerfilNutricionistaScreen({
       ),
     [calendarDays]
   );
-  const selectedDay = useMemo(
-    () => availableDays.find((day) => day.dateKey === selectedDayKey) || null,
-    [availableDays, selectedDayKey]
-  );
-  const availableSlots = useMemo(
-    () =>
-      uniqueSlotsByScheduledAt(
-        (selectedDay?.slots || []).filter((slot) => slot.status === 'available')
-      ),
-    [selectedDay]
-  );
-
   useEffect(() => {
     navigation.setOptions({
       readerTitle: 'Perfil do Profissional',
@@ -205,10 +187,7 @@ export default function PacientePerfilNutricionistaScreen({
       ]);
 
       const generated = generateSlotsForNextDays(availability, { days: 21 });
-      const occupiedBase = isEditing
-        ? (consultas || []).filter((item) => item.id !== consultaEdicao?.id)
-        : consultas;
-      const marked = markSlotsWithBooking(generated, occupiedBase);
+      const marked = markSlotsWithBooking(generated, consultas);
       setSlots(marked);
       setSelectedSlot(null);
     } catch (error) {
@@ -218,13 +197,11 @@ export default function PacientePerfilNutricionistaScreen({
     } finally {
       setLoadingAgenda(false);
     }
-  }, [nutricionista?.id_nutricionista_uuid, isEditing, consultaEdicao?.id]);
+  }, [nutricionista?.id_nutricionista_uuid]);
 
   useEffect(() => {
-    if (agendaVisible) {
-      carregarAgenda();
-    }
-  }, [agendaVisible, carregarAgenda]);
+    carregarAgenda();
+  }, [carregarAgenda]);
 
   useEffect(() => {
     let active = true;
@@ -264,16 +241,6 @@ export default function PacientePerfilNutricionistaScreen({
       active = false;
     };
   }, [nutricionista?.id_nutricionista_uuid, patientId]);
-
-  useEffect(() => {
-    if (isEditing && route?.params?.openSchedulePopup) {
-      setAgendaVisible(true);
-    }
-  }, [isEditing, route?.params?.openSchedulePopup]);
-
-  function handleAbrirAgenda() {
-    setAgendaVisible(true);
-  }
 
   async function handleSolicitarAcompanhamento() {
     if (!nutricionista?.id_nutricionista_uuid || !patientId) {
@@ -340,11 +307,9 @@ export default function PacientePerfilNutricionistaScreen({
   }
 
   function handleFecharAgenda() {
-    setAgendaVisible(false);
     setSelectedSlot(null);
     setObservacoes('');
     setErroAgenda('');
-    setSelectorAberto('');
     navigation.setParams({
       openSchedulePopup: false,
     });
@@ -362,26 +327,6 @@ export default function PacientePerfilNutricionistaScreen({
         .filter(Boolean)
         .join(' · ');
 
-      if (isEditing) {
-        await updateConsultaSchedule({
-          consultaId: consultaEdicao.id,
-          scheduledAt: selectedSlot.scheduledAt,
-          motivo,
-          tipoConsulta,
-          convenio,
-          especialidade,
-          valorCentavos: nutricionista.valor_consulta_centavos,
-          nutricionista,
-          actor: usuarioLogado,
-        });
-
-        handleFecharAgenda();
-        navigation.navigate('PacienteAgendamentos', {
-          usuarioLogado,
-          activeSection: 'consultas',
-        });
-        return;
-      }
       if (!linkedToNutri) {
         setErroAgenda(
           'Solicite o acompanhamento primeiro. Depois da aprovacao do nutricionista, o agendamento fica liberado.'
@@ -440,7 +385,7 @@ export default function PacientePerfilNutricionistaScreen({
       usuarioLogado={usuarioLogado}
       showTabBar={false}
     >
-      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.content}>
+      <View style={styles.content}>
         <CartaoAgendamento style={styles.hero}>
           <View style={styles.heroRow}>
             <AvatarProfissional
@@ -536,22 +481,79 @@ export default function PacientePerfilNutricionistaScreen({
           </View>
         </CartaoAgendamento>
 
+        <CartaoAgendamento style={styles.block}>
+          <View style={styles.scheduleHeader}>
+            <View>
+              <Text style={styles.blockTitle}>Calendário de horários</Text>
+              <Text style={styles.scheduleSubtitle}>{nutricionista.nome_completo_nutri}</Text>
+            </View>
+            {loadingAgenda ? <ActivityIndicator color={patientTheme.colors.primaryDark} /> : null}
+          </View>
+
+          {loadingAgenda ? (
+            <View style={styles.scheduleLoading}>
+              <Text style={styles.blockText}>Carregando disponibilidade...</Text>
+            </View>
+          ) : (
+            <CalendarioHorarios
+              days={calendarDays}
+              selectedDayKey={selectedDayKey}
+              onSelectDay={(dayKey) => {
+                setSelectedDayKey(dayKey);
+                setSelectedSlot(null);
+                setErroAgenda('');
+              }}
+              selectedSlot={selectedSlot}
+              onSelectSlot={(slot) => {
+                setSelectedSlot(slot);
+                setErroAgenda('');
+              }}
+            />
+          )}
+
+          {!loadingAgenda && !calendarDays.length && erroAgenda ? (
+            <Text style={styles.errorText}>{erroAgenda}</Text>
+          ) : null}
+
+          {linkedToNutri && calendarDays.length ? (
+            <>
+              <Text style={styles.fieldLabel}>Observações (opcional)</Text>
+              <TextInput
+                value={observacoes}
+                onChangeText={setObservacoes}
+                multiline
+                numberOfLines={4}
+                textAlignVertical="top"
+                placeholder="Descreva brevemente o motivo da consulta..."
+                placeholderTextColor={patientTheme.colors.textMuted}
+                style={styles.notesInput}
+              />
+
+              {erroAgenda ? <Text style={styles.errorText}>{erroAgenda}</Text> : null}
+
+              <View style={styles.inlineAgendaActions}>
+                <BotaoAgendamento
+                  label="Confirmar Agendamento"
+                  onPress={handleConfirmarAgendamento}
+                  loading={confirmando}
+                />
+              </View>
+            </>
+          ) : null}
+        </CartaoAgendamento>
+
         {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
 
-        <BotaoAgendamento
-          label={
-            isEditing
-              ? 'Editar horario'
-              : linkedToNutri
-                ? 'Agendar consulta'
-                : 'Solicitar acompanhamento'
-          }
-          icon={isEditing || linkedToNutri ? 'calendar-outline' : 'person-add-outline'}
-          onPress={isEditing || linkedToNutri ? handleAbrirAgenda : handleSolicitarAcompanhamento}
-          loading={solicitando}
-        />
+        {!linkedToNutri ? (
+          <BotaoAgendamento
+            label="Solicitar acompanhamento"
+            icon="person-add-outline"
+            onPress={handleSolicitarAcompanhamento}
+            loading={solicitando}
+          />
+        ) : null}
 
-        {linkedToNutri && !isEditing ? (
+        {linkedToNutri ? (
           <BotaoAgendamento
             label="Desvincular nutricionista"
             icon="close-circle-outline"
@@ -560,9 +562,10 @@ export default function PacientePerfilNutricionistaScreen({
             loading={desvinculando}
           />
         ) : null}
-      </ScrollView>
+      </View>
 
-      <Modal visible={agendaVisible} transparent animationType="fade" onRequestClose={handleFecharAgenda}>
+      {false ? (
+      <Modal visible={false} transparent animationType="fade" onRequestClose={handleFecharAgenda}>
         <View style={styles.modalOverlay}>
           <KeyboardAvoidingView
             behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
@@ -576,7 +579,7 @@ export default function PacientePerfilNutricionistaScreen({
               >
                 <View style={styles.modalHeader}>
                   <Text style={styles.modalTitle}>
-                    {isEditing ? 'Editar Agendamento' : 'Agendar Consulta'}
+                    Agendar Consulta
                   </Text>
                   <TouchableOpacity onPress={handleFecharAgenda}>
                     <Ionicons name="close" size={18} color={patientTheme.colors.textMuted} />
@@ -715,7 +718,7 @@ export default function PacientePerfilNutricionistaScreen({
                     style={styles.cancelButton}
                   />
                   <BotaoAgendamento
-                    label={isEditing ? 'Salvar novo horário' : 'Confirmar Agendamento'}
+                    label="Confirmar Agendamento"
                     onPress={handleConfirmarAgendamento}
                     loading={confirmando}
                     style={styles.confirmButton}
@@ -728,6 +731,7 @@ export default function PacientePerfilNutricionistaScreen({
           </KeyboardAvoidingView>
         </View>
       </Modal>
+      ) : null}
     </PatientScreenLayout>
   );
 }
@@ -814,6 +818,21 @@ const styles = StyleSheet.create({
   },
   block: {
     gap: 8,
+  },
+  scheduleHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  scheduleSubtitle: {
+    marginTop: 4,
+    color: patientTheme.colors.textMuted,
+    fontWeight: '700',
+    fontSize: 12,
+  },
+  scheduleLoading: {
+    paddingVertical: 16,
   },
   blockTitle: {
     fontSize: 16,
@@ -939,7 +958,7 @@ const styles = StyleSheet.create({
   },
   selectField: {
     alignItems: 'center',
-    backgroundColor: '#f5f6fa',
+    backgroundColor: patientTheme.colors.background,
     borderColor: patientTheme.colors.border,
     borderRadius: 10,
     borderWidth: 1,
@@ -989,13 +1008,18 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   notesInput: {
-    backgroundColor: '#f5f6fa',
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     borderRadius: 10,
     color: patientTheme.colors.text,
     fontSize: 12,
     minHeight: 88,
     paddingHorizontal: 14,
     paddingTop: 14,
+  },
+  inlineAgendaActions: {
+    marginTop: 12,
   },
   errorText: {
     color: '#c45b5b',

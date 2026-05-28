@@ -3,6 +3,7 @@ import { Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { adminShadow, adminTheme } from '../../temas/temaVisualAdmin';
+import { navigateAdminTab } from '../../utilitarios/navegacaoAbas';
 
 export const ADMIN_TAB_BAR_HEIGHT = 64;
 export const ADMIN_TAB_BAR_SPACE = 14;
@@ -33,7 +34,7 @@ export default function BarraAbasAdmin({ navigation, rotaAtual, usuarioLogado })
       return;
     }
 
-    navigation.navigate(rota, { usuarioLogado });
+    navigateAdminTab(navigation, rota, usuarioLogado);
   }
 
   const bottomOffset = Platform.OS === 'web' ? 0 : Math.max(10, Math.min(insets.bottom || 0, 14));
@@ -45,7 +46,20 @@ export default function BarraAbasAdmin({ navigation, rotaAtual, usuarioLogado })
           const ativo = rotaVisual === aba.rota;
 
           return (
-            <Pressable key={aba.rota} style={styles.aba} onPress={() => navegar(aba.rota)}>
+            <Pressable
+              key={aba.rota}
+              style={styles.aba}
+              onPressIn={() => {
+                if (rotaAtual !== aba.rota) {
+                  navegar(aba.rota);
+                }
+              }}
+              onPress={() => {
+                if (rotaAtual !== aba.rota) {
+                  navegar(aba.rota);
+                }
+              }}
+            >
               <View style={[styles.iconeAbaWrap, ativo && styles.iconeAbaWrapAtivo]}>
                 <View style={[styles.iconeAbaInner, ativo && styles.iconeAbaInnerAtivo]}>
                   <Ionicons

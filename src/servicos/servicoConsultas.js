@@ -2,7 +2,6 @@ import { Linking } from 'react-native';
 import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import {
-  buildGoogleMeetLinkFromConsulta,
   isValidGoogleMeetUrl,
   normalizeGoogleMeetUrl,
   resolveMeetLink,
@@ -95,9 +94,11 @@ async function notificarAgendamento({ consulta, nutricionista, pacienteNome }) {
     consultaId: consulta.id,
     destinatarioTipo: 'paciente',
     destinatarioId: consulta.paciente_id,
-    evento: 'meet_disponivel',
-    titulo: 'Teleconsulta confirmada',
-    mensagem: `Consulta com ${nomeNutri} em ${quando}. Link Google Meet: ${meetLink}`,
+    evento: meetLink ? 'meet_disponivel' : 'agendada',
+    titulo: meetLink ? 'Teleconsulta confirmada' : 'Consulta agendada',
+    mensagem: meetLink
+      ? `Sua teleconsulta em ${quando} foi confirmada. Entre pelo Google Meet: ${meetLink}`
+      : `Sua consulta em ${quando} foi agendada. O link do Google Meet ainda nao foi informado.`,
   });
 }
 
@@ -132,7 +133,9 @@ async function notificarMudancaStatus({ consulta, status, nutricionista }) {
       destinatarioId: consulta.paciente_id,
       evento: 'confirmada',
       titulo: 'Consulta confirmada pelo profissional',
-      mensagem: `Sua teleconsulta em ${quando} foi confirmada. Entre pelo Google Meet: ${meetLink}`,
+      mensagem: meetLink
+        ? `Sua teleconsulta em ${quando} foi confirmada. Entre pelo Google Meet: ${meetLink}`
+        : `Sua consulta em ${quando} foi confirmada. O link do Google Meet ainda nao foi informado.`,
     });
   }
 }
@@ -146,6 +149,7 @@ export async function createConsulta({
   convenio,
   especialidade,
   valorCentavos,
+  meetLink,
   nutricionista,
   pacienteNome,
   actor,
@@ -165,6 +169,13 @@ export async function createConsulta({
     throw new Error('Paciente nao encontrado no banco de dados para agendar consulta.');
   }
 
+  const requestedMeetLink = normalizeGoogleMeetUrl(meetLink);
+  if (requestedMeetLink && !isValidGoogleMeetUrl(requestedMeetLink)) {
+    throw new Error('Informe um link valido do Google Meet, no formato https://meet.google.com/xxx-yyyy-zzz.');
+  }
+
+  const normalizedMeetLink = requestedMeetLink || resolveMeetLink({ consulta: null, nutricionista });
+
   const payload = {
     nutricionista_id: nutricionistaId,
     paciente_id: pacienteIdConfirmado,
@@ -176,7 +187,7 @@ export async function createConsulta({
     especialidade: especialidade || '',
     valor_centavos: Number(valorCentavos) || 0,
     canal: 'google_meet',
-    meet_link: '',
+    meet_link: normalizedMeetLink || '',
   };
 
   const { data, error } = await supabase
@@ -232,14 +243,6 @@ export async function createConsulta({
 
   let consulta = data;
   consulta = await persistirMeetLink(consulta, nutricionista);
-
-  if (!consulta?.meet_link && consulta?.id) {
-    consulta = {
-      ...consulta,
-      meet_link: buildGoogleMeetLinkFromConsulta(consulta.id),
-      canal: 'google_meet',
-    };
-  }
 
   try {
     await notificarAgendamento({ consulta, nutricionista, pacienteNome });

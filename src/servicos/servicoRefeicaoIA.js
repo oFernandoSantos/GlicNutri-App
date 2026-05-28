@@ -1,6 +1,8 @@
 import * as ImagePicker from 'expo-image-picker';
-import * as ImageManipulator from 'expo-image-manipulator';
+import { Platform } from 'react-native';
+import { invalidatePatientExperienceCache } from './cacheExperienciaPaciente';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
+import { buscarAlimentosBrasil } from './servicoBuscaAlimentosBrasil';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { AppLogger, MODULOS_LOG_SISTEMA } from './servicoLogSistema';
 
@@ -24,12 +26,35 @@ function normalizeErrorMessage(error) {
     return 'A Edge Function "analisar-refeicao-ia" ainda nao foi publicada no Supabase.';
   }
 
-  if (message.includes('non-2xx status code') || message.includes('unauthorized')) {
-    return 'A funcao de analise retornou erro. Tente novamente agora que a integracao foi atualizada.';
+  if (message.includes('non-2xx status code')) {
+    return 'A funcao de analise retornou erro. Tente novamente em alguns segundos.';
   }
 
-  if (message.includes('confirm your apicompany email') || message.includes('confirmation link')) {
-    return 'A conta da LogMeal ainda nao foi ativada. Confirme o e-mail da conta LogMeal e tente novamente.';
+  if (message.includes('unauthorized') || message.includes('401')) {
+    return 'Sessao expirada. Faca login novamente e tente analisar a foto.';
+  }
+
+  if (
+    message.includes('resource exhausted') ||
+    message.includes('quota') ||
+    message.includes('rate limit') ||
+    message.includes('429')
+  ) {
+    return (
+      'Limite da API Gemini atingido. Aguarde alguns minutos ou verifique o plano em aistudio.google.com. ' +
+      'Enquanto isso, use "Anexar foto sem IA" e busque na TACO.'
+    );
+  }
+
+  if (
+    message.includes('api key not valid') ||
+    message.includes('invalid api key') ||
+    message.includes('gemini_api_key') ||
+    message.includes('google ai studio')
+  ) {
+    return (
+      'Chave Gemini invalida no servidor. Configure GEMINI_API_KEY no Supabase e publique analisar-refeicao-ia.'
+    );
   }
 
   if (message.includes('provided file does not have a valid format') || message.includes('valid formats are')) {
@@ -38,6 +63,10 @@ function normalizeErrorMessage(error) {
 
   if (message.includes('too large') || message.includes('less than 1048576 bytes')) {
     return 'A foto ficou maior que o limite aceito pela IA. O app reduziu a imagem; tente analisar novamente.';
+  }
+
+  if (message.includes('nao foi possivel identificar alimentos')) {
+    return 'Nao identificamos alimentos nesta foto. Tente outro angulo, mais luz, ou use a busca TACO.';
   }
 
   return error?.message || String(error || 'Ocorreu um erro inesperado.');
@@ -105,8 +134,11 @@ function roundNutrient(value) {
 const EXTRA_NUTRIENT_DEFAULTS = {
   fibras: 0,
   acucares: 0,
+  acucares_adicionados: 0,
   gorduras_saturadas: 0,
+  gordura_trans: 0,
   sodio: 0,
+  sal: 0,
   ferro: 0,
   calcio: 0,
   magnesio: 0,
@@ -120,6 +152,25 @@ const EXTRA_NUTRIENT_DEFAULTS = {
 };
 
 const FOOD_NUTRIENT_HINTS = [
+  {
+    keys: ['bebida', 'refrigerante', 'coca', 'cola', 'pepsi', 'guarana', 'suco', 'isotonico'],
+    fibras: 0,
+    acucares: 10.6,
+    acucares_adicionados: 10.6,
+    gorduras_saturadas: 0,
+    gordura_trans: 0,
+    sodio: 7,
+    ferro: 0,
+    calcio: 0,
+    magnesio: 0,
+    potassio: 0,
+    zinco: 0,
+    vitamina_a: 0,
+    vitamina_c: 0,
+    vitamina_d: 0,
+    vitamina_b12: 0,
+    folato: 0,
+  },
   {
     keys: ['arroz', 'massa', 'macarrao', 'batata', 'pao', 'quinoa', 'aveia'],
     fibras: 3,
@@ -254,6 +305,22 @@ function hasValue(value) {
 
 function inferFoodNutrientDefaults(alimento) {
   const text = normalizeText(`${alimento?.nome || alimento?.foodName || ''} ${alimento?.categoria || alimento?.category || ''}`);
+  const isNoSugarDrink =
+    (text.includes('refrigerante') || text.includes('bebida') || text.includes('coca') || text.includes('cola')) &&
+    (text.includes('zero') || text.includes('diet') || text.includes('sem acucar'));
+
+  if (isNoSugarDrink) {
+    return {
+      ...EXTRA_NUTRIENT_DEFAULTS,
+      fibras: 0,
+      acucares: 0,
+      acucares_adicionados: 0,
+      gorduras_saturadas: 0,
+      gordura_trans: 0,
+      sodio: 15,
+    };
+  }
+
   const match = FOOD_NUTRIENT_HINTS.find((item) => item.keys.some((key) => text.includes(key)));
   if (!match) return EXTRA_NUTRIENT_DEFAULTS;
 
@@ -264,6 +331,21 @@ function pickNutrientValue(alimento, ptKey, enKey, fallback) {
   if (hasValue(alimento?.[ptKey])) return roundNutrient(alimento[ptKey]);
   if (hasValue(alimento?.[enKey])) return roundNutrient(alimento[enKey]);
   return roundNutrient(fallback);
+}
+
+function pickBaseNutrientValue(alimento, baseKey, ptKey, enKey, fallback) {
+  if (hasValue(alimento?.[baseKey])) {
+    const baseValue = roundNutrient(alimento[baseKey]);
+    const isRealLabel =
+      alimento?.origem === 'rotulo' ||
+      normalizeText(alimento?.fonteNutricional || alimento?.fonte_nutricional).includes('rotulo');
+
+    if (baseValue !== 0 || isRealLabel) {
+      return baseValue;
+    }
+  }
+
+  return pickNutrientValue(alimento, ptKey, enKey, fallback);
 }
 
 function inferExtension(fileName, mimeType) {
@@ -303,12 +385,29 @@ function looksLikeScreenshot(asset) {
   );
 }
 
+function buildPickerAsset(asset, uri, extra = {}) {
+  const fileName =
+    asset?.fileName ||
+    asset?.file_name ||
+    `refeicao-${Date.now()}.jpg`;
+
+  return {
+    uri,
+    fileName,
+    mimeType: asset?.mimeType || asset?.type || 'image/jpeg',
+    width: extra.width || asset?.width || null,
+    height: extra.height || asset?.height || null,
+    fileSize: extra.fileSize || asset?.fileSize || asset?.file_size || null,
+    isScreenshot: looksLikeScreenshot(asset),
+  };
+}
+
 async function normalizePickerAsset(asset) {
   if (!asset?.uri) {
     return null;
   }
 
-  const maxDimension = 1280;
+  const maxDimension = 1600;
   const width = Number(asset.width) || 0;
   const height = Number(asset.height) || 0;
   const shouldResize = width > maxDimension || height > maxDimension;
@@ -323,22 +422,41 @@ async function normalizePickerAsset(asset) {
       ]
     : [];
 
-  const manipulated = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
-    compress: 0.65,
-    format: ImageManipulator.SaveFormat.JPEG,
-  });
-  const normalizedUri = manipulated.uri;
-  const fileName = `refeicao-${Date.now()}.jpg`;
-  const mimeType = 'image/jpeg';
+  try {
+    const ImageManipulator = await import('expo-image-manipulator');
+    const manipulated = await ImageManipulator.manipulateAsync(asset.uri, resizeAction, {
+      compress: 0.85,
+      format: ImageManipulator.SaveFormat.JPEG,
+    });
 
+    return buildPickerAsset(asset, manipulated.uri, {
+      width: manipulated.width,
+      height: manipulated.height,
+      fileSize: manipulated.fileSize,
+    });
+  } catch (error) {
+    console.warn('Falha ao normalizar imagem, usando original:', error);
+    return buildPickerAsset(asset, asset.uri);
+  }
+}
+
+function getImagePickerMediaTypes() {
+  if (ImagePicker.MediaType?.Images) {
+    return ImagePicker.MediaType.Images;
+  }
+
+  if (ImagePicker.MediaTypeOptions?.Images) {
+    return ImagePicker.MediaTypeOptions.Images;
+  }
+
+  return ['images'];
+}
+
+function getImagePickerOptions() {
   return {
-    uri: normalizedUri,
-    fileName,
-    mimeType,
-    width: manipulated.width || asset.width || null,
-    height: manipulated.height || asset.height || null,
-    fileSize: manipulated.fileSize || asset.fileSize || asset.file_size || null,
-    isScreenshot: looksLikeScreenshot(asset),
+    allowsEditing: Platform.OS !== 'web',
+    mediaTypes: getImagePickerMediaTypes(),
+    quality: 0.9,
   };
 }
 
@@ -361,9 +479,7 @@ export async function escolherImagemRefeicaoDaGaleria() {
 
   return openPicker(() =>
     ImagePicker.launchImageLibraryAsync({
-      allowsEditing: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
+      ...getImagePickerOptions(),
       selectionLimit: 1,
     })
   );
@@ -378,9 +494,7 @@ export async function tirarFotoRefeicao() {
 
   return openPicker(() =>
     ImagePicker.launchCameraAsync({
-      allowsEditing: true,
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      quality: 0.9,
+      ...getImagePickerOptions(),
     })
   );
 }
@@ -447,40 +561,233 @@ export async function analisarImagemRefeicaoIA(payload) {
     throw new Error(normalizeErrorMessage(data?.message || 'Nao foi possivel analisar a refeicao agora.'));
   }
 
+  if (Array.isArray(data?.alimentos) && data.alimentos.length) {
+    return {
+      ...data,
+      alimentos: enriquecerAlimentosIdentificadosComTaco(data.alimentos),
+    };
+  }
+
   return data;
+}
+
+function escalarNutrienteTaco(valorPor100g, gramas) {
+  const factor = Math.max(normalizeNumber(gramas), 1) / 100;
+  return roundNutrient(normalizeNumber(valorPor100g) * factor);
+}
+
+/**
+ * Refina macros da IA com a TACO quando a porcao ou os totais parecem inconsistentes.
+ */
+export function enriquecerAlimentosIdentificadosComTaco(alimentos = []) {
+  return (Array.isArray(alimentos) ? alimentos : []).map((item) => {
+    const nomeBusca = String(item?.nome || item?.foodName || '').trim();
+    const normalized = criarAlimentoEditavel(item);
+
+    if (!nomeBusca || nomeBusca.toLowerCase().includes('nao identificado')) {
+      return normalized;
+    }
+
+    const match = buscarAlimentosBrasil(nomeBusca, { limit: 1 }).items[0];
+    if (!match) {
+      return normalized;
+    }
+
+    const grams = normalizeNumber(normalized.quantidade_gramas) > 0 ? normalized.quantidade_gramas : 100;
+    const iaCalories = normalizeNumber(normalized.calorias);
+    const tacoCalories = escalarNutrienteTaco(match.calorias, grams);
+    const preferTaco =
+      iaCalories <= 0 ||
+      iaCalories < tacoCalories * 0.35 ||
+      normalizeNumber(normalized.carboidratos) <= 0;
+
+    return criarAlimentoEditavel({
+      ...normalized,
+      nome: match.nome,
+      categoria:
+        normalized.categoria && normalized.categoria !== 'Nao informada'
+          ? normalized.categoria
+          : match.categoria,
+      quantidade_gramas: grams,
+      refTacoId: match.id,
+      calorias: preferTaco ? tacoCalories : normalized.calorias,
+      carboidratos: preferTaco
+        ? escalarNutrienteTaco(match.carboidratos, grams)
+        : normalized.carboidratos,
+      proteinas: preferTaco
+        ? escalarNutrienteTaco(match.proteinas, grams)
+        : normalized.proteinas,
+      gorduras: preferTaco ? escalarNutrienteTaco(match.gorduras, grams) : normalized.gorduras,
+      fibras: preferTaco ? escalarNutrienteTaco(match.fibras, grams) : normalized.fibras,
+    });
+  });
+}
+
+export function getMealEntryNutrition(entry) {
+  const kcal = Number(entry?.kcal ?? entry?.calories);
+  const carbs = Number(entry?.carbsG ?? entry?.carbs);
+  const protein = Number(entry?.proteinG ?? entry?.protein);
+  const fat = Number(entry?.fatG ?? entry?.fat);
+
+  if (!Number.isFinite(kcal) || kcal <= 0) {
+    return null;
+  }
+
+  return {
+    calories: kcal,
+    carbs: Number.isFinite(carbs) ? carbs : 0,
+    protein: Number.isFinite(protein) ? protein : 0,
+    fat: Number.isFinite(fat) ? fat : 0,
+    fiber: Number(entry?.fiberG ?? entry?.fibrasG ?? entry?.fibras ?? 0) || 0,
+    sugars: Number(entry?.sugarsG ?? entry?.acucaresG ?? entry?.acucares ?? 0) || 0,
+    saturatedFat:
+      Number(entry?.saturatedFatG ?? entry?.gordurasSaturadasG ?? entry?.gorduras_saturadas ?? 0) || 0,
+    sodium: Number(entry?.sodiumMg ?? entry?.sodioMg ?? entry?.sodio ?? 0) || 0,
+  };
 }
 
 export function criarAlimentoEditavel(alimento = {}) {
   const inferred = inferFoodNutrientDefaults(alimento);
 
+  const quantidadeBase = roundNutrient(
+    alimento.base_quantidade_gramas || alimento.quantidade_base || alimento.quantidade_gramas || alimento.quantity_grams
+  );
+
+  const caloriasBase = roundNutrient(alimento.base_calorias || alimento.calorias || alimento.calories);
+  const carboidratosBase = roundNutrient(alimento.base_carboidratos || alimento.carboidratos || alimento.carbs);
+  const proteinasBase = roundNutrient(alimento.base_proteinas || alimento.proteinas || alimento.proteins);
+  const gordurasBase = roundNutrient(alimento.base_gorduras || alimento.gorduras || alimento.fats);
+
+  const fibrasBase = pickBaseNutrientValue(
+    alimento,
+    'base_fibras',
+    'fibras',
+    'fiber',
+    inferred.fibras
+  );
+  let acucaresBase = pickBaseNutrientValue(
+    alimento,
+    'base_acucares',
+    'acucares',
+    'sugar',
+    inferred.acucares
+  );
+  let acucaresAdicionadosBase = pickBaseNutrientValue(
+    alimento,
+    'base_acucares_adicionados',
+    'acucares_adicionados',
+    'addedSugar',
+    inferred.acucares_adicionados
+  );
+  const gordurasSaturadasBase = pickBaseNutrientValue(
+    alimento,
+    'base_gorduras_saturadas',
+    'gorduras_saturadas',
+    'saturatedFat',
+    inferred.gorduras_saturadas
+  );
+  const gorduraTransBase = pickBaseNutrientValue(
+    alimento,
+    'base_gordura_trans',
+    'gordura_trans',
+    'transFat',
+    inferred.gordura_trans
+  );
+  const sodioBase = pickBaseNutrientValue(
+    alimento,
+    'base_sodio',
+    'sodio',
+    'sodium',
+    inferred.sodio
+  );
+  const salBase = pickBaseNutrientValue(alimento, 'base_sal', 'sal', 'salt', inferred.sal);
+  const ferroBase = pickBaseNutrientValue(alimento, 'base_ferro', 'ferro', 'iron', inferred.ferro);
+  const calcioBase = pickBaseNutrientValue(alimento, 'base_calcio', 'calcio', 'calcium', inferred.calcio);
+  const magnesioBase = pickBaseNutrientValue(alimento, 'base_magnesio', 'magnesio', 'magnesium', inferred.magnesio);
+  const potassioBase = pickBaseNutrientValue(alimento, 'base_potassio', 'potassio', 'potassium', inferred.potassio);
+  const zincoBase = pickBaseNutrientValue(alimento, 'base_zinco', 'zinco', 'zinc', inferred.zinco);
+  const vitaminaABase = pickBaseNutrientValue(alimento, 'base_vitamina_a', 'vitamina_a', 'vitaminA', inferred.vitamina_a);
+  const vitaminaCBase = pickBaseNutrientValue(alimento, 'base_vitamina_c', 'vitamina_c', 'vitaminC', inferred.vitamina_c);
+  const vitaminaDBase = pickBaseNutrientValue(alimento, 'base_vitamina_d', 'vitamina_d', 'vitaminD', inferred.vitamina_d);
+  const vitaminaB12Base = pickBaseNutrientValue(
+    alimento,
+    'base_vitamina_b12',
+    'vitamina_b12',
+    'vitaminB12',
+    inferred.vitamina_b12
+  );
+  const folatoBase = pickBaseNutrientValue(alimento, 'base_folato', 'folato', 'folate', inferred.folato);
+  const isSugaryDrink =
+    normalizeText(`${alimento?.nome || ''} ${alimento?.categoria || ''}`).match(
+      /(bebida|refrigerante|coca|cola|pepsi|guarana|suco|isotonico)/
+    ) && !normalizeText(alimento?.nome).match(/(zero|diet|sem acucar)/);
+
+  if (isSugaryDrink && acucaresBase <= 0 && carboidratosBase > 0) {
+    acucaresBase = carboidratosBase;
+  }
+
+  if (isSugaryDrink && acucaresAdicionadosBase <= 0 && acucaresBase > 0) {
+    acucaresAdicionadosBase = acucaresBase;
+  }
+
+  const baseForScaling = quantidadeBase > 0 ? quantidadeBase : 100;
+  const quantidadeAtual = roundNutrient(alimento.quantidade_gramas || alimento.quantity_grams) || baseForScaling;
+  const factor = baseForScaling > 0 ? quantidadeAtual / baseForScaling : 1;
+
   return {
     id: alimento.id || buildUuid(),
     nome: String(alimento.nome || alimento.foodName || 'Alimento').trim(),
     categoria: String(alimento.categoria || alimento.category || 'Nao informada').trim(),
-    quantidade_gramas: roundNutrient(alimento.quantidade_gramas || alimento.quantity_grams),
-    calorias: roundNutrient(alimento.calorias || alimento.calories),
-    carboidratos: roundNutrient(alimento.carboidratos || alimento.carbs),
-    proteinas: roundNutrient(alimento.proteinas || alimento.proteins),
-    gorduras: roundNutrient(alimento.gorduras || alimento.fats),
-    fibras: pickNutrientValue(alimento, 'fibras', 'fiber', inferred.fibras),
-    acucares: pickNutrientValue(alimento, 'acucares', 'sugar', inferred.acucares),
-    gorduras_saturadas: pickNutrientValue(
-      alimento,
-      'gorduras_saturadas',
-      'saturatedFat',
-      inferred.gorduras_saturadas
-    ),
-    sodio: pickNutrientValue(alimento, 'sodio', 'sodium', inferred.sodio),
-    ferro: pickNutrientValue(alimento, 'ferro', 'iron', inferred.ferro),
-    calcio: pickNutrientValue(alimento, 'calcio', 'calcium', inferred.calcio),
-    magnesio: pickNutrientValue(alimento, 'magnesio', 'magnesium', inferred.magnesio),
-    potassio: pickNutrientValue(alimento, 'potassio', 'potassium', inferred.potassio),
-    zinco: pickNutrientValue(alimento, 'zinco', 'zinc', inferred.zinco),
-    vitamina_a: pickNutrientValue(alimento, 'vitamina_a', 'vitaminA', inferred.vitamina_a),
-    vitamina_c: pickNutrientValue(alimento, 'vitamina_c', 'vitaminC', inferred.vitamina_c),
-    vitamina_d: pickNutrientValue(alimento, 'vitamina_d', 'vitaminD', inferred.vitamina_d),
-    vitamina_b12: pickNutrientValue(alimento, 'vitamina_b12', 'vitaminB12', inferred.vitamina_b12),
-    folato: pickNutrientValue(alimento, 'folato', 'folate', inferred.folato),
+    base_quantidade_gramas: roundNutrient(baseForScaling),
+    base_calorias: roundNutrient(caloriasBase),
+    base_carboidratos: roundNutrient(carboidratosBase),
+    base_proteinas: roundNutrient(proteinasBase),
+    base_gorduras: roundNutrient(gordurasBase),
+    base_fibras: roundNutrient(fibrasBase),
+    base_acucares: roundNutrient(acucaresBase),
+    base_acucares_adicionados: roundNutrient(acucaresAdicionadosBase),
+    base_gorduras_saturadas: roundNutrient(gordurasSaturadasBase),
+    base_gordura_trans: roundNutrient(gorduraTransBase),
+    base_sodio: roundNutrient(sodioBase),
+    base_sal: roundNutrient(salBase),
+    base_ferro: roundNutrient(ferroBase),
+    base_calcio: roundNutrient(calcioBase),
+    base_magnesio: roundNutrient(magnesioBase),
+    base_potassio: roundNutrient(potassioBase),
+    base_zinco: roundNutrient(zincoBase),
+    base_vitamina_a: roundNutrient(vitaminaABase),
+    base_vitamina_c: roundNutrient(vitaminaCBase),
+    base_vitamina_d: roundNutrient(vitaminaDBase),
+    base_vitamina_b12: roundNutrient(vitaminaB12Base),
+    base_folato: roundNutrient(folatoBase),
+
+    quantidade_gramas: roundNutrient(quantidadeAtual),
+    calorias: roundNutrient(caloriasBase * factor),
+    carboidratos: roundNutrient(carboidratosBase * factor),
+    proteinas: roundNutrient(proteinasBase * factor),
+    gorduras: roundNutrient(gordurasBase * factor),
+    fibras: roundNutrient(fibrasBase * factor),
+    acucares: roundNutrient(acucaresBase * factor),
+    acucares_adicionados: roundNutrient(acucaresAdicionadosBase * factor),
+    gorduras_saturadas: roundNutrient(gordurasSaturadasBase * factor),
+    gordura_trans: roundNutrient(gorduraTransBase * factor),
+    sodio: roundNutrient(sodioBase * factor),
+    sal: roundNutrient(salBase * factor),
+    ferro: roundNutrient(ferroBase * factor),
+    calcio: roundNutrient(calcioBase * factor),
+    magnesio: roundNutrient(magnesioBase * factor),
+    potassio: roundNutrient(potassioBase * factor),
+    zinco: roundNutrient(zincoBase * factor),
+    vitamina_a: roundNutrient(vitaminaABase * factor),
+    vitamina_c: roundNutrient(vitaminaCBase * factor),
+    vitamina_d: roundNutrient(vitaminaDBase * factor),
+    vitamina_b12: roundNutrient(vitaminaB12Base * factor),
+    folato: roundNutrient(folatoBase * factor),
+    tabelaNutricional: alimento.tabelaNutricional || alimento.tabela_nutricional || null,
+    nutriScore: alimento.nutriScore || alimento.nutriscore || null,
+    novaGroup: alimento.novaGroup || alimento.nova_group || null,
+    fonteNutricional: alimento.fonteNutricional || alimento.fonte_nutricional || null,
+    unidade_quantidade: alimento.unidade_quantidade || alimento.unidade || null,
   };
 }
 
@@ -493,10 +800,15 @@ export function calcularTotaisRefeicaoIA(alimentos) {
       gorduras_total: roundNutrient(totais.gorduras_total + item.gorduras),
       fibras_total: roundNutrient(totais.fibras_total + item.fibras),
       acucares_total: roundNutrient(totais.acucares_total + item.acucares),
+      acucares_adicionados_total: roundNutrient(
+        totais.acucares_adicionados_total + item.acucares_adicionados
+      ),
       gorduras_saturadas_total: roundNutrient(
         totais.gorduras_saturadas_total + item.gorduras_saturadas
       ),
+      gordura_trans_total: roundNutrient(totais.gordura_trans_total + item.gordura_trans),
       sodio_total: roundNutrient(totais.sodio_total + item.sodio),
+      sal_total: roundNutrient(totais.sal_total + item.sal),
       ferro_total: roundNutrient(totais.ferro_total + item.ferro),
       calcio_total: roundNutrient(totais.calcio_total + item.calcio),
       magnesio_total: roundNutrient(totais.magnesio_total + item.magnesio),
@@ -515,8 +827,11 @@ export function calcularTotaisRefeicaoIA(alimentos) {
       gorduras_total: 0,
       fibras_total: 0,
       acucares_total: 0,
+      acucares_adicionados_total: 0,
       gorduras_saturadas_total: 0,
+      gordura_trans_total: 0,
       sodio_total: 0,
+      sal_total: 0,
       ferro_total: 0,
       calcio_total: 0,
       magnesio_total: 0,
@@ -531,7 +846,16 @@ export function calcularTotaisRefeicaoIA(alimentos) {
   );
 }
 
-export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, title }) {
+export function buildMealTimelineEntryFromAI({
+  alimentos,
+  totais,
+  date,
+  time,
+  title,
+  mealLabel,
+  mealTypeLabel,
+  planSectionId,
+}) {
   const normalizedFoods = Array.isArray(alimentos) ? alimentos : [];
   const safeTotals = totais || calcularTotaisRefeicaoIA(normalizedFoods);
   const description = normalizedFoods
@@ -540,6 +864,7 @@ export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, ti
   const now = new Date();
   const entryDate = date || now.toISOString().slice(0, 10);
   const entryTime = time || now.toTimeString().slice(0, 5);
+  const displayTitle = mealLabel || title || 'Refeição Registrada';
 
   return {
     id: `meal-ia-${Date.now()}`,
@@ -547,16 +872,56 @@ export function buildMealTimelineEntryFromAI({ alimentos, totais, date, time, ti
     mode: 'photo',
     date: entryDate,
     time: entryTime,
-    title: title || 'Refeição Registrada',
+    title: displayTitle,
+    mealLabel: displayTitle,
+    mealTypeLabel: mealTypeLabel || displayTitle,
+    planSectionId: planSectionId || null,
+    mealId: planSectionId || null,
     description: description || 'Refeicao confirmada manualmente.',
     glucoseNote: 'Macros confirmados pelo usuario',
     glucoseDelta: `${roundNutrient(safeTotals.carboidratos_total)} g carbos`,
     aiNote:
-      `IA identificou ${normalizedFoods.length} item(ns). ` +
-      `${roundNutrient(safeTotals.calorias_total)} kcal, ` +
+      `Totais: ${roundNutrient(safeTotals.calorias_total)} kcal, ` +
       `${roundNutrient(safeTotals.proteinas_total)} g proteinas e ` +
       `${roundNutrient(safeTotals.gorduras_total)} g gorduras.`,
+    carbsG: roundNutrient(safeTotals.carboidratos_total),
+    kcal: roundNutrient(safeTotals.calorias_total),
+    proteinG: roundNutrient(safeTotals.proteinas_total),
+    fatG: roundNutrient(safeTotals.gorduras_total),
+    fiberG: roundNutrient(safeTotals.fibras_total),
+    sugarsG: roundNutrient(safeTotals.acucares_total),
+    addedSugarsG: roundNutrient(safeTotals.acucares_adicionados_total),
+    saturatedFatG: roundNutrient(safeTotals.gorduras_saturadas_total),
+    transFatG: roundNutrient(safeTotals.gordura_trans_total),
+    sodiumMg: roundNutrient(safeTotals.sodio_total),
+    foods: normalizedFoods.map((item) => ({
+      name: item.nome,
+      alimento: item.nome,
+      grams: roundNutrient(item.quantidade_gramas),
+      unit: item.unidade_quantidade || null,
+      calories: roundNutrient(item.calorias),
+      carbs: roundNutrient(item.carboidratos),
+      protein: roundNutrient(item.proteinas),
+      fat: roundNutrient(item.gorduras),
+      fiber: roundNutrient(item.fibras),
+      sugars: roundNutrient(item.acucares),
+      saturatedFat: roundNutrient(item.gorduras_saturadas),
+      sodium: roundNutrient(item.sodio),
+    })),
   };
+}
+
+function isMissingMealTotalColumnError(error) {
+  const message = String(error?.message || '').toLowerCase();
+  return (
+    message.includes('schema cache') &&
+    (
+      message.includes('fibras_total') ||
+      message.includes('acucares_total') ||
+      message.includes('gorduras_saturadas_total') ||
+      message.includes('sodio_total')
+    )
+  );
 }
 
 export async function salvarRefeicaoIA({
@@ -565,17 +930,31 @@ export async function salvarRefeicaoIA({
   alimentos,
   confirmado = true,
   createdAt,
+  mealLabel,
+  mealTypeLabel,
+  planSectionId,
 }) {
   if (!patientId) {
     throw new Error('Paciente sem identificador para salvar a refeicao.');
   }
 
+  const mealMetadata = {
+    mealLabel: mealLabel || null,
+    mealTypeLabel: mealTypeLabel || mealLabel || null,
+    planSectionId: planSectionId || null,
+  };
   const normalizedFoods = (Array.isArray(alimentos) ? alimentos : [])
     .map((item) => criarAlimentoEditavel(item))
+    .map((item) => ({
+      ...item,
+      ...mealMetadata,
+    }))
     .filter((item) => item.nome);
 
-  if (!normalizedFoods.length) {
-    throw new Error('Adicione ao menos um alimento antes de confirmar.');
+  const hasFoto = Boolean(String(fotoUrl || '').trim());
+
+  if (!normalizedFoods.length && !hasFoto) {
+    throw new Error('Adicione ao menos um alimento ou uma foto antes de confirmar.');
   }
 
   const totais = calcularTotaisRefeicaoIA(normalizedFoods);
@@ -587,15 +966,38 @@ export async function salvarRefeicaoIA({
     calorias_total: totais.calorias_total,
     proteinas_total: totais.proteinas_total,
     gorduras_total: totais.gorduras_total,
+    fibras_total: totais.fibras_total,
+    acucares_total: totais.acucares_total,
+    gorduras_saturadas_total: totais.gorduras_saturadas_total,
+    sodio_total: totais.sodio_total,
     confirmado,
     ...(createdAt ? { created_at: createdAt } : {}),
   };
 
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from('refeicao_ia')
     .insert([payload])
     .select('*')
     .maybeSingle();
+
+  if (isMissingMealTotalColumnError(error)) {
+    const {
+      fibras_total,
+      acucares_total,
+      gorduras_saturadas_total,
+      sodio_total,
+      ...legacyPayload
+    } = payload;
+
+    const retry = await supabase
+      .from('refeicao_ia')
+      .insert([legacyPayload])
+      .select('*')
+      .maybeSingle();
+
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     AppLogger.erro(MODULOS_LOG_SISTEMA.ALIMENTACAO, 'Cadastro de refeicao', error, {
@@ -649,6 +1051,8 @@ export async function salvarRefeicaoIA({
       totais,
     },
   });
+
+  invalidatePatientExperienceCache(patientId);
 
   return {
     record: data || payload,

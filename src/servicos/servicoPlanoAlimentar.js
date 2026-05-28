@@ -2,19 +2,79 @@ import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { isPatientLinkedToNutritionist } from './servicoVinculosNutricionista';
 
-export async function fetchActiveMealPlanForPatient(pacienteId) {
+const ACTIVE_PLAN_COLUMNS =
+  'id, titulo, descricao, metas, ativo, inicio_em, fim_em, updated_at, paciente_id, nutricionista_id';
+const ACTIVE_PLAN_CACHE_TTL_MS = 5 * 60 * 1000;
+
+const activePlanCache = new Map();
+const activePlanInFlight = new Map();
+
+export function getCachedActiveMealPlanForPatient(pacienteId) {
+  return getCachedActivePlan(pacienteId);
+}
+
+function getCachedActivePlan(pacienteId) {
+  if (!pacienteId || !activePlanCache.has(pacienteId)) {
+    return undefined;
+  }
+
+  const entry = activePlanCache.get(pacienteId);
+  if (Date.now() - entry.fetchedAt > ACTIVE_PLAN_CACHE_TTL_MS) {
+    activePlanCache.delete(pacienteId);
+    return undefined;
+  }
+
+  return entry.data;
+}
+
+export function invalidateActiveMealPlanCache(pacienteId) {
+  if (!pacienteId) {
+    activePlanCache.clear();
+    activePlanInFlight.clear();
+    return;
+  }
+  activePlanCache.delete(pacienteId);
+  activePlanInFlight.delete(pacienteId);
+}
+
+export async function fetchActiveMealPlanForPatient(pacienteId, { forceRefresh = false } = {}) {
   if (!pacienteId) return null;
 
-  const { data, error } = await supabase
+  if (!forceRefresh) {
+    const cached = getCachedActivePlan(pacienteId);
+    if (cached !== undefined) {
+      return cached;
+    }
+
+    if (activePlanInFlight.has(pacienteId)) {
+      return activePlanInFlight.get(pacienteId);
+    }
+  } else {
+    activePlanCache.delete(pacienteId);
+    activePlanInFlight.delete(pacienteId);
+  }
+
+  const promise = supabase
     .from('plano_alimentar')
-    .select('*')
+    .select(ACTIVE_PLAN_COLUMNS)
     .eq('paciente_id', pacienteId)
     .eq('ativo', true)
     .order('updated_at', { ascending: false })
-    .limit(1);
+    .limit(1)
+    .then(({ data, error }) => {
+      if (error) throw error;
+      const plan = (data || [])[0] || null;
+      activePlanCache.set(pacienteId, { data: plan, fetchedAt: Date.now() });
+      activePlanInFlight.delete(pacienteId);
+      return plan;
+    })
+    .catch((error) => {
+      activePlanInFlight.delete(pacienteId);
+      throw error;
+    });
 
-  if (error) throw error;
-  return (data || [])[0] || null;
+  activePlanInFlight.set(pacienteId, promise);
+  return promise;
 }
 
 export async function listMealPlansForPatient(pacienteId, { limit = 20 } = {}) {
@@ -78,6 +138,7 @@ export async function upsertMealPlan({
   if (error) throw error;
 
   if (data?.id) {
+    invalidateActiveMealPlanCache(pacienteId);
     await registrarLogAuditoria({
       actor: actor || null,
       actorType: actor?.tipo_perfil || 'nutricionista',
@@ -123,6 +184,7 @@ export async function disableOtherMealPlansForPatient({
   const affected = (data || []).length;
 
   if (affected > 0) {
+    invalidateActiveMealPlanCache(pacienteId);
     await registrarLogAuditoria({
       actor: actor || null,
       actorType: actor?.tipo_perfil || 'nutricionista',
@@ -137,4 +199,3 @@ export async function disableOtherMealPlansForPatient({
 
   return affected;
 }
-

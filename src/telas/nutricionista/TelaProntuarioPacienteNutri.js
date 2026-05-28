@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { ActivityIndicator, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { RolagemComTeclado } from '../../componentes/comum/RolagemComTeclado';
 import { Ionicons } from '@expo/vector-icons';
 import {
   AvatarBadge,
@@ -9,8 +10,16 @@ import {
   SectionCard,
   TrendChartCard,
 } from '../../componentes/nutricionista/NutriDesktopUI';
-import { getNutritionistPatientById, nutritionistPatientsMock } from '../../dados/dadosNutricionistaMock';
-import { fetchPatientById } from '../../servicos/servicoDadosPaciente';
+import {
+  fetchPatientById,
+  fetchPatientExperience,
+  getLatestGlucose,
+} from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import {
+  averageAdherence,
+  buildWeeklyAdherenceFromMeals,
+} from '../../utilitarios/adesaoNutricional';
 import {
   disableOtherMealPlansForPatient,
   fetchActiveMealPlanForPatient,
@@ -20,7 +29,7 @@ import {
   getNutritionistId,
   isPatientLinkedToNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
-import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 
 const detailTabs = [
   { value: 'overview', label: 'Visao Geral' },
@@ -101,6 +110,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   const [mealSubstitutions, setMealSubstitutions] = useState('');
   const [mealSummary, setMealSummary] = useState('');
   const [extraMeals, setExtraMeals] = useState([]);
+  const [patientExperience, setPatientExperience] = useState(null);
 
   useEffect(() => {
     let active = true;
@@ -130,14 +140,58 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     };
   }, [paciente, pacienteId]);
 
+  useEffect(() => {
+    let active = true;
+    const effectivePacienteId =
+      pacienteId || paciente?.id || patientRecord?.id_paciente_uuid || null;
+
+    async function loadExperience() {
+      if (!effectivePacienteId) {
+        if (active) setPatientExperience(null);
+        return;
+      }
+
+      try {
+        const experience = await fetchPatientExperience(effectivePacienteId, {
+          skipAlertSync: true,
+          ...mesclarLimitesDadosPaciente('prontuario'),
+        });
+        if (active) setPatientExperience(experience);
+      } catch (error) {
+        console.log('Erro ao carregar experiencia do prontuario:', error);
+        if (active) setPatientExperience(null);
+      }
+    }
+
+    loadExperience();
+
+    return () => {
+      active = false;
+    };
+  }, [paciente?.id, pacienteId, patientRecord?.id_paciente_uuid]);
+
   const currentPatient = useMemo(() => {
-    return normalizePatientForProntuario(
-      paciente ||
-      patientRecord ||
-      getNutritionistPatientById(pacienteId) ||
-      nutritionistPatientsMock[0]
+    const base = normalizePatientForProntuario(paciente || patientRecord || null);
+    if (!base || !patientExperience) return base;
+
+    const { items } = buildWeeklyAdherenceFromMeals(
+      patientExperience.appState?.mealEntries,
+      3
     );
-  }, [pacienteId, paciente, patientRecord]);
+    const adherence = averageAdherence(items);
+    const latestGlucose = getLatestGlucose(patientExperience.glucoseReadings);
+    const glucoseValue = latestGlucose?.value ?? base.latestGlucose;
+
+    return {
+      ...base,
+      adherence: adherence || base.adherence,
+      latestGlucose: glucoseValue,
+      glucose12h: (patientExperience.glucoseReadings || []).slice(0, 12),
+      trendText: latestGlucose?.value
+        ? `Ultima leitura: ${latestGlucose.value} mg/dL`
+        : base.trendText,
+    };
+  }, [paciente, patientExperience, patientRecord]);
 
   const allMeals = useMemo(() => {
     return [...(currentPatient?.planMeals || []), ...extraMeals];
@@ -341,10 +395,6 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   return (
     <View style={styles.container}>
       <View style={styles.headerShell}>
-        <TouchableOpacity style={styles.backButton} onPress={() => navigation.goBack()}>
-          <Ionicons name="arrow-back" size={18} color={patientTheme.colors.text} />
-        </TouchableOpacity>
-
         <View style={styles.headerCard}>
           <View style={styles.headerMain}>
             <View style={styles.identityRow}>
@@ -363,9 +413,10 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         </View>
       </View>
 
-      <ScrollView
+      <RolagemComTeclado
         style={styles.scroll}
         contentContainerStyle={styles.content}
+        keyboardBottomBase={48}
         showsVerticalScrollIndicator={false}
       >
         {activeTab === 'overview' ? (
@@ -628,7 +679,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
             </SectionCard>
           </View>
         ) : null}
-      </ScrollView>
+      </RolagemComTeclado>
     </View>
   );
 }
@@ -643,18 +694,8 @@ const styles = StyleSheet.create({
     paddingTop: 16,
     paddingBottom: 8,
   },
-  backButton: {
-    width: 42,
-    height: 42,
-    borderRadius: 21,
-    backgroundColor: patientTheme.colors.surface,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-    ...patientShadow,
-  },
   headerCard: {
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.background,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
     gap: 14,
@@ -746,14 +787,16 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   messageBox: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.lg,
     marginBottom: 12,
     padding: 12,
   },
   messageBoxError: {
-    backgroundColor: '#fff2f2',
-    borderColor: '#f0d2d2',
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     marginBottom: 12,
@@ -776,6 +819,8 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: patientTheme.radius.lg,
     backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     ...patientShadow,
   },
   mealTop: {
@@ -847,6 +892,8 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: patientTheme.radius.lg,
     backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     ...patientShadow,
   },
   goalTop: {
@@ -887,6 +934,8 @@ const styles = StyleSheet.create({
     padding: 14,
     borderRadius: patientTheme.radius.lg,
     backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     ...patientShadow,
   },
   infoCardText: {

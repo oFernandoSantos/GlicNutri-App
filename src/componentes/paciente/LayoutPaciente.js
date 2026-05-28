@@ -7,12 +7,19 @@ import {
   StatusBar,
   Platform,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import BarraAbasPaciente, {
   PATIENT_TAB_BAR_HEIGHT,
   PATIENT_TAB_BAR_SPACE,
 } from './BarraAbasPaciente';
 import { patientTheme } from '../../temas/temaVisualPaciente';
+import { isPatientMainTabRoute } from '../../utilitarios/navegacaoAbas';
+import {
+  WrapperTeclado,
+  getKeyboardVerticalOffset,
+  useKeyboardBottomInset,
+} from '../comum/RolagemComTeclado';
+import GuardiaoSessaoPaciente from './GuardiaoSessaoPaciente';
 
 export default function PatientScreenLayout({
   navigation,
@@ -23,21 +30,46 @@ export default function PatientScreenLayout({
   children,
   rightAction,
   contentContainerStyle,
-  showTabBar = route?.name === 'HomePaciente',
+  showTabBar,
   scrollEnabled = true,
   footerOverlay,
+  topOverlay,
   refreshControl,
+  lockFixedContent = false,
+  keyboardAware = true,
+  backgroundColor,
 }) {
+  const insets = useSafeAreaInsets();
+  const hasFloatingFooterOverlay = Boolean(footerOverlay);
+  const shouldShowTabBar =
+    typeof showTabBar === 'boolean'
+      ? showTabBar
+      : isPatientMainTabRoute(route?.name) && !hasFloatingFooterOverlay;
   const showHeader = Boolean(title || subtitle || rightAction);
+  const tabBarExtra = shouldShowTabBar ? PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16 : 32;
+  const keyboardBottomPadding = useKeyboardBottomInset(tabBarExtra);
+  const keyboardOffset = getKeyboardVerticalOffset(insets);
 
   return (
+    <GuardiaoSessaoPaciente navigation={navigation} usuarioLogado={usuarioLogado}>
     <SafeAreaView
       edges={Platform.OS === 'web' ? undefined : []}
-      style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
+      style={[
+        styles.container,
+        Platform.OS === 'web' && styles.containerWeb,
+        backgroundColor ? { backgroundColor } : null,
+      ]}
     >
-      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
+      <StatusBar
+        barStyle="dark-content"
+        backgroundColor={backgroundColor || patientTheme.colors.background}
+      />
 
-      <View style={styles.body}>
+      <WrapperTeclado
+        style={styles.body}
+        enabled={keyboardAware && !lockFixedContent}
+        keyboardVerticalOffset={keyboardOffset}
+      >
         {showHeader ? (
           <View style={styles.header}>
             <View style={styles.headerText}>
@@ -54,12 +86,15 @@ export default function PatientScreenLayout({
             style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
             contentContainerStyle={[
               styles.content,
-              showTabBar && styles.contentWithTabBar,
+              shouldShowTabBar && styles.contentWithTabBar,
               Platform.OS === 'web' && styles.webContent,
+              keyboardAware && { paddingBottom: keyboardBottomPadding },
               contentContainerStyle,
             ]}
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
             nestedScrollEnabled
             refreshControl={refreshControl}
           >
@@ -69,9 +104,11 @@ export default function PatientScreenLayout({
           <View
             style={[
               styles.scroll,
-              styles.content,
               styles.fixedContent,
-              showTabBar && styles.contentWithTabBar,
+              styles.fixedContentPadding,
+              lockFixedContent && styles.fixedContentLocked,
+              shouldShowTabBar && styles.contentWithTabBar,
+              keyboardAware && { paddingBottom: keyboardBottomPadding },
               contentContainerStyle,
             ]}
           >
@@ -79,22 +116,31 @@ export default function PatientScreenLayout({
           </View>
         )}
 
+        {topOverlay ? (
+          <View
+            style={[styles.topOverlay, Platform.OS === 'web' && styles.topOverlayWeb]}
+            pointerEvents="box-none"
+          >
+            {topOverlay}
+          </View>
+        ) : null}
+
         {footerOverlay ? (
           <View
             style={[
               styles.footerOverlay,
               Platform.OS === 'web' && styles.footerOverlayWeb,
-              showTabBar && styles.footerOverlayWithTabBar,
-              Platform.OS === 'web' && showTabBar && styles.footerOverlayWithTabBarWeb,
+              shouldShowTabBar && styles.footerOverlayWithTabBar,
+              Platform.OS === 'web' && shouldShowTabBar && styles.footerOverlayWithTabBarWeb,
             ]}
             pointerEvents="box-none"
           >
             {footerOverlay}
           </View>
         ) : null}
-      </View>
+      </WrapperTeclado>
 
-      {showTabBar ? (
+      {shouldShowTabBar ? (
         <BarraAbasPaciente
           navigation={navigation}
           rotaAtual={route?.name}
@@ -102,6 +148,7 @@ export default function PatientScreenLayout({
         />
       ) : null}
     </SafeAreaView>
+    </GuardiaoSessaoPaciente>
   );
 }
 
@@ -161,8 +208,15 @@ const styles = StyleSheet.create({
   },
   fixedContent: {
     flex: 1,
-    flexGrow: 0,
     minHeight: 0,
+  },
+  fixedContentPadding: {
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 8,
+    paddingBottom: 36,
+  },
+  fixedContentLocked: {
+    overflow: 'hidden',
   },
   contentWithTabBar: {
     paddingBottom: PATIENT_TAB_BAR_HEIGHT + 32 + PATIENT_TAB_BAR_SPACE,
@@ -170,6 +224,17 @@ const styles = StyleSheet.create({
   webContent: {
     flexGrow: 1,
     minHeight: '100%',
+  },
+  topOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    zIndex: 120,
+  },
+  topOverlayWeb: {
+    position: 'fixed',
+    zIndex: 1200,
   },
   footerOverlay: {
     position: 'absolute',

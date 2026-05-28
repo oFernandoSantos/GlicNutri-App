@@ -24,6 +24,7 @@ import {
   getPatientId,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 
 export default function PacienteBemEstarScreen({
   navigation,
@@ -69,6 +70,7 @@ export default function PacienteBemEstarScreen({
 
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
+          ...mesclarLimitesDadosPaciente('resumo'),
         });
 
         if (!active) return;

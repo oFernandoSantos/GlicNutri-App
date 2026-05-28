@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
   Text,
@@ -23,16 +24,23 @@ import {
   addMedicationEntry,
   buildMonitorSeries,
   createDefaultAppState,
+  fetchMedicationEntries,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientId,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { EsqueletoBloco } from '../../componentes/comum/EsqueletoCarregamento';
+import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
-  fetchLibreViewReadings,
-  isLibreViewSyncConfigured,
-} from '../../servicos/servicoLibreView';
+  hasLibreLinkUpLinked,
+  syncLinkedLibreViewReadings,
+} from '../../servicos/servicoLibreViewAutoSync';
+import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
+import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
 import { buscarMedicamentosAnvisa } from '../../servicos/servicoMedicamentosAnvisa';
 import {
+  buildGlucoseFingerprint,
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
   prependCachedGlucoseReading,
@@ -560,7 +568,7 @@ const eventIcons = {
     library: 'material',
     icon: 'pill',
     color: '#ffffff',
-    backgroundColor: '#E50914',
+    backgroundColor: patientTheme.colors.info,
   },
   sleep: {
     library: 'ion',
@@ -593,16 +601,6 @@ function EventBadge({ event, compact = false }) {
       ) : (
         <Ionicons name={meta.icon} size={14} color={meta.color} />
       )}
-    </View>
-  );
-}
-
-function LibreSensorIcon() {
-  return (
-    <View style={styles.libreSensorIconOuter}>
-      <View style={styles.libreSensorIconMiddle}>
-        <View style={styles.libreSensorIconCenter} />
-      </View>
     </View>
   );
 }
@@ -1246,11 +1244,20 @@ export default function PacienteMonitoramentoScreen({
       ),
     [patientId, usuarioLogado]
   );
+  const monitoramentoFetchLimits = useMemo(
+    () => mesclarLimitesDadosPaciente('monitoramento'),
+    []
+  );
+  const cachedMonitoramentoInicial = useMemo(
+    () => (patientId ? getCachedPatientExperience(patientId, monitoramentoFetchLimits) : null),
+    [patientId, monitoramentoFetchLimits]
+  );
+  const monitoramentoCacheQuente = Boolean(cachedMonitoramentoInicial);
   const [range, setRange] = useState('Hoje');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(!monitoramentoCacheQuente);
   const [savingGlucose, setSavingGlucose] = useState(false);
   const [savingMedication, setSavingMedication] = useState(false);
-  const [syncingLibreView, setSyncingLibreView] = useState(false);
+  const [libreLinkLinked, setLibreLinkLinked] = useState(false);
   const [newGlucoseValue, setNewGlucoseValue] = useState('');
   const [manualChoiceVisible, setManualChoiceVisible] = useState(false);
   const [manualModalVisible, setManualModalVisible] = useState(false);
@@ -1299,10 +1306,20 @@ export default function PacienteMonitoramentoScreen({
   const [medicineTime, setMedicineTime] = useState('');
   const [medicineDays, setMedicineDays] = useState('');
   const [medicineContinuousUse, setMedicineContinuousUse] = useState(false);
-  const [patient, setPatient] = useState(null);
-  const [objectiveText, setObjectiveText] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [patient, setPatient] = useState(cachedMonitoramentoInicial?.patient || null);
+  const [objectiveText, setObjectiveText] = useState(
+    () => cachedMonitoramentoInicial?.clinicalObjective || ''
+  );
+  const [appState, setAppState] = useState(
+    () => cachedMonitoramentoInicial?.appState || createDefaultAppState()
+  );
+  const [glucoseReadings, setGlucoseReadings] = useState(() => {
+    const id = cachedMonitoramentoInicial?.patient?.id_paciente_uuid || patientId;
+    return mergeCachedGlucoseReadings(
+      cachedMonitoramentoInicial?.glucoseReadings || [],
+      getCachedGlucoseReadings(id)
+    );
+  });
   const [loadError, setLoadError] = useState(null);
   const [refreshing, setRefreshing] = useState(false);
   const [avisoUsuario, setAvisoUsuario] = useState(null);
@@ -1390,6 +1407,7 @@ export default function PacienteMonitoramentoScreen({
       const experience = await fetchPatientExperience(patientId, {
         patientContext: usuarioLogado,
         forceRefresh: options.forceRefresh === true,
+        ...monitoramentoFetchLimits,
       });
 
       const mergedReadings = mergeCachedGlucoseReadings(
@@ -1415,15 +1433,17 @@ export default function PacienteMonitoramentoScreen({
         'Não foi possível carregar o monitoramento. Verifique sua conexão com a internet e tente novamente.'
       );
     }
-  }, [canResolvePatient, patientId, usuarioLogado]);
+  }, [canResolvePatient, monitoramentoFetchLimits, patientId, usuarioLogado]);
 
   useEffect(() => {
     let active = true;
 
     async function load() {
       try {
-        setLoading(true);
-        await loadMonitoringData();
+        if (!monitoramentoCacheQuente) {
+          setLoading(true);
+        }
+        await loadMonitoringData({ forceRefresh: !monitoramentoCacheQuente });
       } finally {
         if (active) setLoading(false);
       }
@@ -1434,7 +1454,7 @@ export default function PacienteMonitoramentoScreen({
     return () => {
       active = false;
     };
-  }, [loadMonitoringData]);
+  }, [loadMonitoringData, monitoramentoCacheQuente]);
 
   const onRefreshMonitoramento = useCallback(async () => {
     setRefreshing(true);
@@ -1459,6 +1479,60 @@ export default function PacienteMonitoramentoScreen({
       setGlucoseReadings(nextReadings);
     });
   }, [activePatientId]);
+
+  useEffect(() => {
+    if (!activePatientId) return undefined;
+
+    let active = true;
+
+    hasLibreLinkUpLinked(activePatientId).then((linked) => {
+      if (!active) return;
+      setLibreLinkLinked(linked);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [activePatientId]);
+
+  useFocusEffect(
+    useCallback(() => {
+      if (route?.params?.openQuickRegister !== 'glucose') {
+        setManualChoiceVisible(false);
+      }
+
+      if (!activePatientId) {
+        return undefined;
+      }
+
+      let active = true;
+
+      hasLibreLinkUpLinked(activePatientId).then((linked) => {
+        if (!active) return;
+        setLibreLinkLinked(linked);
+
+        if (!linked) return;
+
+        syncLinkedLibreViewReadings({
+          patientId: activePatientId,
+          patientEmail: patient?.email_pac || usuarioLogado?.email_pac || usuarioLogado?.email,
+          actor: patient || usuarioLogado,
+          silent: true,
+        })
+          .then((result) => {
+            if (!active || !result?.readings?.length) return;
+            setGlucoseReadings(result.readings);
+          })
+          .catch((error) => {
+            console.log('Erro ao sincronizar LibreView ao abrir monitoramento:', error);
+          });
+      });
+
+      return () => {
+        active = false;
+      };
+    }, [activePatientId, patient, route?.params?.openQuickRegister, usuarioLogado])
+  );
 
   useEffect(() => {
     if (insulinCategory !== 'basal') {
@@ -2092,6 +2166,24 @@ export default function PacienteMonitoramentoScreen({
       return;
     }
 
+    const duplicateFingerprint = buildGlucoseFingerprint({
+      patientId: activePatientId,
+      date: selectedDate,
+      time: selectedTime,
+      value: parsedValue,
+    });
+    const hasDuplicateReading = mergeCachedGlucoseReadings(
+      getCachedGlucoseReadings(activePatientId)
+    ).some((item) => buildGlucoseFingerprint(item) === duplicateFingerprint);
+
+    if (hasDuplicateReading) {
+      setAvisoUsuario({
+        tipo: 'aviso',
+        texto: 'Ja existe um registro com a mesma data, hora e valor.',
+      });
+      return;
+    }
+
     try {
       setGlucoseConfirmVisible(false);
       setManualModalVisible(false);
@@ -2180,90 +2272,6 @@ export default function PacienteMonitoramentoScreen({
       });
     } finally {
       setSavingGlucose(false);
-    }
-  }
-
-  function isKnownReading(reading, existingReadings) {
-    return existingReadings.some(
-      (item) =>
-        item.value === reading.value &&
-        item.date === reading.date &&
-        String(item.time).slice(0, 5) === String(reading.time).slice(0, 5)
-    );
-  }
-
-  async function handleSyncLibreView() {
-    if (!activePatientId) {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto: 'Paciente sem identificador para sincronizar o LibreView.',
-      });
-      return;
-    }
-
-    if (!isLibreViewSyncConfigured()) {
-      setAvisoUsuario({
-        tipo: 'aviso',
-        texto:
-          'LibreView não configurado: defina EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL no backend para sincronizar.',
-      });
-      return;
-    }
-
-    try {
-      setSyncingLibreView(true);
-
-      const libreReadings = await fetchLibreViewReadings({
-        patientId: activePatientId,
-        patientEmail: patient?.email_pac || usuarioLogado?.email_pac || usuarioLogado?.email,
-      });
-      const newReadings = libreReadings.filter(
-        (reading) => !isKnownReading(reading, glucoseReadings)
-      );
-
-      for (const reading of newReadings) {
-        await addGlucoseReading(activePatientId, reading.value, {
-          date: reading.date,
-          time: reading.time,
-          actor: patient || usuarioLogado,
-          auditSource: 'libreview_sync',
-        });
-      }
-
-      const updatedReadings = await fetchPatientExperience(activePatientId, {
-        patientContext: usuarioLogado,
-        forceRefresh: true,
-      });
-      const mergedReadings = mergeCachedGlucoseReadings(
-        updatedReadings.glucoseReadings,
-        getCachedGlucoseReadings(activePatientId)
-      );
-
-      setPatient(updatedReadings.patient || patient);
-      setObjectiveText(updatedReadings.clinicalObjective || objectiveText);
-      setAppState(updatedReadings.appState);
-      setGlucoseReadings(mergedReadings);
-      replaceCachedGlucoseReadings(activePatientId, mergedReadings);
-
-      setAvisoUsuario({
-        tipo: 'sucesso',
-        texto: newReadings.length
-          ? `LibreView: ${newReadings.length} leitura(s) importada(s).`
-          : 'LibreView sincronizado: nenhuma leitura nova encontrada.',
-      });
-    } catch (error) {
-      console.log('Erro ao sincronizar LibreView:', error);
-      setAvisoUsuario({
-        tipo: 'erro',
-        texto:
-          'Não foi possível sincronizar o LibreView. Verifique a conexão e tente novamente.',
-      });
-      AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Sincronizacao LibreView', error, {
-        usuario: patient || usuarioLogado,
-        complemento: 'Falha ao sincronizar leituras do LibreView',
-      });
-    } finally {
-      setSyncingLibreView(false);
     }
   }
 
@@ -2499,6 +2507,8 @@ export default function PacienteMonitoramentoScreen({
         medicationEntries: [historyMedicationEntry, ...(current.medicationEntries || [])],
       }));
 
+      let savedStateSnapshot = appState;
+
       try {
         const savedState = await savePatientAppState({
           patientId: activePatientId,
@@ -2511,6 +2521,7 @@ export default function PacienteMonitoramentoScreen({
           patientContext: usuarioLogado,
         });
 
+        savedStateSnapshot = savedState.appState || savedStateSnapshot;
         setPatient(savedState.patient || patient);
         setObjectiveText(savedState.clinicalObjective || objectiveText);
         setAppState(savedState.appState);
@@ -2519,21 +2530,36 @@ export default function PacienteMonitoramentoScreen({
       }
 
       try {
-        const refreshedExperience = await fetchPatientExperience(activePatientId, {
-          patientContext: usuarioLogado,
-          currentPatient: patient,
-          forceRefresh: true,
-        });
+        const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
+        const medicationLimit = monitorLimits.medicationLimit || 80;
+        const medicationEntries = await fetchMedicationEntries(
+          activePatientId,
+          medicationLimit
+        );
 
-        setPatient(refreshedExperience.patient);
-        setObjectiveText(refreshedExperience.clinicalObjective);
-        setAppState(refreshedExperience.appState);
-      } catch (refreshError) {
-        console.log('Erro ao recarregar medicacoes apos salvar:', refreshError);
         setAppState((current) => ({
           ...current,
-          medicationEntries: [savedMedication, ...(current.medicationEntries || [])],
+          medicationEntries,
         }));
+        replaceCachedPatientAppState(activePatientId, {
+          ...savedStateSnapshot,
+          medicationEntries,
+        });
+      } catch (refreshError) {
+        console.log('Erro ao recarregar medicacoes apos salvar:', refreshError);
+        setAppState((current) => {
+          const existing = current.medicationEntries || [];
+          const savedId = savedMedication?.databaseId || savedMedication?.id;
+          const alreadyListed = existing.some(
+            (item) => (item?.databaseId || item?.id) === savedId
+          );
+          return {
+            ...current,
+            medicationEntries: alreadyListed
+              ? existing
+              : [savedMedication, ...existing],
+          };
+        });
       }
       setMedicationLabel('');
       setMedicationKind('');
@@ -2597,13 +2623,13 @@ export default function PacienteMonitoramentoScreen({
       <View style={[styles.currentCard, { backgroundColor: latestStatus.cardColor }]}>
         <View style={styles.currentHeader}>
           <View>
-            <Text style={[styles.currentEyebrow, { color: latestStatus.mutedTextColor }]}>
+            <Text style={[styles.currentEyebrow, { color: patientTheme.colors.onPrimary }]}>
               Glicose Agora
             </Text>
-            <Text style={[styles.currentValue, { color: latestStatus.textColor }]}>
+            <Text style={[styles.currentValue, { color: patientTheme.colors.onPrimary }]}>
               {latestReading ? `${latestReading.value} mg/dL` : '-- mg/dL'}
             </Text>
-            <Text style={[styles.currentTime, { color: latestStatus.mutedTextColor }]}>
+            <Text style={[styles.currentTime, { color: patientTheme.colors.onPrimary }]}>
               {latestReading
                 ? `Última leitura às ${String(latestReading.time).slice(0, 5)}`
                 : 'Sem leitura registrada'}
@@ -2611,8 +2637,8 @@ export default function PacienteMonitoramentoScreen({
           </View>
 
           <View style={[styles.statusPill, { backgroundColor: latestStatus.badgeColor }]}>
-            <Ionicons name="alert-circle-outline" size={14} color={latestStatus.textColor} />
-            <Text style={[styles.statusPillText, { color: latestStatus.textColor }]}>
+            <Ionicons name="alert-circle-outline" size={14} color={patientTheme.colors.onPrimary} />
+            <Text style={[styles.statusPillText, { color: patientTheme.colors.onPrimary }]}>
               {latestStatus.label}
             </Text>
           </View>
@@ -2700,7 +2726,13 @@ export default function PacienteMonitoramentoScreen({
 
         {loading ? (
           <View style={styles.loadingArea}>
-            <ActivityIndicator color={patientTheme.colors.primaryDark} />
+            <EsqueletoBloco width="100%" height={168} borderRadius={16} />
+            <EsqueletoBloco
+              width="72%"
+              height={12}
+              borderRadius={8}
+              style={{ marginTop: 12 }}
+            />
           </View>
         ) : series.length > 0 ? (
           <GlucoseLineChart series={series} />
@@ -2736,22 +2768,37 @@ export default function PacienteMonitoramentoScreen({
       </TouchableOpacity>
 
       <TouchableOpacity
-        style={styles.libreViewStandaloneButton}
-        onPress={handleSyncLibreView}
-        disabled={syncingLibreView || !activePatientId}
+        style={[
+          styles.libreViewStandaloneButton,
+          libreLinkLinked && styles.libreViewStandaloneButtonLinked,
+        ]}
+        onPress={() =>
+          navigation.navigate('PacientePerfilIntegracao', {
+            usuarioLogado,
+          })
+        }
+        disabled={!activePatientId}
       >
-        {syncingLibreView ? (
-          <ActivityIndicator color="#1F2F6B" />
-        ) : (
-          <>
-            <View style={styles.libreViewStandaloneIcon}>
-              <LibreSensorIcon />
-            </View>
+        <>
+          <View style={styles.libreViewStandaloneIcon}>
+            <IconeSensorLibre />
+          </View>
+          <View style={styles.libreViewStandaloneCopy}>
             <Text style={[styles.currentActionText, styles.libreViewActionText]}>
               FreeStyle Libre
             </Text>
-          </>
-        )}
+            <Text style={styles.libreViewStandaloneSubtitle}>
+              {libreLinkLinked
+                ? 'Vinculado · toque para gerenciar integração'
+                : 'Toque para integrar com LibreLinkUp'}
+            </Text>
+          </View>
+          {libreLinkLinked ? (
+            <Ionicons name="checkmark-circle" size={20} color={LIBRE_BLUE} />
+          ) : (
+            <Ionicons name="chevron-forward" size={20} color={LIBRE_BLUE} />
+          )}
+        </>
       </TouchableOpacity>
 
       <Modal
@@ -4282,50 +4329,43 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   libreViewActionButton: {
-    backgroundColor: '#FFE600',
+    backgroundColor: LIBRE_YELLOW,
   },
   libreViewStandaloneButton: {
     alignItems: 'center',
-    backgroundColor: '#FFE600',
+    backgroundColor: LIBRE_YELLOW,
     borderRadius: 18,
     flexDirection: 'row',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
     marginTop: 14,
-    minHeight: 46,
+    minHeight: 58,
     position: 'relative',
     paddingHorizontal: 18,
+    paddingVertical: 10,
+    gap: 12,
+  },
+  libreViewStandaloneButtonLinked: {
+    borderWidth: 1.5,
+    borderColor: LIBRE_BLUE,
   },
   libreViewStandaloneIcon: {
-    left: 12,
-    position: 'absolute',
+    marginLeft: 2,
+  },
+  libreViewStandaloneCopy: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  libreViewStandaloneSubtitle: {
+    color: LIBRE_BLUE_SOFT,
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 2,
   },
   libreViewActionText: {
-    color: '#1F2F6B',
+    color: LIBRE_BLUE,
     fontSize: 15,
     fontWeight: '700',
-    textAlign: 'center',
-  },
-  libreSensorIconOuter: {
-    alignItems: 'center',
-    backgroundColor: '#E6CF00',
-    borderRadius: 15,
-    height: 30,
-    justifyContent: 'center',
-    width: 30,
-  },
-  libreSensorIconMiddle: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    borderRadius: 10,
-    height: 20,
-    justifyContent: 'center',
-    width: 20,
-  },
-  libreSensorIconCenter: {
-    backgroundColor: '#E6CF00',
-    borderRadius: 4,
-    height: 8,
-    width: 8,
+    textAlign: 'left',
   },
   medicationQuickCard: {
     alignItems: 'center',
@@ -4340,7 +4380,7 @@ const styles = StyleSheet.create({
   },
   medicationIcon: {
     alignItems: 'center',
-    backgroundColor: '#E50914',
+    backgroundColor: patientTheme.colors.info,
     borderRadius: 21,
     height: 42,
     justifyContent: 'center',

@@ -12,7 +12,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { INTRO_SEEN_STORAGE_KEY } from '../../constantes/chavesArmazenamento';
+import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
 import { supabase } from '../../servicos/configSupabase';
+import { salvarSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
 
 const CTA_WIDTH = 330;
 const CTA_HEIGHT = 56;
@@ -84,6 +86,7 @@ export default function TelaIntroducao({ navigation, onIntroFinished }) {
 
         if (isMounted && data?.session?.user && !checkedSession.current) {
           checkedSession.current = true;
+          const usuarioPaciente = (await salvarSessaoPaciente(data.session.user)) || data.session.user;
 
           navigation.reset({
             index: 0,
@@ -91,7 +94,7 @@ export default function TelaIntroducao({ navigation, onIntroFinished }) {
               {
                 name: 'HomePaciente',
                 params: {
-                  usuarioLogado: data.session.user,
+                  usuarioLogado: usuarioPaciente,
                   loginSocial: true,
                 },
               },
@@ -308,7 +311,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   libreSlide: {
-    backgroundColor: '#FFE600',
+    backgroundColor: LIBRE_YELLOW,
     alignItems: 'center',
   },
   libreContent: {
@@ -319,7 +322,7 @@ const styles = StyleSheet.create({
     paddingTop: 84,
   },
   libreOuterCircle: {
-    backgroundColor: '#E6CF00',
+    backgroundColor: LIBRE_YELLOW,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -329,7 +332,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   libreCenterCircle: {
-    backgroundColor: '#E6CF00',
+    backgroundColor: LIBRE_YELLOW,
   },
   libreInfoArea: {
     position: 'absolute',
@@ -341,7 +344,7 @@ const styles = StyleSheet.create({
     paddingBottom: 34,
   },
   libreBrandText: {
-    color: '#1F2F6B',
+    color: LIBRE_BLUE,
     fontSize: 40,
     fontWeight: '700',
     lineHeight: 46,
@@ -351,26 +354,20 @@ const styles = StyleSheet.create({
     marginTop: 26,
   },
   libreTitleText: {
-    color: '#FFFFFF',
+    color: LIBRE_BLUE,
     fontSize: 40,
     fontWeight: '400',
     lineHeight: 46,
     letterSpacing: 0.3,
     maxWidth: '92%',
-    textShadowColor: 'rgba(0,0,0,0.28)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
   },
   libreSubtitleText: {
-    color: '#FFFFFF',
+    color: LIBRE_BLUE_SOFT,
     fontSize: 16,
     fontWeight: '600',
     marginTop: 18,
     lineHeight: 24,
     maxWidth: '92%',
-    textShadowColor: 'rgba(0,0,0,0.42)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 5,
   },
   slideImage: {
     width: '100%',
