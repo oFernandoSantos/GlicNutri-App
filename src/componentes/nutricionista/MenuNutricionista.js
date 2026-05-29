@@ -69,7 +69,7 @@ export default function NutricionistaDrawer({
             </View>
 
             <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Ionicons name="close" size={24} color={patientTheme.colors.onPrimary} />
+              <Ionicons name="close" size={24} color={patientTheme.colors.text} />
             </TouchableOpacity>
           </View>
 
@@ -177,10 +177,11 @@ const styles = StyleSheet.create({
     margin: 16,
     padding: 18,
     borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.primary,
+    backgroundColor: patientTheme.colors.surface,
     flexDirection: 'row',
     alignItems: 'flex-start',
     ...patientShadow,
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   headerCompact: {
     margin: 12,
@@ -190,7 +191,7 @@ const styles = StyleSheet.create({
     width: 50,
     height: 50,
     borderRadius: 25,
-    backgroundColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: patientTheme.colors.backgroundSoft,
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
@@ -202,7 +203,7 @@ const styles = StyleSheet.create({
     marginRight: 10,
   },
   avatarText: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
     fontSize: 20,
     fontWeight: '700',
   },
@@ -213,7 +214,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   title: {
-    color: 'rgba(255,255,255,0.82)',
+    color: patientTheme.colors.textMuted,
     fontSize: 12,
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -223,7 +224,7 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   userName: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
     fontSize: 18,
     fontWeight: '700',
   },
@@ -231,7 +232,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
   },
   userSubtitle: {
-    color: 'rgba(255,255,255,0.9)',
+    color: patientTheme.colors.textMuted,
     fontSize: 12,
     lineHeight: 18,
     marginTop: 4,
@@ -262,7 +263,7 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
   },
   menuItemActive: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
   },
   menuLabel: {
     flexShrink: 1,
@@ -276,7 +277,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   menuLabelActive: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.text,
   },
   footer: {
     marginTop: 'auto',

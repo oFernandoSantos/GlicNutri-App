@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, FlatList, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import LayoutMedico from '../../componentes/medico/LayoutMedico';
-import { nutriTheme as theme } from '../../temas/temaVisualNutricionista';
+import { medicoTheme as theme } from '../../temas/temaVisualNutricionista';
 import { getMedicoId, listPatientsByDoctor } from '../../servicos/servicoVinculosMedico';
 
 export default function TelaPacientesMedico({ navigation, route }) {

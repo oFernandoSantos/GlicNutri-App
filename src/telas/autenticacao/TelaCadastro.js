@@ -56,6 +56,7 @@ const googleLogo = {
 
 const AUTH_WEB_MAX_WIDTH = 440;
 const AUTH_ACCENT_GREEN = '#24d393';
+const LABEL_PROFISSIONAL = 'Profissional da Saúde';
 
 function createCadastroFieldErrors() {
   return {
@@ -73,7 +74,7 @@ function createCadastroFieldErrors() {
 
 export default function TelaCadastroFixed({ navigation, route }) {
   const roleInicial =
-    route?.params?.roleInicial === 'Nutricionista' ? 'Nutricionista' : 'Paciente';
+    route?.params?.roleInicial === 'Paciente' ? 'Paciente' : 'Nutricionista';
 
   const [role, setRole] = useState(roleInicial);
   const [nome, setNome] = useState('');
@@ -390,10 +391,10 @@ export default function TelaCadastroFixed({ navigation, route }) {
         return validarNomeCompleto(nomeLimpo);
       case 'documento':
         if (!documentoBruto) {
-          return `Informe ${isPaciente ? 'o CPF' : 'o CRN/UF'}.`;
+          return `Informe ${isPaciente ? 'o CPF' : 'o CRN/UF ou CRM/UF'}.`;
         }
         if (!isPaciente && !validarCrn(documentoFormatado)) {
-          return 'Digite o CRN no formato 12345/SP.';
+          return 'Digite o CRN/UF ou CRM/UF no formato 12345/SP.';
         }
         if (isPaciente && !validarCpf(documentoFormatado)) {
           return 'Digite um CPF valido.';
@@ -418,7 +419,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
       case 'codigoAcessoNutricionista':
         if (isPaciente || !exigirCodigoAcesso) return '';
         if (!codigoAcessoNormalizado) {
-          return 'Informe o codigo de acesso da empresa para cadastrar a nutricionista.';
+          return 'Informe o codigo de acesso da empresa para cadastrar o profissional.';
         }
         return !isValidNutritionistAccessCode(codigoAcessoNormalizado)
           ? 'Codigo de acesso invalido. Use o codigo fornecido pela empresa.'
@@ -530,11 +531,11 @@ export default function TelaCadastroFixed({ navigation, route }) {
     if (error) throw error;
 
     if ((data || []).some((item) => item.crm_numero === crnLimpo)) {
-      throw new Error('Ja existe um nutricionista cadastrado com esse CRN/UF.');
+      throw new Error('Ja existe um profissional da saúde cadastrado com esse CRN/UF ou CRM/UF.');
     }
 
     if ((data || []).some((item) => item.email_acesso === emailLimpo)) {
-      throw new Error('Ja existe um nutricionista cadastrado com esse e-mail.');
+      throw new Error('Ja existe um profissional da saúde cadastrado com esse e-mail.');
     }
   };
 
@@ -714,7 +715,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
 
         if (error) throw error;
         if (!data?.id_nutricionista_uuid) {
-          throw new Error('O nutricionista nao foi confirmado no banco de dados.');
+          throw new Error('O profissional da saúde nao foi confirmado no banco de dados.');
         }
 
         await registrarLogAuditoria({
@@ -736,7 +737,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
       const mensagemSucesso =
         isPaciente
           ? 'Paciente cadastrado com sucesso.'
-          : 'Nutricionista cadastrado com sucesso.';
+          : 'Profissional da saúde cadastrado com sucesso.';
 
       limparFormulario();
       setMensagemCadastroSucesso(
@@ -999,7 +1000,14 @@ export default function TelaCadastroFixed({ navigation, route }) {
             <View style={styles.card} onLayout={registerScrollContainer}>
             <Text style={styles.title}>Crie sua conta</Text>
 
-            <SeletorPerfil role={role} onChangeRole={trocarPerfil} />
+            <SeletorPerfil
+              role={role}
+              opcoes={[
+                'Paciente',
+                { value: 'Nutricionista', label: LABEL_PROFISSIONAL },
+              ]}
+              onChangeRole={trocarPerfil}
+            />
 
             <Text style={styles.label}>Nome Completo</Text>
             <TextInput
@@ -1022,7 +1030,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
             />
             {renderFieldError('nome')}
 
-            <Text style={styles.label}>{isPaciente ? 'CPF' : 'CRN/UF'}</Text>
+            <Text style={styles.label}>{isPaciente ? 'CPF' : 'CRN/UF ou CRM/UF'}</Text>
             <TextInput
               style={getInputStyle('documento', fieldErrors.documento)}
               value={documento}
@@ -1348,7 +1356,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
                     <Text style={styles.modalTitle}>Codigo de Acesso da Empresa</Text>
                     <Text style={styles.modalDescription}>
                       Digite o codigo fornecido pela empresa para liberar o cadastro da
-                      nutricionista.
+                      profissional da saúde.
                     </Text>
 
                     <TextInput

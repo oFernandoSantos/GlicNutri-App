@@ -62,15 +62,17 @@ const googleLogo = {
   uri: 'https://img.icons8.com/?size=100&id=xoyhGXWmHnqX&format=png&color=000000',
 };
 
+const ROLE_PROFISSIONAL = 'Profissional da Saúde';
+
 export default function TelaLogin({ navigation, route, session }) {
   const isAdminAccess = route?.params?.roleInicial === 'Admin';
   const roleInicial =
     route?.params?.roleInicial === 'Admin'
       ? 'Admin'
-      : route?.params?.roleInicial === 'Nutricionista'
-      ? 'Nutricionista'
-      : route?.params?.roleInicial === 'Medico'
-      ? 'Medico'
+      : route?.params?.roleInicial === 'Nutricionista' ||
+          route?.params?.roleInicial === 'Medico' ||
+          route?.params?.roleInicial === ROLE_PROFISSIONAL
+        ? ROLE_PROFISSIONAL
       : 'Paciente';
 
   const [role, setRole] = useState(roleInicial);
@@ -131,9 +133,19 @@ export default function TelaLogin({ navigation, route, session }) {
     const senhaLimpa = senhaValor.trim();
 
     if (!identificadorLimpo) {
-      proximosErros.identificador = 'Informe o e-mail cadastrado.';
-    } else if (!validarEmail(identificadorLimpo)) {
-      proximosErros.identificador = 'Digite um e-mail valido para continuar.';
+      proximosErros.identificador =
+        role === ROLE_PROFISSIONAL
+          ? 'Informe o e-mail cadastrado.'
+          : 'Informe o e-mail cadastrado.';
+    } else if (
+      role === ROLE_PROFISSIONAL
+        ? !validarEmail(identificadorLimpo)
+        : !validarEmail(identificadorLimpo)
+    ) {
+      proximosErros.identificador =
+        role === ROLE_PROFISSIONAL
+          ? 'Digite um e-mail valido para continuar.'
+          : 'Digite um e-mail valido para continuar.';
     }
 
     if (!senhaLimpa) {
@@ -169,6 +181,36 @@ export default function TelaLogin({ navigation, route, session }) {
     identificadorInformado,
     senhaInformada
   ) {
+    if (perfil === ROLE_PROFISSIONAL) {
+      const medicoResult = await buscarUsuarioPorCredenciais(
+        'Medico',
+        identificadorInformado,
+        senhaInformada
+      );
+
+      if (medicoResult.usuario) {
+        return medicoResult;
+      }
+
+      const nutriResult = await buscarUsuarioPorCredenciais(
+        'Nutricionista',
+        identificadorInformado,
+        senhaInformada
+      );
+
+      if (nutriResult.usuario) {
+        return nutriResult;
+      }
+
+      return {
+        usuario: null,
+        motivo:
+          medicoResult.motivo === 'senha_incorreta' || nutriResult.motivo === 'senha_incorreta'
+            ? 'senha_incorreta'
+            : 'usuario_nao_encontrado',
+      };
+    }
+
     if (perfil === 'Medico') {
       const { data, error } = await supabase.rpc('verificar_login_medico', {
         p_identificador: identificadorInformado.trim(),
@@ -238,7 +280,10 @@ export default function TelaLogin({ navigation, route, session }) {
                 ...usuarioEncontrado,
                 tipo_perfil: 'admin',
               })
-            : sanitizeSensitivePatientData(usuarioEncontrado);
+            : sanitizeSensitivePatientData({
+                ...usuarioEncontrado,
+                tipo_perfil: perfil.toLowerCase(),
+              });
 
         return {
           usuario: usuarioSanitizado,
@@ -344,7 +389,7 @@ export default function TelaLogin({ navigation, route, session }) {
       if (!usuario) {
         registrarLogAuditoria({
           actor: null,
-          actorType: role === 'Nutricionista' ? 'nutricionista' : 'paciente',
+          actorType: role === 'Paciente' ? 'paciente' : 'anonimo',
           action: 'login_falha_credencial',
           entity: 'sessao',
           entityId: null,
@@ -361,11 +406,9 @@ export default function TelaLogin({ navigation, route, session }) {
               ? ''
               : role === 'Paciente'
                 ? 'Paciente nao encontrado. Confira o e-mail informado.'
-                : role === 'Nutricionista'
-                  ? 'Nutricionista nao encontrado. Confira o e-mail informado.'
-                  : role === 'Medico'
-                    ? 'Medico nao encontrado. Confira o e-mail ou CRM.'
-                    : 'Administrador nao encontrado. Confira o e-mail informado.',
+                : role === ROLE_PROFISSIONAL
+                  ? 'Profissional da saúde nao encontrado. Confira o e-mail informado.'
+                  : 'Administrador nao encontrado. Confira o e-mail informado.',
           senha:
             motivo === 'senha_incorreta'
               ? 'Senha incorreta. Confira a senha digitada e tente novamente.'
@@ -428,18 +471,29 @@ export default function TelaLogin({ navigation, route, session }) {
         return;
       }
 
+      const perfilResolvido = usuario?.tipo_perfil;
+      const perfilLogin =
+        perfilResolvido === 'medico'
+          ? 'Medico'
+          : perfilResolvido === 'nutricionista'
+            ? 'Nutricionista'
+            : 'Paciente';
       const actorTipo =
-        role === 'Paciente' ? 'paciente' : role === 'Medico' ? 'medico' : 'nutricionista';
+        perfilResolvido === 'medico'
+          ? 'medico'
+          : perfilResolvido === 'nutricionista'
+            ? 'nutricionista'
+            : 'paciente';
       const loginOkAction =
-        role === 'Paciente'
-          ? 'login_sucesso_paciente'
-          : role === 'Medico'
-            ? 'login_sucesso_medico'
-            : 'login_sucesso_nutricionista';
+        perfilResolvido === 'medico'
+          ? 'login_sucesso_medico'
+          : perfilResolvido === 'nutricionista'
+            ? 'login_sucesso_nutricionista'
+            : 'login_sucesso_paciente';
       const sessaoEntityId =
-        role === 'Paciente'
+        perfilResolvido === 'paciente'
           ? usuario?.id_paciente_uuid || null
-          : role === 'Medico'
+          : perfilResolvido === 'medico'
             ? usuario?.id_medico_uuid || null
             : usuario?.id_nutricionista_uuid || null;
 
@@ -456,12 +510,12 @@ export default function TelaLogin({ navigation, route, session }) {
 
       let usuarioSessao = usuario;
 
-      if (role === 'Nutricionista') {
+      if (perfilResolvido === 'nutricionista') {
         usuarioSessao = await salvarSessaoNutricionista(usuario);
         if (route?.params?.onNutriLogin) {
           route.params.onNutriLogin(usuarioSessao);
         }
-      } else if (role === 'Medico') {
+      } else if (perfilResolvido === 'medico') {
         usuarioSessao = await salvarSessaoMedico(usuario);
         if (route?.params?.onMedicoLogin) {
           route.params.onMedicoLogin(usuarioSessao);
@@ -475,7 +529,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
       if (usuario?.tipo_perfil !== 'admin') {
         const rpcToken = await emitirSessaoRpcPosCredencial({
-          role,
+          role: perfilLogin,
           identificador,
           senha,
         });
@@ -487,11 +541,11 @@ export default function TelaLogin({ navigation, route, session }) {
       }
 
       const rotaDestino =
-        role === 'Paciente' && !(await hasPatientOnboardingSeen(usuario))
+        perfilResolvido === 'paciente' && !(await hasPatientOnboardingSeen(usuario))
           ? 'PacienteOnboarding'
-          : role === 'Paciente'
+          : perfilResolvido === 'paciente'
             ? 'HomePaciente'
-            : role === 'Medico'
+            : perfilResolvido === 'medico'
               ? 'HomeMedico'
               : 'HomeNutricionista';
 
@@ -863,6 +917,10 @@ export default function TelaLogin({ navigation, route, session }) {
     fontWeight: 'bold',
   };
 
+  const profissionalSelecionado = role === ROLE_PROFISSIONAL;
+  const identificadorLabel = profissionalSelecionado ? 'E-mail cadastrado' : 'E-mail cadastrado';
+  const identificadorPlaceholder = profissionalSelecionado ? 'email@exemplo.com' : 'email@exemplo.com';
+
   return (
     <SafeAreaView edges={Platform.OS === 'web' ? undefined : []} style={safeAreaStyle}>
       <KeyboardAvoidingView
@@ -905,7 +963,7 @@ export default function TelaLogin({ navigation, route, session }) {
 
         <SeletorPerfil
           role={role}
-          opcoes={isAdminAccess ? ['Paciente', 'Nutricionista'] : ['Paciente', 'Nutricionista', 'Medico']}
+          opcoes={['Paciente', { value: ROLE_PROFISSIONAL, label: 'Profissional da Saúde' }]}
           onChangeRole={(perfil) => {
             setRole(perfil);
             setIdentificador('');
@@ -915,14 +973,14 @@ export default function TelaLogin({ navigation, route, session }) {
           }}
         />
 
-        <Text style={labelStyle}>E-mail cadastrado</Text>
+        <Text style={labelStyle}>{identificadorLabel}</Text>
         <TextInput
           style={[
             inputStyle,
             fieldErrors.identificador ? inputErrorStyle : null,
             focusedField === 'identificador' ? inputFocusBorder : null,
           ]}
-          placeholder="email@exemplo.com"
+          placeholder={identificadorPlaceholder}
           placeholderTextColor="#999"
           value={identificador}
           onChangeText={handleChangeIdentificador}

@@ -1241,14 +1241,16 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   bubbleMine: {
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.surfaceBorder,
+    borderWidth: 1,
   },
   bubbleText: {
     color: patientTheme.colors.text,
     lineHeight: 21,
   },
   bubbleTextMine: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
     fontWeight: '700',
   },
   bubbleTime: {
@@ -1258,7 +1260,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   bubbleTimeMine: {
-    color: 'rgba(255,255,255,0.85)',
+    color: patientTheme.colors.textMuted,
   },
   inputRow: {
     flexShrink: 0,
@@ -1296,7 +1298,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
     alignItems: 'center',
     justifyContent: 'center',
   },

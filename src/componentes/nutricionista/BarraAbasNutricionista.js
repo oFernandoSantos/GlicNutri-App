@@ -7,6 +7,8 @@ import { navigateNutriTab } from '../../utilitarios/navegacaoAbas';
 
 export const NUTRI_TAB_BAR_HEIGHT = 64;
 export const NUTRI_TAB_BAR_SPACE = 14;
+const TAB_HIGHLIGHT_COLOR = '#4fdfa3';
+const TAB_ACTIVE_BACKGROUND = '#FFFFFF';
 
 const abasPrincipais = [
   { rota: 'NutricionistaAgenda', rotulo: 'Agenda', icone: 'calendar-outline' },
@@ -51,7 +53,7 @@ export default function BarraAbasNutricionista({
           return (
             <Pressable
               key={aba.rota}
-              style={[styles.aba, ativo && styles.abaAtiva]}
+              style={styles.aba}
               accessibilityRole="tab"
               accessibilityState={{ selected: ativo }}
               accessibilityLabel={`Aba ${aba.rotulo}${ativo ? ', selecionada' : ''}`}
@@ -66,14 +68,19 @@ export default function BarraAbasNutricionista({
                 }
               }}
             >
-              <Ionicons
-                name={aba.icone}
-                size={22}
-                color={ativo ? patientTheme.colors.onPrimary : patientTheme.colors.textMuted}
-              />
-              <Text style={[styles.rotuloAba, ativo && styles.rotuloAbaAtivo]}>
-                {aba.rotulo}
-              </Text>
+              <View style={styles.abaInner}>
+                <View style={[styles.iconeAbaWrap, ativo && styles.iconeAbaWrapAtivo]}>
+                  <View style={[styles.iconeAbaInner, ativo && styles.iconeAbaInnerAtivo]}>
+                    <Ionicons
+                      name={aba.icone}
+                      size={ativo ? 24 : 22}
+                      color={ativo ? TAB_HIGHLIGHT_COLOR : '#98A2A7'}
+                    />
+                    {ativo ? <Text style={styles.rotuloAbaDentroAtivo}>{aba.rotulo}</Text> : null}
+                  </View>
+                </View>
+                {!ativo ? <Text style={styles.rotuloAba}>{aba.rotulo}</Text> : null}
+              </View>
             </Pressable>
           );
         })}
@@ -91,51 +98,82 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: 40,
     elevation: 14,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    backgroundColor: patientTheme.colors.background,
     borderTopWidth: 1,
-    borderTopColor: patientTheme.colors.surfaceBorder,
+    borderTopColor: '#FFFFFF',
   },
   barra: {
     width: '100%',
-    minHeight: NUTRI_TAB_BAR_HEIGHT,
-    paddingTop: 7,
-    paddingBottom: 7,
-    paddingHorizontal: 8,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    minHeight: 58,
+    paddingTop: 1,
+    paddingBottom: 3,
+    paddingHorizontal: 6,
+    backgroundColor: patientTheme.colors.background,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     ...patientShadow,
-    borderColor: patientTheme.colors.surfaceBorder,
+    borderColor: '#FFFFFF',
+    zIndex: 80,
   },
   aba: {
     flex: 1,
-    height: 50,
-    marginHorizontal: 2,
-    borderRadius: patientTheme.radius.lg,
+    height: 48,
+    marginHorizontal: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 4,
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
+    paddingVertical: 3,
+    overflow: 'visible',
   },
-  abaAtiva: {
-    backgroundColor: patientTheme.colors.primaryDark,
-    borderColor: patientTheme.colors.primaryDark,
-    elevation: 3,
-    shadowColor: patientTheme.colors.primaryDark,
-    shadowOpacity: 0.22,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+  abaInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconeAbaWrap: {
+    alignItems: 'center',
+    borderRadius: 20,
+    height: 34,
+    justifyContent: 'center',
+    width: 44,
+  },
+  iconeAbaInner: {
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  iconeAbaWrapAtivo: {
+    backgroundColor: TAB_ACTIVE_BACKGROUND,
+    borderColor: TAB_HIGHLIGHT_COLOR,
+    borderWidth: 1.5,
+    borderRadius: 34,
+    elevation: 8,
+    height: 68,
+    justifyContent: 'center',
+    marginTop: -13,
+    shadowColor: TAB_HIGHLIGHT_COLOR,
+    shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.45,
+    shadowRadius: 10,
+    width: 68,
+  },
+  iconeAbaInnerAtivo: {
+    alignItems: 'center',
+    gap: 4,
+    justifyContent: 'center',
+    transform: [{ translateY: -2 }],
   },
   rotuloAba: {
-    marginTop: 3,
-    fontSize: 11,
-    fontWeight: '700',
-    color: patientTheme.colors.textMuted,
+    marginTop: 1,
+    fontSize: 10,
+    fontWeight: '500',
+    color: '#8B95A1',
   },
-  rotuloAbaAtivo: {
-    color: patientTheme.colors.onPrimary,
+  rotuloAbaDentroAtivo: {
+    alignSelf: 'center',
+    color: TAB_HIGHLIGHT_COLOR,
+    fontSize: 9,
+    fontWeight: '700',
+    lineHeight: 11,
+    marginTop: 0,
+    textAlign: 'center',
   },
 });

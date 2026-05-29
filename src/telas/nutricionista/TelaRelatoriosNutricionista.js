@@ -729,10 +729,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 10,
     borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   retryButtonText: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.text,
     fontWeight: '700',
   },
   chartsRow: {

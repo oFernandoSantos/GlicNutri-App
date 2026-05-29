@@ -941,15 +941,15 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.background,
   },
   pendingRequestButtonPrimary: {
-    backgroundColor: patientTheme.colors.primaryDark,
-    borderColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   pendingRequestButtonText: {
     color: patientTheme.colors.textMuted,
     fontWeight: '700',
   },
   pendingRequestButtonPrimaryText: {
-    color: '#ffffff',
+    color: patientTheme.colors.text,
     fontWeight: '700',
   },
   inlineLoading: {
@@ -967,13 +967,15 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   retryButton: {
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   retryButtonText: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
     fontWeight: '900',
   },
 });

@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutMedico from '../../componentes/medico/LayoutMedico';
-import { nutriTheme as theme } from '../../temas/temaVisualNutricionista';
+import { medicoTheme as theme } from '../../temas/temaVisualNutricionista';
 import { getMedicoId, listPatientsByDoctor } from '../../servicos/servicoVinculosMedico';
 import { supabase } from '../../servicos/configSupabase';
 
