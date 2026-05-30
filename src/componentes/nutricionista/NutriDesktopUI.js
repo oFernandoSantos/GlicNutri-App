@@ -245,13 +245,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   avatarStrong: {
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   avatarSubtle: {
     backgroundColor: patientTheme.colors.primarySoft,
   },
   avatarText: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
     fontWeight: '900',
     fontSize: 16,
   },
@@ -276,7 +278,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#d7a54b',
   },
   progressSuccess: {
-    backgroundColor: '#4fdfa3',
+    backgroundColor: patientTheme.colors.text,
   },
   riskBadge: {
     alignSelf: 'flex-start',
@@ -291,7 +293,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#fff8e6',
   },
   riskBadgeLow: {
-    backgroundColor: '#edf9f3',
+    backgroundColor: patientTheme.colors.backgroundSoft,
   },
   riskBadgeText: {
     fontWeight: '800',
@@ -304,7 +306,7 @@ const styles = StyleSheet.create({
     color: '#b4872e',
   },
   riskTextLow: {
-    color: '#2f8a61',
+    color: patientTheme.colors.text,
   },
   metricCard: {
     minHeight: 140,
@@ -406,11 +408,11 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   tabChipActive: {
-    backgroundColor: patientTheme.colors.primaryDark,
-    borderColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.surfaceBorder,
     elevation: 3,
-    shadowColor: patientTheme.colors.primaryDark,
-    shadowOpacity: 0.22,
+    shadowColor: patientTheme.colors.shadow,
+    shadowOpacity: 0.1,
     shadowRadius: 8,
     shadowOffset: { width: 0, height: 4 },
   },
@@ -419,7 +421,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   tabChipTextActive: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
   },
   searchWrap: {
     minHeight: 52,
@@ -495,7 +497,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#d96767',
   },
   barFillSuccess: {
-    backgroundColor: '#4fdfa3',
+    backgroundColor: patientTheme.colors.text,
   },
   barLabel: {
     marginTop: 10,

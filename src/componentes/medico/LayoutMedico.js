@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { nutriTheme as theme, nutriShadow as shadow } from '../../temas/temaVisualNutricionista';
+import { medicoTheme as theme, medicoShadow as shadow } from '../../temas/temaVisualNutricionista';
 
 export default function LayoutMedico({
   children,

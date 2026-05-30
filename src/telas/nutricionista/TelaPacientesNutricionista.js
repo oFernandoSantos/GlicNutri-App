@@ -353,7 +353,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'transparent',
   },
   filterChipActive: {
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   filterChipText: {
     color: patientTheme.colors.text,
@@ -479,13 +481,15 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     alignSelf: 'flex-start',
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.surfaceBorder,
     paddingHorizontal: 14,
     paddingVertical: 10,
   },
   retryButtonText: {
-    color: patientTheme.colors.onPrimary,
+    color: patientTheme.colors.text,
     fontWeight: '900',
   },
 });

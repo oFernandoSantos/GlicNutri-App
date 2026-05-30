@@ -11,6 +11,12 @@ export default function SeletorPerfil({
   onChangeRole,
   opcoes = ['Paciente', 'Nutricionista'],
 }) {
+  const opcoesNormalizadas = opcoes.map((opcao) =>
+    typeof opcao === 'string'
+      ? { value: opcao, label: opcao }
+      : { value: opcao.value, label: opcao.label || opcao.value }
+  );
+
   const containerStyle = {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -38,13 +44,13 @@ export default function SeletorPerfil({
 
   return (
     <View style={containerStyle}>
-      {opcoes.map((perfil) => (
+      {opcoesNormalizadas.map((perfil) => (
         <TouchableOpacity
-          key={perfil}
-          style={getButtonStyle(perfil)}
-          onPress={() => onChangeRole(perfil)}
+          key={perfil.value}
+          style={getButtonStyle(perfil.value)}
+          onPress={() => onChangeRole(perfil.value)}
         >
-          <Text style={getTextStyle(perfil)}>{perfil}</Text>
+          <Text style={getTextStyle(perfil.value)}>{perfil.label}</Text>
         </TouchableOpacity>
       ))}
     </View>

@@ -10,7 +10,7 @@ import {
 } from 'react-native';
 import LayoutMedico from '../../componentes/medico/LayoutMedico';
 import { FilterTabs } from '../../componentes/nutricionista/NutriDesktopUI';
-import { nutriTheme as theme } from '../../temas/temaVisualNutricionista';
+import { medicoTheme as theme } from '../../temas/temaVisualNutricionista';
 import { getMedicoId } from '../../servicos/servicoVinculosMedico';
 import {
   fetchProntuarioClinicoMedico,
