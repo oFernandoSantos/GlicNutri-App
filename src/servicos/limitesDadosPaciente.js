@@ -7,11 +7,12 @@ export const LIMITES_DADOS_PACIENTE = {
     allowGoogleSync: false,
     glucoseLimit: 7,
     medicationLimit: 0,
-    mealLimit: 40,
+    mealLimit: 12,
     includeMealPlan: true,
     skipAlertSync: true,
   },
   diario: {
+    skipChat: true,
     glucoseLimit: 40,
     medicationLimit: 30,
     mealLimit: 40,
@@ -19,9 +20,11 @@ export const LIMITES_DADOS_PACIENTE = {
     skipAlertSync: true,
   },
   monitoramento: {
-    glucoseLimit: 120,
-    medicationLimit: 80,
-    mealLimit: 80,
+    skipChat: true,
+    skipAlertSync: true,
+    glucoseLimit: 60,
+    medicationLimit: 40,
+    mealLimit: 30,
   },
   historico: {
     glucoseLimit: 100,
@@ -45,12 +48,14 @@ export const LIMITES_DADOS_PACIENTE = {
     skipAlertSync: true,
   },
   assistente: {
+    skipChat: true,
     glucoseLimit: 20,
     medicationLimit: 16,
     mealLimit: 20,
     skipAlertSync: true,
   },
   progresso: {
+    skipChat: true,
     glucoseLimit: 60,
     medicationLimit: 40,
     mealLimit: 40,

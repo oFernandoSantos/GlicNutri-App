@@ -1,6 +1,7 @@
 import React, { useEffect } from 'react';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 import { isNutriUser } from '../../servicos/servicoSessaoNutricionista';
+import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
 /**
  * Impede que sessao de nutricionista ou admin permaneca em telas do paciente.
  */
@@ -23,7 +24,12 @@ export default function GuardiaoSessaoPaciente({ navigation, usuarioLogado, chil
         index: 0,
         routes: [{ name: 'HomeNutricionista' }],
       });
+      return;
     }
+
+    garantirSessaoRpcClinicaComPerfil(usuarioLogado).catch((error) => {
+      console.log('Falha ao garantir sessao RPC paciente:', error?.message || error);
+    });
   }, [navigation, usuarioLogado]);
 
   return children;

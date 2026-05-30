@@ -81,21 +81,28 @@ export async function fetchChatThreadFromDatabase({
   nutritionistName = 'Nutricionista',
   patientName = 'Paciente',
   limit = 200,
+  rpcActor = null,
 }) {
   const resolvedNutriId = await resolveNutricionistaIdForPatient(pacienteId, nutricionistaId);
   if (!pacienteId || !resolvedNutriId) return [];
 
-  const { data, error } = await supabase.rpc(
-    'listar_mensagens_chat',
-    await enrichRpcClinicalParams(
+  let rpcParams;
+  try {
+    rpcParams = await enrichRpcClinicalParams(
       {
         p_paciente_id: pacienteId,
         p_nutricionista_id: resolvedNutriId,
         p_limite: limit,
       },
-      pacienteId
-    )
-  );
+      pacienteId,
+      rpcActor
+    );
+  } catch (error) {
+    console.log('Sessao RPC ausente ao listar chat:', error?.message || error);
+    return null;
+  }
+
+  const { data, error } = await supabase.rpc('listar_mensagens_chat', rpcParams);
 
   if (error) {
     if (isMissingRpc(error, 'listar_mensagens_chat')) return null;

@@ -6,17 +6,27 @@ function isMissingRpc(error, name) {
   return message.includes(name.toLowerCase()) || error?.code === 'PGRST202';
 }
 
-export async function fetchPacienteAppStateFromTable(pacienteId) {
+export async function fetchPacienteAppStateFromTable(pacienteId, rpcActor = null) {
   if (!pacienteId) return null;
 
-  const { data, error } = await supabase.rpc(
-    'obter_paciente_app_state',
-    await enrichRpcClinicalParams({ p_paciente_id: pacienteId }, pacienteId)
-  );
+  let rpcParams;
+  try {
+    rpcParams = await enrichRpcClinicalParams(
+      { p_paciente_id: pacienteId },
+      pacienteId,
+      rpcActor
+    );
+  } catch (error) {
+    console.log('Sessao RPC ausente ao ler app_state:', error?.message || error);
+    return null;
+  }
+
+  const { data, error } = await supabase.rpc('obter_paciente_app_state', rpcParams);
 
   if (error) {
     if (isMissingRpc(error, 'obter_paciente_app_state')) return null;
-    throw error;
+    console.log('Erro ao obter paciente_app_state:', error.message);
+    return null;
   }
 
   if (!data || typeof data !== 'object' || !Object.keys(data).length) {
@@ -26,7 +36,7 @@ export async function fetchPacienteAppStateFromTable(pacienteId) {
   return data;
 }
 
-export async function savePacienteAppStateToTable(pacienteId, estado) {
+export async function savePacienteAppStateToTable(pacienteId, estado, rpcActor = null) {
   if (!pacienteId) return null;
 
   const { data, error } = await supabase.rpc(
@@ -36,7 +46,8 @@ export async function savePacienteAppStateToTable(pacienteId, estado) {
         p_paciente_id: pacienteId,
         p_estado: estado || {},
       },
-      pacienteId
+      pacienteId,
+      rpcActor
     )
   );
 

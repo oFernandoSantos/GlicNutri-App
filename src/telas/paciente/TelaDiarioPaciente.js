@@ -9,7 +9,7 @@ import {
   ScrollView,
   useWindowDimensions,
 } from 'react-native';
-import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
+import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
@@ -23,6 +23,7 @@ import {
 import { EsqueletoDiarioRefeicoes } from '../../componentes/comum/EsqueletoCarregamento';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
+  getCachedPatientAppState,
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
@@ -264,15 +265,30 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     () => (patientId ? getCachedPatientExperience(patientId, diarioFetchLimits) : null),
     [patientId, diarioFetchLimits]
   );
-  const diarioCacheQuente = Boolean(cachedDiarioInicial);
+  const cachedAppStateInicial = useMemo(
+    () => (patientId ? getCachedPatientAppState(patientId) : null),
+    [patientId]
+  );
+  const diarioCacheQuente = Boolean(cachedDiarioInicial || cachedAppStateInicial);
   const [loading, setLoading] = useState(!diarioCacheQuente);
   const [range, setRange] = useState('Hoje');
   const [nutritionSlideIndex, setNutritionSlideIndex] = useState(0);
   const [appState, setAppState] = useState(
-    () => cachedDiarioInicial?.appState || createDefaultAppState()
+    () => cachedDiarioInicial?.appState || cachedAppStateInicial || createDefaultAppState()
   );
   const [resolvedPatientId, setResolvedPatientId] = useState(patientId);
   const hasLoadedRef = useRef(false);
+
+  const aplicarDiarioExperience = useCallback(
+    (experience) => {
+      if (!experience) return;
+      const canonicalId = experience.patient?.id_paciente_uuid || patientId;
+      setResolvedPatientId(canonicalId);
+      setAppState(experience.appState);
+      replaceCachedPatientAppState(canonicalId, experience.appState);
+    },
+    [patientId]
+  );
 
   const loadDiario = useCallback(
     async ({ silent = false, forceRefresh = false } = {}) => {
@@ -285,35 +301,66 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
           return;
         }
 
+        const cachedExperience =
+          !forceRefresh && patientId
+            ? getCachedPatientExperience(patientId, diarioFetchLimits)
+            : null;
+        const cacheFresco =
+          patientId && isPatientExperienceCacheFresh(patientId, diarioFetchLimits);
+
+        if (cachedExperience) {
+          aplicarDiarioExperience(cachedExperience);
+
+          if (cacheFresco && !forceRefresh) {
+            return;
+          }
+
+          fetchPatientExperience(patientId, {
+            patientContext: usuarioLogado,
+            ...diarioFetchLimits,
+          })
+            .then(aplicarDiarioExperience)
+            .catch((error) => console.log('Refresh diario:', error));
+          return;
+        }
+
+        if (!forceRefresh && cachedAppStateInicial) {
+          setAppState(cachedAppStateInicial);
+        }
+
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
           forceRefresh,
           ...diarioFetchLimits,
         });
 
-        const canonicalId = experience.patient?.id_paciente_uuid || patientId;
-        setResolvedPatientId(canonicalId);
-        setAppState(experience.appState);
-        replaceCachedPatientAppState(canonicalId, experience.appState);
+        aplicarDiarioExperience(experience);
       } catch (error) {
         console.log('Erro ao carregar diario:', error);
       } finally {
         if (!silent) setLoading(false);
       }
     },
-    [canResolvePatient, diarioFetchLimits, patientId, usuarioLogado]
+    [
+      aplicarDiarioExperience,
+      cachedAppStateInicial,
+      canResolvePatient,
+      diarioFetchLimits,
+      patientId,
+      usuarioLogado,
+    ]
   );
 
   useFocusEffect(
     useCallback(() => {
-      const cacheFresco =
+      const experienceCacheFresco =
         patientId && isPatientExperienceCacheFresh(patientId, diarioFetchLimits);
       loadDiario({
-        silent: hasLoadedRef.current || cacheFresco,
+        silent: hasLoadedRef.current || experienceCacheFresco || Boolean(cachedAppStateInicial),
         forceRefresh: false,
       });
       hasLoadedRef.current = true;
-    }, [diarioFetchLimits, loadDiario, patientId])
+    }, [cachedAppStateInicial, diarioFetchLimits, loadDiario, patientId])
   );
 
   useEffect(() => {
@@ -466,14 +513,6 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       }),
     [selectedNutritionSummary]
   );
-  const latestMealEntry = timelineEntries[0] || null;
-  const latestMealSummary = latestMealEntry
-    ? latestMealEntry.description || latestMealEntry.aiNote || 'Refeicao registrada.'
-    : 'Assim que voce registrar uma refeicao, mostramos o ultimo resumo aqui.';
-  const scoreSummaryText = latestMealEntry
-    ? `Proteínas (${Math.round(nutritionSummary.protein)} g), Gorduras (${Math.round(nutritionSummary.fat)} g)`
-    : 'Proteínas (0 g), Gorduras (0 g)';
-  const lastMealTime = timelineEntries[0]?.time || '--:--';
   const emptyTimeline = !loading && !timelineEntries.length;
   const nutritionCarouselCardWidth = Math.max(windowWidth - 36, 280);
 
@@ -498,31 +537,6 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         </TouchableOpacity>
       }
     >
-      <View style={styles.scoreCard}>
-        <View style={styles.scoreMain}>
-          <Text style={styles.scoreLabel}>Resumo alimentar</Text>
-        </View>
-
-        <View style={styles.scoreLatestCard}>
-          <View style={styles.scoreLatestHeader}>
-            <View style={styles.scoreBadge}>
-              <MaterialCommunityIcons
-                name="silverware-fork-knife"
-                size={18}
-                color={patientTheme.colors.primaryDark}
-              />
-              <Text style={styles.scoreBadgeText}>{'\u00daltima refei\u00e7\u00e3o'}</Text>
-            </View>
-            <Text style={styles.scoreLatestTime}>{lastMealTime}</Text>
-          </View>
-          <Text style={styles.scoreLatestTitle}>{latestMealEntry ? 'Refei\u00e7\u00e3o Registrada' : 'Sem registro recente'}</Text>
-          <Text style={styles.scoreLatestSummary} numberOfLines={3}>
-            {latestMealSummary}
-          </Text>
-          <Text style={styles.scoreLatestNutrition}>{scoreSummaryText}</Text>
-        </View>
-      </View>
-
       <View style={styles.evolutionSection}>
         <Text style={styles.evolutionTitle}>Sua Evolução</Text>
 
