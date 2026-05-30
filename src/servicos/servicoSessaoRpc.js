@@ -5,6 +5,10 @@ export const RPC_SESSION_STORAGE_KEY = '@glicnutri:rpcSessionToken';
 export const RPC_SESSION_META_STORAGE_KEY = '@glicnutri:rpcSessionMeta';
 
 let cachedRpcSessionToken = null;
+let cachedRpcProfileKey = '';
+let sessaoRpcEnsureInFlight = null;
+let sessaoRpcLastEnsuredAt = 0;
+const SESSAO_RPC_ENSURE_TTL_MS = 45 * 1000;
 
 export function getRpcSessionTokenSync() {
   return cachedRpcSessionToken;
@@ -19,6 +23,12 @@ export async function loadRpcSessionToken() {
     cachedRpcSessionToken = null;
     return null;
   }
+}
+
+function buildRpcProfileKey(user) {
+  const { actorType, actorId, email } = resolveActorFromProfile(user);
+  if (!actorType || !actorId || !email) return '';
+  return `${actorType}:${actorId}:${String(email).trim().toLowerCase()}`;
 }
 
 function isSessaoRpcInvalidaMessage(message = '') {
@@ -111,35 +121,86 @@ export async function restaurarSessaoRpcDoPerfil(user) {
   const token = Array.isArray(data) ? data[0] : data;
   if (!token) return null;
 
-  await salvarRpcSessionToken(token, { actorType, metodo: 'restaurar_app' });
+  await salvarRpcSessionToken(token, {
+    actorType,
+    actorId,
+    email,
+    metodo: 'restaurar_app',
+  });
   return token;
 }
 
-export async function garantirSessaoRpcClinica(user = null) {
-  let token = await loadRpcSessionToken();
+async function resolverSessaoRpcClinica(user = null) {
+  const requestedProfileKey = buildRpcProfileKey(user);
+  if (requestedProfileKey && requestedProfileKey !== cachedRpcProfileKey) {
+    const restored = await restaurarSessaoRpcDoPerfil(user);
+    if (restored) {
+      sessaoRpcLastEnsuredAt = Date.now();
+      return restored;
+    }
+  }
+
+  let token = cachedRpcSessionToken || (await loadRpcSessionToken());
 
   if (token) {
     const renewed = await renovarSessaoRpc();
-    if (renewed) return renewed;
-    token = await loadRpcSessionToken();
-    if (token) return token;
+    if (renewed) {
+      sessaoRpcLastEnsuredAt = Date.now();
+      return renewed;
+    }
+    token = cachedRpcSessionToken || (await loadRpcSessionToken());
+    if (token) {
+      sessaoRpcLastEnsuredAt = Date.now();
+      return token;
+    }
   }
 
   try {
     const { data: authData } = await supabase.auth.getSession();
     if (authData?.session?.user) {
       const oauthToken = await emitirSessaoRpcOAuthPaciente();
-      if (oauthToken) return oauthToken;
+      if (oauthToken) {
+        sessaoRpcLastEnsuredAt = Date.now();
+        return oauthToken;
+      }
     }
   } catch (_error) {
     // noop
   }
 
   if (user) {
-    return restaurarSessaoRpcDoPerfil(user);
+    const restored = await restaurarSessaoRpcDoPerfil(user);
+    if (restored) {
+      sessaoRpcLastEnsuredAt = Date.now();
+    }
+    return restored;
   }
 
   return null;
+}
+
+export async function garantirSessaoRpcClinica(user = null) {
+  const now = Date.now();
+  const requestedProfileKey = buildRpcProfileKey(user);
+  const canReuseFastToken =
+    cachedRpcSessionToken &&
+    now - sessaoRpcLastEnsuredAt < SESSAO_RPC_ENSURE_TTL_MS &&
+    (!requestedProfileKey || requestedProfileKey === cachedRpcProfileKey);
+
+  if (canReuseFastToken) {
+    return cachedRpcSessionToken;
+  }
+
+  if (sessaoRpcEnsureInFlight) {
+    return sessaoRpcEnsureInFlight;
+  }
+
+  sessaoRpcEnsureInFlight = resolverSessaoRpcClinica(user)
+    .finally(() => {
+      sessaoRpcEnsureInFlight = null;
+    });
+
+  return sessaoRpcEnsureInFlight;
 }
 
 export async function garantirSessaoRpcClinicaComPerfil(user) {
@@ -154,6 +215,12 @@ export async function salvarRpcSessionToken(token, meta = {}) {
   }
 
   cachedRpcSessionToken = normalized;
+  cachedRpcProfileKey =
+    meta?.profileKey ||
+    (meta?.actorType && meta?.actorId && meta?.email
+      ? `${meta.actorType}:${meta.actorId}:${String(meta.email).trim().toLowerCase()}`
+      : '');
+  sessaoRpcLastEnsuredAt = Date.now();
   await AsyncStorage.setItem(RPC_SESSION_STORAGE_KEY, normalized);
   await AsyncStorage.setItem(RPC_SESSION_META_STORAGE_KEY, JSON.stringify(meta || {}));
   return normalized;
@@ -162,6 +229,8 @@ export async function salvarRpcSessionToken(token, meta = {}) {
 export async function limparRpcSessionToken() {
   const token = cachedRpcSessionToken || (await loadRpcSessionToken());
   cachedRpcSessionToken = null;
+  cachedRpcProfileKey = '';
+  sessaoRpcLastEnsuredAt = 0;
 
   try {
     await AsyncStorage.multiRemove([RPC_SESSION_STORAGE_KEY, RPC_SESSION_META_STORAGE_KEY]);
@@ -228,17 +297,35 @@ export async function emitirSessaoRpcOAuthPaciente() {
   return token;
 }
 
+export function resolveRpcActorProfile(user = null, pacienteId = null) {
+  if (user && typeof user === 'object' && !Array.isArray(user)) {
+    return user;
+  }
+
+  if (typeof pacienteId === 'string' && pacienteId.trim()) {
+    return { id_paciente_uuid: pacienteId.trim() };
+  }
+
+  return null;
+}
+
 export async function enrichRpcClinicalParams(params = {}, pacienteId = null, user = null) {
-  const token = await garantirSessaoRpcClinica(user);
+  const profile = resolveRpcActorProfile(user, pacienteId);
+  const token = await garantirSessaoRpcClinica(profile);
+
   if (!token) {
     throw new Error('Sessao clinica ausente. Saia do app e faca login novamente.');
   }
 
   const payload = { ...params, p_token_sessao: token };
+  const resolvedPatientId =
+    (typeof pacienteId === 'string' && pacienteId.trim()) ||
+    profile?.id_paciente_uuid ||
+    null;
 
-  if (pacienteId && !payload.p_id_paciente_uuid && !payload.p_paciente_id) {
-    payload.p_id_paciente_uuid = pacienteId;
-    payload.p_paciente_id = pacienteId;
+  if (resolvedPatientId && !payload.p_id_paciente_uuid && !payload.p_paciente_id) {
+    payload.p_id_paciente_uuid = resolvedPatientId;
+    payload.p_paciente_id = resolvedPatientId;
   }
 
   return payload;

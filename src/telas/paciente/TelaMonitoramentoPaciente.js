@@ -28,6 +28,7 @@ import {
   fetchPatientExperience,
   getCachedPatientExperience,
   getPatientId,
+  isPatientExperienceCacheFresh,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { EsqueletoBloco } from '../../componentes/comum/EsqueletoCarregamento';
@@ -49,6 +50,7 @@ import {
   subscribeToGlucoseReadings,
 } from '../../servicos/centralGlicose';
 import {
+  getCachedPatientAppState,
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
@@ -1252,7 +1254,19 @@ export default function PacienteMonitoramentoScreen({
     () => (patientId ? getCachedPatientExperience(patientId, monitoramentoFetchLimits) : null),
     [patientId, monitoramentoFetchLimits]
   );
-  const monitoramentoCacheQuente = Boolean(cachedMonitoramentoInicial);
+  const cachedMonitoramentoAppStateInicial = useMemo(
+    () => (patientId ? getCachedPatientAppState(patientId) : null),
+    [patientId]
+  );
+  const cachedMonitoramentoGlucoseInicial = useMemo(
+    () => (patientId ? getCachedGlucoseReadings(patientId) : []),
+    [patientId]
+  );
+  const monitoramentoCacheQuente = Boolean(
+    cachedMonitoramentoInicial ||
+      cachedMonitoramentoAppStateInicial ||
+      cachedMonitoramentoGlucoseInicial.length
+  );
   const [range, setRange] = useState('Hoje');
   const [loading, setLoading] = useState(!monitoramentoCacheQuente);
   const [savingGlucose, setSavingGlucose] = useState(false);
@@ -1311,16 +1325,20 @@ export default function PacienteMonitoramentoScreen({
     () => cachedMonitoramentoInicial?.clinicalObjective || ''
   );
   const [appState, setAppState] = useState(
-    () => cachedMonitoramentoInicial?.appState || createDefaultAppState()
+    () =>
+      cachedMonitoramentoInicial?.appState ||
+      cachedMonitoramentoAppStateInicial ||
+      createDefaultAppState()
   );
   const [glucoseReadings, setGlucoseReadings] = useState(() => {
     const id = cachedMonitoramentoInicial?.patient?.id_paciente_uuid || patientId;
     return mergeCachedGlucoseReadings(
       cachedMonitoramentoInicial?.glucoseReadings || [],
-      getCachedGlucoseReadings(id)
+      id ? getCachedGlucoseReadings(id) : cachedMonitoramentoGlucoseInicial
     );
   });
   const [loadError, setLoadError] = useState(null);
+  const [technicalLoadLog, setTechnicalLoadLog] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const [avisoUsuario, setAvisoUsuario] = useState(null);
   const activePatientId = patient?.id_paciente_uuid || patientId || null;
@@ -1394,21 +1412,30 @@ export default function PacienteMonitoramentoScreen({
     [bolusSuggestion, bolusOverlapAlerts, bolusSafetyAlerts]
   );
 
-  const loadMonitoringData = useCallback(async (options = {}) => {
-    try {
-      setLoadError(null);
+  const registrarLogTecnicoCarga = useCallback(
+    (stage, error) => {
+      const message =
+        String(error?.message || error?.details || error?.hint || error || 'erro_desconhecido').trim();
+      const code = String(error?.code || '').trim();
+      const email = String(usuarioLogado?.email_pac || usuarioLogado?.email || '').trim() || 'sem-email';
+      setTechnicalLoadLog(
+        [
+          `stage=${stage}`,
+          `patientId=${patientId || 'sem-id'}`,
+          `email=${email}`,
+          code ? `code=${code}` : null,
+          `message=${message}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      );
+    },
+    [patientId, usuarioLogado]
+  );
 
-      if (!canResolvePatient) {
-        setAppState(createDefaultAppState());
-        setGlucoseReadings([]);
-        return;
-      }
-
-      const experience = await fetchPatientExperience(patientId, {
-        patientContext: usuarioLogado,
-        forceRefresh: options.forceRefresh === true,
-        ...monitoramentoFetchLimits,
-      });
+  const aplicarMonitoramentoExperience = useCallback(
+    function aplicarMonitoramentoExperience(experience) {
+      if (!experience) return;
 
       const mergedReadings = mergeCachedGlucoseReadings(
         experience.glucoseReadings,
@@ -1427,13 +1454,70 @@ export default function PacienteMonitoramentoScreen({
         experience.patient?.id_paciente_uuid || patientId,
         mergedReadings
       );
+    },
+    [patientId]
+  );
+
+  const loadMonitoringData = useCallback(async (options = {}) => {
+    try {
+      setLoadError(null);
+      setTechnicalLoadLog('');
+
+      if (!canResolvePatient) {
+        setAppState(createDefaultAppState());
+        setGlucoseReadings([]);
+        return;
+      }
+
+      const forceRefresh = options.forceRefresh === true;
+      const cachedExperience =
+        !forceRefresh && patientId
+          ? getCachedPatientExperience(patientId, monitoramentoFetchLimits)
+          : null;
+      const cacheIsFresh =
+        patientId && isPatientExperienceCacheFresh(patientId, monitoramentoFetchLimits);
+
+      if (cachedExperience) {
+        aplicarMonitoramentoExperience(cachedExperience);
+
+        if (cacheIsFresh && !forceRefresh) {
+          return;
+        }
+
+        fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+          ...monitoramentoFetchLimits,
+        })
+          .then(aplicarMonitoramentoExperience)
+          .catch((error) => {
+            registrarLogTecnicoCarga('monitoramento_refresh_background', error);
+            console.log('Refresh monitoramento:', error);
+          });
+        return;
+      }
+
+      const experience = await fetchPatientExperience(patientId, {
+        patientContext: usuarioLogado,
+        forceRefresh,
+        ...monitoramentoFetchLimits,
+      });
+
+      aplicarMonitoramentoExperience(experience);
     } catch (error) {
+      registrarLogTecnicoCarga('monitoramento_load', error);
       console.log('Erro ao carregar monitoramento:', error);
       setLoadError(
         'Não foi possível carregar o monitoramento. Verifique sua conexão com a internet e tente novamente.'
       );
     }
-  }, [canResolvePatient, monitoramentoFetchLimits, patientId, usuarioLogado]);
+  }, [
+    aplicarMonitoramentoExperience,
+    canResolvePatient,
+    monitoramentoFetchLimits,
+    patientId,
+    registrarLogTecnicoCarga,
+    usuarioLogado,
+  ]);
 
   useEffect(() => {
     let active = true;
@@ -1443,7 +1527,7 @@ export default function PacienteMonitoramentoScreen({
         if (!monitoramentoCacheQuente) {
           setLoading(true);
         }
-        await loadMonitoringData({ forceRefresh: !monitoramentoCacheQuente });
+        await loadMonitoringData({ forceRefresh: false });
       } finally {
         if (active) setLoading(false);
       }
@@ -2611,14 +2695,23 @@ export default function PacienteMonitoramentoScreen({
         />
       ) : null}
       {!loading && loadError ? (
-        <EstadoErroCarregamento
-          onTentarNovamente={async () => {
-            setLoading(true);
-            await loadMonitoringData();
-            setLoading(false);
-          }}
-          loading={loading}
-        />
+        <>
+          <EstadoErroCarregamento
+            onTentarNovamente={async () => {
+              setLoading(true);
+              await loadMonitoringData();
+              setLoading(false);
+            }}
+            loading={loading}
+          />
+          {technicalLoadLog ? (
+            <MensagemInline
+              tipo="aviso"
+              texto={`Log tecnico\n${technicalLoadLog}`}
+              onFechar={() => setTechnicalLoadLog('')}
+            />
+          ) : null}
+        </>
       ) : null}
       <View style={[styles.currentCard, { backgroundColor: latestStatus.cardColor }]}>
         <View style={styles.currentHeader}>

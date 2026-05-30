@@ -3,7 +3,7 @@ import { hashIdsForCache, trimCacheMap } from '../utilitarios/chaveCache';
 const DEFAULT_TTL_MS = 90 * 1000;
 const MAX_EXPERIENCE_CACHE_ENTRIES = 100;
 const MAX_NUTRI_INBOX_CACHE_ENTRIES = 40;
-const HOME_EXPERIENCE_TTL_MS = 120 * 1000;
+const HOME_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
 const CHAT_CACHE_TTL_MS = 20 * 1000;
 export const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const HISTORICO_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
@@ -24,6 +24,7 @@ const NUTRI_INBOX_TTL_MS = 20 * 1000;
 function buildLimitsFingerprint(options = {}) {
   return [
     options.homeOnly ? 'h1' : '',
+    options.homeCritical ? 'hc' : '',
     options.planOnly ? 'p1' : '',
     options.chatOnly ? 'c1' : '',
     options.skipChat ? 'sc' : '',

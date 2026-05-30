@@ -1,5 +1,5 @@
 import { supabase } from './configSupabase';
-import { enrichRpcClinicalParams } from './servicoSessaoRpc';
+import { enrichRpcClinicalParams, garantirSessaoRpcClinicaComPerfil } from './servicoSessaoRpc';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
@@ -299,6 +299,29 @@ function serializeObjectiveAndAppState(objectiveText, appState) {
   }
 
   return `${META_START}\n${payload}\n${META_END}`;
+}
+
+function resolveRpcActorFromOptions(options = {}, patient = null) {
+  return options?.patientContext || patient || null;
+}
+
+async function buildRpcParams(params, patientId, rpcActor) {
+  try {
+    return await enrichRpcClinicalParams(params, patientId, rpcActor);
+  } catch (error) {
+    console.log('Sessao RPC indisponivel:', error?.message || error);
+
+    if (rpcActor) {
+      try {
+        await garantirSessaoRpcClinicaComPerfil(rpcActor);
+        return await enrichRpcClinicalParams(params, patientId, rpcActor);
+      } catch (retryError) {
+        console.log('Falha ao restaurar sessao RPC clinica:', retryError?.message || retryError);
+      }
+    }
+
+    return null;
+  }
 }
 
 function buildTodayDateString() {
@@ -832,7 +855,9 @@ async function fetchPatientByEmail(email) {
     .from('paciente')
     .select('*')
     .ilike('email_pac', email)
-    .limit(1);
+    .or('excluido.is.null,excluido.eq.false')
+    .order('data_hora_ultima_atualizacao', { ascending: false })
+    .limit(5);
 
   if (error) {
     throw error;
@@ -868,20 +893,47 @@ export function prefetchPatientHomeExperience(patientId, patientContext = null) 
 
       return fetchPatientExperience(resolvedId, {
         patientContext,
-        homeOnly: true,
-        skipChat: true,
-        minimalProfile: true,
-        allowGoogleSync: false,
-        glucoseLimit: 7,
-        medicationLimit: 0,
-        mealLimit: 0,
-        skipAlertSync: true,
+        ...mesclarLimitesDadosPaciente('resumo'),
       });
     })
     .catch((error) => {
       console.log('Prefetch home paciente:', error?.message || error);
       return null;
     });
+}
+
+export function prefetchPatientAreaBootstrap(patientId, patientContext = null) {
+  if (!patientId && !patientContext) return;
+
+  prefetchPatientHomeExperience(patientId, patientContext);
+  prefetchPatientProfileExperience(patientId, patientContext);
+
+  const resolvedId = getPatientId(patientContext) || patientId;
+  if (!resolvedId) return;
+
+  setTimeout(() => {
+    prefetchPatientScreenExperience(resolvedId, patientContext, 'diario');
+    prefetchPatientScreenExperience(resolvedId, patientContext, 'monitoramento');
+  }, 350);
+}
+
+export async function warmPatientHomeForLogin(patientId, patientContext = null) {
+  const resolvedId =
+    getPatientId(patientContext) ||
+    patientId ||
+    (await resolveCanonicalPatientId(patientId, { patientContext }));
+
+  if (!resolvedId) return null;
+
+  try {
+    return await fetchPatientExperience(resolvedId, {
+      patientContext,
+      ...mesclarLimitesDadosPaciente('resumo'),
+    });
+  } catch (error) {
+    console.log('Warm home paciente:', error?.message || error);
+    return null;
+  }
 }
 
 export function prefetchPatientPlanExperience(patientId, patientContext = null) {
@@ -952,7 +1004,9 @@ async function fetchPatientByCpf(cpf) {
     .from('paciente')
     .select('*')
     .eq('cpf_paciente', cpf)
-    .limit(1);
+    .or('excluido.is.null,excluido.eq.false')
+    .order('data_hora_ultima_atualizacao', { ascending: false })
+    .limit(5);
 
   if (error) {
     throw error;
@@ -1041,6 +1095,7 @@ async function resolvePatientChatThread({
   patient,
   options,
   mergedLegacyState,
+  rpcActor = null,
 }) {
   const nutricionistaId = await resolveNutricionistaIdForPatient(
     effectivePatientId,
@@ -1052,6 +1107,7 @@ async function resolvePatientChatThread({
     nutricionistaId,
     patientName,
     nutritionistName: 'Nutricionista',
+    rpcActor: rpcActor || resolveRpcActorFromOptions(options, patient),
   });
 
   if (chatThread === null) {
@@ -1070,10 +1126,11 @@ async function resolvePatientChatThread({
 }
 
 async function loadPatientChatOnly(patientId, options = {}) {
-  const patient = await fetchPatientById(patientId, options);
+  const patient = options.currentPatient || (await fetchPatientById(patientId, options));
+  const rpcActor = resolveRpcActorFromOptions(options, patient);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
-  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId, rpcActor);
   const mergedLegacyState = tableAppState
     ? { ...parsed.appState, ...tableAppState }
     : parsed.appState;
@@ -1082,6 +1139,7 @@ async function loadPatientChatOnly(patientId, options = {}) {
     patient,
     options,
     mergedLegacyState,
+    rpcActor,
   });
   const normalizedAppState = normalizeAppState({
     ...mergedLegacyState,
@@ -1097,34 +1155,178 @@ async function loadPatientChatOnly(patientId, options = {}) {
   };
 }
 
-async function loadPatientHomeSummary(patientId, options = {}) {
-  const effectivePatientId = patientId || getPatientId(options.patientContext);
-  const glucoseLimit = options.glucoseLimit ?? 7;
-  const mealLimit = options.mealLimit ?? 0;
+async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor = null) {
+  if (!resolvedPatientId) {
+    return {
+      tableAppState: null,
+      glucoseReadings: [],
+      databaseMedicationEntries: [],
+      databaseMealEntries: [],
+      activeMealPlan: null,
+    };
+  }
 
-  const [patient, tableAppState, glucoseReadings, databaseMealEntries, activeMealPlan] = await Promise.all([
-    effectivePatientId
-      ? fetchPatientById(effectivePatientId, options)
-      : fetchPatientById(patientId, options),
-    effectivePatientId
-      ? fetchPacienteAppStateFromTable(effectivePatientId).catch(() => null)
-      : Promise.resolve(null),
-    glucoseLimit > 0 && effectivePatientId
-      ? fetchGlucoseReadings(effectivePatientId, glucoseLimit)
+  const glucoseLimit = options.glucoseLimit ?? 7;
+  const mealLimit = options.homeCritical === true ? 0 : options.mealLimit ?? 0;
+  const medicationLimit = options.homeCritical === true ? 0 : options.medicationLimit ?? 0;
+  const includeMealPlan = options.homeCritical === true ? false : Boolean(options.includeMealPlan);
+  const includeAppState = options.homeCritical !== true;
+
+  const baseParams = await buildRpcParams(
+    {
+      p_id_paciente_uuid: resolvedPatientId,
+      p_paciente_id: resolvedPatientId,
+    },
+    resolvedPatientId,
+    rpcActor
+  );
+
+  if (!baseParams) {
+    return {
+      tableAppState: null,
+      glucoseReadings: [],
+      databaseMedicationEntries: [],
+      databaseMealEntries: [],
+      activeMealPlan: null,
+    };
+  }
+
+  const rpcCall = (name, extraParams = {}) =>
+    supabase.rpc(name, { ...baseParams, ...extraParams });
+  const rpcCallSafe = async (name, extraParams = {}, fallback = { data: null, error: null }) => {
+    try {
+      return await rpcCall(name, extraParams);
+    } catch (error) {
+      return fallback;
+    }
+  };
+
+  const [
+    appStateResult,
+    manualGlucoseResult,
+    cgmGlucoseResult,
+    medsResult,
+    mealsResult,
+    activeMealPlan,
+  ] = await Promise.all([
+    includeAppState
+      ? rpcCallSafe('obter_paciente_app_state', {})
+      : Promise.resolve({ data: null, error: null }),
+    glucoseLimit > 0
+      ? rpcCall('listar_glicemias_manuais_paciente', { p_limite: glucoseLimit })
+      : Promise.resolve({ data: [], error: null }),
+    glucoseLimit > 0
+      ? rpcCall('listar_glicemias_cgm_paciente', { p_limite: glucoseLimit })
+      : Promise.resolve({ data: [], error: null }),
+    medicationLimit > 0
+      ? fetchMedicationEntries(resolvedPatientId, medicationLimit, rpcActor)
       : Promise.resolve([]),
-    mealLimit > 0 && effectivePatientId
-      ? fetchMealEntries(effectivePatientId, mealLimit)
-      : Promise.resolve([]),
-    options.includeMealPlan && effectivePatientId
-      ? fetchActiveMealPlanForPatient(effectivePatientId).catch(() => null)
+    mealLimit > 0
+      ? rpcCall('listar_refeicoes_ia_paciente', { p_limite: mealLimit })
+      : Promise.resolve({ data: [], error: null }),
+    includeMealPlan
+      ? fetchActiveMealPlanForPatient(resolvedPatientId).catch(() => null)
       : Promise.resolve(null),
   ]);
+
+  let tableAppState = null;
+  if (includeAppState && !appStateResult.error && appStateResult.data) {
+    if (typeof appStateResult.data === 'object' && Object.keys(appStateResult.data).length) {
+      tableAppState = appStateResult.data;
+    }
+  }
+
+  let rpcReadings = [];
+  if (!manualGlucoseResult.error && Array.isArray(manualGlucoseResult.data)) {
+    rpcReadings = manualGlucoseResult.data.map(normalizeGlucoseReadingRow);
+  }
+
+  let cgmReadings = [];
+  if (!cgmGlucoseResult.error && Array.isArray(cgmGlucoseResult.data)) {
+    cgmReadings = cgmGlucoseResult.data.map((row) =>
+      normalizeGlucoseReadingRow({
+        id_glicemia_manual_uuid: row.id,
+        id_paciente_uuid: row.id_paciente_uuid,
+        valor_glicose_mgdl: row.valor_glicose_mgdl,
+        data: row.data,
+        hora: row.hora,
+        sintomas_associados: row.tendencia
+          ? `Fonte: ${row.fonte || 'cgm'} | Tendencia: ${row.tendencia}`
+          : `Fonte: ${row.fonte || 'cgm'}`,
+      })
+    );
+  }
+
+  const glucoseReadings = mergeCachedGlucoseReadings(rpcReadings, cgmReadings).slice(0, glucoseLimit);
+
+  let databaseMealEntries = [];
+  if (mealLimit > 0 && !mealsResult.error && Array.isArray(mealsResult.data)) {
+    databaseMealEntries = mealsResult.data.map((row, index) =>
+      normalizeMealEntryFromDatabase(row, index)
+    );
+  }
+
+  return {
+    tableAppState,
+    glucoseReadings,
+    databaseMedicationEntries: Array.isArray(medsResult) ? medsResult : [],
+    databaseMealEntries,
+    activeMealPlan,
+  };
+}
+
+async function loadPatientHomeSummary(patientId, options = {}) {
+  const candidatePatientId =
+    options.currentPatient?.id_paciente_uuid ||
+    patientId ||
+    getPatientId(options.patientContext);
+  const glucoseLimit = options.glucoseLimit ?? 7;
+  const mealLimit = options.mealLimit ?? 0;
+  const medicationLimit = options.medicationLimit ?? 0;
+  const rpcActorSeed = resolveRpcActorFromOptions(options, options.currentPatient);
+
+  const patientPromise = options.currentPatient
+    ? Promise.resolve(options.currentPatient)
+    : fetchPatientById(candidatePatientId || patientId, options);
+
+  const clinicalPromise =
+    candidatePatientId &&
+    (options.homeCritical === true ||
+      glucoseLimit > 0 ||
+      mealLimit > 0 ||
+      medicationLimit > 0 ||
+      options.includeMealPlan)
+      ? fetchHomeClinicalBundle(candidatePatientId, options, rpcActorSeed)
+      : Promise.resolve(null);
+
+  const [patient, clinicalBundle] = await Promise.all([patientPromise, clinicalPromise]);
+  const rpcActor = resolveRpcActorFromOptions(options, patient);
+  const resolvedPatientId = patient?.id_paciente_uuid || candidatePatientId || patientId;
+
+  const bundle =
+    clinicalBundle ||
+    (await fetchHomeClinicalBundle(resolvedPatientId, options, rpcActor));
+
+  const {
+    tableAppState,
+    glucoseReadings,
+    databaseMedicationEntries,
+    databaseMealEntries,
+    activeMealPlan,
+  } = bundle;
 
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const mergedLegacyState = tableAppState
     ? { ...parsed.appState, ...tableAppState }
     : parsed.appState;
   const normalizedAppState = normalizeAppState(mergedLegacyState);
+  const legacyMedicationEntries = ensureArray(normalizedAppState.medicationEntries).map(
+    (entry, index) => normalizeMedicationEntry(entry, 'legacy', index)
+  );
+  const medicationEntries = mergeMedicationEntries(
+    databaseMedicationEntries,
+    legacyMedicationEntries
+  );
   const legacyMealEntries = ensureArray(normalizedAppState.mealEntries);
   const mealEntries =
     mealLimit > 0
@@ -1134,6 +1336,14 @@ async function loadPatientHomeSummary(patientId, options = {}) {
   const visibleMealEntries = includeHidden
     ? mealEntries
     : mealEntries.filter((entry) => !normalizedAppState.hiddenMealEntryIds.includes(entry?.id));
+  const visibleMedicationEntries = includeHidden
+    ? medicationEntries
+    : medicationEntries.filter(
+        (entry) =>
+          !normalizedAppState.hiddenMedicationEntryIds.includes(
+            entry?.databaseId || entry?.legacyId || entry?.id
+          )
+      );
   const mergedGlucoseReadings = mergeCachedGlucoseReadings(glucoseReadings);
   const visibleGlucoseReadings = includeHidden
     ? mergedGlucoseReadings
@@ -1148,7 +1358,7 @@ async function loadPatientHomeSummary(patientId, options = {}) {
       ...normalizedAppState,
       activeMealPlan,
       mealEntries: visibleMealEntries,
-      medicationEntries: ensureArray(normalizedAppState.medicationEntries),
+      medicationEntries: visibleMedicationEntries,
     },
     glucoseReadings: visibleGlucoseReadings,
     nutricionistaId: patient?.id_nutricionista_uuid || null,
@@ -1168,10 +1378,11 @@ async function loadPatientExperience(patientId, options = {}) {
     return loadPatientHomeSummary(patientId, options);
   }
 
-  const patient = await fetchPatientById(patientId, options);
+  const patient = options.currentPatient || (await fetchPatientById(patientId, options));
+  const rpcActor = resolveRpcActorFromOptions(options, patient);
   const parsed = extractObjectiveAndAppState(patient?.objetivo_principal_consulta);
   const effectivePatientId = patient?.id_paciente_uuid || patientId;
-  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId);
+  const tableAppState = await fetchPacienteAppStateFromTable(effectivePatientId, rpcActor);
   const mergedLegacyState = tableAppState
     ? { ...parsed.appState, ...tableAppState }
     : parsed.appState;
@@ -1180,6 +1391,7 @@ async function loadPatientExperience(patientId, options = {}) {
     patient,
     options,
     mergedLegacyState,
+    rpcActor,
   });
   const normalizedAppState = normalizeAppState({
     ...mergedLegacyState,
@@ -1196,13 +1408,13 @@ async function loadPatientExperience(patientId, options = {}) {
     activeMealPlan,
   ] = await Promise.all([
     glucoseLimit > 0
-      ? fetchGlucoseReadings(effectivePatientId, glucoseLimit)
+      ? fetchGlucoseReadings(effectivePatientId, glucoseLimit, rpcActor).catch(() => [])
       : Promise.resolve([]),
     medicationLimit > 0
-      ? fetchMedicationEntries(effectivePatientId, medicationLimit)
+      ? fetchMedicationEntries(effectivePatientId, medicationLimit, rpcActor).catch(() => [])
       : Promise.resolve([]),
     mealLimit > 0
-      ? fetchMealEntries(effectivePatientId, mealLimit)
+      ? fetchMealEntries(effectivePatientId, mealLimit, rpcActor).catch(() => [])
       : Promise.resolve([]),
     options.includeMealPlan
       ? fetchActiveMealPlanForPatient(effectivePatientId).catch(() => null)
@@ -1280,7 +1492,36 @@ export async function resolveCanonicalPatientId(patientId, options = {}) {
 }
 
 export async function fetchPatientExperience(patientId, options = {}) {
-  const canonicalId = await resolveCanonicalPatientId(patientId, options);
+  const mergedOptions = {
+    ...options,
+    patientContext: options.patientContext,
+    minimalProfile:
+      options.minimalProfile === true ||
+      options.homeOnly === true ||
+      options.planOnly === true,
+  };
+
+  const candidateId =
+    options.currentPatient?.id_paciente_uuid ||
+    patientId ||
+    getPatientId(options.patientContext) ||
+    null;
+
+  if (candidateId && options.forceRefresh !== true) {
+    const cached = getCachedPatientExperience(candidateId, mergedOptions);
+    if (cached) {
+      return cached;
+    }
+  }
+
+  const patient =
+    options.currentPatient ||
+    (await fetchPatientById(patientId, mergedOptions));
+
+  const canonicalId =
+    patient?.id_paciente_uuid ||
+    candidateId ||
+    null;
 
   if (patientId && canonicalId && patientId !== canonicalId) {
     invalidatePatientExperienceCache(patientId);
@@ -1288,15 +1529,19 @@ export async function fetchPatientExperience(patientId, options = {}) {
 
   const loader = () =>
     loadPatientExperience(canonicalId || patientId, {
-      ...options,
-      patientContext: options.patientContext,
+      ...mergedOptions,
+      currentPatient: patient,
     });
 
   if (!canonicalId) {
     return loader();
   }
 
-  return fetchCachedPatientExperience(canonicalId, options, loader);
+  return fetchCachedPatientExperience(
+    canonicalId,
+    { ...mergedOptions, currentPatient: patient },
+    loader
+  );
 }
 
 export async function fetchPatientNutritionistChat(patientId, options = {}) {
@@ -1884,23 +2129,31 @@ function isRpcFunctionMissing(error, functionName) {
   );
 }
 
-export async function fetchGlucoseReadings(patientId, limit = 120) {
+export async function fetchGlucoseReadings(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
     return [];
   }
 
-  let rpcReadings = [];
-  const { data: rpcData, error: rpcError } = await supabase.rpc(
-    'listar_glicemias_manuais_paciente',
-    await enrichRpcClinicalParams(
-      {
-        p_id_paciente_uuid: patientId,
-        p_limite: limit,
-      },
-      patientId
-    )
+  const baseParams = await buildRpcParams(
+    {
+      p_id_paciente_uuid: patientId,
+      p_limite: limit,
+    },
+    patientId,
+    rpcActor
   );
 
+  if (!baseParams) {
+    return [];
+  }
+
+  const [{ data: rpcData, error: rpcError }, { data: cgmData, error: cgmError }] =
+    await Promise.all([
+      supabase.rpc('listar_glicemias_manuais_paciente', baseParams),
+      supabase.rpc('listar_glicemias_cgm_paciente', baseParams),
+    ]);
+
+  let rpcReadings = [];
   if (!rpcError && Array.isArray(rpcData)) {
     rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
   } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
@@ -1908,17 +2161,6 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
   }
 
   let cgmReadings = [];
-  const { data: cgmData, error: cgmError } = await supabase.rpc(
-    'listar_glicemias_cgm_paciente',
-    await enrichRpcClinicalParams(
-      {
-        p_id_paciente_uuid: patientId,
-        p_limite: limit,
-      },
-      patientId
-    )
-  );
-
   if (!cgmError && Array.isArray(cgmData)) {
     cgmReadings = cgmData.map((row) =>
       normalizeGlucoseReadingRow({
@@ -1940,17 +2182,24 @@ export async function fetchGlucoseReadings(patientId, limit = 120) {
   return merged.slice(0, limit);
 }
 
-async function fetchMedicationEntriesOnly(patientId, limit = 120) {
+async function fetchMedicationEntriesOnly(patientId, limit = 120, rpcActor = null) {
   let rpcEntries = [];
+  const rpcParams = await buildRpcParams(
+    {
+      p_id_paciente_uuid: patientId,
+      p_limite: limit,
+    },
+    patientId,
+    rpcActor
+  );
+
+  if (!rpcParams) {
+    return rpcEntries;
+  }
+
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     'listar_medicacoes_paciente',
-    await enrichRpcClinicalParams(
-      {
-        p_id_paciente_uuid: patientId,
-        p_limite: limit,
-      },
-      patientId
-    )
+    rpcParams
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
@@ -1967,16 +2216,23 @@ async function fetchMedicationEntriesOnly(patientId, limit = 120) {
   return rpcEntries.slice(0, limit);
 }
 
-async function fetchLegacyInsulinFromMedicacaoTable(patientId, limit = 120) {
+async function fetchLegacyInsulinFromMedicacaoTable(patientId, limit = 120, rpcActor = null) {
+  const rpcParams = await buildRpcParams(
+    {
+      p_id_paciente_uuid: patientId,
+      p_limite: limit,
+    },
+    patientId,
+    rpcActor
+  );
+
+  if (!rpcParams) {
+    return [];
+  }
+
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     'listar_medicacoes_paciente',
-    await enrichRpcClinicalParams(
-      {
-        p_id_paciente_uuid: patientId,
-        p_limite: limit,
-      },
-      patientId
-    )
+    rpcParams
   );
 
   if (!rpcError && Array.isArray(rpcData)) {
@@ -1992,60 +2248,72 @@ async function fetchLegacyInsulinFromMedicacaoTable(patientId, limit = 120) {
   return [];
 }
 
-export async function fetchInsulinEntries(patientId, limit = 120) {
+export async function fetchInsulinEntries(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
     return [];
   }
 
   let dedicatedEntries = [];
-  const { data: rpcData, error: rpcError } = await supabase.rpc(
-    'listar_insulinas_paciente',
-    await enrichRpcClinicalParams(
-      {
-        p_id_paciente_uuid: patientId,
-        p_limite: limit,
-      },
-      patientId
-    )
+  const rpcParams = await buildRpcParams(
+    {
+      p_id_paciente_uuid: patientId,
+      p_limite: limit,
+    },
+    patientId,
+    rpcActor
   );
 
-  if (!rpcError && Array.isArray(rpcData)) {
-    dedicatedEntries = rpcData.map((item, index) => normalizeInsulinEntry(item, 'insulin_rpc', index));
-  } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_insulinas_paciente')) {
-    console.log('Erro ao buscar insulina por RPC:', rpcError.message);
+  if (rpcParams) {
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      'listar_insulinas_paciente',
+      rpcParams
+    );
+
+    if (!rpcError && Array.isArray(rpcData)) {
+      dedicatedEntries = rpcData.map((item, index) => normalizeInsulinEntry(item, 'insulin_rpc', index));
+    } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_insulinas_paciente')) {
+      console.log('Erro ao buscar insulina por RPC:', rpcError.message);
+    }
   }
 
-  const legacyEntries = await fetchLegacyInsulinFromMedicacaoTable(patientId, limit);
+  const legacyEntries = await fetchLegacyInsulinFromMedicacaoTable(patientId, limit, rpcActor);
   return mergeInsulinEntries(dedicatedEntries, legacyEntries).slice(0, limit);
 }
 
-export async function fetchMedicationEntries(patientId, limit = 120) {
+export async function fetchMedicationEntries(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
     return [];
   }
 
   const [medicines, insulins] = await Promise.all([
-    fetchMedicationEntriesOnly(patientId, limit),
-    fetchInsulinEntries(patientId, limit),
+    fetchMedicationEntriesOnly(patientId, limit, rpcActor),
+    fetchInsulinEntries(patientId, limit, rpcActor),
   ]);
 
   return mergeMedicationEntries(medicines, insulins).slice(0, limit);
 }
 
-export async function fetchMealEntries(patientId, limit = 120) {
+export async function fetchMealEntries(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
+    return [];
+  }
+
+  const rpcParams = await buildRpcParams(
+    {
+      p_paciente_id: patientId,
+      p_limite: limit,
+    },
+    patientId,
+    rpcActor
+  );
+
+  if (!rpcParams) {
     return [];
   }
 
   const { data: rpcData, error: rpcError } = await supabase.rpc(
     'listar_refeicoes_ia_paciente',
-    await enrichRpcClinicalParams(
-      {
-        p_paciente_id: patientId,
-        p_limite: limit,
-      },
-      patientId
-    )
+    rpcParams
   );
 
   if (!rpcError && Array.isArray(rpcData)) {

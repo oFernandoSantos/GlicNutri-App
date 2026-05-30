@@ -770,6 +770,7 @@ export default function PacienteHomeScreen({
   const [glucoseReadings, setGlucoseReadings] = useState([]);
   const [clinicalAlerts, setClinicalAlerts] = useState([]);
   const [loadError, setLoadError] = useState(null);
+  const [technicalLoadLog, setTechnicalLoadLog] = useState('');
   const [chatLastReadAt, setChatLastReadAt] = useState(null);
   const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
   const loadInFlightRef = useRef(null);
@@ -848,15 +849,57 @@ export default function PacienteHomeScreen({
     }
   }, []);
 
+  const agendarAlertasClinicos = useCallback(
+    function agendarAlertasClinicos(patientUuid, delayMs = 450) {
+      if (!patientUuid) return;
+      setTimeout(() => {
+        carregarAlertasClinicos(patientUuid);
+      }, delayMs);
+    },
+    [carregarAlertasClinicos]
+  );
+
+  const atualizarExperienceSilencioso = useCallback(
+    function atualizarExperienceSilencioso(experience) {
+      if (!experience) return;
+      aplicarExperience(experience);
+      agendarAlertasClinicos(experience.patient?.id_paciente_uuid || idPaciente, 120);
+    },
+    [agendarAlertasClinicos, aplicarExperience, idPaciente]
+  );
+
+  const registrarLogTecnicoCarga = useCallback(
+    (stage, error) => {
+      const message =
+        String(error?.message || error?.details || error?.hint || error || 'erro_desconhecido').trim();
+      const code = String(error?.code || '').trim();
+      const email = String(usuarioLogado?.email_pac || usuarioLogado?.email || '').trim() || 'sem-email';
+      setTechnicalLoadLog(
+        [
+          `stage=${stage}`,
+          `patientId=${idPaciente || 'sem-id'}`,
+          `email=${email}`,
+          code ? `code=${code}` : null,
+          `message=${message}`,
+        ]
+          .filter(Boolean)
+          .join('\n')
+      );
+    },
+    [idPaciente, usuarioLogado]
+  );
+
   const carregarDados = useCallback(async function carregarDados(options = {}) {
     const forceRefresh = options.forceRefresh === true;
+    const backgroundOnly = options.backgroundOnly === true;
 
-    if (loadInFlightRef.current) {
+    if (loadInFlightRef.current && !backgroundOnly) {
       return loadInFlightRef.current;
     }
 
     const run = (async () => {
       try {
+        setTechnicalLoadLog('');
         if (!canResolvePatient) {
           setPaciente({
             nome_completo: nomeBaseUsuario,
@@ -876,43 +919,80 @@ export default function PacienteHomeScreen({
           : null;
         const cacheIsFresh = isPatientExperienceCacheFresh(idPaciente, cacheOptions);
 
-        if (cachedExperience) {
-          aplicarExperience(cachedExperience);
-          setLoadError(null);
-          setMetricsLoading(false);
-          setRefreshing(false);
-          carregarAlertasClinicos(cachedExperience.patient?.id_paciente_uuid || idPaciente);
+        if (cachedExperience && !forceRefresh) {
+          if (!backgroundOnly) {
+            aplicarExperience(cachedExperience);
+            setLoadError(null);
+            setMetricsLoading(false);
+            setRefreshing(false);
+            agendarAlertasClinicos(cachedExperience.patient?.id_paciente_uuid || idPaciente);
+          }
 
-          if (cacheIsFresh && !forceRefresh) {
+          if (cacheIsFresh) {
             return;
           }
+
+          fetchPatientExperience(idPaciente, {
+            ...cacheOptions,
+            patientContext: usuarioLogado,
+          })
+            .then(atualizarExperienceSilencioso)
+            .catch((error) => {
+              registrarLogTecnicoCarga('home_refresh_background', error);
+              console.log('Refresh home paciente:', error);
+            });
+          return;
         }
 
-        const experienceResult = await fetchPatientExperience(idPaciente, {
+        if (backgroundOnly) {
+          return;
+        }
+
+        const criticalOptions = {
           ...cacheOptions,
-          forceRefresh,
+          homeCritical: true,
+          includeMealPlan: false,
+          mealLimit: 0,
+          medicationLimit: 0,
+        };
+
+        const criticalExperience = await fetchPatientExperience(idPaciente, {
+          ...criticalOptions,
+          patientContext: usuarioLogado,
         });
 
-        let experience = experienceResult;
-
-        if (!experience.patient && usuarioLogado?.id) {
-          syncGooglePatientRecord(usuarioLogado)
-            .then((pacienteSincronizado) => {
-              if (pacienteSincronizado?.id_paciente_uuid) {
-                aplicarExperience({
-                  ...experience,
-                  patient: pacienteSincronizado,
-                });
-              }
-            })
-            .catch(() => {});
-        }
-
-        aplicarExperience(experience);
+        aplicarExperience(criticalExperience);
         setLoadError(null);
         setMetricsLoading(false);
-        carregarAlertasClinicos(experience.patient?.id_paciente_uuid || idPaciente);
+        setRefreshing(false);
+        agendarAlertasClinicos(criticalExperience.patient?.id_paciente_uuid || idPaciente);
+
+        fetchPatientExperience(idPaciente, {
+          ...cacheOptions,
+          patientContext: usuarioLogado,
+        })
+          .then((experience) => {
+            aplicarExperience(experience);
+
+            if (!experience.patient && usuarioLogado?.id) {
+              syncGooglePatientRecord(usuarioLogado)
+                .then((pacienteSincronizado) => {
+                  if (pacienteSincronizado?.id_paciente_uuid) {
+                    aplicarExperience({
+                      ...experience,
+                      patient: pacienteSincronizado,
+                    });
+                  }
+                })
+                .catch(() => {});
+            }
+          })
+          .catch((error) => {
+            registrarLogTecnicoCarga('home_enrichment_background', error);
+            console.log('Enriquecimento home paciente:', error);
+          });
       } catch (error) {
+        registrarLogTecnicoCarga('home_load', error);
         console.log('Erro ao carregar dados:', error);
         if (!getCachedPatientExperience(idPaciente, homeFetchOptions)) {
           setLoadError(
@@ -925,20 +1005,26 @@ export default function PacienteHomeScreen({
       }
     })();
 
-    loadInFlightRef.current = run;
+    if (!backgroundOnly) {
+      loadInFlightRef.current = run;
+    }
 
     try {
       await run;
     } finally {
-      loadInFlightRef.current = null;
+      if (!backgroundOnly) {
+        loadInFlightRef.current = null;
+      }
     }
   }, [
+    agendarAlertasClinicos,
     aplicarExperience,
+    atualizarExperienceSilencioso,
     canResolvePatient,
-    carregarAlertasClinicos,
     homeFetchOptions,
     idPaciente,
     nomeBaseUsuario,
+    registrarLogTecnicoCarga,
     usuarioLogado,
   ]);
 
@@ -1034,9 +1120,7 @@ export default function PacienteHomeScreen({
         return undefined;
       }
 
-      const cacheFresco =
-        idPaciente && isPatientExperienceCacheFresh(idPaciente, homeFetchOptions);
-      carregarDados({ forceRefresh: !cacheFresco && homeLoadedRef.current });
+      carregarDados({ forceRefresh: false });
       homeLoadedRef.current = true;
       return undefined;
     }, [carregarDados, homeFetchOptions, idPaciente, navigation])
@@ -1432,7 +1516,8 @@ export default function PacienteHomeScreen({
       <View style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}>
         <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.background} />
         <View style={styles.loadingContainer}>
-          <EstadoErroCarregamento
+          <>
+            <EstadoErroCarregamento
             titulo="Painel indisponível"
             mensagem={loadError}
             loading={refreshing}
@@ -1442,6 +1527,14 @@ export default function PacienteHomeScreen({
               carregarDados({ forceRefresh: true });
             }}
           />
+            {technicalLoadLog ? (
+              <MensagemInline
+                tipo="aviso"
+                texto={`Log tecnico\n${technicalLoadLog}`}
+                onFechar={() => setTechnicalLoadLog('')}
+              />
+            ) : null}
+          </>
         </View>
         <BarraAbasPaciente
           navigation={navigation}
@@ -1458,7 +1551,8 @@ export default function PacienteHomeScreen({
 
       {loadError ? (
         <View style={styles.inlineErrorWrap}>
-          <EstadoErroCarregamento
+          <>
+            <EstadoErroCarregamento
             titulo="Atualização parcial"
             mensagem={loadError}
             loading={refreshing}
@@ -1467,6 +1561,14 @@ export default function PacienteHomeScreen({
               carregarDados({ forceRefresh: true });
             }}
           />
+            {technicalLoadLog ? (
+              <MensagemInline
+                tipo="aviso"
+                texto={`Log tecnico\n${technicalLoadLog}`}
+                onFechar={() => setTechnicalLoadLog('')}
+              />
+            ) : null}
+          </>
         </View>
       ) : null}
 

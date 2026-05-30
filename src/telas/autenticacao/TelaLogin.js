@@ -17,7 +17,13 @@ import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
 } from '../../servicos/sincronizarPacienteGoogle';
-import { sanitizeSensitivePatientData } from '../../servicos/servicoDadosPaciente';
+import {
+  sanitizeSensitivePatientData,
+  warmPatientHomeForLogin,
+  getPatientId,
+  prefetchPatientAreaBootstrap,
+  invalidatePatientExperienceCache,
+} from '../../servicos/servicoDadosPaciente';
 import {
   maybeCompleteGoogleOAuthSession,
   startGoogleOAuth,
@@ -522,9 +528,6 @@ export default function TelaLogin({ navigation, route, session }) {
         }
       } else if (role === 'Paciente') {
         usuarioSessao = await salvarSessaoPaciente(usuario);
-        if (route?.params?.onPatientLogin) {
-          route.params.onPatientLogin(usuarioSessao);
-        }
       }
 
       if (usuario?.tipo_perfil !== 'admin') {
@@ -537,6 +540,15 @@ export default function TelaLogin({ navigation, route, session }) {
           setErrorMessage(
             'Login ok, mas sessao clinica nao iniciou. Saia e entre novamente antes de registrar dados.'
           );
+        }
+      }
+
+      if (perfilResolvido === 'paciente' && usuarioSessao) {
+        usuarioSessao = await enriquecerSessaoPacienteComCadastro(usuarioSessao);
+
+        if (route?.params?.onPatientLogin) {
+          const persistedPatient = await route.params.onPatientLogin(usuarioSessao);
+          usuarioSessao = persistedPatient || usuarioSessao;
         }
       }
 
@@ -588,17 +600,49 @@ export default function TelaLogin({ navigation, route, session }) {
     }
   }
 
+  async function enriquecerSessaoPacienteComCadastro(usuarioPaciente) {
+    if (!usuarioPaciente) {
+      return usuarioPaciente;
+    }
+
+    invalidatePatientExperienceCache();
+
+    const experience = await warmPatientHomeForLogin(getPatientId(usuarioPaciente), usuarioPaciente);
+    const pacienteResolvido = experience?.patient;
+
+    if (!pacienteResolvido?.id_paciente_uuid) {
+      prefetchPatientAreaBootstrap(getPatientId(usuarioPaciente), usuarioPaciente);
+      return usuarioPaciente;
+    }
+
+    const usuarioEnriquecido = await salvarSessaoPaciente({
+      ...usuarioPaciente,
+      ...pacienteResolvido,
+      tipo_perfil: 'paciente',
+    });
+
+    prefetchPatientAreaBootstrap(
+      getPatientId(usuarioEnriquecido) || pacienteResolvido.id_paciente_uuid,
+      usuarioEnriquecido
+    );
+
+    return usuarioEnriquecido;
+  }
+
   async function finalizarLoginGoogleComUsuario(user, auditOptions = {}) {
     if (patientAppAlreadyActive(navigation)) {
       return;
     }
 
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
-    const usuarioPaciente = (await salvarSessaoPaciente(pacienteGoogle || user)) || pacienteGoogle || user;
+    let usuarioPaciente =
+      (await salvarSessaoPaciente(pacienteGoogle || user)) || pacienteGoogle || user;
     await emitirSessaoRpcOAuthPaciente();
+    usuarioPaciente = await enriquecerSessaoPacienteComCadastro(usuarioPaciente);
 
     if (route?.params?.onPatientLogin) {
-      route.params.onPatientLogin(usuarioPaciente);
+      const persistedPatient = await route.params.onPatientLogin(usuarioPaciente);
+      usuarioPaciente = persistedPatient || usuarioPaciente;
     }
     const rotaDestino = (await hasPatientOnboardingSeen(usuarioPaciente))
       ? 'HomePaciente'

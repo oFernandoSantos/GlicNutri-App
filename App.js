@@ -80,8 +80,8 @@ import { garantirSessaoRpcClinicaComPerfil } from './src/servicos/servicoSessaoR
 import { resolveInitialRouteName, isPatientUser } from './src/utilitarios/perfisApp';
 import {
   getPatientId,
-  prefetchPatientHomeExperience,
-  prefetchPatientProfileExperience,
+  prefetchPatientAreaBootstrap,
+  warmPatientHomeForLogin,
 } from './src/servicos/servicoDadosPaciente';
 import {
   hasLibreLinkUpLinked,
@@ -450,8 +450,8 @@ export default function App() {
     const patientId = getPatientId(perfilPaciente);
     if (!patientId || adminSession || nutriSession) return;
 
-    prefetchPatientHomeExperience(patientId, perfilPaciente);
-    prefetchPatientProfileExperience(patientId, perfilPaciente);
+    prefetchPatientAreaBootstrap(patientId, perfilPaciente);
+    warmPatientHomeForLogin(patientId, perfilPaciente).catch(() => {});
   }, [adminSession, nutriSession, patientLocalSession, session?.user]);
 
   useEffect(() => {
@@ -633,7 +633,7 @@ export default function App() {
   function getPacienteProps(props) {
     const routeMeta = props.route?.params?.usuarioLogado || null;
     const sessionUser =
-      patientSessionOverride || patientLocalSession || session?.user || routeMeta || null;
+      routeMeta || patientSessionOverride || patientLocalSession || session?.user || null;
 
     const usuarioLogado = sessionUser
       ? {
