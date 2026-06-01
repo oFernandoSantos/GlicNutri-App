@@ -30,6 +30,10 @@ import NutricionistaRelatoriosScreen from './src/telas/nutricionista/TelaRelator
 import HomeMedico from './src/telas/medico/TelaInicioMedico';
 import MedicoPacientesScreen from './src/telas/medico/TelaPacientesMedico';
 import MedicoProntuarioPacienteScreen from './src/telas/medico/TelaProntuarioPacienteMedico';
+import MedicoAgendaScreen from './src/telas/medico/TelaAgendaMedico';
+import MedicoMensagensScreen from './src/telas/medico/TelaMensagensMedico';
+import MedicoRelatoriosScreen from './src/telas/medico/TelaRelatoriosMedico';
+import MedicoConsultaScreen from './src/telas/medico/TelaConsultaMedico';
 import TelaAuditoriaAdmin from './src/telas/admin/TelaAuditoriaAdmin';
 import TelaHomeAdmin from './src/telas/admin/TelaHomeAdmin';
 import TelaCadastrosAdmin from './src/telas/admin/TelaCadastrosAdmin';
@@ -45,9 +49,11 @@ import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePacient
 import PacienteSuporteScreen from './src/telas/paciente/TelaSuportePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
 import PacientePerfilNutricionistaScreen from './src/telas/paciente/TelaPerfilNutricionistaAgendamento';
+import PacientePerfilMedicoScreen from './src/telas/paciente/TelaPerfilMedicoAgendamento';
 import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacienteProgressoScreen from './src/telas/paciente/TelaProgressoPaciente';
+import PacienteRelatoriosScreen from './src/telas/paciente/TelaRelatoriosPaciente';
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
 import PacienteChatNutricionistaScreen from './src/telas/paciente/TelaChatNutricionistaPaciente';
 import PacienteChatNutricionistaDetalheScreen from './src/telas/paciente/TelaChatNutricionistaDetalhePaciente';
@@ -484,7 +490,7 @@ export default function App() {
         patientId,
         patientEmail: perfilPaciente.email_pac || perfilPaciente.email,
         actor: perfilPaciente,
-        runImmediately: true,
+        runImmediately: false,
       });
     })();
 
@@ -683,14 +689,14 @@ export default function App() {
                   sessionMedico?.id_medico_uuid || routeMeta?.id_medico_uuid || null,
               }
             : null,
-          onMedicoLogout: async () => {
-            await limparSessaoMedico();
-            setMedicoSession(null);
-            props.navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
-          },
         },
       },
       navigation: props.navigation,
+      onMedicoLogout: async () => {
+        await limparSessaoMedico();
+        setMedicoSession(null);
+        props.navigation.reset({ index: 0, routes: [{ name: 'Login' }] });
+      },
     };
   }
 
@@ -891,6 +897,11 @@ export default function App() {
                   withSwipeBack(props, <PacientePerfilNutricionistaScreen {...getPacienteProps(props)} />)
                 }
               </Stack.Screen>
+              <Stack.Screen name="PacientePerfilMedico" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(props, <PacientePerfilMedicoScreen {...getPacienteProps(props)} />)
+                }
+              </Stack.Screen>
 
               <Stack.Screen name="PacienteBemEstar" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacienteBemEstarScreen {...getPacienteProps(props)} />)}
@@ -917,6 +928,10 @@ export default function App() {
 
               <Stack.Screen name="PacienteProgresso" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacienteProgressoScreen {...getPacienteProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteRelatorios" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <PacienteRelatoriosScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacientePerfil" options={readerScreenOptions}>
@@ -970,9 +985,25 @@ export default function App() {
                 {(props) => withSwipeBack(props, <HomeMedico {...getMedicoProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="MedicoPacientes" options={readerScreenOptions}>
+              <Stack.Screen name="MedicoPacientes" options={mainTabReaderOptions}>
                 {(props) =>
                   withSwipeBack(props, <MedicoPacientesScreen {...getMedicoProps(props)} />)
+                }
+              </Stack.Screen>
+
+              <Stack.Screen name="MedicoAgenda" options={mainTabReaderOptions}>
+                {(props) => withSwipeBack(props, <MedicoAgendaScreen {...getMedicoProps(props)} />)}
+              </Stack.Screen>
+
+              <Stack.Screen name="MedicoMensagens" options={mainTabReaderOptions}>
+                {(props) =>
+                  withSwipeBack(props, <MedicoMensagensScreen {...getMedicoProps(props)} />)
+                }
+              </Stack.Screen>
+
+              <Stack.Screen name="MedicoRelatorios" options={mainTabReaderOptions}>
+                {(props) =>
+                  withSwipeBack(props, <MedicoRelatoriosScreen {...getMedicoProps(props)} />)
                 }
               </Stack.Screen>
 
@@ -980,6 +1011,10 @@ export default function App() {
                 {(props) =>
                   withSwipeBack(props, <MedicoProntuarioPacienteScreen {...getMedicoProps(props)} />)
                 }
+              </Stack.Screen>
+
+              <Stack.Screen name="MedicoConsulta" options={readerScreenOptions}>
+                {(props) => withSwipeBack(props, <MedicoConsultaScreen {...getMedicoProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen

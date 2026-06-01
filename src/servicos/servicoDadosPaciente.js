@@ -1,9 +1,24 @@
+import {
+  buildLocalDateString,
+  buildLocalTimeString,
+  enrichGlucoseReadingDisplayFields,
+  extractLocalDateTimeFromIsoTimestamp,
+  filterGlucoseReadingsLastHours,
+  getGlucoseReadingDisplayDate,
+  normalizeLocalDateString,
+  normalizeLocalTimeString,
+  sortGlucoseReadingsChronologically,
+} from '../utilitarios/dataLocal';
 import { supabase } from './configSupabase';
 import { enrichRpcClinicalParams, garantirSessaoRpcClinicaComPerfil } from './servicoSessaoRpc';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
-import { mergeCachedGlucoseReadings } from './centralGlicose';
-import { replaceCachedPatientAppState } from './centralAppState';
+import {
+  getCachedGlucoseReadings,
+  mergeCachedGlucoseReadings,
+  replaceCachedGlucoseReadings,
+} from './centralGlicose';
+import { getCachedPatientAppState, replaceCachedPatientAppState } from './centralAppState';
 import { validateGlucoseValue, validateInsulinDose, validateMedicationEntry } from '../utilitarios/validacoesPaciente';
 import {
   fetchCachedPatientChat,
@@ -325,7 +340,7 @@ async function buildRpcParams(params, patientId, rpcActor) {
 }
 
 function buildTodayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  return buildLocalDateString();
 }
 
 function buildCurrentTimeString() {
@@ -510,7 +525,9 @@ function buildMedicationSignature(entry) {
 
 function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
   const normalizedType = normalizeMedicationType(item?.medicationKind || item?.tipo_registro);
-  const date = normalizeMedicationDate(item?.date || item?.data);
+  const date = normalizeMedicationDate(
+    item?.date || item?.data || item?.data_registro || item?.created_at
+  );
   const time = normalizeMedicationTime(item?.time || item?.hora);
   const medicineName = String(item?.medicineName || item?.nome_medicamento || '').trim();
   const medicineUnit = String(item?.medicineUnit || item?.unidade_medida || '').trim();
@@ -542,6 +559,7 @@ function normalizeMedicationEntry(item, storageOrigin = 'legacy', index = 0) {
     medicineName,
     medicineUnit,
     medicineQuantity,
+    medicineQuantityNumber: normalizeMedicationNumber(medicineQuantity),
     medicineDays,
     medicineContinuousUse,
     patientId: item?.id_paciente_uuid || item?.patientId || null,
@@ -600,11 +618,25 @@ function mergeMedicationEntries(databaseEntries, legacyEntries) {
 
 function normalizeMealEntryFromDatabase(row, index = 0) {
   const createdAt = String(row?.created_at || row?.createdAt || '').trim();
-  const date = createdAt ? createdAt.slice(0, 10) : buildTodayDateString();
-  const time = createdAt ? createdAt.slice(11, 16) : buildCurrentTimeString().slice(0, 5);
+  const localParts = extractLocalDateTimeFromIsoTimestamp(createdAt);
   const recordId = String(row?.id || '').trim();
+  const fotoUrl = String(row?.foto_url || '').trim();
   const foods = Array.isArray(row?.alimentos) ? row.alimentos : [];
+  const metadataFood = foods.find(
+    (item) => item?.mealLabel || item?.mealTypeLabel || item?.planSectionId
+  );
+  const explicitDate = String(row?.data_refeicao || row?.data || metadataFood?.date || '').trim();
+  const explicitTime = String(row?.hora_refeicao || row?.hora || metadataFood?.time || '').trim();
+  const date =
+    (/^\d{4}-\d{2}-\d{2}$/.test(explicitDate.slice(0, 10)) ? explicitDate.slice(0, 10) : null) ||
+    localParts?.date ||
+    buildTodayDateString();
+  const time =
+    (/^\d{2}:\d{2}/.test(explicitTime) ? explicitTime.slice(0, 5) : null) ||
+    localParts?.time ||
+    buildCurrentTimeString().slice(0, 5);
   const description = foods
+    .filter((item) => !item?.metadataOnly)
     .map((item) => {
       const nome = String(item?.nome || '').trim();
       const gramas = item?.quantidade_gramas ?? null;
@@ -620,14 +652,13 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   const calories = Number(row?.calorias_total) || 0;
   const protein = Number(row?.proteinas_total) || 0;
   const fat = Number(row?.gorduras_total) || 0;
-  const firstFoodWithMealMeta = foods.find(
-    (item) => item?.mealLabel || item?.mealTypeLabel || item?.planSectionId
-  );
   const mealLabel =
-    firstFoodWithMealMeta?.mealLabel ||
-    firstFoodWithMealMeta?.mealTypeLabel ||
+    row?.tipo_refeicao ||
+    row?.meal_label ||
+    metadataFood?.mealLabel ||
+    metadataFood?.mealTypeLabel ||
     'Refeição Registrada';
-  const planSectionId = firstFoodWithMealMeta?.planSectionId || null;
+  const planSectionId = metadataFood?.planSectionId || null;
   const fiber =
     Number(row?.fibras_total) ||
     foods.reduce((sum, item) => sum + (Number(item?.fibras) || 0), 0);
@@ -644,12 +675,13 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   return {
     id: recordId ? `meal-ia-${recordId}` : `meal-db-${date}-${time}-${index}`,
     kind: 'meal',
-    mode: row?.foto_url ? 'photo' : 'manual',
+    patientId: row?.paciente_id || row?.id_paciente_uuid || null,
+    mode: fotoUrl && !fotoUrl.startsWith('seed://') ? 'photo' : 'manual',
     date,
     time,
     title: mealLabel,
     mealLabel,
-    mealTypeLabel: firstFoodWithMealMeta?.mealTypeLabel || mealLabel,
+    mealTypeLabel: metadataFood?.mealTypeLabel || row?.tipo_refeicao || mealLabel,
     planSectionId,
     mealId: planSectionId,
     description: description || 'Refeição registrada.',
@@ -698,12 +730,61 @@ function isMissingMealTotalColumnError(error) {
   );
 }
 
-function mergeMealEntries(databaseEntries, legacyEntries) {
-  const merged = [];
-  const seenDatabaseIds = new Set();
-  const seenEntryIds = new Set();
+function resolveMealDatabaseId(entry = {}) {
+  const databaseId = String(entry?.databaseId || '').trim();
+  const id = String(entry?.id || '').trim();
+  return databaseId || (id.startsWith('meal-ia-') ? id.slice('meal-ia-'.length) : '');
+}
 
-  [...ensureArray(databaseEntries), ...ensureArray(legacyEntries)].forEach((entry, index) => {
+function isGenericMealLabel(value) {
+  const raw = String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toLowerCase();
+  return !raw || raw === 'refeicao registrada' || raw === 'refeicao confirmada manualmente';
+}
+
+function mergeMealEntryPair(primary = {}, secondary = {}) {
+  const pickLabel = (field) => {
+    const primaryValue = primary?.[field];
+    const secondaryValue = secondary?.[field];
+    if (!isGenericMealLabel(primaryValue)) return primaryValue;
+    if (!isGenericMealLabel(secondaryValue)) return secondaryValue;
+    return primaryValue || secondaryValue || null;
+  };
+
+  const primaryFoods = Array.isArray(primary?.foods) ? primary.foods : [];
+  const secondaryFoods = Array.isArray(secondary?.foods) ? secondary.foods : [];
+
+  return {
+    ...secondary,
+    ...primary,
+    id: primary?.id || secondary?.id,
+    databaseId: primary?.databaseId || secondary?.databaseId || null,
+    storageOrigin: primary?.storageOrigin || secondary?.storageOrigin || 'database',
+    date: primary?.date || secondary?.date || buildTodayDateString(),
+    time: primary?.time || secondary?.time || buildCurrentTimeString().slice(0, 5),
+    title: pickLabel('title') || pickLabel('mealLabel') || 'Refeição Registrada',
+    mealLabel: pickLabel('mealLabel') || pickLabel('title') || 'Refeição Registrada',
+    mealTypeLabel: pickLabel('mealTypeLabel') || pickLabel('mealLabel') || pickLabel('title'),
+    description: primary?.description || secondary?.description || '',
+    foods: primaryFoods.length ? primaryFoods : secondaryFoods,
+    kcal: Number(primary?.kcal) || Number(secondary?.kcal) || 0,
+    carbsG: Number(primary?.carbsG) || Number(secondary?.carbsG) || 0,
+    proteinG: Number(primary?.proteinG) || Number(secondary?.proteinG) || 0,
+    fatG: Number(primary?.fatG) || Number(secondary?.fatG) || 0,
+    foto_url: primary?.foto_url || secondary?.foto_url || null,
+    kind: primary?.kind || secondary?.kind || 'meal',
+  };
+}
+
+function mergeMealEntries(databaseEntries, legacyEntries) {
+  const mergedByDbId = new Map();
+  const mergedByEntryId = new Map();
+  const legacyOnly = [];
+
+  const registerEntry = (entry, index = 0) => {
     const normalized =
       entry?.storageOrigin === 'database' || entry?.databaseId
         ? entry
@@ -711,41 +792,59 @@ function mergeMealEntries(databaseEntries, legacyEntries) {
             ...entry,
             storageOrigin: entry?.storageOrigin || 'legacy',
           };
-    const databaseId = String(normalized?.databaseId || '').trim();
-    const id = String(normalized?.id || '').trim();
-    const derivedDatabaseId =
-      databaseId || (id.startsWith('meal-ia-') ? id.slice('meal-ia-'.length) : '');
-
-    if (derivedDatabaseId && seenDatabaseIds.has(derivedDatabaseId)) {
-      return;
-    }
-
-    if (id && seenEntryIds.has(id)) {
-      return;
-    }
-
-    if (derivedDatabaseId) {
-      seenDatabaseIds.add(derivedDatabaseId);
-    }
-
-    if (id) {
-      seenEntryIds.add(id);
-    }
-
-    merged.push({
+    const databaseId = resolveMealDatabaseId(normalized);
+    const id = String(normalized?.id || '').trim() || (databaseId ? `meal-ia-${databaseId}` : `meal-${Date.now()}-${index}`);
+    const shaped = {
       ...normalized,
-      id: id || (databaseId ? `meal-ia-${databaseId}` : `meal-${Date.now()}-${index}`),
+      id,
+      databaseId: databaseId || normalized?.databaseId || null,
       date: normalized?.date || buildTodayDateString(),
       time: normalized?.time || buildCurrentTimeString().slice(0, 5),
       kind: normalized?.kind || 'meal',
-    });
-  });
+    };
 
-  return merged.sort((left, right) => {
-    const leftStamp = `${left.date || '1970-01-01'}T${left.time || '00:00:00'}`;
-    const rightStamp = `${right.date || '1970-01-01'}T${right.time || '00:00:00'}`;
-    return rightStamp.localeCompare(leftStamp);
-  });
+    if (databaseId) {
+      const existing = mergedByDbId.get(databaseId);
+      mergedByDbId.set(databaseId, existing ? mergeMealEntryPair(shaped, existing) : shaped);
+      return;
+    }
+
+    const existingById = mergedByEntryId.get(id);
+    if (existingById) {
+      mergedByEntryId.set(id, mergeMealEntryPair(shaped, existingById));
+      return;
+    }
+
+    mergedByEntryId.set(id, shaped);
+    legacyOnly.push(id);
+  };
+
+  ensureArray(databaseEntries).forEach(registerEntry);
+  ensureArray(legacyEntries).forEach(registerEntry);
+
+  return [...mergedByDbId.values(), ...legacyOnly.map((id) => mergedByEntryId.get(id)).filter(Boolean)].sort(
+    (left, right) => {
+      const leftStamp = `${left.date || '1970-01-01'}T${left.time || '00:00:00'}`;
+      const rightStamp = `${right.date || '1970-01-01'}T${right.time || '00:00:00'}`;
+      return rightStamp.localeCompare(leftStamp);
+    }
+  );
+}
+
+export function mergeAppStateMealEntries(appState, patientId) {
+  const normalized = normalizeAppState(appState);
+  if (!patientId) {
+    return normalized;
+  }
+
+  const central = getCachedPatientAppState(patientId);
+  return {
+    ...normalized,
+    mealEntries: mergeMealEntries(
+      ensureArray(central?.mealEntries),
+      ensureArray(normalized.mealEntries)
+    ),
+  };
 }
 
 function buildMedicationEntryFromPayload(payload) {
@@ -767,34 +866,90 @@ function buildGlucoseReadingFromPayload(payload, fallbackValue) {
 }
 
 function normalizeGlucoseDate(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return buildTodayDateString();
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) return raw.slice(0, 10);
-  const parsed = new Date(raw);
-  if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
-  }
-  return buildTodayDateString();
+  return normalizeLocalDateString(value);
 }
 
 function normalizeGlucoseTime(value) {
-  const raw = String(value || '').trim();
-  if (!raw) return buildCurrentTimeString();
-  if (/^\d{2}:\d{2}/.test(raw)) return raw.slice(0, 8);
-  return buildCurrentTimeString();
+  return normalizeLocalTimeString(value);
 }
 
 function normalizeGlucoseReadingRow(item, index = 0) {
   const symptoms = item.sintomas_associados || '';
   const glucoseTypeMatch = String(symptoms).match(/Tipo da glicemia:\s*(.+)$/i);
+  const enriched = enrichGlucoseReadingDisplayFields({
+    id: item.id,
+    id_glicemia_manual_uuid: item.id_glicemia_manual_uuid,
+    id_paciente_uuid: item.id_paciente_uuid,
+    patientId: item.id_paciente_uuid || item.patientId || null,
+    value: Number(item.valor_glicose_mgdl ?? item.value) || 0,
+    readingTimeUtc: item.reading_time_utc || item.readingTimeUtc || null,
+    syncedAt: item.synced_at || item.syncedAt || null,
+    date: item.data || item.date,
+    time: item.hora || item.time,
+    fonte: item.fonte,
+    source: item.source,
+    raw_payload: item.raw_payload,
+    glucoseType: item.glucoseType || glucoseTypeMatch?.[1] || '',
+    sintomas_associados: symptoms,
+  });
+  const normalizedDate = enriched.date;
+  const normalizedTime = enriched.time;
 
   return {
-    id: item.id_glicemia_manual_uuid || `${item.data || 'sem-data'}-${item.hora || 'sem-hora'}-${index}`,
-    patientId: item.id_paciente_uuid,
-    value: Number(item.valor_glicose_mgdl) || 0,
-    date: normalizeGlucoseDate(item.data),
-    time: normalizeGlucoseTime(item.hora),
-    glucoseType: item.glucoseType || glucoseTypeMatch?.[1] || '',
+    id:
+      enriched.id ||
+      item.id_glicemia_manual_uuid ||
+      item.id ||
+      `reading-${normalizedDate}-${normalizedTime}-${index}`,
+    patientId: enriched.id_paciente_uuid || enriched.patientId || null,
+    value: enriched.value,
+    readingTimeUtc: enriched.readingTimeUtc || null,
+    syncedAt: enriched.syncedAt || null,
+    date: normalizedDate,
+    time: normalizedTime,
+    glucoseType: enriched.glucoseType || '',
+    source:
+      enriched.source ||
+      (enriched.fonte ? String(enriched.fonte) : symptoms.includes('Fonte:') ? 'cgm' : 'manual'),
+  };
+}
+
+export function mapRemoteGlucoseReadingToEntry(
+  reading,
+  patientId,
+  { source = 'librelinkup', index = 0 } = {}
+) {
+  const enriched = enrichGlucoseReadingDisplayFields({
+    ...reading,
+    fonte: reading?.fonte || source,
+    source: reading?.source || source,
+  });
+  const date = enriched.date;
+  const time = enriched.time;
+  const readingTimeUtc = enriched.readingTimeUtc || null;
+  const value = Number(reading?.value);
+
+  if (
+    !patientId ||
+    !Number.isFinite(value) ||
+    value <= 0 ||
+    !readingTimeUtc ||
+    !date ||
+    !time
+  ) {
+    return null;
+  }
+
+  return {
+    id:
+      reading?.id ||
+      `cgm-${patientId}-${readingTimeUtc}-${value}-${index}`,
+    patientId,
+    value,
+    readingTimeUtc,
+    date,
+    time,
+    source,
   };
 }
 
@@ -867,7 +1022,7 @@ async function fetchPatientByEmail(email) {
 }
 
 const PATIENT_HOME_PROFILE_COLUMNS =
-  'id_paciente_uuid, nome_completo, email_pac, cpf_paciente, objetivo_principal_consulta, id_nutricionista_uuid, peso_atual_kg, data_nascimento, data_hora_ultima_atualizacao';
+  'id_paciente_uuid, nome_completo, email_pac, cpf_paciente, objetivo_principal_consulta, id_nutricionista_uuid, id_medico_uuid, peso_atual_kg, data_nascimento, data_hora_ultima_atualizacao';
 
 export async function fetchPatientProfileMinimal(patientId, options = {}) {
   if (!patientId) return null;
@@ -1166,7 +1321,7 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
     };
   }
 
-  const glucoseLimit = options.glucoseLimit ?? 7;
+  const glucoseLimit = Math.max(options.glucoseLimit ?? 48, 48);
   const mealLimit = options.homeCritical === true ? 0 : options.mealLimit ?? 0;
   const medicationLimit = options.homeCritical === true ? 0 : options.medicationLimit ?? 0;
   const includeMealPlan = options.homeCritical === true ? false : Boolean(options.includeMealPlan);
@@ -1182,9 +1337,14 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
   );
 
   if (!baseParams) {
+    const glucoseReadings =
+      glucoseLimit > 0
+        ? await fetchGlucoseReadings(resolvedPatientId, glucoseLimit, rpcActor)
+        : [];
+
     return {
       tableAppState: null,
-      glucoseReadings: [],
+      glucoseReadings,
       databaseMedicationEntries: [],
       databaseMealEntries: [],
       activeMealPlan: null,
@@ -1203,21 +1363,14 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
 
   const [
     appStateResult,
-    manualGlucoseResult,
-    cgmGlucoseResult,
     medsResult,
     mealsResult,
     activeMealPlan,
+    glucoseReadings,
   ] = await Promise.all([
     includeAppState
       ? rpcCallSafe('obter_paciente_app_state', {})
       : Promise.resolve({ data: null, error: null }),
-    glucoseLimit > 0
-      ? rpcCall('listar_glicemias_manuais_paciente', { p_limite: glucoseLimit })
-      : Promise.resolve({ data: [], error: null }),
-    glucoseLimit > 0
-      ? rpcCall('listar_glicemias_cgm_paciente', { p_limite: glucoseLimit })
-      : Promise.resolve({ data: [], error: null }),
     medicationLimit > 0
       ? fetchMedicationEntries(resolvedPatientId, medicationLimit, rpcActor)
       : Promise.resolve([]),
@@ -1227,6 +1380,9 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
     includeMealPlan
       ? fetchActiveMealPlanForPatient(resolvedPatientId).catch(() => null)
       : Promise.resolve(null),
+    glucoseLimit > 0
+      ? fetchGlucoseReadings(resolvedPatientId, glucoseLimit, rpcActor)
+      : Promise.resolve([]),
   ]);
 
   let tableAppState = null;
@@ -1235,29 +1391,6 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
       tableAppState = appStateResult.data;
     }
   }
-
-  let rpcReadings = [];
-  if (!manualGlucoseResult.error && Array.isArray(manualGlucoseResult.data)) {
-    rpcReadings = manualGlucoseResult.data.map(normalizeGlucoseReadingRow);
-  }
-
-  let cgmReadings = [];
-  if (!cgmGlucoseResult.error && Array.isArray(cgmGlucoseResult.data)) {
-    cgmReadings = cgmGlucoseResult.data.map((row) =>
-      normalizeGlucoseReadingRow({
-        id_glicemia_manual_uuid: row.id,
-        id_paciente_uuid: row.id_paciente_uuid,
-        valor_glicose_mgdl: row.valor_glicose_mgdl,
-        data: row.data,
-        hora: row.hora,
-        sintomas_associados: row.tendencia
-          ? `Fonte: ${row.fonte || 'cgm'} | Tendencia: ${row.tendencia}`
-          : `Fonte: ${row.fonte || 'cgm'}`,
-      })
-    );
-  }
-
-  const glucoseReadings = mergeCachedGlucoseReadings(rpcReadings, cgmReadings).slice(0, glucoseLimit);
 
   let databaseMealEntries = [];
   if (mealLimit > 0 && !mealsResult.error && Array.isArray(mealsResult.data)) {
@@ -2129,57 +2262,173 @@ function isRpcFunctionMissing(error, functionName) {
   );
 }
 
+function mapCgmRowToGlucoseReading(row, index = 0) {
+  return normalizeGlucoseReadingRow({
+    id: row.id,
+    id_glicemia_manual_uuid: row.id,
+    id_paciente_uuid: row.id_paciente_uuid,
+    valor_glicose_mgdl: row.valor_glicose_mgdl,
+    data: row.data,
+    hora: row.hora,
+    fonte: row.fonte || 'librelinkup',
+    reading_time_utc: row.reading_time_utc,
+    synced_at: row.synced_at,
+    raw_payload: row.raw_payload,
+    sintomas_associados: row.tendencia
+      ? `Fonte: ${row.fonte || 'librelinkup'} | Tendencia: ${row.tendencia}`
+      : `Fonte: ${row.fonte || 'librelinkup'}`,
+  }, index);
+}
+
+async function fetchCgmGlucoseRowsDirect(patientId, limit = 120) {
+  const { data, error } = await supabase
+    .from('registro_glicemia_cgm')
+    .select(
+      'id, id_paciente_uuid, valor_glicose_mgdl, data, hora, fonte, reading_time_utc, synced_at, raw_payload, tendencia'
+    )
+    .eq('id_paciente_uuid', patientId)
+    .order('reading_time_utc', { ascending: false, nullsFirst: false })
+    .limit(Math.max(limit, 1));
+
+  if (error || !Array.isArray(data)) {
+    if (error) {
+      console.log('Erro ao buscar glicemia CGM direto:', error.message);
+    }
+    return [];
+  }
+
+  return data.map((row, index) => mapCgmRowToGlucoseReading(row, index));
+}
+
+async function fetchManualGlucoseRowsDirect(patientId, limit = 120) {
+  const { data, error } = await supabase
+    .from('registro_glicemia_manual')
+    .select('id_glicemia_manual_uuid, id_paciente_uuid, valor_glicose_mgdl, data, hora, sintomas_associados')
+    .eq('id_paciente_uuid', patientId)
+    .order('data', { ascending: false })
+    .order('hora', { ascending: false })
+    .limit(Math.max(limit, 1));
+
+  if (error || !Array.isArray(data)) {
+    if (error) {
+      console.log('Erro ao buscar glicemia manual direto:', error.message);
+    }
+    return [];
+  }
+
+  return data.map((row, index) => normalizeGlucoseReadingRow(row, index));
+}
+
 export async function fetchGlucoseReadings(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
     return [];
   }
 
+  const safeLimit = Math.max(Number(limit) || 0, 1);
   const baseParams = await buildRpcParams(
     {
       p_id_paciente_uuid: patientId,
-      p_limite: limit,
+      p_limite: safeLimit,
     },
     patientId,
     rpcActor
   );
 
-  if (!baseParams) {
+  let rpcReadings = [];
+  let cgmReadings = [];
+
+  if (baseParams) {
+    const [{ data: rpcData, error: rpcError }, { data: cgmData, error: cgmError }] =
+      await Promise.all([
+        supabase.rpc('listar_glicemias_manuais_paciente', baseParams),
+        supabase.rpc('listar_glicemias_cgm_paciente', baseParams),
+      ]);
+
+    if (!rpcError && Array.isArray(rpcData)) {
+      rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
+    } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
+      console.log('Erro ao buscar glicemia manual por RPC:', rpcError.message);
+    }
+
+    if (!cgmError && Array.isArray(cgmData)) {
+      cgmReadings = cgmData.map((row, index) => mapCgmRowToGlucoseReading(row, index));
+    } else if (cgmError && !isRpcFunctionMissing(cgmError, 'listar_glicemias_cgm_paciente')) {
+      console.log('Erro ao buscar glicemia CGM por RPC:', cgmError.message);
+    }
+  } else {
+    console.log('Sessao RPC indisponivel ao buscar glicose; usando leitura direta das tabelas.');
+  }
+
+  if (!rpcReadings.length) {
+    rpcReadings = await fetchManualGlucoseRowsDirect(patientId, safeLimit);
+  }
+
+  if (!cgmReadings.length) {
+    cgmReadings = await fetchCgmGlucoseRowsDirect(patientId, safeLimit);
+  }
+
+  const merged = mergeCachedGlucoseReadings(cgmReadings, rpcReadings);
+  return merged.slice(0, safeLimit);
+}
+
+export async function refreshPatientGlucoseReadings(patientId, options = {}) {
+  if (!patientId) return [];
+
+  const limit = Math.max(Number(options.glucoseLimit) || 60, 60);
+  const rpcActor = options.patientContext || options.actor || null;
+
+  try {
+    await garantirSessaoRpcClinicaComPerfil(rpcActor);
+  } catch (error) {
+    console.log('Sessao RPC ausente ao atualizar glicose:', error?.message || error);
+  }
+
+  const fetchedReadings = await fetchGlucoseReadings(patientId, limit, rpcActor).catch((error) => {
+    console.log('Falha ao buscar glicose do paciente:', error?.message || error);
+    return [];
+  });
+  replaceCachedGlucoseReadings(patientId, fetchedReadings);
+  invalidatePatientExperienceCache(patientId);
+
+  return getCachedGlucoseReadings(patientId);
+}
+
+export async function refreshPatientMealEntries(patientId, options = {}) {
+  if (!patientId) {
     return [];
   }
 
-  const [{ data: rpcData, error: rpcError }, { data: cgmData, error: cgmError }] =
-    await Promise.all([
-      supabase.rpc('listar_glicemias_manuais_paciente', baseParams),
-      supabase.rpc('listar_glicemias_cgm_paciente', baseParams),
-    ]);
+  const limit = Math.max(Number(options.mealLimit) || 56, 7);
+  const rpcActor = options.patientContext || options.actor || null;
 
-  let rpcReadings = [];
-  if (!rpcError && Array.isArray(rpcData)) {
-    rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
-  } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
-    console.log('Erro ao buscar glicemia manual por RPC:', rpcError.message);
+  try {
+    await garantirSessaoRpcClinicaComPerfil(rpcActor);
+  } catch (error) {
+    console.log('Sessao RPC ausente ao atualizar refeicoes:', error?.message || error);
   }
 
-  let cgmReadings = [];
-  if (!cgmError && Array.isArray(cgmData)) {
-    cgmReadings = cgmData.map((row) =>
-      normalizeGlucoseReadingRow({
-        id_glicemia_manual_uuid: row.id,
-        id_paciente_uuid: row.id_paciente_uuid,
-        valor_glicose_mgdl: row.valor_glicose_mgdl,
-        data: row.data,
-        hora: row.hora,
-        sintomas_associados: row.tendencia
-          ? `Fonte: ${row.fonte || 'cgm'} | Tendencia: ${row.tendencia}`
-          : `Fonte: ${row.fonte || 'cgm'}`,
-      })
-    );
-  } else if (cgmError && !isRpcFunctionMissing(cgmError, 'listar_glicemias_cgm_paciente')) {
-    console.log('Erro ao buscar glicemia CGM por RPC:', cgmError.message);
+  const fetchedMeals = await fetchMealEntries(patientId, limit, rpcActor).catch((error) => {
+    console.log('Falha ao buscar refeicoes do paciente:', error?.message || error);
+    return [];
+  });
+
+  const central = getCachedPatientAppState(patientId) || createDefaultAppState();
+  const mergedMeals = mergeMealEntries(fetchedMeals, ensureArray(central.mealEntries));
+  const hiddenIds = ensureArray(central.hiddenMealEntryIds);
+  const visibleMeals = options.includeHidden
+    ? mergedMeals
+    : mergedMeals.filter((entry) => !hiddenIds.includes(entry?.id));
+
+  replaceCachedPatientAppState(patientId, {
+    ...central,
+    mealEntries: visibleMeals,
+  });
+
+  if (visibleMeals.length > 0) {
+    invalidatePatientExperienceCache(patientId);
   }
 
-  const merged = mergeCachedGlucoseReadings(rpcReadings, cgmReadings);
-  return merged.slice(0, limit);
+  return visibleMeals;
 }
 
 async function fetchMedicationEntriesOnly(patientId, limit = 120, rpcActor = null) {
@@ -2327,6 +2576,41 @@ export async function fetchMealEntries(patientId, limit = 120, rpcActor = null) 
   return [];
 }
 
+export async function clearCgmGlucoseReadingsBySource(
+  patientId,
+  { fonte = 'librelinkup', actor = null } = {}
+) {
+  if (!patientId) {
+    return { removidos: 0 };
+  }
+
+  const { data, error } = await supabase.rpc(
+    'limpar_glicemia_cgm_fonte',
+    await enrichRpcClinicalParams(
+      {
+        p_id_paciente_uuid: patientId,
+        p_fonte: fonte,
+      },
+      patientId,
+      actor
+    )
+  );
+
+  if (error) {
+    if (isRpcFunctionMissing(error, 'limpar_glicemia_cgm_fonte')) {
+      return { removidos: 0 };
+    }
+    throw error;
+  }
+
+  invalidatePatientExperienceCache(patientId);
+  replaceCachedGlucoseReadings(patientId, []);
+
+  return {
+    removidos: Number(data || 0),
+  };
+}
+
 export async function syncCgmGlucoseReadings(
   patientId,
   readings = [],
@@ -2339,22 +2623,34 @@ export async function syncCgmGlucoseReadings(
   const payload = readings
     .map((reading) => ({
       value: Number(reading?.value),
-      date: reading?.date,
-      time: reading?.time,
+      readingTimeUtc: reading?.readingTimeUtc,
       tendencia: reading?.tendencia || reading?.trend || null,
       fonte: reading?.fonte || fonte,
       device_serial: reading?.device_serial || null,
-      raw: reading?.raw || null,
+      raw:
+        reading?.raw ||
+        (reading?.Timestamp || reading?.FactoryTimestamp
+          ? {
+              value: Number(reading?.value),
+              Timestamp: reading?.Timestamp ?? reading?.timestamp ?? null,
+              FactoryTimestamp: reading?.FactoryTimestamp ?? reading?.factoryTimestamp ?? null,
+            }
+          : null),
     }))
-    .filter((item) => Number.isFinite(item.value) && item.value > 0 && item.date && item.time);
+    .filter(
+      (item) =>
+        Number.isFinite(item.value) &&
+        item.value > 0 &&
+        Boolean(item.readingTimeUtc)
+    );
 
   if (!payload.length) {
     return { inseridos: 0, ignorados: 0 };
   }
 
-  const { data, error } = await supabase.rpc(
-    'sincronizar_glicemia_cgm',
-    await enrichRpcClinicalParams(
+  let rpcParams;
+  try {
+    rpcParams = await enrichRpcClinicalParams(
       {
         p_id_paciente_uuid: patientId,
         p_readings: payload,
@@ -2362,8 +2658,13 @@ export async function syncCgmGlucoseReadings(
       },
       patientId,
       actor
-    )
-  );
+    );
+  } catch (error) {
+    console.log('Sessao RPC ausente ao sincronizar CGM:', error?.message || error);
+    throw error;
+  }
+
+  const { data, error } = await supabase.rpc('sincronizar_glicemia_cgm', rpcParams);
 
   if (error) {
     if (isRpcFunctionMissing(error, 'sincronizar_glicemia_cgm')) {
@@ -2374,6 +2675,14 @@ export async function syncCgmGlucoseReadings(
 
   const row = Array.isArray(data) ? data[0] : data;
   invalidatePatientExperienceCache(patientId);
+
+  const rpcActor = actor || null;
+  await refreshPatientGlucoseReadings(patientId, {
+    actor: rpcActor,
+    patientContext: rpcActor,
+    glucoseLimit: Math.max(payload.length, 7),
+  }).catch(() => {});
+
   return {
     inseridos: Number(row?.inseridos || 0),
     ignorados: Number(row?.ignorados || 0),
@@ -2997,27 +3306,38 @@ export function getLatestGlucose(glucoseReadings) {
 }
 
 export function buildMonitorSeries(glucoseReadings, range = 'Hoje') {
-  const normalized = mergeCachedGlucoseReadings(ensureArray(glucoseReadings)).map((item) => ({
-    label: range === 'Hoje' ? item.time.slice(0, 5) : item.date.slice(5),
-    value: item.value,
-    date: item.date,
-    time: item.time,
-  }));
+  const normalized = mergeCachedGlucoseReadings(ensureArray(glucoseReadings)).map((item) => {
+    const enriched = enrichGlucoseReadingDisplayFields(item);
+
+    return {
+      label: range === 'Hoje' ? enriched.time.slice(0, 5) : enriched.date.slice(5),
+      chartKey:
+        enriched.readingTimeUtc ||
+        `${enriched.date}T${enriched.time}|${enriched.value}`,
+      value: enriched.value,
+      date: enriched.date,
+      time: enriched.time,
+      readingTimeUtc: enriched.readingTimeUtc || null,
+    };
+  });
 
   if (!normalized.length) {
     return [];
   }
 
   if (range === 'Hoje') {
-    const todayReadings = normalized.filter((item) => item.date === buildTodayDateString());
-    const latestDate = normalized[0]?.date || buildTodayDateString();
-    const dayReadings = todayReadings.length
-      ? todayReadings
-      : normalized.filter((item) => item.date === latestDate);
+    const today = buildTodayDateString();
+    const todayReadings = normalized.filter((item) => item.date === today);
+    const lastDayReadings = filterGlucoseReadingsLastHours(normalized, 24);
+    const latestDate = normalized[0]?.date || today;
+    const dayReadings =
+      todayReadings.length >= 2
+        ? todayReadings
+        : lastDayReadings.length >= 2
+          ? lastDayReadings
+          : normalized.filter((item) => item.date === latestDate);
 
-    return dayReadings
-      .slice(0, 12)
-      .reverse();
+    return sortGlucoseReadingsChronologically(dayReadings).slice(-12);
   }
 
   if (range === '7 dias') {

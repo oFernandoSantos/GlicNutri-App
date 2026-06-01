@@ -12,6 +12,12 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import {
+  DashboardKpiCard,
+  DashboardMiniKpiCard,
+  KPI_ACCENTS,
+  dashboardKpiStyles,
+} from '../../componentes/comum/CartaoKpiDashboard';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
@@ -22,9 +28,8 @@ import {
   isPatientExperienceCacheFresh,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
-import { mergeCachedGlucoseReadings } from '../../servicos/centralGlicose';
 import { subscribeToPatientAppState } from '../../servicos/centralAppState';
-import { exportPatientProgressReport } from '../../servicos/servicoRelatorioPaciente';
+import { exportPatientProgressReport, buildCountByDay, buildGlucoseDailyAverageSeries, buildGlycemicMetrics, filterReportEntriesByPeriod, getReportPeriodBounds, isInsulinMedicationEntry } from '../../servicos/servicoRelatorioPaciente';
 import {
   buildPlanAdherenceSeries,
   resolvePlanSections,
@@ -276,41 +281,6 @@ function buildAdherenceSeries(mealEntries, targetMeals, period, startDateInput, 
   return items;
 }
 
-function buildGlycemicMetrics(glucoseReadings) {
-  const values = mergeCachedGlucoseReadings(Array.isArray(glucoseReadings) ? glucoseReadings : [])
-    .map((item) => Number(item?.value))
-    .filter((value) => Number.isFinite(value) && value > 0);
-
-  if (!values.length) {
-    return {
-      average: null,
-      gmi: null,
-      variability: null,
-      tir: null,
-      total: 0,
-      hasData: false,
-    };
-  }
-
-  const total = values.length;
-  const average = Math.round(values.reduce((sum, value) => sum + value, 0) / total);
-  const inRange = values.filter((value) => value >= 70 && value <= 180).length;
-  const tir = Math.round((inRange / total) * 100);
-  const variance =
-    values.reduce((sum, value) => sum + (value - average) ** 2, 0) / Math.max(total, 1);
-  const variability = Math.round(Math.sqrt(variance));
-  const gmi = (3.31 + 0.02392 * average).toFixed(1);
-
-  return {
-    average,
-    gmi: Number(gmi),
-    variability,
-    tir,
-    total,
-    hasData: true,
-  };
-}
-
 function buildAchievements(weeklyAdherence, weightSeries, mealEntries, glucoseReadings) {
   let streak = 0;
   for (let index = weeklyAdherence.length - 1; index >= 0; index -= 1) {
@@ -514,6 +484,38 @@ function WeightChart({ points }) {
   );
 }
 
+function CountBars({ items, emptyLabel = 'Sem registros no periodo.' }) {
+  if (!items?.length) {
+    return <Text style={styles.emptyMealText}>{emptyLabel}</Text>;
+  }
+
+  const max = Math.max(...items.map((item) => Number(item.value) || 0), 1);
+
+  return (
+    <View style={styles.adherenceChartWrap}>
+      <View style={styles.adherenceBarsRow}>
+        {items.map((item) => (
+          <View key={item.id || item.label} style={styles.adherenceBarColumn}>
+            <View style={styles.adherenceBarTrack}>
+              <View
+                style={[
+                  styles.adherenceBarFill,
+                  {
+                    height: `${Math.max(8, (Number(item.value) / max) * 100)}%`,
+                    backgroundColor: item.color || patientTheme.colors.primaryDark,
+                  },
+                ]}
+              />
+            </View>
+            <Text style={styles.adherenceBarLabel}>{item.label}</Text>
+            <Text style={styles.adherenceBarPercent}>{item.value}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
 function AdherenceBars({ items }) {
   return (
     <View style={styles.adherenceChartWrap}>
@@ -559,7 +561,7 @@ export default function PacienteProgressoScreen({
       ),
     [patientId, usuarioLogado]
   );
-  const progressoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('progresso'), []);
+  const progressoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('relatorio'), []);
   const cachedProgressoInicial = useMemo(
     () => (patientId ? getCachedPatientExperience(patientId, progressoFetchLimits) : null),
     [patientId, progressoFetchLimits]
@@ -632,32 +634,51 @@ export default function PacienteProgressoScreen({
   }, [patient?.id_paciente_uuid, patientId]);
 
   const periodBounds = useMemo(
-    () => getPeriodBounds(selectedPeriod, searchStartDate, searchEndDate),
+    () => getReportPeriodBounds(selectedPeriod, searchStartDate, searchEndDate),
     [selectedPeriod, searchStartDate, searchEndDate]
   );
 
   const filteredMealEntries = useMemo(
     () =>
-      filterEntriesByPeriod(
+      filterReportEntriesByPeriod(
         appState?.mealEntries,
         selectedPeriod,
         searchStartDate,
-        searchEndDate,
-        (item) => item?.date
+        searchEndDate
       ),
     [appState?.mealEntries, selectedPeriod, searchStartDate, searchEndDate]
   );
 
   const filteredGlucoseReadings = useMemo(
     () =>
-      filterEntriesByPeriod(
+      filterReportEntriesByPeriod(
         glucoseReadings,
         selectedPeriod,
         searchStartDate,
-        searchEndDate,
-        (item) => item?.date
+        searchEndDate
       ),
     [glucoseReadings, selectedPeriod, searchStartDate, searchEndDate]
+  );
+
+  const filteredMedicationEntries = useMemo(
+    () =>
+      filterReportEntriesByPeriod(
+        appState?.medicationEntries,
+        selectedPeriod,
+        searchStartDate,
+        searchEndDate
+      ),
+    [appState?.medicationEntries, selectedPeriod, searchStartDate, searchEndDate]
+  );
+
+  const filteredInsulinEntries = useMemo(
+    () => filteredMedicationEntries.filter(isInsulinMedicationEntry),
+    [filteredMedicationEntries]
+  );
+
+  const filteredPureMedicationEntries = useMemo(
+    () => filteredMedicationEntries.filter((entry) => !isInsulinMedicationEntry(entry)),
+    [filteredMedicationEntries]
   );
 
   const filteredNotifications = useMemo(
@@ -744,33 +765,114 @@ export default function PacienteProgressoScreen({
     () => buildMealRecords(filteredMealEntries),
     [filteredMealEntries]
   );
+  const glucoseDailySeries = useMemo(
+    () =>
+      buildGlucoseDailyAverageSeries(filteredGlucoseReadings).map((item) => ({
+        ...item,
+        id: `glucose-${item.date}`,
+        color:
+          item.value < 70 ? '#fc8181' : item.value > 180 ? '#ed8936' : patientTheme.colors.primaryDark,
+      })),
+    [filteredGlucoseReadings]
+  );
+  const mealsDailySeries = useMemo(
+    () =>
+      buildCountByDay(filteredMealEntries, (entry) => entry?.date).map((item) => ({
+        ...item,
+        id: `meal-${item.date}`,
+        color: '#4299e1',
+      })),
+    [filteredMealEntries]
+  );
+  const insulinDailySeries = useMemo(
+    () =>
+      buildCountByDay(filteredInsulinEntries, (entry) => entry?.date).map((item) => ({
+        ...item,
+        id: `insulin-${item.date}`,
+        color: '#9f7aea',
+      })),
+    [filteredInsulinEntries]
+  );
+  const medicationDailySeries = useMemo(
+    () =>
+      buildCountByDay(filteredPureMedicationEntries, (entry) => entry?.date).map((item) => ({
+        ...item,
+        id: `med-${item.date}`,
+        color: '#ed8936',
+      })),
+    [filteredPureMedicationEntries]
+  );
   const [exportingReport, setExportingReport] = useState(false);
 
   async function handleExportProgress() {
     try {
       setExportingReport(true);
+
+      let exportMeals = filteredMealEntries;
+      let exportGlucose = filteredGlucoseReadings;
+      let exportMedication = filteredMedicationEntries;
+      let exportMetrics = glycemicMetrics;
+      const activePatientId = patient?.id_paciente_uuid || patientId;
+
+      if (activePatientId) {
+        const experience = await fetchPatientExperience(activePatientId, {
+          patientContext: usuarioLogado,
+          forceRefresh: true,
+          ...progressoFetchLimits,
+        });
+
+        exportMeals = filterReportEntriesByPeriod(
+          experience?.appState?.mealEntries,
+          selectedPeriod,
+          searchStartDate,
+          searchEndDate
+        );
+        if (!exportMeals.length && filteredMealEntries.length) {
+          exportMeals = filteredMealEntries;
+        }
+        exportGlucose = filterReportEntriesByPeriod(
+          experience?.glucoseReadings,
+          selectedPeriod,
+          searchStartDate,
+          searchEndDate
+        );
+        exportMedication = filterReportEntriesByPeriod(
+          experience?.appState?.medicationEntries,
+          selectedPeriod,
+          searchStartDate,
+          searchEndDate
+        );
+        exportMetrics = buildGlycemicMetrics(exportGlucose);
+      }
+
       const result = await exportPatientProgressReport({
+        patient: patient || usuarioLogado,
         patientName: getPatientDisplayName(patient || usuarioLogado),
         generatedAt: new Date().toLocaleString('pt-BR'),
+        periodLabel,
+        periodBounds,
+        period: selectedPeriod,
+        startDate: searchStartDate,
+        endDate: searchEndDate,
         weightSeries,
         weeklyAdherence: adherenceSeries,
-        glycemicMetrics,
+        glycemicMetrics: exportMetrics,
         monthlySummary: {
           adherenceAverage,
-          activeDays: new Set(filteredMealEntries.map((entry) => entry?.date).filter(Boolean))
-            .size,
+          activeDays: new Set(exportMeals.map((entry) => entry?.date).filter(Boolean)).size,
           summaryItems: monthlySummary,
         },
         achievements,
-        mealEntries: filteredMealEntries,
-        glucoseReadings: filteredGlucoseReadings,
-      });
+        mealEntries: exportMeals,
+        glucoseReadings: exportGlucose,
+        medicationEntries: exportMedication,
+      }, { format: 'pdf' });
       if (result?.ok) {
         Alert.alert(
-          'Relatorio exportado',
+          'Relatorio PDF',
           Platform.OS === 'web'
-            ? 'O arquivo foi baixado.'
-            : 'Use o compartilhamento para salvar o relatorio completo.'
+            ? 'O PDF foi baixado com graficos e registros do periodo.'
+            : 'Use o compartilhamento para salvar o PDF.'
         );
       }
     } catch (error) {
@@ -849,27 +951,22 @@ export default function PacienteProgressoScreen({
             </View>
           ) : null}
 
-          <View style={styles.metricsRow}>
-            <View style={[styles.topMetricCard, styles.topMetricCardPrimary]}>
-              <Ionicons
-                name="trending-down-outline"
-                size={18}
-                color={patientTheme.colors.primaryDark}
+          <View style={dashboardKpiStyles.grid}>
+            <View style={dashboardKpiStyles.cell}>
+              <DashboardKpiCard
+                icon="trending-down-outline"
+                accent={KPI_ACCENTS.green}
+                label="Perda de peso"
+                value={weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
               />
-              <Text style={styles.topMetricValue}>
-                {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
-              </Text>
-              <Text style={styles.topMetricLabel}>Perda de peso</Text>
             </View>
-
-            <View style={styles.topMetricCard}>
-              <Ionicons
-                name="analytics-outline"
-                size={18}
-                color={patientTheme.colors.primaryDark}
+            <View style={dashboardKpiStyles.cell}>
+              <DashboardKpiCard
+                icon="analytics-outline"
+                accent={KPI_ACCENTS.blue}
+                label={`Adesao media (${periodLabel})`}
+                value={`${adherenceAverage}%`}
               />
-              <Text style={styles.topMetricValue}>{adherenceAverage}%</Text>
-              <Text style={styles.topMetricLabel}>Adesao media ({periodLabel})</Text>
             </View>
           </View>
 
@@ -989,23 +1086,30 @@ export default function PacienteProgressoScreen({
                   />
                 </View>
 
-                <View style={styles.glycemicMetricsRow}>
-                  <View style={styles.glycemicMetricCard}>
-                    <Text style={styles.glycemicMetricLabel}>Media</Text>
-                    <Text style={styles.glycemicMetricValue}>{glycemicMetrics.average}</Text>
-                    <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
+                <View style={dashboardKpiStyles.miniRow}>
+                  <View style={dashboardKpiStyles.miniCell}>
+                    <DashboardMiniKpiCard
+                      label="Media"
+                      value={String(glycemicMetrics.average)}
+                      helper="mg/dL"
+                      accent={KPI_ACCENTS.green}
+                    />
                   </View>
-                  <View style={styles.glycemicMetricCard}>
-                    <Text style={styles.glycemicMetricLabel}>A1C estimada</Text>
-                    <Text style={styles.glycemicMetricValue}>
-                      {glycemicMetrics.gmi?.toFixed(1)}
-                    </Text>
-                    <Text style={styles.glycemicMetricUnit}>%</Text>
+                  <View style={dashboardKpiStyles.miniCell}>
+                    <DashboardMiniKpiCard
+                      label="A1C estimada"
+                      value={glycemicMetrics.gmi?.toFixed(1) ?? '—'}
+                      helper="%"
+                      accent={KPI_ACCENTS.blue}
+                    />
                   </View>
-                  <View style={styles.glycemicMetricCard}>
-                    <Text style={styles.glycemicMetricLabel}>Variabilidade</Text>
-                    <Text style={styles.glycemicMetricValue}>{glycemicMetrics.variability}</Text>
-                    <Text style={styles.glycemicMetricUnit}>mg/dL</Text>
+                  <View style={dashboardKpiStyles.miniCell}>
+                    <DashboardMiniKpiCard
+                      label="Variabilidade"
+                      value={String(glycemicMetrics.variability)}
+                      helper="mg/dL"
+                      accent={KPI_ACCENTS.orange}
+                    />
                   </View>
                 </View>
               </>
@@ -1014,6 +1118,58 @@ export default function PacienteProgressoScreen({
                 Registre glicemias no monitoramento para ver tendências aqui.
               </Text>
             )}
+
+            {glycemicMetrics.hasData ? (
+              <>
+                <Text style={styles.sectionFootnote}>Media diaria no periodo</Text>
+                <CountBars items={glucoseDailySeries} emptyLabel="Sem leituras para grafico." />
+              </>
+            ) : null}
+          </View>
+
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="water-outline" size={15} color="#9f7aea" />
+                <Text style={styles.sectionTitle}>Insulina</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>{filteredInsulinEntries.length} registro(s)</Text>
+              </View>
+            </View>
+            <CountBars
+              items={insulinDailySeries}
+              emptyLabel="Nenhuma aplicacao de insulina no periodo."
+            />
+          </View>
+
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="medkit-outline" size={15} color="#ed8936" />
+                <Text style={styles.sectionTitle}>Medicacao</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>{filteredPureMedicationEntries.length} registro(s)</Text>
+              </View>
+            </View>
+            <CountBars
+              items={medicationDailySeries}
+              emptyLabel="Nenhuma medicacao registrada no periodo."
+            />
+          </View>
+
+          <View style={styles.sectionCard}>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="restaurant-outline" size={15} color="#4299e1" />
+                <Text style={styles.sectionTitle}>Alimentacao no periodo</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>{filteredMealEntries.length} refeicao(oes)</Text>
+              </View>
+            </View>
+            <CountBars items={mealsDailySeries} emptyLabel="Sem refeicoes para grafico." />
           </View>
 
           <View style={styles.sectionCard}>
@@ -1088,7 +1244,9 @@ export default function PacienteProgressoScreen({
             ) : (
               <Ionicons name="download-outline" size={18} color={patientTheme.colors.primaryDark} />
             )}
-            <Text style={styles.exportButtonText}>Baixar relatorio completo</Text>
+            <Text style={styles.exportButtonText}>
+              {exportingReport ? 'Gerando PDF…' : 'Baixar relatorio PDF (glicose, alimentacao, insulina, medicacao)'}
+            </Text>
           </TouchableOpacity>
         </>
       ) : null}

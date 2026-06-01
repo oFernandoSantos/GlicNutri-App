@@ -540,6 +540,93 @@ export async function uploadImagemRefeicaoIA({ asset, patientId }) {
   };
 }
 
+const DISPLAYABLE_URI_PATTERN = /^(https?:|file:|data:|blob:)/i;
+const MEAL_PHOTO_SIGNED_URL_TTL_SECONDS = 60 * 60;
+
+function parseMealPhotoStorageRef(photoRef) {
+  const raw = String(photoRef || '').trim();
+
+  if (!raw || DISPLAYABLE_URI_PATTERN.test(raw)) {
+    return null;
+  }
+
+  if (raw.startsWith('storage://')) {
+    const withoutScheme = raw.slice('storage://'.length);
+    const slashIndex = withoutScheme.indexOf('/');
+
+    if (slashIndex <= 0) {
+      return null;
+    }
+
+    return {
+      bucket: withoutScheme.slice(0, slashIndex),
+      path: withoutScheme.slice(slashIndex + 1),
+    };
+  }
+
+  if (!raw.includes('://')) {
+    return {
+      bucket: REFEICAO_IA_BUCKET,
+      path: raw.replace(/^\/+/, ''),
+    };
+  }
+
+  return null;
+}
+
+export function getMealEntryPhotoRef(entry) {
+  if (!entry || typeof entry !== 'object') {
+    return null;
+  }
+
+  const candidates = [
+    entry.foto_url,
+    entry.fotoUrl,
+    entry.photoUrl,
+    entry.storagePath,
+    entry.imageUri,
+    entry.imageUrl,
+  ];
+
+  for (const value of candidates) {
+    const ref = String(value || '').trim();
+
+    if (ref) {
+      return ref;
+    }
+  }
+
+  return null;
+}
+
+export async function resolveMealPhotoDisplayUri(photoRef) {
+  const raw = String(photoRef || '').trim();
+
+  if (!raw) {
+    return null;
+  }
+
+  if (DISPLAYABLE_URI_PATTERN.test(raw)) {
+    return raw;
+  }
+
+  const storageRef = parseMealPhotoStorageRef(raw);
+
+  if (!storageRef?.bucket || !storageRef?.path) {
+    return null;
+  }
+
+  const { data, error } = await supabase.storage
+    .from(storageRef.bucket)
+    .createSignedUrl(storageRef.path, MEAL_PHOTO_SIGNED_URL_TTL_SECONDS);
+
+  if (error) {
+    throw new Error(normalizeErrorMessage(error));
+  }
+
+  return data?.signedUrl || null;
+}
+
 export async function analisarImagemRefeicaoIA(payload) {
   const { data, error } = await supabase.functions.invoke('analisar-refeicao-ia', {
     body: payload,
@@ -625,13 +712,22 @@ export function enriquecerAlimentosIdentificadosComTaco(alimentos = []) {
 }
 
 export function getMealEntryNutrition(entry) {
-  const kcal = Number(entry?.kcal ?? entry?.calories);
   const carbs = Number(entry?.carbsG ?? entry?.carbs);
   const protein = Number(entry?.proteinG ?? entry?.protein);
   const fat = Number(entry?.fatG ?? entry?.fat);
+  let kcal = Number(entry?.kcal ?? entry?.calories);
 
   if (!Number.isFinite(kcal) || kcal <= 0) {
-    return null;
+    const fromMacros =
+      (Number.isFinite(carbs) ? carbs : 0) * 4 +
+      (Number.isFinite(protein) ? protein : 0) * 4 +
+      (Number.isFinite(fat) ? fat : 0) * 9;
+
+    if (fromMacros > 0) {
+      kcal = fromMacros;
+    } else {
+      return null;
+    }
   }
 
   return {
@@ -856,6 +952,7 @@ export function buildMealTimelineEntryFromAI({
   mealLabel,
   mealTypeLabel,
   planSectionId,
+  fotoUrl,
 }) {
   const normalizedFoods = Array.isArray(alimentos) ? alimentos : [];
   const safeTotals = totais || calcularTotaisRefeicaoIA(normalizedFoods);
@@ -866,11 +963,12 @@ export function buildMealTimelineEntryFromAI({
   const entryDate = date || now.toISOString().slice(0, 10);
   const entryTime = time || now.toTimeString().slice(0, 5);
   const displayTitle = mealLabel || title || 'Refeição Registrada';
+  const normalizedPhotoRef = String(fotoUrl || '').trim();
 
   return {
     id: `meal-ia-${Date.now()}`,
     kind: 'meal',
-    mode: 'photo',
+    mode: normalizedPhotoRef ? 'photo' : 'manual',
     date: entryDate,
     time: entryTime,
     title: displayTitle,
@@ -909,6 +1007,7 @@ export function buildMealTimelineEntryFromAI({
       saturatedFat: roundNutrient(item.gorduras_saturadas),
       sodium: roundNutrient(item.sodio),
     })),
+    foto_url: normalizedPhotoRef || null,
   };
 }
 
@@ -958,11 +1057,27 @@ export async function salvarRefeicaoIA({
     throw new Error('Adicione ao menos um alimento ou uma foto antes de confirmar.');
   }
 
-  const totais = calcularTotaisRefeicaoIA(normalizedFoods);
+  const alimentosPersistidos =
+    normalizedFoods.length > 0
+      ? normalizedFoods
+      : [
+          {
+            nome: mealLabel || mealTypeLabel || 'Refeicao registrada',
+            quantidade_gramas: 0,
+            calorias: 0,
+            carboidratos: 0,
+            proteinas: 0,
+            gorduras: 0,
+            ...mealMetadata,
+            metadataOnly: true,
+          },
+        ];
+
+  const totais = calcularTotaisRefeicaoIA(alimentosPersistidos);
   const payload = {
     paciente_id: patientId,
     foto_url: fotoUrl || null,
-    alimentos: normalizedFoods,
+    alimentos: alimentosPersistidos,
     carboidratos_total: totais.carboidratos_total,
     calorias_total: totais.calorias_total,
     proteinas_total: totais.proteinas_total,

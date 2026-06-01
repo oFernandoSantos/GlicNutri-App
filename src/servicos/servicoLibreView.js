@@ -1,9 +1,39 @@
+import {
+  buildLocalDateString,
+  buildLocalTimeString,
+  formatDateTimePartsInTimeZone,
+  formatReadingTimeForDisplay,
+  GLICNUTRI_TIMEZONE,
+  normalizeLocalDateString,
+  normalizeLocalTimeString,
+  parseLibreReadingTimeUtc,
+} from '../utilitarios/dataLocal';
+import { supabaseAnonKey } from './configSupabase';
+
 const supabaseProjectUrl = globalThis?.process?.env?.EXPO_PUBLIC_SUPABASE_URL || '';
 const libreViewSyncUrl =
   globalThis?.process?.env?.EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL ||
   (supabaseProjectUrl ? `${supabaseProjectUrl}/functions/v1/libreview-sync` : '');
 
 const LIBRE_LINKUP_STORAGE_PREFIX = '@glicnutri:libreLinkUp:';
+export const DEFAULT_LIBRE_API_REGION = 'la';
+
+const LIBRE_REGION_ALIASES = {
+  br: 'la',
+  mx: 'la',
+  ar: 'la',
+  cl: 'la',
+  co: 'la',
+};
+
+export function normalizeLibreApiRegion(region) {
+  const value = String(region || '').trim().toLowerCase();
+  if (!value || value === 'global') {
+    return DEFAULT_LIBRE_API_REGION;
+  }
+
+  return LIBRE_REGION_ALIASES[value] || value;
+}
 
 function normalizeHeader(value) {
   return String(value || '')
@@ -77,9 +107,14 @@ function normalizeTimestampParts(rawTimestamp, rawDate, rawTime) {
   if (timestamp) {
     const parsed = new Date(timestamp);
     if (!Number.isNaN(parsed.getTime())) {
+      const localized = formatDateTimePartsInTimeZone(parsed, GLICNUTRI_TIMEZONE);
+      if (localized) {
+        return localized;
+      }
+
       return {
-        date: parsed.toISOString().slice(0, 10),
-        time: parsed.toTimeString().slice(0, 8),
+        date: buildLocalDateString(parsed),
+        time: buildLocalTimeString(parsed),
       };
     }
 
@@ -170,43 +205,44 @@ function buildHeaderIndexes(headers) {
 }
 
 function normalizeDate(value) {
-  if (!value) return new Date().toISOString().slice(0, 10);
-
-  const date = new Date(value);
-
-  if (!Number.isNaN(date.getTime())) {
-    return date.toISOString().slice(0, 10);
-  }
-
-  return String(value).slice(0, 10);
+  return normalizeLocalDateString(value);
 }
 
 function normalizeTime(value) {
-  if (!value) return new Date().toTimeString().slice(0, 8);
+  return normalizeLocalTimeString(value);
+}
 
-  const date = new Date(value);
-
-  if (!Number.isNaN(date.getTime())) {
-    return date.toTimeString().slice(0, 8);
-  }
-
-  const text = String(value);
-  return text.length === 5 ? `${text}:00` : text.slice(0, 8);
+function buildLibreReadingRawPayload(item, value) {
+  return {
+    value,
+    Timestamp: item?.Timestamp ?? item?.timestamp ?? null,
+    FactoryTimestamp: item?.FactoryTimestamp ?? item?.factoryTimestamp ?? null,
+  };
 }
 
 function normalizeLibreReading(item) {
-  const timestamp =
-    item?.timestamp ||
-    item?.dateTime ||
-    item?.date_time ||
-    item?.time ||
-    item?.createdAt ||
-    null;
+  const value = Number(item?.valueMgDl || item?.value_in_mg_per_dl || item?.value || item?.glucose);
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+
+  const raw = buildLibreReadingRawPayload(item, value);
+  const readingTimeUtc = item?.readingTimeUtc || parseLibreReadingTimeUtc(item);
+  if (!readingTimeUtc) {
+    return null;
+  }
+
+  const display = formatReadingTimeForDisplay(readingTimeUtc);
 
   return {
-    value: Number(item?.valueMgDl || item?.value_in_mg_per_dl || item?.value || item?.glucose),
-    date: item?.date || normalizeDate(timestamp),
-    time: item?.hour || item?.hora || normalizeTime(timestamp),
+    value,
+    readingTimeUtc,
+    date: display?.date,
+    time: display?.time,
+    fonte: 'librelinkup',
+    Timestamp: raw.Timestamp,
+    FactoryTimestamp: raw.FactoryTimestamp,
+    raw,
   };
 }
 
@@ -236,7 +272,7 @@ export async function loadLibreLinkUpCredentials(patientId) {
     return {
       email,
       password,
-      region: String(parsed?.region || 'la').trim() || 'la',
+      region: normalizeLibreApiRegion(parsed?.region),
       connectionPatientId: String(parsed?.connectionPatientId || '').trim() || null,
     };
   } catch (error) {
@@ -259,7 +295,7 @@ export async function saveLibreLinkUpCredentials(patientId, credentials = {}) {
   const payload = {
     email,
     password,
-    region: String(credentials?.region || 'la').trim() || 'la',
+    region: normalizeLibreApiRegion(credentials?.region),
     connectionPatientId: String(credentials?.connectionPatientId || '').trim() || null,
     linkedAt: new Date().toISOString(),
   };
@@ -298,6 +334,12 @@ export async function fetchLibreViewReadings({
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
+      ...(supabaseAnonKey
+        ? {
+            apikey: supabaseAnonKey,
+            Authorization: `Bearer ${supabaseAnonKey}`,
+          }
+        : {}),
     },
     body: JSON.stringify({
       patientId,
@@ -305,7 +347,7 @@ export async function fetchLibreViewReadings({
       limit,
       libreEmail,
       librePassword,
-      libreRegion,
+      libreRegion: normalizeLibreApiRegion(libreRegion),
       connectionPatientId,
     }),
   });
@@ -387,6 +429,7 @@ export function parseLibreViewExportText(rawText) {
       value,
       date: normalizedMoment.date,
       time: normalizedMoment.time,
+      fonte: 'librelinkup',
     });
   }
 

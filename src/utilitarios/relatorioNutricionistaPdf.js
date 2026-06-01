@@ -1,5 +1,22 @@
-import { brand } from '../temas/designSystem';
-import { riskBucketLabel } from './adesaoNutricional';
+import {
+  BRAND_RGB,
+  CHART_BLUE,
+  CHART_ORANGE,
+  CHART_PURPLE,
+  GLUCOSE_OK,
+  PAGE_MARGIN,
+  addBulletListPanel,
+  addInsightBox,
+  addMetaLine,
+  addModernFooter,
+  addModernHeader,
+  addModernSectionTitle,
+  addSummaryCardGrid,
+  drawColumnChart,
+  drawDistributionPanel,
+  drawHorizontalBarChart,
+  pdfText,
+} from './relatorioPdfDesign';
 
 let pdfModulesPromise = null;
 
@@ -12,327 +29,144 @@ async function loadPdfModules() {
       })
     );
   }
-
   return pdfModulesPromise;
 }
 
-const PAGE_MARGIN = 14;
-const BRAND_RGB = [47, 157, 120];
-const MUTED_RGB = [92, 107, 117];
-const DANGER_RGB = [217, 107, 107];
-
-function pdfText(value) {
-  return String(value ?? '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function addReportHeader(doc, bundle, title) {
-  doc.setFillColor(...BRAND_RGB);
-  doc.rect(0, 0, doc.internal.pageSize.getWidth(), 28, 'F');
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(11);
-  doc.text('GLICNUTRI', PAGE_MARGIN, 12);
-  doc.setFontSize(15);
-  doc.text(pdfText(title), PAGE_MARGIN, 22);
-
-  doc.setTextColor(47, 52, 56);
-  doc.setFontSize(10);
-  let y = 38;
-  doc.text(`Gerado em: ${pdfText(bundle.generatedAt)}`, PAGE_MARGIN, y);
-  y += 6;
-  doc.text(`Profissional: ${pdfText(bundle.nutricionista.nome)}`, PAGE_MARGIN, y);
-  y += 6;
-  doc.text(`E-mail: ${pdfText(bundle.nutricionista.email || 'Nao informado')}`, PAGE_MARGIN, y);
-  y += 6;
-  doc.text(`Pacientes na carteira: ${bundle.metrics.totalPatients}`, PAGE_MARGIN, y);
-  return y + 8;
-}
-
-function addSectionTitle(doc, y, title) {
-  doc.setFontSize(12);
-  doc.setTextColor(...BRAND_RGB);
-  doc.text(pdfText(title), PAGE_MARGIN, y);
-  doc.setDrawColor(217, 224, 231);
-  doc.line(PAGE_MARGIN, y + 2, doc.internal.pageSize.getWidth() - PAGE_MARGIN, y + 2);
-  return y + 10;
-}
-
-function addSummaryBullets(doc, startY, lines) {
-  let y = startY;
-  doc.setFontSize(10);
-  doc.setTextColor(47, 52, 56);
-  lines.forEach((line) => {
-    doc.text(`• ${pdfText(line)}`, PAGE_MARGIN, y);
-    y += 6;
-  });
-  return y + 4;
-}
-
-export function buildRelatorioGeralPdf(bundle, { jsPDF, autoTable }) {
+export function buildPortfolioSummaryPdf(bundle, { jsPDF }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  let y = addReportHeader(doc, bundle, 'Relatorio Geral da Carteira');
+  const analytics = bundle.portfolioAnalytics || {};
+  const metrics = bundle.metrics || {};
+  const periodLabel = bundle.periodLabel || 'Últimos 7 dias';
 
-  y = addSectionTitle(doc, y, 'Resumo executivo');
-  y = addSummaryBullets(doc, y, [
-    `Pacientes ativos: ${bundle.metrics.totalPatients}`,
-    `Alto risco: ${bundle.metrics.highRiskCount}`,
-    `Adesao media: ${bundle.metrics.averageAdherence}%`,
-    `Alertas ativos: ${bundle.metrics.alertsTotal}`,
-    `Consultas registradas: ${bundle.consultas.total}`,
-    `Proximas consultas: ${bundle.consultas.upcoming}`,
-    `Consultas realizadas: ${bundle.consultas.completed}`,
+  let y = addModernHeader(doc, {
+    title: 'Relatório da Carteira',
+    subtitle: pdfText(bundle.nutricionista?.nome || 'Nutricionista'),
+    metaRight: periodLabel,
+  });
+
+  y = addMetaLine(
+    doc,
+    y,
+    `Gerado em ${pdfText(bundle.generatedAt)} · ${metrics.totalPatients ?? 0} paciente(s) vinculado(s)`
+  );
+  y += 4;
+
+  y = addModernSectionTitle(doc, y, '1. Visão geral da carteira');
+  y = addSummaryCardGrid(doc, y, [
+    { label: 'Pacientes', value: metrics.totalPatients ?? 0, color: BRAND_RGB },
+    { label: 'Ativos', value: analytics.activePatients ?? 0, color: GLUCOSE_OK },
+    { label: 'Sem registros', value: analytics.inactivePatients ?? 0, color: CHART_ORANGE },
+    { label: 'Glicose média', value: analytics.portfolioAvgGlucose ?? '—', suffix: 'mg/dL', color: BRAND_RGB },
+    { label: 'Tempo no alvo', value: analytics.portfolioAvgTir ?? '—', suffix: '%', color: GLUCOSE_OK },
+    { label: 'Adesão média', value: metrics.averageAdherence ?? 0, suffix: '%', color: CHART_BLUE },
+    { label: 'Refeições', value: analytics.totals?.meals ?? 0, color: CHART_BLUE },
+    { label: 'Glicose', value: analytics.totals?.glucose ?? 0, color: BRAND_RGB },
+    { label: 'Insulina', value: analytics.totals?.insulin ?? 0, color: CHART_PURPLE },
+    { label: 'Medicações', value: analytics.totals?.medication ?? 0, color: CHART_ORANGE },
   ]);
 
-  autoTable(doc, {
-    startY: y,
-    head: [['Objetivo', 'Pacientes']],
-    body: bundle.objectiveDistribution.map((item) => [item.label, String(item.value)]),
-    styles: { fontSize: 9, cellPadding: 2 },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'grid',
-  });
+  y = drawDistributionPanel(doc, y, 'Distribuição por faixa de controle', analytics.controlDistribution);
 
-  y = doc.lastAutoTable.finalY + 8;
-  y = addSectionTitle(doc, y, 'Distribuicao de risco');
+  y = drawHorizontalBarChart(doc, y, 'Ranking · tempo no alvo', analytics.tirRanking);
+  y = drawHorizontalBarChart(doc, y, 'Média glicêmica por paciente', analytics.glucoseAvgRanking);
 
-  autoTable(doc, {
-    startY: y,
-    head: [['Nivel', 'Pacientes']],
-    body: bundle.riskDistribution.map((item) => [item.label, String(item.value)]),
-    styles: { fontSize: 9, cellPadding: 2 },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'grid',
-  });
+  y = addModernSectionTitle(doc, y, '2. Engajamento e evolução');
+  y = drawHorizontalBarChart(doc, y, 'Quantidade de registros por paciente', analytics.recordsRanking);
+  y = drawHorizontalBarChart(doc, y, 'Adesão alimentar por paciente', analytics.adherenceRanking);
 
-  y = doc.lastAutoTable.finalY + 8;
-  y = addSectionTitle(doc, y, 'Adesao semanal da carteira');
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Dia', 'Adesao %']],
-    body: bundle.weeklyAdherence.map((item) => [item.label, `${item.value}%`]),
-    styles: { fontSize: 9, cellPadding: 2 },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'striped',
-  });
-
-  doc.addPage();
-  y = addSectionTitle(doc, 20, 'Detalhamento por paciente');
-
-  autoTable(doc, {
-    startY: y,
-    head: [
-      [
-        'Paciente',
-        'Risco',
-        'Adesao',
-        'Glicemia',
-        'TIR',
-        'Refeicoes/sem',
-        'Objetivo',
-      ],
-    ],
-    body: bundle.patients.map((patient) => [
-      patient.name,
-      patient.risk,
-      `${patient.adherence}%`,
-      patient.latestGlucose != null ? `${patient.latestGlucose}` : '—',
-      patient.glucoseTir != null ? `${patient.glucoseTir}%` : '—',
-      String(patient.mealsLoggedWeek),
-      pdfText(patient.objective).slice(0, 40),
-    ]),
-    styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
-    headStyles: { fillColor: BRAND_RGB },
-    columnStyles: { 6: { cellWidth: 42 } },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'striped',
-  });
-
-  if (bundle.consultas?.items?.length) {
-    doc.addPage();
-    y = addSectionTitle(doc, 20, 'Agenda e consultas recentes');
-    autoTable(doc, {
-      startY: y,
-      head: [['Data/Hora', 'Paciente', 'Tipo', 'Status']],
-      body: bundle.consultas.items.map((item) => [
-        item.scheduledLabel,
-        item.pacienteNome,
-        item.tipo,
-        item.status,
-      ]),
-      styles: { fontSize: 8, cellPadding: 2 },
-      headStyles: { fillColor: BRAND_RGB },
-      margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-      theme: 'grid',
+  const showEvolution = (analytics.evolutionTirSeries || []).some((item) => item.value > 0);
+  if (showEvolution) {
+    y = drawColumnChart(doc, y, 'Evolução do tempo no alvo (carteira)', analytics.evolutionTirSeries, {
+      color: GLUCOSE_OK,
+      valueSuffix: '%',
+    });
+  } else {
+    y = drawColumnChart(doc, y, 'Evolução da adesão semanal', bundle.weeklyAdherence || [], {
+      color: CHART_BLUE,
+      valueSuffix: '%',
     });
   }
 
-  addFooter(doc);
+  y = addModernSectionTitle(doc, y, '3. Pacientes em destaque');
+  y = addBulletListPanel(doc, y, 'Melhor controle glicêmico', analytics.bestControlPatients, GLUCOSE_OK);
+  y = addBulletListPanel(doc, y, 'Precisam de atenção', analytics.needsAttentionPatients, CHART_ORANGE);
+  y = addBulletListPanel(doc, y, 'Baixa adesão alimentar', analytics.lowAdherencePatients, CHART_BLUE);
+  y = addBulletListPanel(
+    doc,
+    y,
+    `Sem registros nos últimos ${bundle.inactiveDays || 7} dias`,
+    analytics.inactivePatientsList,
+    CHART_ORANGE
+  );
+
+  const insights = [
+    metrics.highRiskCount
+      ? `${metrics.highRiskCount} paciente(s) classificado(s) como alto risco.`
+      : 'Nenhum paciente em alto risco no momento.',
+    metrics.alertsTotal
+      ? `${metrics.alertsTotal} alerta(s) clínico(s) ativo(s) na carteira.`
+      : 'Sem alertas clínicos ativos registrados.',
+    bundle.consultas?.upcoming
+      ? `${bundle.consultas.upcoming} consulta(s) agendada(s) nos próximos dias.`
+      : 'Nenhuma consulta próxima agendada.',
+  ];
+  y = addModernSectionTitle(doc, y, '4. Resumo para gestão');
+  y = addInsightBox(doc, y, insights);
+
+  addModernFooter(doc, 'GlicNutri · Relatório da carteira');
   return doc;
 }
 
-export function buildRelatorioAdesaoPdf(bundle, { jsPDF, autoTable }) {
+/** Mantém compatibilidade com exportações legadas (adesão/risco) no formato resumido. */
+export function buildRelatorioAdesaoPdf(bundle, { jsPDF }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  let y = addReportHeader(doc, bundle, 'Relatorio de Adesao Alimentar');
-
-  y = addSectionTitle(doc, y, 'Resumo');
-  y = addSummaryBullets(doc, y, [
-    `Adesao media da carteira: ${bundle.metrics.averageAdherence}%`,
-    `Media semanal agregada: ${bundle.metrics.portfolioAverage}%`,
-    `Melhor dia: ${bundle.metrics.bestDay}%`,
-    `Pior dia: ${bundle.metrics.worstDay}%`,
+  let y = addModernHeader(doc, {
+    title: 'Adesão alimentar da carteira',
+    subtitle: pdfText(bundle.nutricionista?.nome || 'Nutricionista'),
+    metaRight: bundle.periodLabel || 'Período',
+  });
+  y = addSummaryCardGrid(doc, y, [
+    { label: 'Adesão média', value: bundle.metrics?.averageAdherence ?? 0, suffix: '%', color: CHART_BLUE },
+    { label: 'Melhor dia', value: bundle.metrics?.bestDay ?? 0, suffix: '%', color: GLUCOSE_OK },
+    { label: 'Pior dia', value: bundle.metrics?.worstDay ?? 0, suffix: '%', color: CHART_ORANGE },
   ]);
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Dia', 'Adesao carteira %']],
-    body: bundle.weeklyAdherence.map((item) => [item.label, `${item.value}%`]),
-    styles: { fontSize: 9, cellPadding: 2 },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'striped',
+  y = drawColumnChart(doc, y, 'Evolução semanal da carteira', bundle.weeklyAdherence || [], {
+    color: CHART_BLUE,
+    valueSuffix: '%',
   });
-
-  y = doc.lastAutoTable.finalY + 8;
-  y = addSectionTitle(doc, y, 'Ranking de adesao');
-
-  autoTable(doc, {
-    startY: y,
-    head: [['#', 'Paciente', 'Adesao', 'Sequencia', 'Risco']],
-    body: bundle.ranking.map((item, index) => [
-      String(index + 1),
-      item.patientName,
-      `${item.adherence}%`,
-      item.streak,
-      item.risk,
-    ]),
-    styles: { fontSize: 8, cellPadding: 2 },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'grid',
-  });
-
-  const detailRows = [];
-  bundle.patients.forEach((patient) => {
-    if (!patient.weeklyItems?.length) {
-      detailRows.push([
-        patient.name,
-        '—',
-        '—',
-        `${patient.adherence}%`,
-        String(patient.mealsLoggedWeek),
-      ]);
-      return;
-    }
-    patient.weeklyItems.forEach((day) => {
-      detailRows.push([
-        patient.name,
-        day.label,
-        day.isoDate,
-        `${day.value}%`,
-        String(day.mealsLogged),
-      ]);
-    });
-  });
-
-  doc.addPage();
-  y = addSectionTitle(doc, 20, 'Refeicoes por dia (ultimos 7 dias)');
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Paciente', 'Dia', 'Data', 'Adesao', 'Refeicoes']],
-    body: detailRows,
-    styles: { fontSize: 7, cellPadding: 1.5, overflow: 'linebreak' },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'striped',
-  });
-
-  addFooter(doc);
+  y = drawHorizontalBarChart(
+    doc,
+    y,
+    'Ranking de adesão',
+    (bundle.ranking || []).map((item) => ({
+      label: item.patientName,
+      value: item.adherence,
+      display: `${item.adherence}%`,
+      color: CHART_BLUE,
+    }))
+  );
+  addModernFooter(doc, 'GlicNutri · Adesão da carteira');
   return doc;
 }
 
-export function buildRelatorioRiscoPdf(bundle, { jsPDF, autoTable }) {
+export function buildRelatorioRiscoPdf(bundle, { jsPDF }) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  let y = addReportHeader(doc, bundle, 'Relatorio de Risco Glicemico');
-
-  const moderado =
-    bundle.riskDistribution.find((item) => item.id === 'moderado')?.value || 0;
-  const baixo = bundle.riskDistribution.find((item) => item.id === 'baixo')?.value || 0;
-
-  y = addSectionTitle(doc, y, 'Resumo');
-  y = addSummaryBullets(doc, y, [
-    `Alto risco: ${bundle.metrics.highRiskCount}`,
-    `Moderado: ${moderado}`,
-    `Baixo: ${baixo}`,
-    `Alertas ativos na carteira: ${bundle.metrics.alertsTotal}`,
-  ]);
-
-  autoTable(doc, {
-    startY: y,
-    head: [['Nivel', 'Quantidade']],
-    body: bundle.riskDistribution.map((item) => [item.label, String(item.value)]),
-    styles: { fontSize: 9, cellPadding: 2 },
-    headStyles: { fillColor: BRAND_RGB },
-    margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-    theme: 'grid',
+  const analytics = bundle.portfolioAnalytics || {};
+  let y = addModernHeader(doc, {
+    title: 'Risco glicêmico da carteira',
+    subtitle: pdfText(bundle.nutricionista?.nome || 'Nutricionista'),
+    metaRight: bundle.periodLabel || 'Período',
   });
-
-  ['alto', 'moderado', 'baixo'].forEach((bucket, bucketIndex) => {
-    const patients = bundle.patients.filter((patient) => patient.riskBucket === bucket);
-    if (!patients.length) return;
-
-    if (bucketIndex > 0 || doc.lastAutoTable.finalY > 240) {
-      doc.addPage();
-      y = 20;
-    } else {
-      y = doc.lastAutoTable.finalY + 10;
-    }
-
-    const headColor = bucket === 'alto' ? DANGER_RGB : bucket === 'moderado' ? [232, 184, 74] : BRAND_RGB;
-    y = addSectionTitle(doc, y, `Pacientes — risco ${riskBucketLabel(bucket)}`);
-
-    autoTable(doc, {
-      startY: y,
-      head: [['Paciente', 'Glicemia', 'Media', 'TIR', 'Adesao', 'Objetivo']],
-      body: patients.map((patient) => [
-        patient.name,
-        patient.latestGlucose != null ? `${patient.latestGlucose} mg/dL` : '—',
-        patient.glucoseAverage != null ? `${patient.glucoseAverage} mg/dL` : '—',
-        patient.glucoseTir != null ? `${patient.glucoseTir}%` : '—',
-        `${patient.adherence}%`,
-        pdfText(patient.objective).slice(0, 36),
-      ]),
-      styles: { fontSize: 8, cellPadding: 2, overflow: 'linebreak' },
-      headStyles: { fillColor: headColor },
-      margin: { left: PAGE_MARGIN, right: PAGE_MARGIN },
-      theme: 'striped',
-    });
-  });
-
-  addFooter(doc);
+  y = drawDistributionPanel(doc, y, 'Distribuição por controle', analytics.controlDistribution);
+  y = addBulletListPanel(doc, y, 'Pacientes que precisam de atenção', analytics.needsAttentionPatients, CHART_ORANGE);
+  y = drawHorizontalBarChart(doc, y, 'Média glicêmica por paciente', analytics.glucoseAvgRanking);
+  addModernFooter(doc, 'GlicNutri · Risco da carteira');
   return doc;
 }
 
-function addFooter(doc) {
-  const pageCount = doc.getNumberOfPages();
-  for (let page = 1; page <= pageCount; page += 1) {
-    doc.setPage(page);
-    doc.setFontSize(8);
-    doc.setTextColor(...MUTED_RGB);
-    doc.text(
-      `GlicNutri · Relatorio clinico · Pagina ${page} de ${pageCount}`,
-      PAGE_MARGIN,
-      doc.internal.pageSize.getHeight() - 8
-    );
-    doc.setTextColor(brand.slate);
-  }
+/** Alias legado */
+export function buildRelatorioGeralPdf(bundle, modules) {
+  return buildPortfolioSummaryPdf(bundle, modules);
 }
 
 export async function buildNutritionistReportPdf(bundle, type = 'geral') {
@@ -341,5 +175,11 @@ export async function buildNutritionistReportPdf(bundle, type = 'geral') {
 
   if (type === 'adesao') return buildRelatorioAdesaoPdf(bundle, modules);
   if (type === 'risco') return buildRelatorioRiscoPdf(bundle, modules);
-  return buildRelatorioGeralPdf(bundle, modules);
+  return buildPortfolioSummaryPdf(bundle, modules);
+}
+
+export async function buildNutritionistPatientReportPdf(bundle, { mode = 'visual' } = {}) {
+  const { buildNutritionistPatientClinicalPdf } = await import('./relatorioPacientePdf');
+  const { jsPDF, autoTable } = await loadPdfModules();
+  return buildNutritionistPatientClinicalPdf(bundle, { jsPDF, autoTable, reportMode: mode });
 }

@@ -265,7 +265,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
                   onPress={() => markStatus('cancelled')}
                   disabled={savingAction}
                 >
-                  <Ionicons name="close-circle-outline" size={16} color="#d96666" />
+                  <Ionicons name="close-circle-outline" size={16} color={patientTheme.colors.danger} />
                   <Text style={styles.actionBtnDangerText}>Cancelar</Text>
                 </TouchableOpacity>
               </View>
@@ -436,7 +436,7 @@ const styles = StyleSheet.create({
   actionBtnSuccess: { backgroundColor: '#e8f5e9', borderWidth: 1, borderColor: '#c8e6c9' },
   actionBtnSuccessText: { color: '#2e7d32', fontWeight: '900' },
   actionBtnDanger: { backgroundColor: '#fff4f4', borderWidth: 1, borderColor: '#f0d2d2' },
-  actionBtnDangerText: { color: '#d96666', fontWeight: '900' },
+  actionBtnDangerText: { color: patientTheme.colors.danger, fontWeight: '900' },
   actionBtnSecondary: { backgroundColor: patientTheme.colors.primarySoft },
   actionBtnSecondaryText: { color: patientTheme.colors.text, fontWeight: '900' },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

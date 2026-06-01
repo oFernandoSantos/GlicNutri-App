@@ -178,6 +178,23 @@ export async function ensurePatientNutritionistLink({
 }) {
   if (!pacienteId || !nutricionistaId) return false;
 
+  const { data: patient, error: patientError } = await supabase
+    .from('paciente')
+    .select('id_paciente_uuid, id_nutricionista_uuid')
+    .eq('id_paciente_uuid', pacienteId)
+    .maybeSingle();
+
+  if (patientError) throw patientError;
+
+  if (
+    patient?.id_nutricionista_uuid &&
+    patient.id_nutricionista_uuid !== nutricionistaId
+  ) {
+    throw new Error(
+      'Voce ja possui um nutricionista vinculado. Desvincule o acompanhamento atual antes de solicitar outro.'
+    );
+  }
+
   const patch = {
     id_nutricionista_uuid: nutricionistaId,
     data_hora_ultima_atualizacao: new Date().toISOString(),

@@ -1,24 +1,33 @@
+import { resolveCanonicalReadingTimeUtc, sortGlucoseReadingsNewestFirst } from '../utilitarios/dataLocal';
+
 const glucoseCache = new Map();
 const glucoseListeners = new Map();
 
-function toTimestamp(item) {
-  const date = item?.date || '1970-01-01';
-  const time = item?.time || '00:00:00';
-  return `${date}T${time}`;
-}
-
 function sortReadings(readings) {
-  return [...(Array.isArray(readings) ? readings : [])].sort((left, right) =>
-    toTimestamp(right).localeCompare(toTimestamp(left))
-  );
+  return sortGlucoseReadingsNewestFirst(readings);
 }
 
 export function buildGlucoseFingerprint(item) {
+  const source = String(item?.source || item?.fonte || 'manual').trim().toLowerCase();
+  const patientKey = item?.patientId || item?.id_paciente_uuid || '';
+  const value = Number(item?.value) || Number(item?.valor_glicose_mgdl) || 0;
+  const raw = item?.raw_payload || item?.raw;
+  const rawTimestamp = raw?.Timestamp ?? raw?.timestamp;
+  if (rawTimestamp) {
+    return [patientKey, String(rawTimestamp), value, source].join('|');
+  }
+
+  const readingTimeUtc = resolveCanonicalReadingTimeUtc(item);
+  if (readingTimeUtc) {
+    return [patientKey, readingTimeUtc, value, source].join('|');
+  }
+
   return [
-    item?.patientId || item?.id_paciente_uuid || '',
+    patientKey,
     item?.date || '',
     String(item?.time || '').slice(0, 8),
-    Number(item?.value) || Number(item?.valor_glicose_mgdl) || 0,
+    value,
+    source,
   ].join('|');
 }
 
@@ -52,6 +61,15 @@ function notify(patientId) {
 
 export function getCachedGlucoseReadings(patientId) {
   return glucoseCache.get(patientId) || [];
+}
+
+export function mergeIntoCachedGlucoseReadings(patientId, readings = []) {
+  if (!patientId) return [];
+
+  const next = mergeCachedGlucoseReadings(readings, getCachedGlucoseReadings(patientId));
+  glucoseCache.set(patientId, next);
+  notify(patientId);
+  return next;
 }
 
 export function replaceCachedGlucoseReadings(patientId, readings) {

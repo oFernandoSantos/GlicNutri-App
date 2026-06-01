@@ -2,6 +2,14 @@ import React from 'react';
 import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
+import {
+  DashboardKpiCard,
+  DashboardMiniKpiCard,
+  KPI_ACCENTS,
+  dashboardKpiStyles,
+} from '../comum/CartaoKpiDashboard';
+
+export { DashboardKpiCard, DashboardMiniKpiCard, KPI_ACCENTS, dashboardKpiStyles } from '../comum/CartaoKpiDashboard';
 
 export function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -71,18 +79,13 @@ export function RiskBadge({ risk }) {
 
 export function MetricCard({ icon, label, value, helper, tone = 'default', style }) {
   return (
-    <SectionCard style={[styles.metricCard, tone === 'danger' && styles.metricDanger, style]}>
-      <View style={[styles.metricIconWrap, tone === 'danger' && styles.metricIconDanger]}>
-        <Ionicons
-          name={icon}
-          size={18}
-          color={tone === 'danger' ? '#c55b5b' : patientTheme.colors.primaryDark}
-        />
-      </View>
-      <Text style={styles.metricLabel}>{label}</Text>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricHelper}>{helper}</Text>
-    </SectionCard>
+    <DashboardKpiCard
+      icon={icon}
+      label={label}
+      value={value}
+      accent={tone === 'danger' ? KPI_ACCENTS.red : KPI_ACCENTS.green}
+      style={style}
+    />
   );
 }
 
@@ -272,7 +275,7 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.primaryDark,
   },
   progressDanger: {
-    backgroundColor: '#d96767',
+    backgroundColor: patientTheme.colors.danger,
   },
   progressWarning: {
     backgroundColor: '#d7a54b',
@@ -300,7 +303,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   riskTextHigh: {
-    color: '#c55b5b',
+    color: patientTheme.colors.danger,
   },
   riskTextMedium: {
     color: '#b4872e',
@@ -494,7 +497,7 @@ const styles = StyleSheet.create({
     borderRadius: 20,
   },
   barFillDanger: {
-    backgroundColor: '#d96767',
+    backgroundColor: patientTheme.colors.danger,
   },
   barFillSuccess: {
     backgroundColor: patientTheme.colors.text,

@@ -1,75 +1,177 @@
-import React, { useState } from 'react';
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
-import { Ionicons } from '@expo/vector-icons';
-import { medicoTheme as theme, medicoShadow as shadow } from '../../temas/temaVisualNutricionista';
+import React from 'react';
+import { View, Text, ScrollView, StyleSheet, StatusBar, Platform } from 'react-native';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import BarraAbasMedico, { MEDICO_TAB_BAR_HEIGHT, MEDICO_TAB_BAR_SPACE } from './BarraAbasMedico';
+import { medicoTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { isMedicoMainTabRoute } from '../../utilitarios/navegacaoAbas';
+import {
+  WrapperTeclado,
+  getKeyboardVerticalOffset,
+  useKeyboardBottomInset,
+} from '../comum/RolagemComTeclado';
 
 export default function LayoutMedico({
-  children,
+  navigation,
+  route,
+  usuarioLogado,
   title,
   subtitle,
-  usuarioLogado,
-  onLogout,
-  navigation,
+  rightAction,
+  children,
+  contentContainerStyle,
+  showTabBar,
+  scrollEnabled = true,
+  refreshControl,
+  lockFixedContent = false,
+  keyboardAware = true,
 }) {
-  const name =
-    usuarioLogado?.nome_completo_medico ||
-    usuarioLogado?.nome ||
-    'Médico';
+  const insets = useSafeAreaInsets();
+  const shouldShowTabBar =
+    typeof showTabBar === 'boolean' ? showTabBar : isMedicoMainTabRoute(route?.name);
+  const showHeader = Boolean(title || subtitle || rightAction);
+  const tabBarExtra = shouldShowTabBar ? MEDICO_TAB_BAR_HEIGHT + MEDICO_TAB_BAR_SPACE + 16 : 32;
+  const keyboardBottomPadding = useKeyboardBottomInset(tabBarExtra);
+  const keyboardOffset = getKeyboardVerticalOffset(insets);
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top']}>
-      <View style={styles.header}>
-        <View style={styles.headerCopy}>
-          <Text style={styles.kicker}>Portal médico</Text>
-          <Text style={styles.title}>{title || 'Pacientes'}</Text>
-          {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
-          <Text style={styles.user}>{name}</Text>
-        </View>
-        <View style={styles.actions}>
-          <TouchableOpacity
-            style={styles.iconBtn}
-            onPress={() => navigation?.navigate?.('MedicoPacientes')}
+    <SafeAreaView
+      edges={Platform.OS === 'web' ? undefined : []}
+      style={[styles.container, Platform.OS === 'web' && styles.containerWeb]}
+    >
+      <StatusBar barStyle="dark-content" backgroundColor={patientTheme.colors.backgroundSoft} />
+
+      <WrapperTeclado
+        style={styles.body}
+        enabled={keyboardAware && !lockFixedContent}
+        keyboardVerticalOffset={keyboardOffset}
+      >
+        {showHeader ? (
+          <View style={styles.header}>
+            <View style={styles.headerText}>
+              {title ? <Text style={styles.title}>{title}</Text> : null}
+              {subtitle ? <Text style={styles.subtitle}>{subtitle}</Text> : null}
+            </View>
+            <View style={styles.rightAction}>{rightAction || null}</View>
+          </View>
+        ) : null}
+
+        {scrollEnabled ? (
+          <ScrollView
+            style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
+            contentContainerStyle={[
+              styles.content,
+              shouldShowTabBar && styles.contentWithTabBar,
+              Platform.OS === 'web' && styles.webContent,
+              keyboardAware && { paddingBottom: keyboardBottomPadding },
+              contentContainerStyle,
+            ]}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+            nestedScrollEnabled
+            refreshControl={refreshControl}
           >
-            <Ionicons name="people-outline" size={20} color={theme.colors.text} />
-          </TouchableOpacity>
-          {onLogout ? (
-            <TouchableOpacity style={styles.iconBtn} onPress={onLogout}>
-              <Ionicons name="log-out-outline" size={20} color={theme.colors.danger} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-      </View>
-      <View style={styles.body}>{children}</View>
+            {children}
+          </ScrollView>
+        ) : (
+          <View
+            style={[
+              styles.scroll,
+              styles.fixedContent,
+              styles.fixedContentPadding,
+              lockFixedContent && styles.fixedContentLocked,
+              shouldShowTabBar && styles.contentWithTabBar,
+              keyboardAware && { paddingBottom: keyboardBottomPadding },
+              contentContainerStyle,
+            ]}
+          >
+            {children}
+          </View>
+        )}
+      </WrapperTeclado>
+
+      {shouldShowTabBar ? (
+        <BarraAbasMedico navigation={navigation} rotaAtual={route?.name} usuarioLogado={usuarioLogado} />
+      ) : null}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safe: { flex: 1, backgroundColor: theme.colors.background },
+  container: {
+    flex: 1,
+    minHeight: 0,
+    backgroundColor: patientTheme.colors.background,
+  },
+  containerWeb: {
+    minHeight: '100%',
+    overflow: 'visible',
+  },
+  body: {
+    flex: 1,
+    minHeight: 0,
+  },
   header: {
-    flexDirection: 'row',
-    paddingHorizontal: theme.spacing.screen,
-    paddingVertical: 14,
-    gap: 12,
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 14,
+    paddingBottom: 12,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderBottomWidth: 1,
-    borderBottomColor: theme.colors.border,
-    backgroundColor: theme.colors.surface,
-    ...shadow,
+    borderBottomColor: patientTheme.colors.surfaceBorder,
   },
-  headerCopy: { flex: 1 },
-  kicker: { fontSize: 11, fontWeight: '800', color: theme.colors.info, textTransform: 'uppercase' },
-  title: { fontSize: 22, fontWeight: '900', color: theme.colors.text, marginTop: 4 },
-  subtitle: { marginTop: 4, color: theme.colors.textMuted },
-  user: { marginTop: 6, fontSize: 12, color: theme.colors.textMuted, fontWeight: '700' },
-  actions: { flexDirection: 'row', gap: 8, alignItems: 'flex-start' },
-  iconBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    backgroundColor: theme.colors.backgroundSoft,
-    alignItems: 'center',
-    justifyContent: 'center',
+  headerText: {
+    marginRight: 72,
   },
-  body: { flex: 1 },
+  title: {
+    fontSize: 28,
+    color: patientTheme.colors.text,
+    fontWeight: '700',
+  },
+  subtitle: {
+    marginTop: 6,
+    color: patientTheme.colors.textMuted,
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  rightAction: {
+    position: 'absolute',
+    top: 24,
+    right: patientTheme.spacing.screen,
+    minWidth: 48,
+    alignItems: 'flex-end',
+  },
+  scroll: {
+    flex: 1,
+    minHeight: 0,
+  },
+  webScroll: {
+    overflowY: 'visible',
+    overflowX: 'hidden',
+  },
+  content: {
+    flexGrow: 1,
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 14,
+    paddingBottom: 36,
+  },
+  fixedContent: {
+    flex: 1,
+    minHeight: 0,
+  },
+  fixedContentPadding: {
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 14,
+    paddingBottom: 36,
+  },
+  fixedContentLocked: {
+    overflow: 'hidden',
+  },
+  contentWithTabBar: {
+    paddingBottom: MEDICO_TAB_BAR_HEIGHT + 32 + MEDICO_TAB_BAR_SPACE,
+  },
+  webContent: {
+    flexGrow: 1,
+    minHeight: '100%',
+  },
 });

@@ -29,6 +29,7 @@ import { hasPatientOnboardingSeen } from '../../servicos/servicoOnboardingPacien
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
+import { brand } from '../../temas/designSystem';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import {
   isValidNutritionistAccessCode,
@@ -1608,7 +1609,7 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   inputError: {
-    borderColor: '#d96666',
+    borderColor: brand.danger,
   },
   inputFocused: {
     ...inputFocusBorder,
@@ -1705,7 +1706,7 @@ const styles = StyleSheet.create({
     ...softGreenBorder,
   },
   inputPickerError: {
-    borderColor: '#d96666',
+    borderColor: brand.danger,
   },
   checkboxContainer: {
     flexDirection: 'row',

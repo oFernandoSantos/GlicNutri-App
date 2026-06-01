@@ -15,6 +15,9 @@ import {
   AvatarBadge,
   SectionCard,
   nutriDesktopStyles,
+  dashboardKpiStyles,
+  DashboardKpiCard,
+  KPI_ACCENTS,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import { abrirLinkGoogleMeet, createConsulta, updateConsultaStatus } from '../../servicos/servicoConsultas';
 import { resolveMeetLink } from '../../servicos/servicoGoogleMeet';
@@ -29,6 +32,7 @@ import {
 } from '../../servicos/servicoSolicitacoesAcompanhamento';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 import { ConsultaStatusBadge } from '../../componentes/comum/ui';
+import PainelDisponibilidadeAgendaProfissional from '../../componentes/agendamento/PainelDisponibilidadeAgendaProfissional';
 
 function startOfDay(offset = 0) {
   const date = new Date();
@@ -218,11 +222,11 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
 
   const summary = useMemo(() => {
     return [
-      { id: 'today', label: 'Consultas Hoje', value: consultasHoje.length, valueStyle: styles.metricValueToday },
-      { id: 'week', label: 'Esta Semana', value: consultasSemana.length, valueStyle: styles.metricValueWeek },
-      { id: 'month', label: 'Este Mês', value: consultasMes.length, valueStyle: styles.metricValueMonth },
-      { id: 'total', label: 'Total Agendadas', value: consultas.length, valueStyle: styles.metricValueTotal },
-      { id: 'requests', label: 'Solicitações', value: requests.length, valueStyle: styles.metricValueRequests },
+      { id: 'today', label: 'Consultas Hoje', value: String(consultasHoje.length), icon: 'today-outline', accent: KPI_ACCENTS.greenBright },
+      { id: 'week', label: 'Esta Semana', value: String(consultasSemana.length), icon: 'calendar-outline', accent: KPI_ACCENTS.greenBright },
+      { id: 'month', label: 'Este Mês', value: String(consultasMes.length), icon: 'calendar-number-outline', accent: KPI_ACCENTS.greenBright },
+      { id: 'total', label: 'Total Agendadas', value: String(consultas.length), icon: 'layers-outline', accent: KPI_ACCENTS.gray },
+      { id: 'requests', label: 'Solicitações', value: String(requests.length), icon: 'mail-unread-outline', accent: KPI_ACCENTS.red },
     ];
   }, [consultas, consultasHoje, consultasMes, consultasSemana, requests.length]);
 
@@ -633,10 +637,14 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
       <View style={nutriDesktopStyles.pageGap}>
         <View style={styles.summaryGrid}>
           {summary.map((item) => (
-            <SectionCard key={item.id} style={[styles.summaryCard, styles.flatCard]}>
-              <Text style={styles.summaryLabel}>{item.label}</Text>
-              <Text style={[styles.summaryValue, item.valueStyle]}>{item.value}</Text>
-            </SectionCard>
+            <View key={item.id} style={styles.summaryCell}>
+              <DashboardKpiCard
+                icon={item.icon}
+                accent={item.accent}
+                label={item.label}
+                value={item.value}
+              />
+            </View>
           ))}
         </View>
 
@@ -808,6 +816,13 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
             </View>
           )}
         </SectionCard>
+
+        <PainelDisponibilidadeAgendaProfissional
+          variant="nutri"
+          professionalId={nutricionistaId}
+          actor={usuarioLogado}
+          theme={patientTheme}
+        />
       </View>
     </LayoutNutricionista>
   );
@@ -827,40 +842,10 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
-  summaryCard: {
+  summaryCell: {
     width: Platform.OS === 'web' ? '19%' : '48%',
-    minWidth: 180,
+    minWidth: 150,
     flexGrow: 1,
-    minHeight: 72,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryLabel: {
-    fontSize: 11,
-    color: patientTheme.colors.textMuted,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  summaryValue: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  metricValueToday: {
-    color: patientTheme.colors.primaryDark,
-  },
-  metricValueWeek: {
-    color: patientTheme.colors.primaryDark,
-  },
-  metricValueMonth: {
-    color: patientTheme.colors.primaryDark,
-  },
-  metricValueTotal: {
-    color: patientTheme.colors.text,
-  },
-  metricValueRequests: {
-    color: patientTheme.colors.danger,
   },
   topPanelsRow: {
     alignItems: 'stretch',

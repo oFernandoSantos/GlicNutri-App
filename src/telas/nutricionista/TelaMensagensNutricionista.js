@@ -24,6 +24,9 @@ import {
   SearchInput,
   SectionCard,
   nutriDesktopStyles,
+  dashboardKpiStyles,
+  DashboardKpiCard,
+  KPI_ACCENTS,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 import { supabase } from '../../servicos/configSupabase';
@@ -508,10 +511,10 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     const today = chatSummaryMetrics.today;
 
     return [
-      { id: 'total', icon: 'chatbubbles-outline', label: 'Total Conversas', value: total, helper: 'Pacientes com chat', tone: 'default' },
-      { id: 'unread', icon: 'mail-unread-outline', label: 'Nao Lidas', value: unread, helper: 'Aguardando resposta', tone: unread ? 'danger' : 'default' },
-      { id: 'read', icon: 'checkmark-done-outline', label: 'Lidas', value: read, helper: 'Conversas revisadas', tone: 'default' },
-      { id: 'today', icon: 'today-outline', label: 'Hoje', value: today, helper: 'Atualizadas hoje', tone: 'default' },
+      { id: 'total', icon: 'chatbubbles-outline', label: 'Total Conversas', value: String(total), accent: KPI_ACCENTS.blue },
+      { id: 'unread', icon: 'mail-unread-outline', label: 'Nao Lidas', value: String(unread), accent: KPI_ACCENTS.red },
+      { id: 'read', icon: 'checkmark-done-outline', label: 'Lidas', value: String(read), accent: KPI_ACCENTS.green },
+      { id: 'today', icon: 'today-outline', label: 'Hoje', value: String(today), accent: KPI_ACCENTS.orange },
     ];
   }, [chatSummaryMetrics, chats.length]);
 
@@ -642,22 +645,16 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     >
       <View style={[nutriDesktopStyles.pageGap, styles.pageGap]}>
         {!isCompact ? (
-          <View style={styles.metricGrid}>
+          <View style={dashboardKpiStyles.grid}>
             {metrics.map((item) => (
-              <SectionCard key={item.id} style={[styles.metricCell, styles.metricCardCustom]}>
-                <Text style={styles.metricLabelCustom}>{item.label}</Text>
-                <Text
-                  style={[
-                    styles.metricValueCustom,
-                    item.id === 'unread' && styles.metricValueUnread,
-                    item.id === 'read' && styles.metricValueRead,
-                    item.id === 'today' && styles.metricValueToday,
-                  ]}
-                >
-                  {item.value}
-                </Text>
-                <Text style={styles.metricHelperCustom}>{item.helper}</Text>
-              </SectionCard>
+              <View key={item.id} style={dashboardKpiStyles.cell}>
+                <DashboardKpiCard
+                  icon={item.icon}
+                  accent={item.accent}
+                  label={item.label}
+                  value={item.value}
+                />
+              </View>
             ))}
           </View>
         ) : null}

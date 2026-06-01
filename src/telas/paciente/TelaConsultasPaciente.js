@@ -35,6 +35,7 @@ import {
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
 import { listNutritionists } from '../../servicos/servicoNutricionistas';
+import { filterMedicos, getMedicoEspecialidadeLabel, listMedicos } from '../../servicos/servicoMedicos';
 import {
   generateSlotsForNextDays,
   listNutriAvailability,
@@ -51,6 +52,7 @@ import {
   isPatientLinkedToNutritionist,
   resolveAssignedNutritionistIdFromRecords,
 } from '../../servicos/servicoVinculosNutricionista';
+import { resolveAssignedDoctorIdFromRecords } from '../../servicos/servicoVinculosMedico';
 import { resolveNutricionistaIdForPatient } from '../../servicos/servicoMensagensChat';
 import { formatValorConsulta, resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import {
@@ -112,11 +114,44 @@ function getPacienteNome(usuario) {
   return usuario?.nome_completo || usuario?.nome_pac || usuario?.email_pac || 'Paciente';
 }
 
+function getMedicoAvatarUri(medico) {
+  const seed = encodeURIComponent(
+    String(medico?.id_medico_uuid || medico?.nome_completo_medico || 'medico').trim()
+  );
+  return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=d1fae5,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
 function getNutriAvatarUri(nutri) {
   const seed = encodeURIComponent(
     String(nutri?.id_nutricionista_uuid || nutri?.nome_completo_nutri || 'nutri').trim()
   );
   return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
+}
+
+function resolveProfissionalDaConsulta(consulta, nutricionistas, medicos) {
+  if (consulta?.medico_id) {
+    const medico =
+      medicos.find((item) => item.id_medico_uuid === consulta.medico_id) || null;
+    return {
+      nutri: null,
+      medico,
+      nome: medico?.nome_completo_medico || 'Médico',
+      especialidade: getMedicoEspecialidadeLabel(medico),
+      avatarUri: getMedicoAvatarUri(medico),
+    };
+  }
+
+  const nutri =
+    nutricionistas.find((item) => item.id_nutricionista_uuid === consulta?.nutricionista_id) ||
+    null;
+
+  return {
+    nutri,
+    medico: null,
+    nome: nutri?.nome_completo_nutri || 'Profissional',
+    especialidade: getNutriEspecialidadeLabel(nutri),
+    avatarUri: getNutriAvatarUri(nutri),
+  };
 }
 
 export default function PacienteAgendamentosScreen({
@@ -135,8 +170,10 @@ export default function PacienteAgendamentosScreen({
   const [mensagem, setMensagem] = useState(null);
 
   const [nutricionistas, setNutricionistas] = useState([]);
+  const [medicos, setMedicos] = useState([]);
   const [consultasPaciente, setConsultasPaciente] = useState([]);
   const [linkedNutricionistaId, setLinkedNutricionistaId] = useState(null);
+  const [linkedMedicoId, setLinkedMedicoId] = useState(null);
   const [selectedNutri, setSelectedNutri] = useState(null);
   const [slots, setSlots] = useState([]);
   const [selectedDayKey, setSelectedDayKey] = useState('');
@@ -230,8 +267,9 @@ export default function PacienteAgendamentosScreen({
   const loadBase = useCallback(async () => {
     try {
       setLoadError(null);
-      const [nutris, cons, pacienteAtual] = await Promise.all([
+      const [nutris, meds, cons, pacienteAtual] = await Promise.all([
         listNutritionists(),
+        listMedicos(),
         patientId ? listConsultasByPaciente(patientId, { limit: 60 }) : Promise.resolve([]),
         patientId
           ? fetchPatientById(patientId, {
@@ -244,14 +282,20 @@ export default function PacienteAgendamentosScreen({
         patient: pacienteAtual,
         consultas: cons,
       });
+      const linkedMedId = resolveAssignedDoctorIdFromRecords({
+        patient: pacienteAtual,
+        consultas: cons,
+      });
 
       if (!linkedId && patientId) {
         linkedId = await resolveNutricionistaIdForPatient(patientId, null);
       }
 
       setNutricionistas(nutris || []);
+      setMedicos(meds || []);
       setConsultasPaciente(cons || []);
       setLinkedNutricionistaId(linkedId);
+      setLinkedMedicoId(linkedMedId);
 
       const routeNutriId = route?.params?.selectedNutriId;
       const preferredNutriId = linkedId || routeNutriId;
@@ -513,6 +557,51 @@ export default function PacienteAgendamentosScreen({
     [filteredNutris, linkedNutricionistaId]
   );
 
+  const filteredMedicosBase = useMemo(() => {
+    let list = filterMedicos(medicos, filterParams);
+
+    if (ordenacao === 'preco') {
+      list = [...list].sort(
+        (a, b) =>
+          Number(a.valor_consulta_centavos || 0) - Number(b.valor_consulta_centavos || 0)
+      );
+    } else if (ordenacao === 'avaliacao') {
+      list = [...list].sort(
+        (a, b) =>
+          Number(getStableRating(b.id_medico_uuid)) - Number(getStableRating(a.id_medico_uuid))
+      );
+    }
+
+    return list;
+  }, [medicos, filterParams, ordenacao]);
+
+  const assignedMedico = useMemo(() => {
+    if (!linkedMedicoId) return null;
+    return (
+      (medicos || []).find((medico) => medico.id_medico_uuid === linkedMedicoId) ||
+      filteredMedicosBase.find((medico) => medico.id_medico_uuid === linkedMedicoId) ||
+      null
+    );
+  }, [filteredMedicosBase, linkedMedicoId, medicos]);
+
+  const filteredMedicos = useMemo(() => {
+    const others = filteredMedicosBase.filter(
+      (medico) => medico.id_medico_uuid !== linkedMedicoId
+    );
+
+    if (assignedMedico) {
+      return [assignedMedico, ...others];
+    }
+
+    return filteredMedicosBase;
+  }, [assignedMedico, filteredMedicosBase, linkedMedicoId]);
+
+  const outrosMedicos = useMemo(
+    () =>
+      filteredMedicos.filter((medico) => medico.id_medico_uuid !== linkedMedicoId),
+    [filteredMedicos, linkedMedicoId]
+  );
+
   const calendarDays = useMemo(() => groupSlotsByDay(slots), [slots]);
 
   useEffect(() => {
@@ -575,14 +664,9 @@ export default function PacienteAgendamentosScreen({
   const filterConsultasByQuery = useCallback(
     (items) =>
       (items || []).filter((item) => {
-        const nutri =
-          nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) || null;
+        const profissional = resolveProfissionalDaConsulta(item, nutricionistas, medicos);
         const profissionalText = normalizeSearchText(
-          [
-            nutri?.nome_completo_nutri,
-            nutri?.crm_numero,
-            getNutriEspecialidadeLabel(nutri),
-          ].join(' ')
+          [profissional.nome, profissional.especialidade].join(' ')
         );
         const tipoText = normalizeSearchText(item?.tipo_consulta);
         const dataText = normalizeSearchText(formatConsultaDateTime(item?.scheduled_at));
@@ -601,6 +685,7 @@ export default function PacienteAgendamentosScreen({
       consultasProfissionalNormalized,
       consultasSearchNormalized,
       consultasTipoNormalized,
+      medicos,
       nutricionistas,
     ]
   );
@@ -941,6 +1026,119 @@ export default function PacienteAgendamentosScreen({
     );
   }
 
+  function renderMedicoCard(medico, options = {}) {
+    const { forceLinked = false } = options;
+    const spec = getMedicoEspecialidadeLabel(medico);
+    const ratingReal =
+      Number.isFinite(Number(medico?.rating_media)) && Number(medico?.rating_media) > 0
+        ? Number(medico.rating_media).toFixed(1)
+        : getStableRating(medico?.id_medico_uuid);
+    const totalAvaliacoesReal =
+      Number.isFinite(Number(medico?.total_avaliacoes)) && Number(medico?.total_avaliacoes) > 0
+        ? Number(medico.total_avaliacoes)
+        : getStableReviewCount(medico?.id_medico_uuid);
+    const expAnosReal =
+      Number.isFinite(Number(medico?.anos_experiencia)) && Number(medico?.anos_experiencia) > 0
+        ? Number(medico.anos_experiencia)
+        : getStableExperienceYears(medico?.id_medico_uuid);
+    const rating = ratingReal;
+    const totalAvaliacoes = totalAvaliacoesReal;
+    const expAnos = expAnosReal;
+    const isLinkedMedico = forceLinked || linkedMedicoId === medico.id_medico_uuid;
+    const bioPreview =
+      medico.bio_resumo ||
+      'Acompanhamento clinico de diabetes, glicemia, medicacao e insulina por teleconsulta.';
+
+    return (
+      <CartaoAgendamento
+        key={medico.id_medico_uuid}
+        style={[styles.proCard, isLinkedMedico && styles.proCardLinked]}
+        onPress={() =>
+          navigation.push('PacientePerfilMedico', {
+            usuarioLogado,
+            medico,
+          })
+        }
+      >
+        {isLinkedMedico ? (
+          <View style={styles.linkedBadge}>
+            <Ionicons name="checkmark-circle" size={15} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.linkedBadgeText}>Médico vinculado</Text>
+          </View>
+        ) : null}
+
+        <View style={styles.proRow}>
+          <AvatarProfissional
+            name={medico.nome_completo_medico}
+            size={56}
+            online
+            imageUri={getMedicoAvatarUri(medico)}
+          />
+          <View style={styles.proBody}>
+            <Text style={styles.proName}>{medico.nome_completo_medico}</Text>
+            <Text style={styles.proSpec}>{spec} · Teleconsulta</Text>
+            <Text style={styles.proCrn}>
+              {medico.crm_medico ? `CRM ${medico.crm_medico}` : 'CRM nao informado'}
+            </Text>
+
+            <Text numberOfLines={1} style={styles.proSpecVisible}>
+              {spec}
+            </Text>
+            <View style={styles.proMetaRowCompact}>
+              <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
+              <Text style={styles.proMeta}>{rating}</Text>
+              <Text style={styles.proMeta}>({totalAvaliacoes})</Text>
+              <Text style={styles.proMetaDot}>·</Text>
+              <Text style={styles.proMeta}>{expAnos} anos de experiencia</Text>
+            </View>
+            <Text numberOfLines={2} style={styles.proBio}>
+              {bioPreview}
+            </Text>
+            <Text style={[styles.proAvailability, styles.proAvailabilityOpen]}>
+              {isLinkedMedico
+                ? 'Médico responsável pelo seu acompanhamento clínico'
+                : 'Disponivel para vinculo de acompanhamento clinico'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.proHighlights}>
+          <View style={styles.highlightPill}>
+            <Ionicons name="cash-outline" size={14} color={patientTheme.colors.primaryDark} />
+            <Text style={styles.highlightText}>
+              {formatValorConsulta(medico.valor_consulta_centavos)}
+            </Text>
+          </View>
+          <View style={styles.highlightPill}>
+            <Ionicons
+              name={medico.aceita_convenio ? 'shield-checkmark-outline' : 'card-outline'}
+              size={14}
+              color={patientTheme.colors.primaryDark}
+            />
+            <Text style={styles.highlightText}>
+              {medico.aceita_convenio ? 'Aceita convenio' : 'Particular'}
+            </Text>
+          </View>
+        </View>
+
+        <View style={styles.proActions}>
+          <BotaoAgendamento
+            label={isLinkedMedico ? 'Ver acompanhamento' : 'Ver Perfil'}
+            icon={isLinkedMedico ? 'checkmark-circle-outline' : 'person-circle-outline'}
+            onPress={(event) => {
+              event?.stopPropagation?.();
+              navigation.push('PacientePerfilMedico', {
+                usuarioLogado,
+                medico,
+              });
+            }}
+            style={styles.proScheduleBtn}
+          />
+        </View>
+      </CartaoAgendamento>
+    );
+  }
+
   return (
     <PatientScreenLayout
       navigation={navigation}
@@ -1043,15 +1241,15 @@ export default function PacienteAgendamentosScreen({
 
       {activeSection === 'agendar' ? (
         <>
-      <CampoBuscaAgendamento
-        value={searchQuery}
-        onChangeText={setSearchQuery}
-        placeholder="Buscar por nome, CRN ou especialidade"
-        trailingIcon="funnel-outline"
-        onTrailingPress={() => setFiltrosAbertos((prev) => !prev)}
-        trailingAccessibilityLabel="Abrir filtros da teleconsulta"
-        trailingActive={filtrosAbertos}
-      />
+          <CampoBuscaAgendamento
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Buscar por nome, CRN ou especialidade"
+            trailingIcon="funnel-outline"
+            onTrailingPress={() => setFiltrosAbertos((prev) => !prev)}
+            trailingAccessibilityLabel="Abrir filtros da teleconsulta"
+            trailingActive={filtrosAbertos}
+          />
 
       <View style={styles.quickFiltersRow}>
         <ChipFiltro
@@ -1116,6 +1314,81 @@ export default function PacienteAgendamentosScreen({
         </>
       ) : null}
 
+      {activeSection === 'medicos' ? (
+        <>
+          <CampoBuscaAgendamento
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            placeholder="Buscar por nome, CRM ou especialidade"
+            trailingIcon="funnel-outline"
+            onTrailingPress={() => setFiltrosAbertos((prev) => !prev)}
+            trailingAccessibilityLabel="Abrir filtros de medicos"
+            trailingActive={filtrosAbertos}
+          />
+
+          <View style={styles.quickFiltersRow}>
+            <ChipFiltro
+              label="Todos"
+              icon="apps-outline"
+              active={quickFilter === 'all'}
+              onPress={() => setQuickFilter('all')}
+              style={styles.quickFilterChip}
+              textStyle={styles.quickFilterChipText}
+            />
+            <ChipFiltro
+              label="Hoje"
+              icon="today-outline"
+              active={quickFilter === 'today'}
+              onPress={() => setQuickFilter('today')}
+              style={styles.quickFilterChip}
+              textStyle={styles.quickFilterChipText}
+            />
+            <ChipFiltro
+              label="Amanhã"
+              icon="sunny-outline"
+              active={quickFilter === 'tomorrow'}
+              onPress={() => setQuickFilter('tomorrow')}
+              style={styles.quickFilterChip}
+              textStyle={styles.quickFilterChipText}
+            />
+            <ChipFiltro
+              label="Melhores"
+              icon="star-outline"
+              active={quickFilter === 'top'}
+              onPress={() => setQuickFilter('top')}
+              style={styles.quickFilterChip}
+              textStyle={styles.quickFilterChipText}
+            />
+          </View>
+
+          <FiltrosAgendamentoAvancado
+            tipoConsulta={tipoConsulta}
+            onTipoConsultaChange={setTipoConsulta}
+            convenio={convenio}
+            onConvenioChange={setConvenio}
+            especialidade={especialidadeFiltro}
+            onEspecialidadeChange={setEspecialidadeFiltro}
+            dateFromBr={dateFromBr}
+            dateToBr={dateToBr}
+            onDateFromBrChange={(value) => setDateFromBr(maskDateBr(value))}
+            onDateToBrChange={(value) => setDateToBr(maskDateBr(value))}
+            maxValorReais={maxValorReais}
+            onMaxValorReaisChange={setMaxValorReais}
+            ordenacao={ordenacao}
+            onOrdenacaoChange={setOrdenacao}
+            ratingMinimo={ratingMinimo}
+            onRatingMinimoChange={setRatingMinimo}
+            somenteConvenio={somenteConvenio}
+            onSomenteConvenioChange={setSomenteConvenio}
+            filtrosAtivos={filtrosAtivos}
+            onLimpar={limparFiltrosAvancados}
+            abertoExterno={filtrosAbertos}
+            onAbertoChange={setFiltrosAbertos}
+            ocultarToggle
+          />
+        </>
+      ) : null}
+
       <View style={styles.segmentedWrap}>
         <TouchableOpacity
           activeOpacity={0.9}
@@ -1124,6 +1397,15 @@ export default function PacienteAgendamentosScreen({
         >
           <Text style={[styles.segmentedText, activeSection === 'agendar' && styles.segmentedTextActive]}>
             Nutricionistas
+          </Text>
+        </TouchableOpacity>
+        <TouchableOpacity
+          activeOpacity={0.9}
+          style={[styles.segmentedOption, activeSection === 'medicos' && styles.segmentedOptionActive]}
+          onPress={() => setActiveSection('medicos')}
+        >
+          <Text style={[styles.segmentedText, activeSection === 'medicos' && styles.segmentedTextActive]}>
+            Médicos
           </Text>
         </TouchableOpacity>
         <TouchableOpacity
@@ -1308,6 +1590,60 @@ export default function PacienteAgendamentosScreen({
             </>
           ) : null}
 
+          {activeSection === 'medicos' ? (
+            <>
+              {assignedMedico ? (
+                <View style={styles.sectionHeaderRow}>
+                  <View>
+                    <Text style={styles.sectionTitle}>Médico responsável pelo acompanhamento</Text>
+                    <Text style={styles.sectionSubtitle}>
+                      Seu médico de acompanhamento aparece primeiro para facilitar o vínculo clínico.
+                    </Text>
+                  </View>
+                </View>
+              ) : null}
+
+              {assignedMedico ? (
+                <View style={styles.assignedNutriWrap}>
+                  {renderMedicoCard(assignedMedico, { forceLinked: true })}
+                </View>
+              ) : null}
+
+              <View style={styles.sectionHeaderRow}>
+                <View>
+                  <Text style={styles.sectionTitle}>
+                    {assignedMedico ? 'Outros médicos' : 'Médicos cadastrados'}
+                  </Text>
+                  <Text style={styles.sectionSubtitle}>
+                    {linkedMedicoId
+                      ? 'Voce pode visualizar outros perfis, mas so troca de médico apos desvincular o atual.'
+                      : `${filteredMedicosBase.length} médico(s) encontrado(s) no banco`}
+                  </Text>
+                </View>
+              </View>
+
+              {!outrosMedicos.length && !assignedMedico ? (
+                <CartaoAgendamento style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Nenhum médico encontrado</Text>
+                  <Text style={styles.emptyText}>
+                    Ajuste especialidade, avaliacao, valor ou busca para ampliar os resultados.
+                  </Text>
+                </CartaoAgendamento>
+              ) : null}
+
+              {!outrosMedicos.length && assignedMedico ? (
+                <CartaoAgendamento style={styles.emptyCard}>
+                  <Text style={styles.emptyTitle}>Nenhum outro médico listado</Text>
+                  <Text style={styles.emptyText}>
+                    No momento, apenas seu médico de acompanhamento esta listado acima.
+                  </Text>
+                </CartaoAgendamento>
+              ) : null}
+
+              {outrosMedicos.map((medico) => renderMedicoCard(medico))}
+            </>
+          ) : null}
+
       {!loading && !loadError && activeSection === 'consultas' ? (
         <>
           {consultasSection === 'agendadas' ? (
@@ -1321,24 +1657,27 @@ export default function PacienteAgendamentosScreen({
 
               {proximasConsultasFiltradas.length ? (
                 proximasConsultasFiltradas.map((item) => {
-                  const nutri =
-                    nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
-                    null;
-                  const meetLink = resolveMeetLink({ consulta: item, nutricionista: nutri });
+                  const profissional = resolveProfissionalDaConsulta(
+                    item,
+                    nutricionistas,
+                    medicos
+                  );
+                  const meetLink = resolveMeetLink({
+                    consulta: item,
+                    nutricionista: profissional.nutri,
+                  });
 
                   return (
                     <CartaoAgendamento key={`next-filtered-${item.id}`} style={styles.bookingCard}>
                       <View style={styles.bookingTopRow}>
                         <AvatarProfissional
-                          name={nutri?.nome_completo_nutri || 'Profissional'}
+                          name={profissional.nome}
                           size={48}
-                          imageUri={getNutriAvatarUri(nutri)}
+                          imageUri={profissional.avatarUri}
                         />
                         <View style={styles.bookingBody}>
-                          <Text style={styles.bookingName}>
-                            {nutri?.nome_completo_nutri || 'Profissional'}
-                          </Text>
-                          <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
+                          <Text style={styles.bookingName}>{profissional.nome}</Text>
+                          <Text style={styles.bookingSpec}>{profissional.especialidade}</Text>
                           <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
                           <Text style={styles.bookingMeta}>
                             {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
@@ -1352,21 +1691,21 @@ export default function PacienteAgendamentosScreen({
                           <BotaoAgendamento
                             label="Confirmar"
                             icon="checkmark-circle-outline"
-                            onPress={() => handleConfirmarConsultaAgendada(item, nutri)}
+                            onPress={() => handleConfirmarConsultaAgendada(item, profissional.nutri)}
                             style={styles.bookingActionPrimary}
                           />
                         ) : null}
                         <BotaoAgendamento
                           label="Cancelar"
                           variant="ghost"
-                          onPress={() => handleCancelarConsulta(item, nutri)}
+                          onPress={() => handleCancelarConsulta(item, profissional.nutri)}
                           style={styles.bookingActionSecondary}
                         />
                         {meetLink ? (
                           <BotaoAgendamento
                             label="Entrar"
                             icon="videocam-outline"
-                            onPress={() => handleAbrirMeet(item, nutri)}
+                            onPress={() => handleAbrirMeet(item, profissional.nutri)}
                             style={styles.bookingActionPrimary}
                           />
                         ) : null}
@@ -1396,23 +1735,23 @@ export default function PacienteAgendamentosScreen({
 
               {consultasAnterioresFiltradas.length ? (
                 consultasAnterioresFiltradas.map((item) => {
-                  const nutri =
-                    nutricionistas.find((n) => n.id_nutricionista_uuid === item.nutricionista_id) ||
-                    null;
+                  const profissional = resolveProfissionalDaConsulta(
+                    item,
+                    nutricionistas,
+                    medicos
+                  );
 
                   return (
                     <CartaoAgendamento key={`past-filtered-${item.id}`} style={styles.bookingCardPast}>
                       <View style={styles.bookingTopRow}>
                         <AvatarProfissional
-                          name={nutri?.nome_completo_nutri || 'Profissional'}
+                          name={profissional.nome}
                           size={44}
-                          imageUri={getNutriAvatarUri(nutri)}
+                          imageUri={profissional.avatarUri}
                         />
                         <View style={styles.bookingBody}>
-                          <Text style={styles.bookingName}>
-                            {nutri?.nome_completo_nutri || 'Profissional'}
-                          </Text>
-                          <Text style={styles.bookingSpec}>{getNutriEspecialidadeLabel(nutri)}</Text>
+                          <Text style={styles.bookingName}>{profissional.nome}</Text>
+                          <Text style={styles.bookingSpec}>{profissional.especialidade}</Text>
                           <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
                           <Text style={styles.bookingMeta}>
                             {item.tipo_consulta || 'Teleconsulta'} · {item.status || 'finalizada'}

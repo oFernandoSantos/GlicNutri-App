@@ -18,16 +18,18 @@ import {
   addGlucoseReading,
   fetchGlucoseReadings,
   getPatientId,
+  refreshPatientGlucoseReadings,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
-  replaceCachedGlucoseReadings,
+  buildGlucoseFingerprint,
 } from '../../servicos/centralGlicose';
 import { executarEmLotes } from '../../utilitarios/carregamentoTela';
 import {
   clearLibreLinkUpCredentials,
+  DEFAULT_LIBRE_API_REGION,
   isLibreViewSyncConfigured,
   loadLibreLinkUpCredentials,
   parseLibreViewExportText,
@@ -37,6 +39,7 @@ import {
   hasLibreLinkUpLinked,
   startLibreViewAutoSync,
   stopLibreViewAutoSync,
+  buildLibreSyncFeedback,
   syncLinkedLibreViewReadings,
 } from '../../servicos/servicoLibreViewAutoSync';
 import { AppLogger, MODULOS_LOG_SISTEMA } from '../../servicos/servicoLogSistema';
@@ -58,12 +61,8 @@ function getContentWidth(windowWidth) {
 }
 
 function isKnownReading(reading, existingReadings) {
-  return existingReadings.some(
-    (item) =>
-      item.value === reading.value &&
-      item.date === reading.date &&
-      String(item.time).slice(0, 5) === String(reading.time).slice(0, 5)
-  );
+  const fingerprint = buildGlucoseFingerprint(reading);
+  return existingReadings.some((item) => buildGlucoseFingerprint(item) === fingerprint);
 }
 
 export default function PacienteIntegracaoSensorScreen({
@@ -137,9 +136,9 @@ export default function PacienteIntegracaoSensorScreen({
 
   async function importLibreViewReadings(readings, sourceLabel = 'libreview_import') {
     const monitorLimits = mesclarLimitesDadosPaciente('monitoramento');
-    const glucoseLimit = monitorLimits.glucoseLimit || 120;
+    const glucoseLimit = monitorLimits.glucoseLimit || 60;
     const existingReadings = mergeCachedGlucoseReadings(
-      await fetchGlucoseReadings(patientId, glucoseLimit),
+      await fetchGlucoseReadings(patientId, glucoseLimit, usuarioLogado).catch(() => []),
       getCachedGlucoseReadings(patientId)
     );
     const newReadings = readings.filter((reading) => !isKnownReading(reading, existingReadings));
@@ -153,12 +152,10 @@ export default function PacienteIntegracaoSensorScreen({
       })
     );
 
-    const fetchedReadings = await fetchGlucoseReadings(patientId, glucoseLimit);
-    const mergedReadings = mergeCachedGlucoseReadings(
-      fetchedReadings,
-      getCachedGlucoseReadings(patientId)
-    );
-    replaceCachedGlucoseReadings(patientId, mergedReadings);
+    await refreshPatientGlucoseReadings(patientId, {
+      patientContext: usuarioLogado,
+      glucoseLimit,
+    });
 
     return newReadings;
   }
@@ -255,15 +252,16 @@ export default function PacienteIntegracaoSensorScreen({
       await saveLibreLinkUpCredentials(patientId, {
         email,
         password,
-        region: 'la',
+        region: DEFAULT_LIBRE_API_REGION,
       });
 
       const result = await syncLinkedLibreViewReadings({
         patientId,
         patientEmail,
         actor: usuarioLogado,
-        credentials: { email, password, region: 'la' },
+        credentials: { email, password, region: DEFAULT_LIBRE_API_REGION },
         silent: false,
+        force: true,
       });
 
       setLibreLinkLinked(true);
@@ -273,14 +271,12 @@ export default function PacienteIntegracaoSensorScreen({
         patientId,
         patientEmail,
         actor: usuarioLogado,
-        runImmediately: true,
+        runImmediately: false,
       });
 
       setFeedback({
         tipo: 'sucesso',
-        texto: result.imported
-          ? `Sensor vinculado. ${result.imported} leitura(s) importada(s). Sincronizacao automatica a cada 5 min.`
-          : 'Sensor vinculado. Sincronizacao automatica a cada 5 min.',
+        texto: buildLibreSyncFeedback(result, { linking: true }),
       });
     } catch (error) {
       console.log('Erro ao vincular LibreLinkUp:', error);
@@ -341,13 +337,12 @@ export default function PacienteIntegracaoSensorScreen({
         patientEmail,
         actor: usuarioLogado,
         silent: false,
+        force: true,
       });
 
       setFeedback({
-        tipo: 'sucesso',
-        texto: result.imported
-          ? `LibreView: ${result.imported} leitura(s) importada(s).`
-          : 'LibreView sincronizado: nenhuma leitura nova encontrada.',
+        tipo: result?.fetched || result?.imported ? 'sucesso' : 'aviso',
+        texto: buildLibreSyncFeedback(result),
       });
     } catch (error) {
       console.log('Erro ao sincronizar LibreView:', error);

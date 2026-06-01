@@ -28,6 +28,7 @@ import {
   maybeCompleteGoogleOAuthSession,
   startGoogleOAuth,
 } from '../../servicos/servicoOAuthGoogle';
+import { bootstrapLibreSyncOnLogin } from '../../servicos/servicoLibreViewAutoSync';
 import { hasPatientOnboardingSeen } from '../../servicos/servicoOnboardingPaciente';
 import {
   limparSessaoAdmin,
@@ -54,6 +55,7 @@ import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
+import { brand } from '../../temas/designSystem';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import { getPrivacyPolicyUrl } from '../../constantes/configPublicaApp';
 
@@ -608,6 +610,13 @@ export default function TelaLogin({ navigation, route, session }) {
     invalidatePatientExperienceCache();
 
     const experience = await warmPatientHomeForLogin(getPatientId(usuarioPaciente), usuarioPaciente);
+
+    await bootstrapLibreSyncOnLogin({
+      patientId: getPatientId(usuarioPaciente),
+      patientEmail: usuarioPaciente.email_pac || usuarioPaciente.email,
+      actor: usuarioPaciente,
+    }).catch(() => null);
+
     const pacienteResolvido = experience?.patient;
 
     if (!pacienteResolvido?.id_paciente_uuid) {
@@ -816,7 +825,7 @@ export default function TelaLogin({ navigation, route, session }) {
   };
 
   const inputErrorStyle = {
-    borderColor: '#d96666',
+    borderColor: brand.danger,
   };
 
   const passwordInputWrapperStyle = {
