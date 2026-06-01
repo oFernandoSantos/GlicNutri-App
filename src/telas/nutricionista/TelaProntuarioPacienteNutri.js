@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Platform,
   StyleSheet,
   Text,
@@ -49,6 +50,7 @@ import {
   fetchConsultasHistorico,
 } from '../../servicos/servicoProntuarioCompleto';
 import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
+import { exportNutritionistPatientReport } from '../../servicos/servicoRelatoriosNutricionista';
 
 const detailTabs = [
   { value: 'overview',  label: 'Visão Geral' },
@@ -210,6 +212,9 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   // ── Estado histórico de consultas ────────────────────────────────
   const [consultasHistorico, setConsultasHistorico] = useState([]);
   const [loadingHistorico, setLoadingHistorico] = useState(false);
+  const [reportPeriod, setReportPeriod] = useState('7days');
+  const [reportMode, setReportMode] = useState('visual');
+  const [exportingReport, setExportingReport] = useState(false);
 
   // ── Estado metas clínicas ────────────────────────────────────────
   const [editMeta, setEditMeta] = useState(false);
@@ -585,6 +590,42 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     }
   }
 
+  async function handleExportPatientReport() {
+    if (!currentPatient) return;
+    try {
+      setExportingReport(true);
+      const result = await exportNutritionistPatientReport(
+        {
+          usuarioLogado,
+          patient: {
+            ...(currentPatient.rawData || {}),
+            ...currentPatient,
+            id_paciente_uuid: currentPatient.id,
+            nome_completo: currentPatient.name,
+            data_nascimento: currentPatient.rawData?.data_nascimento,
+            peso_atual_kg: currentPatient.pesoAtual || currentPatient.rawData?.peso_atual_kg,
+            altura_cm: currentPatient.rawData?.altura_cm,
+            imc_calculado: currentPatient.bmi !== '--' ? currentPatient.bmi : currentPatient.rawData?.imc_calculado,
+          },
+          period: reportPeriod,
+        },
+        { mode: reportMode, format: 'pdf' }
+      );
+      if (result?.ok) {
+        Alert.alert(
+          'Relatório do paciente',
+          Platform.OS === 'web'
+            ? 'O PDF foi baixado para o seu dispositivo.'
+            : 'O PDF foi gerado. Escolha onde salvar ou compartilhar.'
+        );
+      }
+    } catch (error) {
+      Alert.alert('Relatório do paciente', error?.message || 'Não foi possível emitir o relatório.');
+    } finally {
+      setExportingReport(false);
+    }
+  }
+
   // ──────────────────────────────────────────────────────────────────
   // Renderização
   // ──────────────────────────────────────────────────────────────────
@@ -666,6 +707,75 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
                 <Text style={styles.statHelper}>Peso: {pesoExibir} kg · Alt: {alturaExibir} cm</Text>
               </SectionCard>
             </View>
+
+            <SectionCard style={styles.reportCard}>
+              <Text style={styles.sectionTitle}>Relatório do paciente</Text>
+              <Text style={styles.reportHelper}>
+                Resumo em PDF com glicose, alimentação, insulina, medicações e alertas automáticos.
+              </Text>
+              <View style={styles.reportChipRow}>
+                {[
+                  { id: '7days', label: '7 dias' },
+                  { id: '15days', label: '15 dias' },
+                  { id: '30days', label: '30 dias' },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.reportChip,
+                      reportPeriod === item.id && styles.reportChipActive,
+                    ]}
+                    onPress={() => setReportPeriod(item.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.reportChipText,
+                        reportPeriod === item.id && styles.reportChipTextActive,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.reportChipRow}>
+                {[
+                  { id: 'visual', label: 'Resumo visual' },
+                  { id: 'full', label: 'Relatório completo' },
+                ].map((item) => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[
+                      styles.reportChip,
+                      reportMode === item.id && styles.reportChipActive,
+                    ]}
+                    onPress={() => setReportMode(item.id)}
+                  >
+                    <Text
+                      style={[
+                        styles.reportChipText,
+                        reportMode === item.id && styles.reportChipTextActive,
+                      ]}
+                    >
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <TouchableOpacity
+                style={[styles.reportPrimaryButton, exportingReport && styles.reportButtonDisabled]}
+                onPress={handleExportPatientReport}
+                disabled={exportingReport}
+                activeOpacity={0.9}
+              >
+                {exportingReport ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="document-text-outline" size={18} color="#fff" />
+                )}
+                <Text style={styles.reportPrimaryButtonText}>Exportar PDF</Text>
+              </TouchableOpacity>
+            </SectionCard>
           </View>
         ) : null}
 
@@ -930,7 +1040,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
                       <Text style={styles.mealTime}>{meal.time}</Text>
                       <Text style={styles.mealTitle}>{meal.title}</Text>
                       <TouchableOpacity onPress={() => removeMeal(meal.id)} style={{ marginLeft: 'auto' }}>
-                        <Ionicons name="trash-outline" size={16} color="#d96666" />
+                        <Ionicons name="trash-outline" size={16} color={patientTheme.colors.danger} />
                       </TouchableOpacity>
                     </View>
                     <Text style={styles.mealSummary}>{meal.objective || meal.summary}</Text>
@@ -1224,6 +1334,36 @@ const styles = StyleSheet.create({
   content: { paddingHorizontal: patientTheme.spacing.screen, paddingBottom: 28, gap: 14 },
   pageGap: { gap: 14 },
   overviewStats: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: 12 },
+  reportCard: { gap: 10 },
+  reportHelper: { color: patientTheme.colors.textMuted, fontSize: 13, lineHeight: 18 },
+  reportChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  reportChip: {
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: patientTheme.colors.background,
+  },
+  reportChipActive: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  reportChipText: { color: patientTheme.colors.textMuted, fontSize: 12, fontWeight: '600' },
+  reportChipTextActive: { color: patientTheme.colors.primaryDark },
+  reportPrimaryButton: {
+    marginTop: 4,
+    minHeight: 46,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: '#4CD197',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 8,
+    paddingHorizontal: 14,
+  },
+  reportPrimaryButtonText: { color: '#fff', fontWeight: '800', fontSize: 15 },
+  reportButtonDisabled: { opacity: 0.65 },
   statCard: { flex: 1, minHeight: 120 },
   statLabel: { color: patientTheme.colors.textMuted, fontSize: 12, textTransform: 'uppercase', fontWeight: '800' },
   statValue: { marginTop: 10, marginBottom: 10, fontSize: 24, fontWeight: '900', color: patientTheme.colors.text },
@@ -1258,7 +1398,7 @@ const styles = StyleSheet.create({
   messageBox: { backgroundColor: patientTheme.colors.background, borderWidth: 1, borderColor: patientTheme.colors.border, borderRadius: patientTheme.radius.lg, marginBottom: 12, padding: 12 },
   messageBoxError: { backgroundColor: '#fff4f4', borderColor: '#f0d2d2', borderRadius: patientTheme.radius.lg, borderWidth: 1, marginBottom: 12, padding: 12 },
   messageText: { color: patientTheme.colors.primaryDark, fontWeight: '800', lineHeight: 20 },
-  messageTextError: { color: '#c55b5b', fontWeight: '800', lineHeight: 20 },
+  messageTextError: { color: patientTheme.colors.danger, fontWeight: '800', lineHeight: 20 },
   mealList: { gap: 10 },
   mealCard: { padding: 14, borderRadius: patientTheme.radius.lg, backgroundColor: patientTheme.colors.background, borderWidth: 1, borderColor: patientTheme.colors.border, ...patientShadow },
   mealTop: { flexDirection: 'row', gap: 12, alignItems: 'center' },

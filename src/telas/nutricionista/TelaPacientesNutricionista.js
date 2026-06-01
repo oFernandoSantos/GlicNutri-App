@@ -7,6 +7,9 @@ import {
   SearchInput,
   SectionCard,
   nutriDesktopStyles,
+  dashboardKpiStyles,
+  DashboardKpiCard,
+  KPI_ACCENTS,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import {
   getNutritionistId,
@@ -108,10 +111,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       : 0;
 
     return [
-      { id: 'total', label: 'Total Pacientes', value: total, valueStyle: styles.metricValueDefault },
-      { id: 'high-risk', label: 'Alto Risco', value: highRisk, valueStyle: styles.metricValueHighRisk },
-      { id: 'adherence', label: 'Adesão Média', value: `${avgAdherence}%`, valueStyle: styles.metricValueAdherence },
-      { id: 'alerts', label: 'Alertas Ativos', value: withAlerts, valueStyle: styles.metricValueAlerts },
+      { id: 'total', label: 'Total Pacientes', value: String(total), icon: 'people-outline', accent: KPI_ACCENTS.blue },
+      { id: 'high-risk', label: 'Alto Risco', value: String(highRisk), icon: 'alert-circle-outline', accent: KPI_ACCENTS.red },
+      { id: 'adherence', label: 'Adesão Média', value: `${avgAdherence}%`, icon: 'trending-up-outline', accent: KPI_ACCENTS.green },
+      { id: 'alerts', label: 'Alertas Ativos', value: String(withAlerts), icon: 'notifications-outline', accent: KPI_ACCENTS.yellow },
     ];
   }, [patients]);
 
@@ -164,12 +167,16 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
           />
         </SectionCard>
 
-        <View style={styles.summaryGrid}>
+        <View style={dashboardKpiStyles.grid}>
           {summary.map((item) => (
-            <SectionCard key={item.id} style={[styles.summaryCard, styles.flatCard]}>
-              <Text style={styles.summaryLabel}>{item.label}</Text>
-              <Text style={[styles.summaryValue, item.valueStyle]}>{item.value}</Text>
-            </SectionCard>
+            <View key={item.id} style={dashboardKpiStyles.cell}>
+              <DashboardKpiCard
+                icon={item.icon}
+                accent={item.accent}
+                label={item.label}
+                value={item.value}
+              />
+            </View>
           ))}
         </View>
 

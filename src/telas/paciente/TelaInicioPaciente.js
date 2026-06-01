@@ -35,8 +35,12 @@ import {
   getPatientDisplayName,
   getPatientId,
   isPatientExperienceCacheFresh,
+  mergeAppStateMealEntries,
+  refreshPatientGlucoseReadings,
+  refreshPatientMealEntries,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
+import { syncLinkedLibreViewReadings } from '../../servicos/servicoLibreViewAutoSync';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { EsqueletoMetricaGlicose } from '../../componentes/comum/EsqueletoCarregamento';
 import { getMealEntryNutrition } from '../../servicos/servicoRefeicaoIA';
@@ -60,6 +64,12 @@ import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
 import MensagemInline from '../../componentes/comum/MensagemInline';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import { listPatientClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
+import {
+  buildLocalDateString,
+  buildTodaySparklineFromReadings,
+  filterGlucoseReadingsLastHours,
+  getGlucoseReadingDisplayDate,
+} from '../../utilitarios/dataLocal';
 import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import {
   PATIENT_MAIN_TAB_ROUTES,
@@ -393,7 +403,7 @@ const NUTRIENT_KEYWORDS = [
 ];
 
 function todayDateString() {
-  return new Date().toISOString().slice(0, 10);
+  return buildLocalDateString();
 }
 
 function normalizeText(value) {
@@ -454,7 +464,9 @@ function percentage(value, target) {
 
 function buildNutritionSummary(mealEntries, planSections) {
   const today = todayDateString();
-  const todayMeals = (mealEntries || []).filter((entry) => !entry.date || entry.date === today);
+  const todayMeals = (mealEntries || []).filter(
+    (entry) => String(entry?.date || '').slice(0, 10) === today
+  );
   const consumedFromMeals = todayMeals.reduce(
     (totals, entry) => {
       const structured = getMealEntryNutrition(entry);
@@ -546,8 +558,16 @@ function buildNutritionSummary(mealEntries, planSections) {
 function buildGlucoseSummary(glucoseReadings) {
   const dedupedReadings = mergeCachedGlucoseReadings(glucoseReadings || []);
   const today = todayDateString();
-  const todayReadings = dedupedReadings.filter((item) => item.date === today);
-  const baseReadings = todayReadings.length ? todayReadings : dedupedReadings;
+  const todayReadings = dedupedReadings.filter(
+    (item) => getGlucoseReadingDisplayDate(item) === today
+  );
+  const lastDayReadings = filterGlucoseReadingsLastHours(dedupedReadings, 24);
+  const baseReadings =
+    todayReadings.length >= 2
+      ? todayReadings
+      : lastDayReadings.length
+        ? lastDayReadings
+        : dedupedReadings;
   const inRange = baseReadings.filter((item) => item.value >= 70 && item.value <= 180).length;
   const above = baseReadings.filter((item) => item.value > 180).length;
   const below = baseReadings.filter((item) => item.value < 70).length;
@@ -592,7 +612,11 @@ function GlucoseMetricCard({
   }
 
   const glucoseLabel = currentGlucose ? `${currentGlucose} mg/dL` : '-- mg/dL';
-  const updatedLabel = latestGlucose?.time ? `Atualizado ${latestGlucose.time}` : 'Sem registro hoje';
+  const readingSource = String(latestGlucose?.source || latestGlucose?.fonte || '').toLowerCase();
+  const sourceSuffix = readingSource.includes('libre') || readingSource.includes('cgm') ? ' · Sensor' : '';
+  const updatedLabel = latestGlucose?.time
+    ? `Atualizado ${String(latestGlucose.time).slice(0, 8)}${sourceSuffix}`
+    : 'Sem registro hoje';
   const statusMeta = getGlucoseStatusMeta(currentGlucose);
 
   return (
@@ -766,7 +790,10 @@ export default function PacienteHomeScreen({
 
   const [paciente, setPaciente] = useState(null);
   const [clinicalObjective, setClinicalObjective] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
+  const [appState, setAppState] = useState(() => {
+    const initialPatientId = getPatientId(usuarioProp || route?.params?.usuarioLogado || null);
+    return (initialPatientId && getCachedPatientAppState(initialPatientId)) || createDefaultAppState();
+  });
   const [glucoseReadings, setGlucoseReadings] = useState([]);
   const [clinicalAlerts, setClinicalAlerts] = useState([]);
   const [loadError, setLoadError] = useState(null);
@@ -811,22 +838,12 @@ export default function PacienteHomeScreen({
           email_pac: usuarioLogado?.email || null,
         }
       );
-      const mergedReadings = mergeCachedGlucoseReadings(
-        experience.glucoseReadings,
-        getCachedGlucoseReadings(experience.patient?.id_paciente_uuid || idPaciente)
-      );
+      const patientUuid = experience.patient?.id_paciente_uuid || idPaciente;
+      const nextAppState = mergeAppStateMealEntries(experience.appState, patientUuid);
 
-      setAppState(experience.appState);
-      replaceCachedPatientAppState(
-        experience.patient?.id_paciente_uuid || idPaciente,
-        experience.appState
-      );
+      setAppState(nextAppState);
+      replaceCachedPatientAppState(patientUuid, nextAppState);
       setClinicalObjective(experience.clinicalObjective);
-      setGlucoseReadings(mergedReadings);
-      replaceCachedGlucoseReadings(
-        experience.patient?.id_paciente_uuid || idPaciente,
-        mergedReadings
-      );
     },
     [idPaciente, nomeBaseUsuario, usuarioLogado]
   );
@@ -928,15 +945,19 @@ export default function PacienteHomeScreen({
             agendarAlertasClinicos(cachedExperience.patient?.id_paciente_uuid || idPaciente);
           }
 
-          if (cacheIsFresh) {
+          const mergedMeals =
+            mergeAppStateMealEntries(cachedExperience.appState, idPaciente)?.mealEntries?.length || 0;
+
+          if (cacheIsFresh && mergedMeals > 0) {
             return;
           }
 
           fetchPatientExperience(idPaciente, {
             ...cacheOptions,
+            forceRefresh: mergedMeals === 0,
             patientContext: usuarioLogado,
           })
-            .then(atualizarExperienceSilencioso)
+            .then(aplicarExperience)
             .catch((error) => {
               registrarLogTecnicoCarga('home_refresh_background', error);
               console.log('Refresh home paciente:', error);
@@ -969,6 +990,7 @@ export default function PacienteHomeScreen({
 
         fetchPatientExperience(idPaciente, {
           ...cacheOptions,
+          forceRefresh: true,
           patientContext: usuarioLogado,
         })
           .then((experience) => {
@@ -1122,8 +1144,43 @@ export default function PacienteHomeScreen({
 
       carregarDados({ forceRefresh: false });
       homeLoadedRef.current = true;
+
+      if (!idPaciente) {
+        return undefined;
+      }
+
+      refreshPatientMealEntries(idPaciente, {
+        patientContext: usuarioLogado,
+        mealLimit: homeFetchOptions.mealLimit,
+      }).catch((error) => {
+        console.log('Refresh refeicoes na home:', error);
+      });
+
+      const refreshGlucose = async () => {
+        try {
+          await syncLinkedLibreViewReadings({
+            patientId: idPaciente,
+            patientEmail: usuarioLogado?.email_pac || usuarioLogado?.email || '',
+            actor: usuarioLogado,
+            glucoseLimit: Math.max(homeFetchOptions.glucoseLimit || 48, 48),
+            silent: true,
+          });
+        } catch (error) {
+          console.log('Sync LibreLinkUp na home:', error?.message || error);
+        }
+
+        await refreshPatientGlucoseReadings(idPaciente, {
+          patientContext: usuarioLogado,
+          glucoseLimit: Math.max(homeFetchOptions.glucoseLimit || 48, 48),
+        }).catch((error) => {
+          console.log('Refresh glicose na home:', error);
+        });
+      };
+
+      refreshGlucose();
+
       return undefined;
-    }, [carregarDados, homeFetchOptions, idPaciente, navigation])
+    }, [carregarDados, homeFetchOptions.mealLimit, homeFetchOptions.glucoseLimit, idPaciente, navigation, usuarioLogado])
   );
 
   function navegarParaTela(rota, params = {}) {
@@ -1398,11 +1455,39 @@ export default function PacienteHomeScreen({
     () => buildPlanDayStatus({ mealEntries, sections: planSections }),
     [mealEntries, planSections]
   );
-  const homePlanMeals = useMemo(
-    () => homePlanDayStatus.meals.slice(0, 3),
-    [homePlanDayStatus.meals]
-  );
-  const homePlanProgress = homePlanDayStatus.progressPercent;
+  const todayMealEntries = useMemo(() => {
+    const today = todayDateString();
+    return (mealEntries || [])
+      .filter((entry) => String(entry?.date || '').slice(0, 10) === today)
+      .sort((left, right) => String(left.time || '').localeCompare(String(right.time || '')));
+  }, [mealEntries]);
+  const homeMealCards = useMemo(() => {
+    if (todayMealEntries.length) {
+      return todayMealEntries.map((entry) => {
+        const nutrition = getMealEntryNutrition(entry) || {};
+        return {
+          id: entry.id,
+          title: entry.mealLabel || entry.title || 'Refeicao',
+          time: entry.time || '--:--',
+          description: entry.description || '',
+          summary: {
+            completed: true,
+            kcal: Math.round(nutrition.calories || entry.kcal || 0),
+            carbs: Math.round(nutrition.carbs || entry.carbsG || 0),
+            protein: Math.round(nutrition.protein || entry.proteinG || 0),
+            fat: Math.round(nutrition.fat || entry.fatG || 0),
+          },
+        };
+      });
+    }
+
+    return homePlanDayStatus.meals.slice(0, 7);
+  }, [homePlanDayStatus.meals, todayMealEntries]);
+  const homePlanProgress = todayMealEntries.length
+    ? Math.min(100, Math.round((todayMealEntries.length / 7) * 100))
+    : homePlanDayStatus.progressPercent;
+  const homePlanCompletedCount = todayMealEntries.length || homePlanDayStatus.completedCount;
+  const homePlanTotalCount = todayMealEntries.length ? 7 : homePlanDayStatus.totalCount || 0;
   const insights = useMemo(
     () => buildHomeInsights(glucoseForInsights, mealEntries.length),
     [glucoseForInsights, mealEntries.length]
@@ -1468,18 +1553,7 @@ export default function PacienteHomeScreen({
     [allNotificationItems, dismissedNotificationKeys]
   );
   const notificationCount = notificationItems.length;
-  const sparklineData =
-    glucoseReadings.length
-      ? glucoseReadings
-          .slice(0, 7)
-          .reverse()
-          .map((item) => ({
-            value: item.value,
-            label: String(item.time || '').slice(0, 5),
-            date: item.date,
-            time: item.time,
-          }))
-      : [];
+  const sparklineData = buildTodaySparklineFromReadings(glucoseReadings, 7);
   const metricDots = ['Glicose', 'Macros', 'Micros'];
 
   useEffect(() => {
@@ -1682,7 +1756,7 @@ export default function PacienteHomeScreen({
                         onPress={() => limparNotificacao(item.notificationKey)}
                         style={styles.notificationClearButton}
                       >
-                        <Ionicons name="checkmark-done-outline" size={16} color="#d96666" />
+                        <Ionicons name="checkmark-done-outline" size={16} color={patientTheme.colors.danger} />
                         <Text style={styles.notificationClearText}>Limpar notificação</Text>
                       </TouchableOpacity>
                     </View>
@@ -1757,39 +1831,45 @@ export default function PacienteHomeScreen({
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Meu plano de hoje</Text>
+        <Text style={styles.sectionTitle}>Alimentacao de hoje</Text>
         <SectionCard>
           <View style={styles.homePlanHeader}>
             <View style={styles.homePlanHeaderLeft}>
               <Ionicons
-                name="radio-button-on-outline"
+                name="restaurant-outline"
                 size={15}
                 color={patientTheme.colors.primaryDark}
               />
-              <Text style={styles.homePlanHeaderTitle}>Plano Alimentar</Text>
+              <Text style={styles.homePlanHeaderTitle}>
+                {todayMealEntries.length ? 'Registros alimentares' : 'Plano Alimentar'}
+              </Text>
             </View>
             <Text style={styles.homePlanHeaderCount}>
-              {homePlanDayStatus.completedCount}/{homePlanDayStatus.totalCount || 0}
+              {homePlanCompletedCount}/{homePlanTotalCount || 0}
             </Text>
           </View>
 
           <View style={styles.homePlanProgressRow}>
-            <Text style={styles.homePlanProgressLabel}>Adesão de hoje</Text>
+            <Text style={styles.homePlanProgressLabel}>
+              {todayMealEntries.length ? 'Refeicoes registradas hoje' : 'Adesao de hoje'}
+            </Text>
             <Text style={styles.homePlanProgressValue}>{homePlanProgress}%</Text>
           </View>
           <View style={styles.homePlanProgressTrack}>
             <View style={[styles.homePlanProgressFill, { width: `${homePlanProgress}%` }]} />
           </View>
 
-          {homePlanMeals.map((item) => (
-            <View
-              key={`home-plan-${item.id}`}
+          {homeMealCards.map((item) => (
+            <TouchableOpacity
+              key={`home-meal-${item.id}`}
               style={[
                 styles.homePlanMealCard,
                 item.summary.completed
                   ? styles.homePlanMealCardDone
                   : styles.homePlanMealCardPending,
               ]}
+              activeOpacity={0.88}
+              onPress={() => navegarParaTela('PacienteDiario')}
             >
               <View style={styles.homePlanMealHeader}>
                 <View style={styles.homePlanMealTitleRow}>
@@ -1815,56 +1895,67 @@ export default function PacienteHomeScreen({
               </View>
 
               {item.summary.completed ? (
-                <View style={styles.homePlanMacrosRow}>
-                  <View>
-                    <Text style={styles.homePlanMacroText}>Calorias: {item.summary.kcal} kcal</Text>
-                    <Text style={styles.homePlanMacroText}>Proteína: {item.summary.protein}g</Text>
+                <>
+                  {item.description ? (
+                    <Text style={styles.homePlanMealDescription} numberOfLines={2}>
+                      {item.description}
+                    </Text>
+                  ) : null}
+                  <View style={styles.homePlanMacrosRow}>
+                    <View>
+                      <Text style={styles.homePlanMacroText}>Calorias: {item.summary.kcal} kcal</Text>
+                      <Text style={styles.homePlanMacroText}>Proteina: {item.summary.protein}g</Text>
+                    </View>
+                    <View>
+                      <Text style={styles.homePlanMacroText}>Carbo: {item.summary.carbs}g</Text>
+                      <Text style={styles.homePlanMacroText}>Gordura: {item.summary.fat}g</Text>
+                    </View>
                   </View>
-                  <View>
-                    <Text style={styles.homePlanMacroText}>Carbo: {item.summary.carbs}g</Text>
-                    <Text style={styles.homePlanMacroText}>Gordura: {item.summary.fat}g</Text>
-                  </View>
-                </View>
+                </>
               ) : (
                 <Text style={styles.homePlanPendingText}>Toque para registrar</Text>
               )}
-            </View>
+            </TouchableOpacity>
           ))}
 
           <TouchableOpacity
             style={styles.homePlanButton}
-            onPress={() => navegarParaTela('PacientePlano')}
+            onPress={() => navegarParaTela('PacienteDiario')}
           >
-            <Text style={styles.homePlanButtonText}>Ver Plano Completo</Text>
+            <Text style={styles.homePlanButtonText}>Abrir alimentacao completa</Text>
           </TouchableOpacity>
 
-          {(planSections.length > 0 ? planSections.slice(0, 3) : [null, null]).map((item, index) => (
-            <View key={item?.id || index} style={styles.planItem}>
-              <View style={styles.planTime}>
-                <Text style={styles.planTimeText}>
-                  {item?.time || (index === 0 ? '07:00' : '12:30')}
-                </Text>
-              </View>
-              <View style={styles.planCopy}>
-                <Text style={styles.planTitle}>
-                  {item?.title || (index === 0 ? 'Café da manhã' : 'Almoço equilibrado')}
-                </Text>
-                <Text style={styles.planText}>
-                  {item?.foods?.join(', ') ||
-                    (index === 0
-                      ? 'Iogurte natural, aveia, chia e fruta.'
-                      : 'Arroz integral, feijao, frango e salada.')}
-                </Text>
-              </View>
-            </View>
-          ))}
+          {!todayMealEntries.length ? (
+            <>
+              {(planSections.length > 0 ? planSections.slice(0, 3) : [null, null]).map((item, index) => (
+                <View key={item?.id || index} style={styles.planItem}>
+                  <View style={styles.planTime}>
+                    <Text style={styles.planTimeText}>
+                      {item?.time || (index === 0 ? '07:00' : '12:30')}
+                    </Text>
+                  </View>
+                  <View style={styles.planCopy}>
+                    <Text style={styles.planTitle}>
+                      {item?.title || (index === 0 ? 'Cafe da manha' : 'Almoco equilibrado')}
+                    </Text>
+                    <Text style={styles.planText}>
+                      {item?.foods?.join(', ') ||
+                        (index === 0
+                          ? 'Iogurte natural, aveia, chia e fruta.'
+                          : 'Arroz integral, feijao, frango e salada.')}
+                    </Text>
+                  </View>
+                </View>
+              ))}
 
-          <TouchableOpacity
-            style={styles.planButton}
-            onPress={() => navegarParaTela('PacientePlano')}
-          >
-            <Text style={styles.planButtonText}>Abrir plano completo</Text>
-          </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.planButton}
+                onPress={() => navegarParaTela('PacientePlano')}
+              >
+                <Text style={styles.planButtonText}>Abrir plano completo</Text>
+              </TouchableOpacity>
+            </>
+          ) : null}
         </SectionCard>
 
         <TouchableOpacity
@@ -1872,6 +1963,13 @@ export default function PacienteHomeScreen({
           onPress={() => navegarParaTela('PacienteProgresso')}
         >
           <Text style={styles.homePlanExternalButtonText}>Ver meu progresso</Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={styles.homeReportsButton}
+          onPress={() => navegarParaTela('PacienteRelatorios')}
+        >
+          <Text style={styles.homeReportsButtonText}>Baixar relatorios (PDF)</Text>
         </TouchableOpacity>
 
         <View style={styles.listFooter} />
@@ -2400,7 +2498,7 @@ const styles = StyleSheet.create({
     paddingVertical: 8,
   },
   notificationClearAllText: {
-    color: '#d96666',
+    color: patientTheme.colors.danger,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -2481,7 +2579,7 @@ const styles = StyleSheet.create({
     paddingVertical: 4,
   },
   notificationClearText: {
-    color: '#d96666',
+    color: patientTheme.colors.danger,
     fontSize: 12,
     fontWeight: '700',
     marginLeft: 5,
@@ -2687,6 +2785,13 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '700',
   },
+  homePlanMealDescription: {
+    marginTop: 8,
+    marginLeft: 26,
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 17,
+  },
   homePlanMealTimeRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -2756,6 +2861,23 @@ const styles = StyleSheet.create({
   homePlanExternalButtonText: {
     color: patientTheme.colors.primaryDark,
     fontWeight: '700',
+    fontSize: 14,
+  },
+  homeReportsButton: {
+    minHeight: 46,
+    marginTop: 8,
+    marginBottom: 2,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.primarySoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+    ...patientShadow,
+  },
+  homeReportsButtonText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '800',
     fontSize: 14,
   },
   overlay: {

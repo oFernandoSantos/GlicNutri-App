@@ -30,6 +30,7 @@ import {
   hideMealEntryForPatient,
   hideMedicationEntryForPatient,
   isPatientExperienceCacheFresh,
+  mergeAppStateMealEntries,
 } from '../../servicos/servicoDadosPaciente';
 import { EsqueletoListaRegistros } from '../../componentes/comum/EsqueletoCarregamento';
 import {
@@ -44,11 +45,17 @@ import {
   removeCachedGlucoseReading,
   replaceCachedGlucoseReadings,
   subscribeToGlucoseReadings,
+  buildGlucoseFingerprint,
 } from '../../servicos/centralGlicose';
 import {
   replaceCachedPatientAppState,
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
+import {
+  enrichGlucoseReadingDisplayFields,
+  getGlucoseReadingDisplayDate,
+  sortGlucoseReadingsNewestFirst,
+} from '../../utilitarios/dataLocal';
 
 const historyTabs = [
   { key: 'glucose', label: 'Glicemia' },
@@ -161,20 +168,20 @@ function addDays(dateString, amount) {
   return `${nextYear}-${nextMonth}-${nextDay}`;
 }
 
-function filterByPeriod(items, period, startDateInput, endDateInput) {
+function filterByPeriod(items, period, startDateInput, endDateInput, options = {}) {
+  const resolveItemDate =
+    options.resolveItemDate ||
+    ((item) => normalizeDateInput(String(item.date || '').slice(0, 10)));
+  const sortItems = options.sortItems || sortByDateTime;
   const today = getTodayDateString();
   let startDate = today;
   let endDate = today;
 
   if (period === 'today') {
-    const hasTodayRecord = items.some(
-      (item) => normalizeDateInput(String(item.date || '').slice(0, 10)) === today
-    );
+    const hasTodayRecord = items.some((item) => resolveItemDate(item) === today);
 
     if (!hasTodayRecord) {
-      const latestRecordDate = sortByDateTime(items)
-        .map((item) => normalizeDateInput(String(item.date || '').slice(0, 10)))
-        .find(Boolean);
+      const latestRecordDate = sortItems(items).map(resolveItemDate).find(Boolean);
 
       if (!latestRecordDate) return items;
 
@@ -203,7 +210,7 @@ function filterByPeriod(items, period, startDateInput, endDateInput) {
   }
 
   return items.filter((item) => {
-    const itemDate = normalizeDateInput(String(item.date || '').slice(0, 10));
+    const itemDate = resolveItemDate(item);
     if (!itemDate) return false;
 
     return itemDate >= startDate && itemDate <= endDate;
@@ -419,11 +426,10 @@ export default function PacienteHistoricoRegistrosScreen({
 
     setPatient(experience.patient);
     setObjectiveText(experience.clinicalObjective);
-    setAppState(experience.appState);
-    replaceCachedPatientAppState(
-      experience.patient?.id_paciente_uuid || patientId,
-      experience.appState
-    );
+    const patientUuid = experience.patient?.id_paciente_uuid || patientId;
+    const nextAppState = mergeAppStateMealEntries(experience.appState, patientUuid);
+    setAppState(nextAppState);
+    replaceCachedPatientAppState(patientUuid, nextAppState);
     setGlucoseReadings(mergedReadings);
     replaceCachedGlucoseReadings(
       experience.patient?.id_paciente_uuid || patientId,
@@ -565,13 +571,15 @@ export default function PacienteHistoricoRegistrosScreen({
 
   const sortedGlucoseReadings = useMemo(
     () =>
-      sortByDateTime(
-        glucoseReadings.filter(
-          (item) =>
-            ![...(appState.hiddenGlucoseReadingIds || []), ...pendingHiddenGlucoseIds].includes(
-              item.id
-            )
-        )
+      sortGlucoseReadingsNewestFirst(
+        glucoseReadings
+          .filter(
+            (item) =>
+              ![...(appState.hiddenGlucoseReadingIds || []), ...pendingHiddenGlucoseIds].includes(
+                item.id
+              )
+          )
+          .map((item) => enrichGlucoseReadingDisplayFields(item))
       ),
     [appState.hiddenGlucoseReadingIds, glucoseReadings, pendingHiddenGlucoseIds]
   );
@@ -582,7 +590,11 @@ export default function PacienteHistoricoRegistrosScreen({
   );
 
   const filteredGlucoseReadings = useMemo(
-    () => filterByPeriod(sortedGlucoseReadings, activePeriod, searchStartDate, searchEndDate),
+    () =>
+      filterByPeriod(sortedGlucoseReadings, activePeriod, searchStartDate, searchEndDate, {
+        resolveItemDate: getGlucoseReadingDisplayDate,
+        sortItems: sortGlucoseReadingsNewestFirst,
+      }),
     [activePeriod, searchEndDate, searchStartDate, sortedGlucoseReadings]
   );
 
@@ -667,15 +679,22 @@ export default function PacienteHistoricoRegistrosScreen({
     navigation.setOptions({
       readerExtraContent: headerSelectors,
       readerTitle: historyTitles[activeTab],
+      readerRightAction: () =>
+        navigation.navigate('PacienteRelatorios', { usuarioLogado }),
+      readerRightIcon: 'document-text-outline',
+      readerRightAccessibilityLabel: 'Abrir relatórios',
     });
 
     return () => {
       navigation.setOptions({
         readerExtraContent: null,
         readerTitle: null,
+        readerRightAction: undefined,
+        readerRightIcon: undefined,
+        readerRightAccessibilityLabel: undefined,
       });
     };
-  }, [activeTab, headerSelectors, navigation]);
+  }, [activeTab, headerSelectors, navigation, usuarioLogado]);
 
   function confirmDeleteGlucose(reading) {
     Alert.alert(

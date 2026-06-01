@@ -5,7 +5,27 @@ import { getMedicoId } from './servicoSessaoMedico';
 const PATIENT_LIST_COLUMNS =
   'id_paciente_uuid, nome_completo, email_pac, cpf_paciente, objetivo_principal_consulta, id_medico_uuid, peso_atual_kg, imc_calculado, data_nascimento, data_hora_ultima_atualizacao, comorbidades_texto, excluido';
 
+const CONSULTA_WITH_PATIENT_COLUMNS =
+  `id, paciente_id, medico_id, nutricionista_id, scheduled_at, status, motivo, meet_link, tipo_consulta,
+  paciente:paciente_id(${PATIENT_LIST_COLUMNS})`;
+
 export { getMedicoId };
+
+const ALLOWED_VINCULO_ORIGENS = new Set([
+  'consulta',
+  'solicitacao',
+  'manual',
+  'admin',
+  'seed',
+]);
+
+export function normalizeVinculoOrigem(origin, { consultaId } = {}) {
+  const value = String(origin || '').trim();
+  if (ALLOWED_VINCULO_ORIGENS.has(value)) return value;
+  if (consultaId) return 'consulta';
+  if (value.includes('solicit')) return 'solicitacao';
+  return 'manual';
+}
 
 function normalizeDate(value) {
   const date = value ? new Date(value) : null;
@@ -81,20 +101,40 @@ export async function ensurePatientDoctorLink({
 }) {
   if (!pacienteId || !medicoId) return false;
 
+  const { data: patient, error: patientError } = await supabase
+    .from('paciente')
+    .select('id_paciente_uuid, id_medico_uuid')
+    .eq('id_paciente_uuid', pacienteId)
+    .maybeSingle();
+
+  if (patientError) throw patientError;
+
+  if (
+    patient?.id_medico_uuid &&
+    patient.id_medico_uuid !== medicoId
+  ) {
+    throw new Error(
+      'Voce ja possui um medico vinculado. Desvincule o acompanhamento atual antes de solicitar outro.'
+    );
+  }
+
+  const origemNormalizada = normalizeVinculoOrigem(origin, { consultaId });
+
   const { error } = await supabase.rpc('garantir_vinculo_medico_paciente', {
     p_paciente_id: pacienteId,
     p_medico_id: medicoId,
-    p_origem: origin,
+    p_origem: origemNormalizada,
     p_consulta_id: consultaId || null,
   });
 
   if (error) {
-    await supabase.rpc('vincular_paciente_profissional', {
+    const fallback = await supabase.rpc('vincular_paciente_profissional', {
       p_paciente_id: pacienteId,
       p_medico_id: medicoId,
-      p_origem: origin,
+      p_origem: origemNormalizada,
       p_consulta_id: consultaId || null,
     });
+    if (fallback.error) throw fallback.error;
   }
 
   try {
@@ -107,6 +147,64 @@ export async function ensurePatientDoctorLink({
       entityId: pacienteId,
       origin,
       details: { medicoId, consultaId },
+    });
+  } catch {
+    /* noop */
+  }
+
+  return true;
+}
+
+export function resolveAssignedDoctorIdFromRecords({ patient, consultas } = {}) {
+  if (patient?.id_medico_uuid) {
+    return patient.id_medico_uuid;
+  }
+
+  const assignedConsulta = [...(consultas || [])]
+    .filter((item) => item?.medico_id && item?.status !== 'cancelled')
+    .sort((left, right) =>
+      String(right?.scheduled_at || '').localeCompare(String(left?.scheduled_at || ''))
+    )[0];
+
+  return assignedConsulta?.medico_id || null;
+}
+
+export async function linkPatientDoctor({ pacienteId, medicoId, actor, origin = 'manual' }) {
+  return ensurePatientDoctorLink({
+    pacienteId,
+    medicoId,
+    actor,
+    origin,
+  });
+}
+
+export async function unlinkPatientDoctor({
+  pacienteId,
+  medicoId,
+  actor,
+  origin = 'desvinculo_manual',
+}) {
+  if (!pacienteId || !medicoId) {
+    throw new Error('Paciente ou medico sem identificador para desvincular.');
+  }
+
+  const { error } = await supabase.rpc('desvincular_paciente_medico', {
+    p_paciente_id: pacienteId,
+    p_medico_id: medicoId,
+  });
+
+  if (error) throw error;
+
+  try {
+    await registrarLogAuditoria({
+      actor: actor || null,
+      actorType: actor?.tipo_perfil || 'paciente',
+      targetPatientId: pacienteId,
+      action: 'paciente_medico_desvinculado',
+      entity: 'paciente',
+      entityId: pacienteId,
+      origin,
+      details: { medicoId },
     });
   } catch {
     /* noop */
@@ -148,4 +246,22 @@ export async function listPatientsByDoctor(medicoId, { limit = 200 } = {}) {
     .limit(limit);
 
   return (direct || []).map((p) => normalizePatientCard(p));
+}
+
+export async function listConsultasMedicoComPaciente(medicoId, { limit = 160, from, to } = {}) {
+  if (!medicoId) return [];
+
+  let query = supabase
+    .from('consulta')
+    .select(CONSULTA_WITH_PATIENT_COLUMNS)
+    .eq('medico_id', medicoId)
+    .order('scheduled_at', { ascending: true })
+    .limit(limit);
+
+  if (from) query = query.gte('scheduled_at', from);
+  if (to) query = query.lte('scheduled_at', to);
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data || [];
 }

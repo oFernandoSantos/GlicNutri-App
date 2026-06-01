@@ -125,10 +125,11 @@ export default function TelaProntuarioPacienteMedico({ navigation, route }) {
   return (
     <LayoutMedico
       navigation={navigation}
+      route={route}
       usuarioLogado={usuarioLogado}
-      onLogout={onMedicoLogout}
       title={name}
-      subtitle="Prontuário clínico"
+      subtitle="Prontuário clínico — diabetes e exames"
+      showTabBar={false}
     >
       <FilterTabs items={tabs} active={tab} onChange={setTab} compact />
       {msg ? (

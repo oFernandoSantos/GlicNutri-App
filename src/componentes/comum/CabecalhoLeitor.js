@@ -6,7 +6,7 @@ import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { adminTheme } from '../../temas/temaVisualAdmin';
 import { stripAuthRoutesFromPatientStack } from '../../utilitarios/navegacaoPaciente';
 
-const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista', 'AdminHome']);
+const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista', 'HomeMedico', 'AdminHome']);
 const AUTH_BACK_ROUTES = new Set(['Cadastro', 'ForgotPassword']);
 const PATIENT_ROUTES = new Set([
   'PacienteDiario',
@@ -18,6 +18,7 @@ const PATIENT_ROUTES = new Set([
   'PacienteBemEstar',
   'PacientePlano',
   'PacienteProgresso',
+  'PacienteRelatorios',
   'PacientePerfil',
   'PacientePerfilContato',
   'PacientePerfilSaude',
@@ -47,6 +48,14 @@ const ADMIN_ROUTES = new Set([
   'AdminLogsSistema',
   'AdminDetalheLogSistema',
 ]);
+const MEDICO_ROUTES = new Set([
+  'MedicoPacientes',
+  'MedicoAgenda',
+  'MedicoMensagens',
+  'MedicoRelatorios',
+  'MedicoProntuarioPaciente',
+  'MedicoConsulta',
+]);
 
 const routeTitles = {
   HomePaciente: 'GlicNutri',
@@ -62,6 +71,7 @@ const routeTitles = {
   PacienteBemEstar: 'Bem-estar',
   PacientePlano: 'Plano',
   PacienteProgresso: 'Progresso',
+  PacienteRelatorios: 'Relatórios',
   PacientePerfil: 'Perfil',
   PacientePerfilContato: 'Identificação e contato',
   PacientePerfilSaude: 'Saúde, metas e rotina',
@@ -88,6 +98,13 @@ const routeTitles = {
   NutricionistaRelatorios: 'Relatórios',
   NutriProntuarioPaciente: 'Prontuário',
   NutriConsultaNutri: 'Consulta',
+  HomeMedico: 'GlicNutri',
+  MedicoAgenda: 'Agenda',
+  MedicoPacientes: 'Pacientes',
+  MedicoMensagens: 'Mensagens',
+  MedicoRelatorios: 'Relatórios',
+  MedicoProntuarioPaciente: 'Prontuário',
+  MedicoConsulta: 'Consulta',
 };
 
 const ROUTE_BACK_FALLBACK = {
@@ -97,6 +114,8 @@ const ROUTE_BACK_FALLBACK = {
   NutriConsultaNutri: 'NutricionistaAgenda',
   AdminDetalheLogSistema: 'AdminLogsSistema',
   AdminCadastroAdministrador: 'AdminCadastros',
+  MedicoProntuarioPaciente: 'MedicoPacientes',
+  MedicoConsulta: 'MedicoAgenda',
 };
 
 function getTitle(route) {
@@ -122,6 +141,10 @@ function getHomeRoute(route) {
 
   if (route?.name === 'HomeNutricionista' || NUTRITIONIST_ROUTES.has(route?.name)) {
     return 'HomeNutricionista';
+  }
+
+  if (route?.name === 'HomeMedico' || MEDICO_ROUTES.has(route?.name)) {
+    return 'HomeMedico';
   }
 
   if (route?.name === 'HomePaciente' || PATIENT_ROUTES.has(route?.name)) {

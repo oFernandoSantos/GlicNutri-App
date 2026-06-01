@@ -132,7 +132,7 @@ export default function NutricionistaDrawer({
                   }, 120);
                 }}
               >
-                <Ionicons name="log-out-outline" size={22} color="#d96666" />
+                <Ionicons name="log-out-outline" size={22} color={patientTheme.colors.danger} />
                 <Text style={[styles.logoutText, compact && styles.logoutTextCompact]}>
                   Sair da conta
                 </Text>
@@ -298,7 +298,7 @@ const styles = StyleSheet.create({
   logoutText: {
     marginLeft: 12,
     fontSize: 15,
-    color: '#d96666',
+    color: patientTheme.colors.danger,
     fontWeight: '700',
   },
   logoutTextCompact: {

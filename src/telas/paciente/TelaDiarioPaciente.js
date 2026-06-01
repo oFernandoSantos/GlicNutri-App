@@ -11,6 +11,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import {
+  DashboardMiniKpiCard,
+  KPI_ACCENTS,
+  dashboardKpiStyles,
+} from '../../componentes/comum/CartaoKpiDashboard';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   appendNewestEntry,
@@ -19,9 +24,12 @@ import {
   getCachedPatientExperience,
   getPatientId,
   isPatientExperienceCacheFresh,
+  mergeAppStateMealEntries,
+  refreshPatientMealEntries,
 } from '../../servicos/servicoDadosPaciente';
 import { EsqueletoDiarioRefeicoes } from '../../componentes/comum/EsqueletoCarregamento';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import { buildLocalDateString } from '../../utilitarios/dataLocal';
 import {
   getCachedPatientAppState,
   replaceCachedPatientAppState,
@@ -84,12 +92,17 @@ const NUTRITION_KEYWORDS = [
 ];
 
 function parseEntryDate(value) {
-  if (!value) {
+  const normalized = String(value || '').trim().slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
     return null;
   }
 
-  const parsed = new Date(`${String(value).slice(0, 10)}T12:00:00`);
+  const parsed = new Date(`${normalized}T12:00:00`);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function getEntryLocalDay(value) {
+  return String(value || '').trim().slice(0, 10);
 }
 
 function calculateDayDifference(baseDate, compareDate) {
@@ -283,9 +296,10 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     (experience) => {
       if (!experience) return;
       const canonicalId = experience.patient?.id_paciente_uuid || patientId;
+      const nextAppState = mergeAppStateMealEntries(experience.appState, canonicalId);
       setResolvedPatientId(canonicalId);
-      setAppState(experience.appState);
-      replaceCachedPatientAppState(canonicalId, experience.appState);
+      setAppState(nextAppState);
+      replaceCachedPatientAppState(canonicalId, nextAppState);
     },
     [patientId]
   );
@@ -311,12 +325,16 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         if (cachedExperience) {
           aplicarDiarioExperience(cachedExperience);
 
-          if (cacheFresco && !forceRefresh) {
+          const mergedMeals =
+            mergeAppStateMealEntries(cachedExperience.appState, patientId)?.mealEntries?.length || 0;
+
+          if (cacheFresco && !forceRefresh && mergedMeals > 0) {
             return;
           }
 
           fetchPatientExperience(patientId, {
             patientContext: usuarioLogado,
+            forceRefresh: forceRefresh || mergedMeals === 0,
             ...diarioFetchLimits,
           })
             .then(aplicarDiarioExperience)
@@ -357,10 +375,19 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         patientId && isPatientExperienceCacheFresh(patientId, diarioFetchLimits);
       loadDiario({
         silent: hasLoadedRef.current || experienceCacheFresco || Boolean(cachedAppStateInicial),
-        forceRefresh: false,
+        forceRefresh: hasLoadedRef.current,
       });
       hasLoadedRef.current = true;
-    }, [cachedAppStateInicial, diarioFetchLimits, loadDiario, patientId])
+
+      if (patientId) {
+        refreshPatientMealEntries(patientId, {
+          patientContext: usuarioLogado,
+          mealLimit: diarioFetchLimits.mealLimit,
+        }).catch((error) => {
+          console.log('Refresh refeicoes no diario:', error);
+        });
+      }
+    }, [cachedAppStateInicial, diarioFetchLimits, loadDiario, patientId, usuarioLogado])
   );
 
   useEffect(() => {
@@ -412,21 +439,26 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
   const todayMealEntries = timelineEntries.length;
   const nutritionSummary = useMemo(() => summarizeNutrition(timelineEntries), [timelineEntries]);
   const selectedNutritionEntries = useMemo(() => {
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
+    const todayKey = buildLocalDateString();
+    const todayAnchor = parseEntryDate(todayKey) || new Date();
 
     return timelineEntries.filter((entry) => {
-      const entryDate = parseEntryDate(entry.date);
+      const entryDay = getEntryLocalDay(entry.date);
 
-      if (!entryDate) {
+      if (!entryDay) {
         return range === 'Hoje';
       }
 
-      const diff = calculateDayDifference(today, entryDate);
-
       if (range === 'Hoje') {
-        return diff === 0;
+        return entryDay === todayKey;
       }
+
+      const entryDate = parseEntryDate(entryDay);
+      if (!entryDate) {
+        return false;
+      }
+
+      const diff = calculateDayDifference(todayAnchor, entryDate);
 
       if (range === '7 dias') {
         return diff >= 0 && diff < 7;
@@ -444,19 +476,21 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     [selectedNutritionEntries]
   );
   const todayTimelineEntries = useMemo(() => {
-    const today = new Date();
-    today.setHours(12, 0, 0, 0);
+    const todayKey = buildLocalDateString();
 
     return timelineEntries.filter((entry) => {
-      const entryDate = parseEntryDate(entry.date);
-
-      if (!entryDate) {
-        return true;
-      }
-
-      return calculateDayDifference(today, entryDate) === 0;
+      const entryDay = getEntryLocalDay(entry.date);
+      return entryDay ? entryDay === todayKey : false;
     });
   }, [timelineEntries]);
+  const displayedTimelineEntries =
+    range === 'Hoje' ? todayTimelineEntries : selectedNutritionEntries;
+  const mealLogTitle =
+    range === 'Hoje'
+      ? 'Registro de Hoje'
+      : range === '7 dias'
+        ? 'Registros — 7 dias'
+        : 'Registros — 14 dias';
   const selectedLastMealTime = selectedNutritionEntries[0]?.time || '--:--';
   const summaryCards = useMemo(
     () => [
@@ -465,24 +499,28 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         label: 'Refeicoes no periodo',
         value: `${selectedNutritionEntries.length}`,
         helper: range === 'Hoje' ? 'registradas hoje' : 'registradas',
+        accent: KPI_ACCENTS.blue,
       },
       {
         id: 'carbs',
         label: 'Carboidratos do periodo',
         value: `${Math.round(selectedNutritionSummary.carbs)}g`,
         helper: 'estimativa da alimentacao',
+        accent: KPI_ACCENTS.orange,
       },
       {
         id: 'calories',
         label: 'Energia consumida',
         value: `${Math.round(selectedNutritionSummary.calories)}`,
         helper: 'kcal estimadas',
+        accent: KPI_ACCENTS.green,
       },
       {
         id: 'last',
         label: 'Ultimo registro',
         value: selectedLastMealTime,
         helper: selectedAiMealEntriesCount ? `${selectedAiMealEntriesCount} com foto e IA` : 'sem foto com IA',
+        accent: KPI_ACCENTS.purple,
       },
     ],
     [range, selectedAiMealEntriesCount, selectedLastMealTime, selectedNutritionEntries.length, selectedNutritionSummary]
@@ -558,12 +596,15 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       </View>
 
       <View style={styles.metricsPanel}>
-        <View style={styles.heroMetrics}>
+        <View style={dashboardKpiStyles.miniRow}>
           {summaryCards.map((item) => (
-            <View key={item.id} style={styles.heroMetricCard}>
-              <Text style={styles.heroMetricLabel}>{item.label}</Text>
-              <Text style={styles.heroMetricValue}>{item.value}</Text>
-              <Text style={styles.heroMetricHelper}>{item.helper}</Text>
+            <View key={item.id} style={dashboardKpiStyles.miniCell}>
+              <DashboardMiniKpiCard
+                label={item.label}
+                value={item.value}
+                helper={item.helper}
+                accent={item.accent}
+              />
             </View>
           ))}
         </View>
@@ -676,31 +717,40 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
 
       <View style={styles.mealLogCard}>
         <View style={styles.mealLogHeader}>
-          <Text style={styles.mealLogTitle}>Registro de Hoje</Text>
+          <Text style={styles.mealLogTitle}>{mealLogTitle}</Text>
           <View style={styles.mealLogBadge}>
             <Text style={styles.mealLogBadgeText}>
-              {todayTimelineEntries.length} {todayTimelineEntries.length === 1 ? 'refeicao' : 'refeicoes'}
+              {displayedTimelineEntries.length}{' '}
+              {displayedTimelineEntries.length === 1 ? 'refeicao' : 'refeicoes'}
             </Text>
           </View>
         </View>
 
         {loading ? (
           <EsqueletoDiarioRefeicoes linhas={3} />
-        ) : todayTimelineEntries.length > 0 ? (
+        ) : displayedTimelineEntries.length > 0 ? (
           <View style={styles.mealLogList}>
-            {todayTimelineEntries.map((entry) => {
+            {displayedTimelineEntries.map((entry) => {
               const nutrition = estimateNutritionFromMeal(entry);
               const description = buildMealDescription(entry);
 
               return (
                 <View key={entry.id} style={styles.mealLogEntry}>
                   <View style={styles.mealLogTimeBlock}>
-                    <Text style={styles.mealLogTimeLabel}>Horario</Text>
-                    <Text style={styles.mealLogTimeValue}>{entry.time || '--:--'}</Text>
+                    <Text style={styles.mealLogTimeLabel}>
+                      {range === 'Hoje' ? 'Horario' : 'Data'}
+                    </Text>
+                    <Text style={styles.mealLogTimeValue}>
+                      {range === 'Hoje'
+                        ? entry.time || '--:--'
+                        : `${String(entry.date || '').slice(8, 10)}/${String(entry.date || '').slice(5, 7)}`}
+                    </Text>
                   </View>
 
                   <View style={styles.mealLogContent}>
-                    <Text style={styles.mealLogEntryTitle}>{entry.title || 'Refeicao registrada'}</Text>
+                    <Text style={styles.mealLogEntryTitle}>
+                      {entry.mealLabel || entry.title || 'Refeicao registrada'}
+                    </Text>
                     <Text style={styles.mealLogEntryDescription} numberOfLines={2}>
                       {description}
                     </Text>
@@ -714,27 +764,35 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
               );
             })}
           </View>
-        ) : emptyTimeline ? (
+        ) : (
           <View style={styles.emptyState}>
-            <View style={styles.emptyIllustration}>
-              <Ionicons name="camera-outline" size={22} color={patientTheme.colors.primaryDark} />
-            </View>
-            <Text style={styles.emptyStateText}>
-              Nenhuma refeição salva ainda. Comece pela primeira foto para montar seu histórico alimentar com ajuda da IA.
-            </Text>
-            <TouchableOpacity
-              style={[styles.primaryButton, styles.emptyPrimaryButton]}
-              onPress={() =>
-                navigation.navigate('RegistroRefeicaoIA', {
-                  usuarioLogado,
-                })
-              }
-              disabled={!canResolvePatient}
-            >
-              <Text style={styles.primaryButtonText}>Registrar primeira refeição</Text>
-            </TouchableOpacity>
+            {emptyTimeline ? (
+              <>
+                <View style={styles.emptyIllustration}>
+                  <Ionicons name="camera-outline" size={22} color={patientTheme.colors.primaryDark} />
+                </View>
+                <Text style={styles.emptyStateText}>
+                  Nenhuma refeicao salva ainda. Comece pela primeira foto para montar seu historico alimentar com ajuda da IA.
+                </Text>
+                <TouchableOpacity
+                  style={[styles.primaryButton, styles.emptyPrimaryButton]}
+                  onPress={() =>
+                    navigation.navigate('RegistroRefeicaoIA', {
+                      usuarioLogado,
+                    })
+                  }
+                  disabled={!canResolvePatient}
+                >
+                  <Text style={styles.primaryButtonText}>Registrar primeira refeicao</Text>
+                </TouchableOpacity>
+              </>
+            ) : (
+              <Text style={styles.emptyStateText}>
+                Nenhuma refeicao registrada neste periodo. Troque para 7 dias ou registre uma nova refeicao.
+              </Text>
+            )}
           </View>
-        ) : null}
+        )}
       </View>
 
     </PatientScreenLayout>

@@ -9,6 +9,11 @@ import {
 import { EsqueletoPlanoPaciente } from '../../componentes/comum/EsqueletoCarregamento';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import {
+  DashboardMiniKpiCard,
+  KPI_ACCENTS,
+  dashboardKpiStyles,
+} from '../../componentes/comum/CartaoKpiDashboard';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
@@ -209,21 +214,30 @@ export default function PacientePlanoScreen({
               </View>
             </View>
 
-            <View style={styles.metricCardsRow}>
-              <View style={styles.heroMetricCard}>
-                <Text style={styles.heroMetricLabel}>Meta diária</Text>
-                <Text style={styles.heroMetricValue}>{totalKcal}</Text>
-                <Text style={styles.heroMetricHelper}>kcal</Text>
+            <View style={dashboardKpiStyles.miniRow}>
+              <View style={dashboardKpiStyles.miniCell}>
+                <DashboardMiniKpiCard
+                  label="Meta diária"
+                  value={String(totalKcal)}
+                  helper="kcal"
+                  accent={KPI_ACCENTS.green}
+                />
               </View>
-              <View style={styles.heroMetricCard}>
-                <Text style={styles.heroMetricLabel}>Refeições</Text>
-                <Text style={styles.heroMetricValue}>{mergedMeals.length}</Text>
-                <Text style={styles.heroMetricHelper}>por dia</Text>
+              <View style={dashboardKpiStyles.miniCell}>
+                <DashboardMiniKpiCard
+                  label="Refeições"
+                  value={String(mergedMeals.length)}
+                  helper="por dia"
+                  accent={KPI_ACCENTS.blue}
+                />
               </View>
-              <View style={styles.heroMetricCard}>
-                <Text style={styles.heroMetricLabel}>Duração</Text>
-                <Text style={styles.heroMetricValue}>{planDurationWeeks}</Text>
-                <Text style={styles.heroMetricHelper}>semanas</Text>
+              <View style={dashboardKpiStyles.miniCell}>
+                <DashboardMiniKpiCard
+                  label="Duração"
+                  value={String(planDurationWeeks)}
+                  helper="semanas"
+                  accent={KPI_ACCENTS.orange}
+                />
               </View>
             </View>
 

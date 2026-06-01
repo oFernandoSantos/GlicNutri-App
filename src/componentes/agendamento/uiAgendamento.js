@@ -196,7 +196,7 @@ export function CampoBuscaAgendamento({
           <Ionicons
             name={trailingIcon}
             size={16}
-            color={trailingActive ? patientTheme.colors.onPrimary : patientTheme.colors.text}
+            color={trailingActive ? patientTheme.colors.onPrimary : patientTheme.colors.primaryDark}
           />
         </TouchableOpacity>
       ) : (

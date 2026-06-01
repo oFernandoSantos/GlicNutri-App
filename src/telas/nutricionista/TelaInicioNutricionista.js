@@ -7,6 +7,9 @@ import {
   AvatarBadge,
   SectionCard,
   nutriDesktopStyles,
+  dashboardKpiStyles,
+  DashboardKpiCard,
+  KPI_ACCENTS,
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import { nutritionistQuickActions } from '../../dados/dadosNutricionistaMock';
 import { fetchNutritionistChatSummary } from '../../servicos/servicoEscalaNutri';
@@ -190,33 +193,29 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
         id: 'patients-linked',
         icon: 'people-outline',
         label: 'Total Pacientes',
-        value: total,
-        valueStyle: styles.metricValueDefault,
-        iconColor: patientTheme.colors.primaryDark,
+        value: String(total),
+        accent: KPI_ACCENTS.blue,
       },
       {
         id: 'high-risk',
         icon: 'alert-circle-outline',
         label: 'Alto Risco',
-        value: highRisk,
-        valueStyle: styles.metricValueHighRisk,
-        iconColor: patientTheme.colors.danger,
+        value: String(highRisk),
+        accent: KPI_ACCENTS.red,
       },
       {
         id: 'alerts',
-        icon: 'alert-circle-outline',
+        icon: 'notifications-outline',
         label: 'Alertas Ativos',
-        value: withAlerts,
-        valueStyle: styles.metricValueAlerts,
-        iconColor: patientTheme.colors.danger,
+        value: String(withAlerts),
+        accent: KPI_ACCENTS.red,
       },
       {
         id: 'adherence',
         icon: 'trending-up-outline',
         label: 'Adesão Média',
         value: `${avgAdherence}%`,
-        valueStyle: styles.metricValueAdherence,
-        iconColor: patientTheme.colors.primaryDark,
+        accent: KPI_ACCENTS.green,
       },
     ];
   }, [clinicalAlerts.length, patients]);
@@ -322,15 +321,16 @@ export default function NutricionistaHomeDashboardScreen({ route, navigation, on
           </SectionCard>
         ) : null}
 
-        <View style={styles.metricGrid}>
+        <View style={dashboardKpiStyles.grid}>
           {metrics.map((item) => (
-            <SectionCard key={item.id} style={[styles.metricCell, styles.metricCard]}>
-              <View style={styles.metricHeader}>
-                <Text style={styles.metricLabel}>{item.label}</Text>
-                <Ionicons name={item.icon} size={22} color={item.iconColor} />
-              </View>
-              <Text style={[styles.metricValue, item.valueStyle]}>{item.value}</Text>
-            </SectionCard>
+            <View key={item.id} style={dashboardKpiStyles.cell}>
+              <DashboardKpiCard
+                icon={item.icon}
+                accent={item.accent}
+                label={item.label}
+                value={item.value}
+              />
+            </View>
           ))}
         </View>
 

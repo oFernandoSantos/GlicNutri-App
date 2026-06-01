@@ -8,10 +8,30 @@ import {
   Text,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
-import { ProgressBar, SectionCard, nutriDesktopStyles } from '../../componentes/nutricionista/NutriDesktopUI';
+import {
+  CHART_PALETTE,
+  FREQ_COLORS,
+  ENGAGEMENT_FREQ_COLORS_BY_ID,
+  RECORD_BUCKET_COLORS,
+  GLUCOSE_COLORS,
+  INSULIN_COLORS,
+  InteractiveDonutChart,
+  InteractiveHorizontalBarChart,
+  InteractiveLineChart,
+  InteractiveProgressChart,
+  MEAL_TYPE_COLORS,
+  OBJECTIVE_COLORS,
+  RISK_COLORS,
+  TREND_COLORS,
+  chartPercent,
+  sumChartValues,
+} from '../../componentes/nutricionista/RelatoriosNutriCharts';
+import { DashboardKpiCard } from '../../componentes/comum/CartaoKpiDashboard';
+import { SectionCard, nutriDesktopStyles } from '../../componentes/nutricionista/NutriDesktopUI';
 import { ScreenLoading } from '../../componentes/comum/ui';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 import {
@@ -19,15 +39,64 @@ import {
   exportNutritionistReport,
 } from '../../servicos/servicoRelatoriosNutricionista';
 
-function MetricCard({ icon, iconColor, label, value, valueStyle }) {
+const METRIC_THEMES = {
+  total: { accent: CHART_PALETTE.blue, icon: 'people-outline' },
+  good: { accent: CHART_PALETTE.greenDark, icon: 'checkmark-circle-outline' },
+  attention: { accent: CHART_PALETTE.orange, icon: 'alert-circle-outline' },
+  critical: { accent: CHART_PALETTE.red, icon: 'warning-outline' },
+  avgAdherence: { accent: CHART_PALETTE.greenDark, icon: 'trending-up-outline' },
+  alerts: { accent: CHART_PALETTE.pink, icon: 'notifications-outline' },
+};
+
+const ALERT_SEVERITY = {
+  critical: { color: CHART_PALETTE.red, soft: '#FEE2E2', icon: 'warning-outline' },
+  highGlucose: { color: CHART_PALETTE.orange, soft: '#FFEDD5', icon: 'pulse-outline' },
+  lowAdherence: { color: CHART_PALETTE.yellow, soft: '#FEF3C7', icon: 'restaurant-outline' },
+  inactive: { color: CHART_PALETTE.gray, soft: CHART_PALETTE.graySoft, icon: 'time-outline' },
+};
+
+const TIR_COLORS = [
+  CHART_PALETTE.red,
+  CHART_PALETTE.orange,
+  CHART_PALETTE.yellow,
+  CHART_PALETTE.green,
+  CHART_PALETTE.greenDark,
+];
+
+const SECTION_ACCENTS = {
+  engagement: { accent: CHART_PALETTE.greenDark, soft: CHART_PALETTE.greenSoft },
+  nutrition: { accent: CHART_PALETTE.blue, soft: CHART_PALETTE.blueSoft },
+  glucose: { accent: CHART_PALETTE.green, soft: CHART_PALETTE.greenSoft },
+  therapy: { accent: CHART_PALETTE.purple, soft: CHART_PALETTE.purpleSoft },
+  rankings: { accent: CHART_PALETTE.medOrange, soft: '#FFEDD5' },
+  alerts: { accent: CHART_PALETTE.red, soft: '#FEE2E2' },
+};
+
+function resolveAccentSoft(accent, soft) {
+  if (soft) return soft;
+  if (accent === CHART_PALETTE.purple) return CHART_PALETTE.purpleSoft;
+  if (accent === CHART_PALETTE.blue) return CHART_PALETTE.blueSoft;
+  if (accent === CHART_PALETTE.red) return '#FEE2E2';
+  if (accent === CHART_PALETTE.medOrange || accent === CHART_PALETTE.orange) return '#FFEDD5';
+  return CHART_PALETTE.greenSoft;
+}
+
+function seriesTrend(series = []) {
+  const valid = series.filter((item) => Number(item.value) > 0);
+  if (valid.length < 2) return 'stable';
+  const delta = valid[valid.length - 1].value - valid[valid.length - 2].value;
+  if (delta > 0) return 'up';
+  if (delta < 0) return 'down';
+  return 'stable';
+}
+
+function MiniKpiCard({ label, value, accent = CHART_PALETTE.green }) {
   return (
-    <SectionCard style={[styles.metricCard, styles.flatCard]}>
-      <View style={styles.metricHeader}>
-        <Text style={styles.metricLabel}>{label}</Text>
-        <Ionicons name={icon} size={22} color={iconColor} />
-      </View>
-      <Text style={[styles.metricValue, valueStyle]}>{value}</Text>
-    </SectionCard>
+    <View style={[styles.miniKpiCard, styles.flatCard]}>
+      <Text style={styles.miniKpiLabel}>{label}</Text>
+      <Text style={[styles.miniKpiValue, { color: accent }]}>{value}</Text>
+      <View style={[styles.miniKpiAccentBar, { backgroundColor: accent }]} />
+    </View>
   );
 }
 
@@ -51,134 +120,192 @@ function ExportCard({ icon, iconColor, title, helper, onPress, loading, disabled
   );
 }
 
-function MiniBarChart({ items, color }) {
-  const safeItems = items?.length ? items : [{ id: 'empty', label: '—', value: 0 }];
-  const max = Math.max(...safeItems.map((item) => Number(item.value) || 0), 1);
-
+function BlockHeader({ title, subtitle, accentColor }) {
   return (
-    <View style={styles.chartBox}>
-      <View style={styles.chartAxisY}>
-        <Text style={styles.axisText}>max</Text>
-        <Text style={styles.axisText}>75%</Text>
-        <Text style={styles.axisText}>50%</Text>
-        <Text style={styles.axisText}>25%</Text>
-        <Text style={styles.axisText}>0</Text>
-      </View>
-      <View style={styles.chartColumnsWrap}>
-        <View style={styles.chartColumns}>
-          {safeItems.map((item) => (
-            <View key={item.id} style={styles.chartColumnItem}>
-              <View style={styles.chartColumnTrack}>
-                <View
-                  style={[
-                    styles.chartColumnFill,
-                    { backgroundColor: color, height: `${Math.max(8, (Number(item.value) / max) * 100)}%` },
-                  ]}
-                />
-              </View>
-              <Text style={styles.chartColumnLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
+    <View style={styles.blockHeader}>
+      {accentColor ? <View style={[styles.blockAccent, { backgroundColor: accentColor }]} /> : null}
+      <View style={styles.blockHeaderCopy}>
+        <Text style={styles.blockTitle}>{title}</Text>
+        {subtitle ? <Text style={styles.blockSubtitle}>{subtitle}</Text> : null}
       </View>
     </View>
   );
 }
 
-function RiskBarChart({ items }) {
-  const safeItems = items?.length
-    ? items
-    : [
-        { id: 'r1', label: 'Alto', value: 0 },
-        { id: 'r2', label: 'Mod.', value: 0 },
-        { id: 'r3', label: 'Baixo', value: 0 },
-      ];
-  const max = Math.max(...safeItems.map((item) => Number(item.value) || 0), 1);
-  const colorMap = [patientTheme.colors.danger, patientTheme.colors.warning, patientTheme.colors.primaryDark];
-
+function FilterChipRow({ items, activeId, onChange, accent = CHART_PALETTE.greenDark }) {
   return (
-    <View style={styles.chartBox}>
-      <View style={styles.chartAxisY}>
-        <Text style={styles.axisText}>{max}</Text>
-        <Text style={styles.axisText} />
-        <Text style={styles.axisText} />
-        <Text style={styles.axisText} />
-        <Text style={styles.axisText}>0</Text>
-      </View>
-      <View style={styles.chartColumnsWrap}>
-        <View style={styles.chartColumns}>
-          {safeItems.map((item, index) => (
-            <View key={item.id} style={styles.chartColumnItem}>
-              <View style={styles.chartColumnTrack}>
-                <View
-                  style={[
-                    styles.chartColumnFill,
-                    {
-                      backgroundColor: colorMap[index] || patientTheme.colors.primaryDark,
-                      height: `${Math.max(8, (Number(item.value) / max) * 100)}%`,
-                    },
-                  ]}
-                />
-              </View>
-              <Text style={styles.chartColumnLabel}>{item.label}</Text>
-            </View>
-          ))}
-        </View>
-      </View>
-    </View>
-  );
-}
-
-function TrendLineChart({ items }) {
-  const safeItems = items?.length
-    ? items
-    : [{ id: 'w0', label: '-', value: 0 }];
-
-  return (
-    <View style={styles.trendChartWrap}>
-      <View style={styles.trendGrid} />
-      <View style={styles.trendLineLayer}>
-        {safeItems.map((item, index) => (
-          <View
+    <View style={styles.reportPeriodRow}>
+      {items.map((item) => {
+        const active = activeId === item.id;
+        const useBrandGreen = accent === CHART_PALETTE.greenDark || accent === CHART_PALETTE.green;
+        return (
+          <TouchableOpacity
             key={item.id}
             style={[
-              styles.trendPoint,
-              {
-                left: `${(index / Math.max(safeItems.length - 1, 1)) * 100}%`,
-                top: `${100 - Number(item.value || 0)}%`,
-              },
+              styles.reportPeriodChip,
+              active &&
+                (useBrandGreen
+                  ? styles.reportPeriodChipActiveBrand
+                  : { backgroundColor: `${accent}18`, borderColor: accent }),
             ]}
-          />
-        ))}
-        <View style={styles.trendPolyline}>
-          <View style={styles.trendPolylineInner} />
-        </View>
-      </View>
-      <View style={styles.trendLabelsRow}>
-        {safeItems.map((item) => (
-          <Text key={item.id} style={styles.trendDayLabel}>
-            {item.label}
-          </Text>
-        ))}
-      </View>
+            onPress={() => onChange(item.id)}
+          >
+            <Text
+              style={[
+                styles.reportPeriodChipText,
+                active &&
+                  (useBrandGreen
+                    ? styles.reportPeriodChipTextActiveBrand
+                    : { color: accent, fontWeight: '800' }),
+              ]}
+            >
+              {item.label}
+            </Text>
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }
 
-export default function TelaRelatoriosNutricionista({ navigation, route, onNutriLogout }) {
+function DetailToggle({
+  open,
+  onPress,
+  labelOpen = 'Ver menos',
+  labelClosed = 'Ver detalhes',
+  accent = CHART_PALETTE.greenDark,
+  soft,
+}) {
+  const softBg = resolveAccentSoft(accent, soft);
+  return (
+    <TouchableOpacity
+      style={[styles.detailToggle, { backgroundColor: softBg, borderColor: `${accent}55` }]}
+      onPress={onPress}
+      activeOpacity={0.9}
+    >
+      <Text style={[styles.detailToggleText, { color: accent }]}>{open ? labelOpen : labelClosed}</Text>
+      <Ionicons name={open ? 'chevron-up' : 'chevron-down'} size={16} color={accent} />
+    </TouchableOpacity>
+  );
+}
+
+function DetailSection({ title, subtitle, accentColor, accentSoft, summary, open, onToggle, children }) {
+  const soft = resolveAccentSoft(accentColor, accentSoft);
+  return (
+    <SectionCard
+      style={[styles.detailSection, styles.flatCard, accentColor ? { borderColor: `${accentColor}33` } : null]}
+    >
+      <BlockHeader title={title} subtitle={subtitle} accentColor={accentColor} />
+      {summary}
+      <DetailToggle open={open} onPress={onToggle} accent={accentColor} soft={soft} />
+      {open ? <View style={styles.detailBody}>{children}</View> : null}
+    </SectionCard>
+  );
+}
+
+function CompactRankingList({
+  items,
+  valueKey = 'displayValue',
+  limit = 3,
+  showAll,
+  onToggleShowAll,
+  toggleAccent = CHART_PALETTE.greenDark,
+  toggleSoft,
+}) {
+  const visible = showAll ? items : items.slice(0, limit);
+  if (!items?.length) {
+    return <Text style={styles.emptyRanking}>Nenhum dado disponível no período.</Text>;
+  }
+
+  return (
+    <>
+      <View style={styles.rankingList}>
+        {visible.map((item, index) => (
+          <View key={item.id} style={styles.rankingRow}>
+            <View style={styles.rankingLeft}>
+              <View style={[styles.rankingIndex, index === 0 && { backgroundColor: CHART_PALETTE.greenSoft }]}>
+                <Text style={styles.rankingIndexText}>{index + 1}</Text>
+              </View>
+              <View style={styles.rankingCopy}>
+                <Text style={styles.rankingName}>{item.patientName}</Text>
+                <Text style={styles.rankingMeta} numberOfLines={1}>
+                  {item.streak} · {item.objective}
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.rankingValue}>{item[valueKey] || item.display}</Text>
+          </View>
+        ))}
+      </View>
+      {items.length > limit ? (
+        <DetailToggle
+          open={showAll}
+          onPress={onToggleShowAll}
+          labelClosed={`Ver todos (${items.length})`}
+          labelOpen="Mostrar top 3"
+          accent={toggleAccent}
+          soft={toggleSoft}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function AlertChip({ item, onPress }) {
+  const meta = ALERT_SEVERITY[item.severity] || ALERT_SEVERITY.inactive;
+  return (
+    <View style={[styles.alertChip, { backgroundColor: meta.soft, borderColor: `${meta.color}55` }]}>
+      <View style={styles.alertChipTop}>
+        <View style={[styles.alertChipIcon, { backgroundColor: `${meta.color}22` }]}>
+          <Ionicons name={meta.icon} size={14} color={meta.color} />
+        </View>
+        <View style={styles.alertChipCopy}>
+          <Text style={styles.alertChipName}>{item.name}</Text>
+          <Text style={[styles.alertChipReason, { color: meta.color }]}>{item.reason}</Text>
+          <Text style={styles.alertChipIndicator}>{item.indicator}</Text>
+        </View>
+      </View>
+      <TouchableOpacity style={[styles.alertActionButton, { borderColor: meta.color }]} onPress={onPress} activeOpacity={0.9}>
+        <Text style={[styles.alertActionText, { color: meta.color }]}>Ver paciente</Text>
+      </TouchableOpacity>
+    </View>
+  );
+}
+
+export default function TelaRelatoriosNutricionista({ navigation, route }) {
   const { usuarioLogado } = route.params || {};
+  const { width } = useWindowDimensions();
+  const isCompact = width < 768;
+
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [exportingKey, setExportingKey] = useState('');
+  const [reportPeriod, setReportPeriod] = useState('7days');
+  const [trendMetric, setTrendMetric] = useState('adherence');
+  const [showAllAlerts, setShowAllAlerts] = useState(false);
+  const [expandedDetails, setExpandedDetails] = useState({
+    engagement: false,
+    nutrition: false,
+    glucose: false,
+    therapy: false,
+    rankings: false,
+  });
+  const [rankingExpanded, setRankingExpanded] = useState({
+    attention: false,
+    evolution: false,
+    lowAdherence: false,
+  });
+
+  const dashboard = bundle?.dashboardAnalytics;
 
   const loadReports = useCallback(
     async ({ silent = false } = {}) => {
       try {
         if (!silent) setLoading(true);
         setLoadError('');
-        const nextBundle = await buildNutritionistReportBundle(usuarioLogado);
+        const nextBundle = await buildNutritionistReportBundle(usuarioLogado, { period: reportPeriod });
         setBundle(nextBundle);
       } catch (error) {
         console.log('Erro ao carregar relatorios do nutricionista:', error);
@@ -189,7 +316,7 @@ export default function TelaRelatoriosNutricionista({ navigation, route, onNutri
         setRefreshing(false);
       }
     },
-    [usuarioLogado]
+    [usuarioLogado, reportPeriod]
   );
 
   useEffect(() => {
@@ -201,92 +328,183 @@ export default function TelaRelatoriosNutricionista({ navigation, route, onNutri
     return unsubscribe;
   }, [navigation, loadReports]);
 
-  const metrics = useMemo(() => {
-    if (!bundle) {
+  const openPatient = useCallback(
+    (patientId) => {
+      const patient = bundle?.patients?.find((row) => row.id === patientId);
+      if (!patient) return;
+      navigation.navigate('NutriProntuarioPaciente', {
+        usuarioLogado,
+        pacienteId: patientId,
+        paciente: patient,
+      });
+    },
+    [navigation, usuarioLogado, bundle]
+  );
+
+  const adherenceTrend = useMemo(
+    () => seriesTrend(dashboard?.weeklyTrend?.adherence || []),
+    [dashboard]
+  );
+
+  const overviewCards = useMemo(() => {
+    const overview = dashboard?.overview;
+    if (!bundle || !overview) {
       return [
-        { id: 'm1', label: 'Total Pacientes', value: '—', icon: 'people-outline', iconColor: patientTheme.colors.primaryDark, valueStyle: styles.metricValueDefault },
-        { id: 'm2', label: 'Alto Risco', value: '—', icon: 'trending-up-outline', iconColor: patientTheme.colors.danger, valueStyle: styles.metricValueHighRisk },
-        { id: 'm3', label: 'Adesão Média', value: '—', icon: 'trending-up-outline', iconColor: patientTheme.colors.primaryDark, valueStyle: styles.metricValueAdherence },
-        { id: 'm4', label: 'Alertas Ativos', value: '—', icon: 'calendar-outline', iconColor: patientTheme.colors.danger, valueStyle: styles.metricValueAlerts },
+        { id: 'total', label: 'Total Pacientes', value: '—', trend: 'stable' },
+        { id: 'good', label: 'Bom Controle', value: '—', trend: 'stable' },
+        { id: 'attention', label: 'Atenção', value: '—', trend: 'stable', invertTrend: true },
+        { id: 'critical', label: 'Críticos', value: '—', trend: 'stable', invertTrend: true },
+        { id: 'avgAdherence', label: 'Adesão Média', value: '—', trend: 'stable' },
+        { id: 'alerts', label: 'Alertas', value: '—', trend: 'stable', invertTrend: true },
       ];
     }
 
     return [
-      {
-        id: 'm1',
-        label: 'Total Pacientes',
-        value: String(bundle.metrics.totalPatients),
-        icon: 'people-outline',
-        iconColor: patientTheme.colors.primaryDark,
-        valueStyle: styles.metricValueDefault,
-      },
-      {
-        id: 'm2',
-        label: 'Alto Risco',
-        value: String(bundle.metrics.highRiskCount),
-        icon: 'trending-up-outline',
-        iconColor: patientTheme.colors.danger,
-        valueStyle: styles.metricValueHighRisk,
-      },
-      {
-        id: 'm3',
-        label: 'Adesão Média',
-        value: `${bundle.metrics.averageAdherence}%`,
-        icon: 'trending-up-outline',
-        iconColor: patientTheme.colors.primaryDark,
-        valueStyle: styles.metricValueAdherence,
-      },
-      {
-        id: 'm4',
-        label: 'Alertas Ativos',
-        value: String(bundle.metrics.alertsTotal),
-        icon: 'calendar-outline',
-        iconColor: patientTheme.colors.danger,
-        valueStyle: styles.metricValueAlerts,
-      },
+      { id: 'total', label: 'Total Pacientes', value: String(bundle.metrics.totalPatients), trend: 'stable' },
+      { id: 'good', label: 'Bom Controle', value: String(overview.goodControl), trend: adherenceTrend },
+      { id: 'attention', label: 'Atenção', value: String(overview.attention), trend: 'stable', invertTrend: true },
+      { id: 'critical', label: 'Críticos', value: String(overview.critical), trend: 'stable', invertTrend: true },
+      { id: 'avgAdherence', label: 'Adesão Média', value: `${bundle.metrics.averageAdherence}%`, trend: adherenceTrend },
+      { id: 'alerts', label: 'Alertas', value: String(bundle.metrics.alertsTotal), trend: 'stable', invertTrend: true },
     ];
-  }, [bundle]);
+  }, [bundle, dashboard, adherenceTrend]);
 
   const objectiveChartItems = useMemo(() => {
-    if (!bundle?.objectiveDistribution?.length) return [];
-    const max = Math.max(...bundle.objectiveDistribution.map((item) => item.value), 1);
-    return bundle.objectiveDistribution.map((item) => ({
-      id: item.id,
-      label: String(item.label).slice(0, 8),
-      value: Math.round((item.value / max) * 100),
-      count: item.value,
+    const rows = dashboard?.objectiveEnhanced?.length
+      ? dashboard.objectiveEnhanced
+      : bundle?.objectiveDistribution || [];
+    return rows.map((item) => ({ id: item.id, label: item.label, value: item.value }));
+  }, [bundle, dashboard]);
+
+  const trendChartItems = useMemo(() => {
+    if (!dashboard?.weeklyTrend) return [];
+    if (trendMetric === 'glucose') return dashboard.weeklyTrend.glucose || [];
+    if (trendMetric === 'tir') return dashboard.weeklyTrend.tir || [];
+    return dashboard.weeklyTrend.adherence || [];
+  }, [dashboard, trendMetric]);
+
+  const trendColor = TREND_COLORS[trendMetric] || CHART_PALETTE.green;
+
+  const totalMeals = useMemo(() => sumChartValues(dashboard?.nutrition?.mealsByDay || []), [dashboard]);
+
+  const engagementCounts = useMemo(() => {
+    const freq = dashboard?.engagementFrequency || [];
+    const find = (id) => freq.find((item) => item.id === id)?.value || 0;
+    return {
+      inactive: find('inativo'),
+      daily: find('diario'),
+      sporadic: find('esporadico'),
+    };
+  }, [dashboard]);
+
+  const rankingAttention = useMemo(() => {
+    return (dashboard?.rankingLists?.highestRisk || []).slice(0, 5).map((item) => ({
+      ...item,
+      displayValue: item.display || item.risk,
     }));
+  }, [dashboard]);
+
+  const rankingEvolution = useMemo(() => {
+    return (dashboard?.rankingLists?.bestTir || []).slice(0, 5).map((item) => ({
+      ...item,
+      displayValue: item.display || `${item.glucoseTir ?? item.value}%`,
+    }));
+  }, [dashboard]);
+
+  const rankingLowAdherence = useMemo(() => {
+    return (dashboard?.rankingLists?.lowestAdherence || []).slice(0, 5).map((item) => ({
+      ...item,
+      displayValue: item.display || `${item.adherence ?? item.value}%`,
+    }));
+  }, [dashboard]);
+
+  const flatAlerts = useMemo(() => {
+    if (!bundle?.patients?.length) return [];
+    const patients = bundle.patients;
+    const severityOrder = { critical: 0, highGlucose: 1, lowAdherence: 2, inactive: 3 };
+
+    const pickIndicator = (row) => {
+      if (Number(row.glucoseAverage) >= 180) return `Glicose ${row.glucoseAverage} mg/dL`;
+      if (Number(row.adherence) > 0 && Number(row.adherence) < 60) return `Adesão ${row.adherence}%`;
+      if (Number(row.glucoseTir) > 0) return `TIR ${row.glucoseTir}%`;
+      return `Adesão ${row.adherence ?? '—'}%`;
+    };
+
+    const build = (rows, severity, reasonFn) =>
+      rows.map((row) => ({
+        id: `${severity}-${row.id}`,
+        patientId: row.id,
+        name: row.name,
+        severity,
+        reason: typeof reasonFn === 'function' ? reasonFn(row) : reasonFn,
+        indicator: pickIndicator(row),
+      }));
+
+    const merged = [
+      ...build(
+        patients.filter((row) => row.controlBucket === 'critico'),
+        'critical',
+        'Controle crítico no período'
+      ),
+      ...build(
+        patients.filter((row) => Number(row.glucoseAverage) >= 180),
+        'highGlucose',
+        (row) => `Glicose média ${row.glucoseAverage} mg/dL`
+      ),
+      ...build(
+        patients.filter((row) => Number(row.adherence) > 0 && Number(row.adherence) < 60),
+        'lowAdherence',
+        (row) => `Adesão alimentar ${row.adherence}%`
+      ),
+      ...build(patients.filter((row) => row.inactive), 'inactive', 'Sem registros recentes'),
+    ];
+
+    const unique = [];
+    const seen = new Set();
+    merged
+      .sort((a, b) => (severityOrder[a.severity] ?? 9) - (severityOrder[b.severity] ?? 9))
+      .forEach((item) => {
+        if (seen.has(item.patientId)) return;
+        seen.add(item.patientId);
+        unique.push(item);
+      });
+
+    return unique;
   }, [bundle]);
 
-  async function handleExport(type, format) {
+  const visibleAlerts = showAllAlerts ? flatAlerts : flatAlerts.slice(0, 3);
+  const riskTotal = sumChartValues(bundle?.riskDistribution || []);
+
+  const toggleDetail = (key) => {
+    setExpandedDetails((prev) => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  async function handleExport(type) {
     if (!bundle) {
-      Alert.alert('Relatorios', 'Aguarde o carregamento dos dados antes de exportar.');
+      Alert.alert('Relatórios', 'Aguarde o carregamento dos dados antes de exportar.');
       return;
     }
 
-    const key = `${type}-${format}`;
+    const key = `${type}-pdf`;
     try {
       setExportingKey(key);
-      const result = await exportNutritionistReport({ bundle, type, format });
+      const result = await exportNutritionistReport({ bundle, type, format: 'pdf' });
       if (result?.ok) {
         Alert.alert(
-          'Exportacao concluida',
+          'PDF gerado',
           Platform.OS === 'web'
-            ? format === 'pdf'
-              ? 'O PDF foi baixado para o seu dispositivo.'
-              : 'O arquivo foi baixado para o seu dispositivo.'
-            : format === 'pdf'
-              ? 'O PDF foi gerado. Escolha onde salvar ou compartilhar.'
-              : 'O relatorio foi preparado para compartilhamento ou salvamento.'
+            ? 'O PDF foi baixado para o seu dispositivo.'
+            : 'O PDF foi gerado. Escolha onde salvar ou compartilhar.'
         );
       }
     } catch (error) {
-      console.log('Erro ao exportar relatorio:', error);
-      Alert.alert('Exportacao', error?.message || 'Nao foi possivel exportar o relatorio.');
+      Alert.alert('Exportação', error?.message || 'Não foi possível exportar o relatório.');
     } finally {
       setExportingKey('');
     }
   }
+
+  const metricCardWidth = isCompact ? '48%' : Platform.OS === 'web' ? '15.5%' : '48%';
 
   return (
     <LayoutNutricionista
@@ -311,16 +529,37 @@ export default function TelaRelatoriosNutricionista({ navigation, route, onNutri
         {bundle?.generatedAt ? (
           <Text style={styles.generatedAt}>
             Atualizado em {bundle.generatedAt}
-            {bundle.consultas?.upcoming
-              ? ` · ${bundle.consultas.upcoming} consulta(s) proxima(s)`
-              : ''}
+            {bundle.consultas?.upcoming ? ` · ${bundle.consultas.upcoming} consulta(s) proxima(s)` : ''}
           </Text>
         ) : null}
 
-        <View style={styles.metricGrid}>
-          {metrics.map((item) => (
-            <MetricCard key={item.id} {...item} />
-          ))}
+        <FilterChipRow
+          items={[
+            { id: '7days', label: '7 dias' },
+            { id: '15days', label: '15 dias' },
+            { id: '30days', label: '30 dias' },
+          ]}
+          activeId={reportPeriod}
+          onChange={setReportPeriod}
+          accent={CHART_PALETTE.greenDark}
+        />
+
+        <View style={[styles.metricGrid, isCompact && styles.metricGridCompact]}>
+          {overviewCards.map((item) => {
+            const theme = METRIC_THEMES[item.id] || METRIC_THEMES.total;
+            return (
+              <View key={item.id} style={{ width: metricCardWidth, flexGrow: 1 }}>
+                <DashboardKpiCard
+                  icon={theme.icon}
+                  accent={theme.accent}
+                  label={item.label}
+                  value={item.value}
+                  trend={item.trend}
+                  invertTrend={item.invertTrend}
+                />
+              </View>
+            );
+          })}
         </View>
 
         {loading ? <ScreenLoading label="Consolidando dados da carteira..." persona="nutricionista" /> : null}
@@ -337,258 +576,318 @@ export default function TelaRelatoriosNutricionista({ navigation, route, onNutri
 
         {!loading && !loadError && bundle ? (
           <>
-            <SectionCard style={[styles.exportSection, styles.flatCard]}>
-              <Text style={styles.sectionTitle}>Exportar Relatórios</Text>
-              <Text style={styles.exportIntro}>
-                Arquivos completos com todos os pacientes vinculados, metricas, consultas e detalhamento
-                clinico. Os tres relatorios principais sao gerados em PDF; use CSV, TXT ou JSON para outros
-                formatos.
-              </Text>
-
-              <View style={styles.exportRow}>
-                <ExportCard
-                  icon="document-text-outline"
-                  iconColor={patientTheme.colors.textMuted}
-                  title="Relatório Geral"
-                  helper="PDF completo da carteira"
-                  loading={exportingKey === 'geral-pdf'}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('geral', 'pdf')}
-                />
-                <ExportCard
-                  icon="trending-up-outline"
-                  iconColor={patientTheme.colors.primaryDark}
-                  title="Relatório de Adesão"
-                  helper="PDF com refeicoes por dia"
-                  loading={exportingKey === 'adesao-pdf'}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('adesao', 'pdf')}
-                />
-                <ExportCard
-                  icon="trending-up-outline"
-                  iconColor={patientTheme.colors.danger}
-                  title="Relatório de Risco"
-                  helper="PDF por nivel de risco"
-                  loading={exportingKey === 'risco-pdf'}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('risco', 'pdf')}
-                />
+            <SectionCard style={[styles.sectionCard, styles.flatCard]}>
+              <BlockHeader
+                title="Saúde da carteira"
+                subtitle="Risco, objetivos e tempo no alvo"
+                accentColor={CHART_PALETTE.greenDark}
+              />
+              <View style={[isCompact ? styles.stackCol : nutriDesktopStyles.desktopRow, styles.splitRow]}>
+                <View style={styles.splitPanel}>
+                  <Text style={styles.chartTitle}>Distribuição de risco</Text>
+                  <InteractiveDonutChart
+                    items={bundle.riskDistribution}
+                    colors={RISK_COLORS}
+                    centerValue={riskTotal}
+                    centerLabel="pacientes"
+                    formatTooltip={(item, total) =>
+                      `${item.value} paciente${item.value === 1 ? '' : 's'} (${chartPercent(item.value, total)}%)`
+                    }
+                  />
+                </View>
+                <View style={styles.splitPanel}>
+                  <Text style={styles.chartTitle}>Objetivos dos pacientes</Text>
+                  <InteractiveHorizontalBarChart items={objectiveChartItems} colors={OBJECTIVE_COLORS} />
+                </View>
               </View>
-
-              <View style={styles.exportFormatRow}>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('geral', 'txt')}
-                >
-                  {exportingKey === 'geral-txt' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>Geral TXT</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('adesao', 'txt')}
-                >
-                  {exportingKey === 'adesao-txt' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>Adesao TXT</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('risco', 'txt')}
-                >
-                  {exportingKey === 'risco-txt' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>Risco TXT</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('geral', 'csv')}
-                >
-                  {exportingKey === 'geral-csv' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>Geral CSV</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('adesao', 'csv')}
-                >
-                  {exportingKey === 'adesao-csv' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>Adesao CSV</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('risco', 'csv')}
-                >
-                  {exportingKey === 'risco-csv' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>Risco CSV</Text>
-                  )}
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={styles.formatChip}
-                  disabled={Boolean(exportingKey)}
-                  onPress={() => handleExport('geral', 'json')}
-                >
-                  {exportingKey === 'geral-json' ? (
-                    <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-                  ) : (
-                    <Text style={styles.formatChipText}>JSON completo</Text>
-                  )}
-                </TouchableOpacity>
-              </View>
-
+              <Text style={[styles.chartTitle, styles.chartTitleSpaced]}>Faixas de tempo no alvo (TIR)</Text>
+              <InteractiveProgressChart
+                items={dashboard?.tirDistribution || []}
+                colors={TIR_COLORS}
+                percentBase={bundle?.metrics?.totalPatients}
+              />
             </SectionCard>
 
-            <View style={[nutriDesktopStyles.desktopRow, styles.chartsRow]}>
-              <SectionCard style={[styles.chartPanel, styles.flatCard]}>
-                <Text style={styles.sectionTitle}>Pacientes por Objetivo</Text>
-                <MiniBarChart items={objectiveChartItems} color={patientTheme.colors.primaryDark} />
-
-                <View style={styles.objectiveList}>
-                  {bundle.objectiveRows.map((item) => (
-                    <View key={item.id} style={styles.objectiveRow}>
-                      <View style={styles.objectiveRowHeader}>
-                        <Text style={styles.objectiveRowLabel}>{item.label}</Text>
-                        <Text style={styles.objectiveRowValue}>
-                          {item.value} paciente{item.value === 1 ? '' : 's'}
-                        </Text>
-                      </View>
-                      <View style={styles.objectiveTrack}>
-                        <View
-                          style={[
-                            styles.objectiveFill,
-                            {
-                              width: `${bundle.metrics.totalPatients ? Math.min(100, (item.value / bundle.metrics.totalPatients) * 100) : 0}%`,
-                            },
-                          ]}
-                        />
-                      </View>
-                    </View>
-                  ))}
-                </View>
-              </SectionCard>
-
-              <SectionCard style={[styles.chartPanel, styles.flatCard]}>
-                <Text style={styles.sectionTitle}>Distribuição de Risco</Text>
-                <RiskBarChart items={bundle.riskDistribution} />
-
-                <View style={styles.riskLegendList}>
-                  {bundle.riskDistribution.map((item, index) => {
-                    const colors = [
-                      patientTheme.colors.danger,
-                      patientTheme.colors.warning,
-                      patientTheme.colors.primaryDark,
-                    ];
-                    const color = colors[index] || patientTheme.colors.primaryDark;
-                    const total = bundle.riskDistribution.reduce(
-                      (sum, entry) => sum + Number(entry.value || 0),
-                      0
-                    );
-                    const percentage = total
-                      ? Math.round((Number(item.value || 0) / total) * 100)
-                      : 0;
-
-                    return (
-                      <View key={item.id} style={styles.riskLegendRow}>
-                        <View style={styles.riskLegendLeft}>
-                          <View style={[styles.riskLegendDot, { backgroundColor: color }]} />
-                          <Text style={styles.riskLegendLabel}>{item.label}</Text>
-                        </View>
-                        <View style={styles.riskLegendRight}>
-                          <Text style={styles.riskLegendValue}>{item.value}</Text>
-                          <Text style={styles.riskLegendPercent}>{percentage}%</Text>
-                        </View>
-                      </View>
-                    );
-                  })}
-                </View>
-              </SectionCard>
-            </View>
-
-            <SectionCard style={[styles.trendSection, styles.flatCard]}>
-              <Text style={styles.sectionTitle}>Tendência de Adesão - Última Semana</Text>
-              <TrendLineChart items={bundle.weeklyAdherence} />
-              <Text style={styles.trendLegend}>↔ Adesão média da carteira (%)</Text>
-
-              <View style={styles.trendSummaryRow}>
-                <View style={[styles.trendSummaryCard, styles.trendSummaryGreen]}>
-                  <Text style={styles.trendSummaryLabel}>Média Semanal</Text>
-                  <Text style={[styles.trendSummaryValue, styles.metricValueAdherence]}>
-                    {bundle.metrics.portfolioAverage}%
-                  </Text>
-                </View>
-                <View style={[styles.trendSummaryCard, styles.trendSummaryBlue]}>
-                  <Text style={styles.trendSummaryLabel}>Melhor Dia</Text>
-                  <Text style={[styles.trendSummaryValue, styles.metricValueWeekBlue]}>
-                    {bundle.metrics.bestDay}%
-                  </Text>
-                </View>
-                <View style={[styles.trendSummaryCard, styles.trendSummaryOrange]}>
-                  <Text style={styles.trendSummaryLabel}>Pior Dia</Text>
-                  <Text style={[styles.trendSummaryValue, styles.metricValueAlerts]}>
-                    {bundle.metrics.worstDay}%
-                  </Text>
-                </View>
-              </View>
+            <SectionCard style={[styles.sectionCard, styles.flatCard]}>
+              <BlockHeader title="Tendência da carteira" subtitle="Evolução semanal no período" accentColor={trendColor} />
+              <FilterChipRow
+                items={[
+                  { id: 'adherence', label: 'Adesão' },
+                  { id: 'glucose', label: 'Glicose' },
+                  { id: 'tir', label: 'Tempo no alvo' },
+                ]}
+                activeId={trendMetric}
+                onChange={setTrendMetric}
+                accent={trendMetric === 'adherence' ? CHART_PALETTE.greenDark : trendColor}
+              />
+              <InteractiveLineChart
+                items={trendChartItems.length ? trendChartItems : bundle.weeklyAdherence}
+                color={trendColor}
+                axisUnit={trendMetric === 'glucose' ? 'mg/dL' : '%'}
+                formatAxisValue={(value) => String(value ?? '—')}
+                formatValue={(value) =>
+                  trendMetric === 'glucose' ? `${value ?? '—'} mg/dL` : `${value ?? '—'}%`
+                }
+              />
             </SectionCard>
 
-            <SectionCard style={[styles.rankingSection, styles.flatCard]}>
-              <Text style={styles.sectionTitle}>Ranking de Adesão</Text>
-
-              {bundle.ranking.length ? (
-                <View style={styles.rankingList}>
-                  {bundle.ranking.map((item, index) => (
-                    <View key={item.id} style={styles.rankingRow}>
-                      <View style={styles.rankingLeft}>
-                        <View
-                          style={[
-                            styles.rankingIndex,
-                            index === 0 && styles.rankingIndexFirst,
-                            index === 1 && styles.rankingIndexSecond,
-                            index === 2 && styles.rankingIndexThird,
-                          ]}
-                        >
-                          <Text style={styles.rankingIndexText}>{index + 1}</Text>
-                        </View>
-                        <View style={styles.rankingCopy}>
-                          <Text style={styles.rankingName}>{item.patientName}</Text>
-                          <Text style={styles.rankingMeta}>
-                            {item.streak} · {item.objective}
-                          </Text>
-                        </View>
-                      </View>
-                      <View style={styles.rankingRight}>
-                        <Text style={styles.rankingValue}>{item.adherence}%</Text>
-                        <View style={styles.rankingProgressWrap}>
-                          <ProgressBar value={item.adherence} tone="default" />
-                        </View>
-                      </View>
-                    </View>
+            <SectionCard style={[styles.alertPanel, styles.flatCard]}>
+              <BlockHeader title="Alertas inteligentes" subtitle="Priorize ação imediata" accentColor={CHART_PALETTE.red} />
+              {visibleAlerts.length ? (
+                <View style={styles.alertChipGrid}>
+                  {visibleAlerts.map((item) => (
+                    <AlertChip key={item.id} item={item} onPress={() => openPatient(item.patientId)} />
                   ))}
                 </View>
               ) : (
-                <Text style={styles.emptyRanking}>
-                  Nenhum paciente vinculado ainda. Os rankings aparecem quando houver registros.
-                </Text>
+                <Text style={styles.emptyRanking}>Nenhum alerta prioritário identificado no período.</Text>
               )}
+              {flatAlerts.length > 3 ? (
+                <DetailToggle
+                  open={showAllAlerts}
+                  onPress={() => setShowAllAlerts((prev) => !prev)}
+                  labelClosed={`Ver todos os alertas (${flatAlerts.length})`}
+                  labelOpen="Mostrar apenas 3 alertas"
+                  accent={SECTION_ACCENTS.alerts.accent}
+                  soft={SECTION_ACCENTS.alerts.soft}
+                />
+              ) : null}
+            </SectionCard>
+
+            <SectionCard style={[styles.insightPanel, styles.flatCard]}>
+              <View style={styles.insightHeader}>
+                <Ionicons name="bulb" size={20} color={CHART_PALETTE.greenDark} />
+                <Text style={styles.insightTitle}>Insights automáticos</Text>
+              </View>
+              <Text style={styles.insightText}>
+                {dashboard?.insightsText ||
+                  'Consolide registros dos pacientes para gerar insights automáticos da carteira.'}
+              </Text>
+            </SectionCard>
+
+            <DetailSection
+              title="Engajamento"
+              subtitle="Frequência de uso da carteira"
+              accentColor={SECTION_ACCENTS.engagement.accent}
+              accentSoft={SECTION_ACCENTS.engagement.soft}
+              open={expandedDetails.engagement}
+              onToggle={() => toggleDetail('engagement')}
+              summary={
+                <View style={styles.miniKpiRow}>
+                  <MiniKpiCard label="Inativos" value={String(engagementCounts.inactive)} accent={ENGAGEMENT_FREQ_COLORS_BY_ID.inativo} />
+                  <MiniKpiCard label="Uso diário" value={String(engagementCounts.daily)} accent={ENGAGEMENT_FREQ_COLORS_BY_ID.diario} />
+                  <MiniKpiCard label="Esporádicos" value={String(engagementCounts.sporadic)} accent={ENGAGEMENT_FREQ_COLORS_BY_ID.esporadico} />
+                </View>
+              }
+            >
+              <View style={[isCompact ? styles.stackCol : nutriDesktopStyles.desktopRow, styles.splitRow]}>
+                <View style={styles.splitPanel}>
+                  <InteractiveDonutChart
+                    items={dashboard?.engagementFrequency || []}
+                    colors={FREQ_COLORS}
+                    centerValue={sumChartValues(dashboard?.engagementFrequency || [])}
+                    centerLabel="pacientes"
+                  />
+                </View>
+                <View style={styles.splitPanel}>
+                  <Text style={styles.chartTitle}>Quantidade de registros</Text>
+                  <InteractiveHorizontalBarChart
+                    items={dashboard?.engagementRecords || []}
+                    colors={RECORD_BUCKET_COLORS}
+                  />
+                </View>
+              </View>
+            </DetailSection>
+
+            <DetailSection
+              title="Alimentação"
+              subtitle="Resumo alimentar da carteira"
+              accentColor={SECTION_ACCENTS.nutrition.accent}
+              accentSoft={SECTION_ACCENTS.nutrition.soft}
+              open={expandedDetails.nutrition}
+              onToggle={() => toggleDetail('nutrition')}
+              summary={
+                <View style={styles.miniKpiRow}>
+                  <MiniKpiCard label="Total refeições" value={String(totalMeals)} accent={CHART_PALETTE.blue} />
+                  <MiniKpiCard label="Média kcal/dia" value={String(dashboard?.nutrition?.avgCalories ?? 0)} accent={CHART_PALETTE.blue} />
+                  <MiniKpiCard label="Média carb/dia" value={`${dashboard?.nutrition?.avgCarbs ?? 0} g`} accent={CHART_PALETTE.blue} />
+                  <MiniKpiCard label="Sem registros" value={String(dashboard?.nutrition?.noMealPatients ?? 0)} accent={CHART_PALETTE.orange} />
+                </View>
+              }
+            >
+              <Text style={styles.chartTitle}>Refeições por dia</Text>
+              <InteractiveLineChart
+                items={dashboard?.nutrition?.mealsByDay || []}
+                color={CHART_PALETTE.blue}
+                axisUnit="ref."
+                formatAxisValue={(value) => String(value ?? 0)}
+                formatValue={(value) => `${value ?? 0} ref.`}
+              />
+              <Text style={[styles.chartTitle, styles.chartTitleSpaced]}>Tipos de refeição</Text>
+              <InteractiveDonutChart
+                items={dashboard?.nutrition?.mealTypes || []}
+                colors={MEAL_TYPE_COLORS}
+                centerValue={sumChartValues(dashboard?.nutrition?.mealTypes || [])}
+                centerLabel="registros"
+              />
+            </DetailSection>
+
+            <DetailSection
+              title="Glicose"
+              subtitle="Controle glicêmico"
+              accentColor={SECTION_ACCENTS.glucose.accent}
+              accentSoft={SECTION_ACCENTS.glucose.soft}
+              open={expandedDetails.glucose}
+              onToggle={() => toggleDetail('glucose')}
+              summary={
+                <View style={styles.miniKpiRow}>
+                  <MiniKpiCard label="Média geral" value={String(dashboard?.glucose?.portfolioAvg ?? '—')} accent={SECTION_ACCENTS.glucose.accent} />
+                  <MiniKpiCard label="Tempo no alvo" value={dashboard?.glucose?.portfolioTir != null ? `${dashboard.glucose.portfolioTir}%` : '—'} accent={CHART_PALETTE.blue} />
+                  <MiniKpiCard label="Acima da meta" value={String(dashboard?.glucose?.aboveTarget ?? 0)} accent={CHART_PALETTE.orange} />
+                  <MiniKpiCard label="Críticos" value={String(dashboard?.overview?.critical ?? 0)} accent={CHART_PALETTE.red} />
+                </View>
+              }
+            >
+              <InteractiveDonutChart
+                items={dashboard?.glucose?.rangeDistribution || []}
+                colors={GLUCOSE_COLORS}
+                centerValue={sumChartValues(dashboard?.glucose?.rangeDistribution || [])}
+                centerLabel="leituras"
+              />
+              <Text style={[styles.chartTitle, styles.chartTitleSpaced]}>Média glicêmica semanal</Text>
+              <InteractiveLineChart
+                items={dashboard?.weeklyTrend?.glucose || []}
+                color={CHART_PALETTE.orange}
+                axisUnit="mg/dL"
+                formatAxisValue={(value) => String(value ?? '—')}
+                formatValue={(value) => `${value ?? '—'} mg/dL`}
+              />
+            </DetailSection>
+
+            <DetailSection
+              title="Insulina e medicação"
+              subtitle="Terapias registradas"
+              accentColor={SECTION_ACCENTS.therapy.accent}
+              accentSoft={SECTION_ACCENTS.therapy.soft}
+              open={expandedDetails.therapy}
+              onToggle={() => toggleDetail('therapy')}
+              summary={
+                <View style={styles.miniKpiRow}>
+                  <MiniKpiCard label="Aplicações" value={String(dashboard?.insulin?.totalApplications ?? 0)} accent={CHART_PALETTE.purple} />
+                  <MiniKpiCard label="Insulinizados" value={String(dashboard?.insulin?.insulinizedPatients ?? 0)} accent={CHART_PALETTE.purple} />
+                  <MiniKpiCard label="Adesão med." value={`${dashboard?.medication?.overallAdherence ?? 0}%`} accent={CHART_PALETTE.medOrange} />
+                </View>
+              }
+            >
+              <InteractiveDonutChart
+                items={dashboard?.insulin?.basalBolus || []}
+                colors={INSULIN_COLORS}
+                centerValue={dashboard?.insulin?.totalApplications ?? 0}
+                centerLabel="aplicações"
+              />
+              <Text style={[styles.chartTitle, styles.chartTitleSpaced]}>Medicação por medicamento</Text>
+              <InteractiveProgressChart
+                items={dashboard?.medication?.topMedications || []}
+                colors={[CHART_PALETTE.medOrange, CHART_PALETTE.orange, CHART_PALETTE.yellow, CHART_PALETTE.red, CHART_PALETTE.pink]}
+                valueSuffix="registros"
+              />
+            </DetailSection>
+
+            <DetailSection
+              title="Rankings"
+              subtitle="Comparativo rápido da carteira"
+              accentColor={SECTION_ACCENTS.rankings.accent}
+              accentSoft={SECTION_ACCENTS.rankings.soft}
+              open={expandedDetails.rankings}
+              onToggle={() => toggleDetail('rankings')}
+              summary={
+                <Text style={styles.summaryHint}>
+                  Top 3 em atenção, evolução (TIR) e baixa adesão. Expanda para ver gráficos completos.
+                </Text>
+              }
+            >
+              <View style={[isCompact ? styles.stackCol : styles.rankingsCompact]}>
+                <View style={styles.rankingBlock}>
+                  <Text style={styles.rankingBlockTitle}>Precisam de atenção</Text>
+                  <CompactRankingList
+                    items={rankingAttention}
+                    showAll={rankingExpanded.attention}
+                    onToggleShowAll={() =>
+                      setRankingExpanded((prev) => ({ ...prev, attention: !prev.attention }))
+                    }
+                    toggleAccent={SECTION_ACCENTS.rankings.accent}
+                    toggleSoft={SECTION_ACCENTS.rankings.soft}
+                  />
+                </View>
+                <View style={styles.rankingBlock}>
+                  <Text style={styles.rankingBlockTitle}>Melhores evoluções (TIR)</Text>
+                  <CompactRankingList
+                    items={rankingEvolution}
+                    showAll={rankingExpanded.evolution}
+                    onToggleShowAll={() =>
+                      setRankingExpanded((prev) => ({ ...prev, evolution: !prev.evolution }))
+                    }
+                    toggleAccent={SECTION_ACCENTS.rankings.accent}
+                    toggleSoft={SECTION_ACCENTS.rankings.soft}
+                  />
+                </View>
+                <View style={styles.rankingBlock}>
+                  <Text style={styles.rankingBlockTitle}>Baixa adesão</Text>
+                  <CompactRankingList
+                    items={rankingLowAdherence}
+                    showAll={rankingExpanded.lowAdherence}
+                    onToggleShowAll={() =>
+                      setRankingExpanded((prev) => ({ ...prev, lowAdherence: !prev.lowAdherence }))
+                    }
+                    toggleAccent={SECTION_ACCENTS.rankings.accent}
+                    toggleSoft={SECTION_ACCENTS.rankings.soft}
+                  />
+                </View>
+              </View>
+            </DetailSection>
+
+            <SectionCard style={[styles.exportSection, styles.flatCard]}>
+              <Text style={styles.sectionTitle}>Relatório da carteira</Text>
+              <Text style={styles.exportIntro}>
+                Emita o PDF consolidado ou relatórios complementares da carteira no período selecionado.
+              </Text>
+              <TouchableOpacity
+                style={[
+                  styles.primaryPdfButton,
+                  (exportingKey === 'geral-pdf' || Boolean(exportingKey)) && styles.primaryPdfButtonDisabled,
+                ]}
+                onPress={() => handleExport('geral')}
+                disabled={Boolean(exportingKey)}
+                activeOpacity={0.9}
+              >
+                {exportingKey === 'geral-pdf' ? (
+                  <ActivityIndicator size="small" color="#fff" />
+                ) : (
+                  <Ionicons name="document-text-outline" size={18} color="#fff" />
+                )}
+                <Text style={styles.primaryPdfButtonText}>Emitir relatório da carteira</Text>
+              </TouchableOpacity>
+              <Text style={styles.secondaryPdfTitle}>Outros relatórios em PDF</Text>
+              <View style={styles.exportRow}>
+                <ExportCard
+                  icon="restaurant-outline"
+                  iconColor={CHART_PALETTE.greenDark}
+                  title="Adesão alimentar"
+                  helper="PDF da adesão da carteira"
+                  loading={exportingKey === 'adesao-pdf'}
+                  disabled={Boolean(exportingKey)}
+                  onPress={() => handleExport('adesao')}
+                />
+                <ExportCard
+                  icon="pulse-outline"
+                  iconColor={CHART_PALETTE.red}
+                  title="Risco glicêmico"
+                  helper="PDF por nível de risco"
+                  loading={exportingKey === 'risco-pdf'}
+                  disabled={Boolean(exportingKey)}
+                  onPress={() => handleExport('risco')}
+                />
+              </View>
             </SectionCard>
           </>
         ) : null}
@@ -616,49 +915,206 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
-  metricCard: {
-    width: Platform.OS === 'web' ? '24%' : '48%',
-    minWidth: 180,
-    flexGrow: 1,
-    minHeight: 76,
-  },
-  metricHeader: {
-    flexDirection: 'row',
+  metricGridCompact: {
     justifyContent: 'space-between',
+  },
+  metricCard: {
+    minWidth: 150,
+    minHeight: 92,
+    padding: 14,
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     alignItems: 'center',
+    justifyContent: 'center',
+  },
+  metricTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 6,
+  },
+  metricTrend: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: patientTheme.colors.textMuted,
+  },
+  metricAccentBar: {
+    marginTop: 8,
+    width: 28,
+    height: 3,
+    borderRadius: 2,
+    alignSelf: 'center',
+  },
+  metricTrendUp: {
+    color: CHART_PALETTE.greenDark,
+  },
+  metricTrendDown: {
+    color: CHART_PALETTE.red,
   },
   metricLabel: {
     fontSize: 13,
     color: patientTheme.colors.textMuted,
     fontWeight: '500',
+    textAlign: 'center',
   },
   metricValue: {
-    marginTop: 10,
+    marginTop: 6,
     fontSize: 18,
     fontWeight: '900',
+    textAlign: 'center',
   },
-  metricValueDefault: {
+  blockHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    marginBottom: 4,
+  },
+  blockAccent: {
+    width: 4,
+    height: 36,
+    borderRadius: 4,
+    marginTop: 2,
+  },
+  blockHeaderCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  blockTitle: {
     color: patientTheme.colors.text,
+    fontSize: 18,
+    fontWeight: '800',
   },
-  metricValueHighRisk: {
-    color: patientTheme.colors.danger,
+  blockSubtitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
   },
-  metricValueAdherence: {
-    color: patientTheme.colors.primaryDark,
+  sectionCard: {
+    gap: 16,
+    padding: 16,
   },
-  metricValueAlerts: {
-    color: patientTheme.colors.danger,
+  detailSection: {
+    gap: 12,
+    padding: 16,
   },
-  metricValueWeekBlue: {
-    color: patientTheme.colors.primaryDark,
+  detailBody: {
+    gap: 14,
+    marginTop: 4,
+  },
+  detailToggle: {
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+  },
+  detailToggleText: {
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  summaryHint: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 19,
+  },
+  miniKpiRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  miniKpiCard: {
+    flex: 1,
+    minWidth: 120,
+    minHeight: 72,
+    borderRadius: patientTheme.radius.lg,
+    padding: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    backgroundColor: patientTheme.colors.background,
+  },
+  miniKpiLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  miniKpiValue: {
+    marginTop: 6,
+    fontSize: 17,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  miniKpiAccentBar: {
+    marginTop: 8,
+    width: 24,
+    height: 3,
+    borderRadius: 2,
   },
   exportSection: {
     gap: 16,
+    padding: 16,
   },
   exportIntro: {
     color: patientTheme.colors.textMuted,
     fontSize: 13,
     lineHeight: 19,
+  },
+  reportPeriodRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  reportPeriodChip: {
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    backgroundColor: patientTheme.colors.background,
+  },
+  reportPeriodChipText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  reportPeriodChipActiveBrand: {
+    backgroundColor: CHART_PALETTE.greenSoft,
+    borderColor: CHART_PALETTE.greenDark,
+  },
+  reportPeriodChipTextActiveBrand: {
+    color: CHART_PALETTE.greenDark,
+    fontWeight: '800',
+  },
+  primaryPdfButton: {
+    backgroundColor: '#4CD197',
+    borderRadius: patientTheme.radius.lg,
+    paddingVertical: 13,
+    paddingHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  primaryPdfButtonDisabled: {
+    opacity: 0.7,
+  },
+  primaryPdfButtonText: {
+    color: '#fff',
+    fontWeight: '700',
+    fontSize: 15,
+  },
+  secondaryPdfTitle: {
+    marginTop: 4,
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
   },
   sectionTitle: {
     color: patientTheme.colors.text,
@@ -668,26 +1124,6 @@ const styles = StyleSheet.create({
   exportRow: {
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
     gap: 12,
-  },
-  exportFormatRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  formatChip: {
-    minHeight: 36,
-    paddingHorizontal: 12,
-    borderRadius: patientTheme.radius.pill,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  formatChipText: {
-    color: patientTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '600',
   },
   exportCard: {
     flex: 1,
@@ -716,15 +1152,20 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     fontSize: 16,
     fontWeight: '700',
+    padding: 16,
   },
   errorText: {
     marginTop: 8,
     color: patientTheme.colors.textMuted,
     fontSize: 14,
     lineHeight: 20,
+    paddingHorizontal: 16,
+    paddingBottom: 16,
   },
   retryButton: {
     marginTop: 14,
+    marginHorizontal: 16,
+    marginBottom: 16,
     alignSelf: 'flex-start',
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -737,227 +1178,119 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
     fontWeight: '700',
   },
-  chartsRow: {
+  splitRow: {
     alignItems: 'stretch',
+    gap: 16,
   },
-  chartPanel: {
+  stackCol: {
+    flexDirection: 'column',
+    gap: 16,
+  },
+  splitPanel: {
     flex: 1,
     minWidth: 0,
-  },
-  chartBox: {
-    marginTop: 16,
-    flexDirection: 'row',
-    minHeight: 210,
-  },
-  chartAxisY: {
-    width: 34,
-    justifyContent: 'space-between',
-    alignItems: 'flex-end',
-    paddingRight: 4,
-  },
-  axisText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 10,
-  },
-  chartColumnsWrap: {
-    flex: 1,
-    borderLeftWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: patientTheme.colors.border,
-  },
-  chartColumns: {
-    flex: 1,
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    alignItems: 'flex-end',
-    paddingBottom: 18,
-    paddingHorizontal: 10,
-  },
-  chartColumnItem: {
-    flex: 1,
-    alignItems: 'center',
-    gap: 8,
-  },
-  chartColumnTrack: {
-    height: 172,
-    width: '72%',
-    justifyContent: 'flex-end',
-  },
-  chartColumnFill: {
-    width: '100%',
-    borderRadius: 6,
-  },
-  chartColumnLabel: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 10,
-    textAlign: 'center',
-  },
-  objectiveList: {
-    marginTop: 18,
     gap: 12,
   },
-  objectiveRow: {
-    gap: 6,
-  },
-  objectiveRowHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  objectiveRowLabel: {
+  chartTitle: {
     color: patientTheme.colors.text,
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: '800',
   },
-  objectiveRowValue: {
-    color: patientTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '500',
+  chartTitleSpaced: {
+    marginTop: 8,
   },
-  objectiveTrack: {
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: patientTheme.colors.border,
-    overflow: 'hidden',
+  alertPanel: {
+    gap: 12,
+    padding: 16,
+    backgroundColor: '#FFFBFB',
+    borderColor: '#FECACA',
   },
-  objectiveFill: {
-    height: '100%',
-    backgroundColor: '#111827',
-  },
-  riskLegendList: {
-    marginTop: 18,
-    gap: 14,
-  },
-  riskLegendRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  riskLegendLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
+  alertChipGrid: {
     gap: 10,
   },
-  riskLegendDot: {
-    width: 12,
-    height: 12,
-    borderRadius: 3,
+  alertChip: {
+    borderWidth: 1,
+    borderRadius: patientTheme.radius.lg,
+    padding: 12,
+    gap: 10,
   },
-  riskLegendLabel: {
+  alertChipTop: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  alertChipIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  alertChipCopy: {
+    flex: 1,
+    gap: 2,
+  },
+  alertChipName: {
     color: patientTheme.colors.text,
-    fontSize: 12,
+    fontSize: 14,
+    fontWeight: '800',
   },
-  riskLegendRight: {
-    alignItems: 'flex-end',
-  },
-  riskLegendValue: {
-    color: patientTheme.colors.text,
+  alertChipReason: {
     fontSize: 12,
     fontWeight: '700',
   },
-  riskLegendPercent: {
+  alertChipIndicator: {
     color: patientTheme.colors.textMuted,
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 11,
   },
-  trendSection: {
-    gap: 14,
-  },
-  trendChartWrap: {
-    marginTop: 8,
-    minHeight: 180,
-    position: 'relative',
-  },
-  trendGrid: {
-    position: 'absolute',
-    left: 42,
-    right: 0,
-    top: 20,
-    bottom: 26,
-    borderLeftWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: patientTheme.colors.border,
-  },
-  trendLineLayer: {
-    position: 'absolute',
-    left: 42,
-    right: 0,
-    top: 20,
-    bottom: 26,
-  },
-  trendPolyline: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    top: '18%',
-    height: 2,
-    backgroundColor: 'transparent',
-    transform: [{ rotate: '-2deg' }],
-  },
-  trendPolylineInner: {
-    flex: 1,
-    backgroundColor: patientTheme.colors.primaryDark,
-  },
-  trendPoint: {
-    position: 'absolute',
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    marginLeft: -4,
-    marginTop: -4,
-    backgroundColor: '#ffffff',
-    borderWidth: 2,
-    borderColor: patientTheme.colors.primaryDark,
-  },
-  trendLabelsRow: {
-    position: 'absolute',
-    left: 36,
-    right: 0,
-    bottom: 0,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
-  trendDayLabel: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 10,
-  },
-  trendLegend: {
-    color: patientTheme.colors.primaryDark,
-    textAlign: 'center',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  trendSummaryRow: {
-    flexDirection: Platform.OS === 'web' ? 'row' : 'column',
-    gap: 10,
-  },
-  trendSummaryCard: {
-    flex: 1,
-    minHeight: 62,
-    borderRadius: patientTheme.radius.xl,
-    padding: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
+  alertActionButton: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1.5,
     backgroundColor: patientTheme.colors.background,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
   },
-  trendSummaryGreen: {},
-  trendSummaryBlue: {},
-  trendSummaryOrange: {},
-  trendSummaryLabel: {
-    color: patientTheme.colors.textMuted,
+  alertActionText: {
     fontSize: 12,
+    fontWeight: '800',
   },
-  trendSummaryValue: {
-    marginTop: 6,
-    fontSize: 16,
-    fontWeight: '900',
+  insightPanel: {
+    gap: 10,
+    padding: 16,
+    backgroundColor: CHART_PALETTE.greenSoft,
+    borderColor: `${CHART_PALETTE.greenDark}44`,
   },
-  rankingSection: {
-    gap: 16,
+  insightHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  insightTitle: {
+    color: CHART_PALETTE.greenDark,
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  insightText: {
+    color: patientTheme.colors.text,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  rankingsCompact: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  rankingBlock: {
+    flex: 1,
+    minWidth: 0,
+    gap: 8,
+  },
+  rankingBlockTitle: {
+    color: patientTheme.colors.text,
+    fontSize: 13,
+    fontWeight: '800',
   },
   rankingList: {
-    gap: 12,
+    gap: 8,
   },
   emptyRanking: {
     color: patientTheme.colors.textMuted,
@@ -965,63 +1298,55 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   rankingRow: {
-    minHeight: 66,
-    borderRadius: patientTheme.radius.xl,
+    minHeight: 54,
+    borderRadius: patientTheme.radius.lg,
     backgroundColor: patientTheme.colors.background,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    gap: 8,
   },
   rankingLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     flex: 1,
+    minWidth: 0,
   },
   rankingIndex: {
-    width: 24,
-    height: 24,
-    borderRadius: 12,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: CHART_PALETTE.graySoft,
   },
-  rankingIndexFirst: {},
-  rankingIndexSecond: {},
-  rankingIndexThird: {},
   rankingIndexText: {
     color: patientTheme.colors.text,
     fontSize: 11,
-    fontWeight: '700',
+    fontWeight: '800',
   },
   rankingCopy: {
     flex: 1,
+    minWidth: 0,
   },
   rankingName: {
     color: patientTheme.colors.text,
-    fontSize: 14,
+    fontSize: 13,
     fontWeight: '700',
   },
   rankingMeta: {
-    marginTop: 4,
+    marginTop: 2,
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
-  },
-  rankingRight: {
-    width: Platform.OS === 'web' ? 180 : 120,
-    alignItems: 'flex-end',
-    gap: 8,
+    fontSize: 10,
   },
   rankingValue: {
     color: patientTheme.colors.text,
     fontSize: 12,
-    fontWeight: '700',
-  },
-  rankingProgressWrap: {
-    width: '100%',
+    fontWeight: '800',
   },
 });

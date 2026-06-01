@@ -24,6 +24,14 @@ export const ADMIN_MAIN_TAB_ROUTES = new Set([
   'AdminLogsSistema',
 ]);
 
+export const MEDICO_MAIN_TAB_ROUTES = new Set([
+  'MedicoAgenda',
+  'MedicoPacientes',
+  'HomeMedico',
+  'MedicoMensagens',
+  'MedicoRelatorios',
+]);
+
 function navigateToMainTab(navigation, { tabRoute, mainTabRoutes, params = {} }) {
   if (!navigation?.dispatch) {
     navigation?.navigate?.(tabRoute, params);
@@ -59,6 +67,10 @@ export function isAdminMainTabRoute(routeName) {
   return ADMIN_MAIN_TAB_ROUTES.has(routeName);
 }
 
+export function isMedicoMainTabRoute(routeName) {
+  return MEDICO_MAIN_TAB_ROUTES.has(routeName);
+}
+
 export function navigatePatientTab(navigation, tabRoute, usuarioLogado, extraParams = {}) {
   stripAuthRoutesFromPatientStack(navigation);
 
@@ -91,5 +103,13 @@ export function navigateAdminTab(navigation, tabRoute, usuarioLogado) {
     tabRoute,
     mainTabRoutes: ADMIN_MAIN_TAB_ROUTES,
     params: { usuarioLogado },
+  });
+}
+
+export function navigateMedicoTab(navigation, tabRoute, usuarioLogado, extraParams = {}) {
+  navigateToMainTab(navigation, {
+    tabRoute,
+    mainTabRoutes: MEDICO_MAIN_TAB_ROUTES,
+    params: { usuarioLogado, ...extraParams },
   });
 }

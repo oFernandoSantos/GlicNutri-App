@@ -9,6 +9,7 @@ import {
 import { fetchPatientById } from './servicoDadosPaciente';
 import { criarNotificacaoConsulta } from './servicoNotificacoesConsulta';
 import { ensurePatientNutritionistLink } from './servicoVinculosNutricionista';
+import { ensurePatientDoctorLink } from './servicoVinculosMedico';
 
 export function normalizeConsultaStatus(value) {
   const status = String(value || '').trim().toLowerCase();
@@ -285,6 +286,71 @@ export async function createConsulta({
   return consulta;
 }
 
+export async function createConsultaMedico({
+  medicoId,
+  pacienteId,
+  scheduledAt,
+  motivo,
+  tipoConsulta,
+  meetLink,
+  medico,
+  pacienteNome,
+  actor,
+  origin = 'consulta',
+}) {
+  if (!medicoId) throw new Error('Médico sem identificador para agendar.');
+  if (!pacienteId) throw new Error('Paciente sem identificador para agendar.');
+  if (!scheduledAt) throw new Error('Horário não informado para agendamento.');
+
+  const pacienteResolvido = await fetchPatientById(pacienteId, {
+    currentPatient: actor,
+    patientContext: actor,
+  });
+  const pacienteIdConfirmado = pacienteResolvido?.id_paciente_uuid || pacienteId;
+
+  const normalizedMeetLink =
+    normalizeGoogleMeetUrl(meetLink) || resolveMeetLink({ consulta: null, nutricionista: medico });
+
+  const payload = {
+    medico_id: medicoId,
+    paciente_id: pacienteIdConfirmado,
+    scheduled_at: scheduledAt,
+    status: 'scheduled',
+    motivo: motivo ? String(motivo).trim() : 'Consulta clínica — diabetes',
+    tipo_consulta: tipoConsulta || 'Teleconsulta clínica',
+    canal: 'google_meet',
+    meet_link: normalizedMeetLink || '',
+  };
+
+  const { data, error } = await supabase.from('consulta').insert([payload]).select('*').maybeSingle();
+  if (error) throw error;
+
+  await ensurePatientDoctorLink({
+    pacienteId: pacienteIdConfirmado,
+    medicoId,
+    consultaId: data?.id,
+    actor,
+    origin,
+  });
+
+  try {
+    await registrarLogAuditoria({
+      actor: actor || null,
+      actorType: 'medico',
+      targetPatientId: pacienteIdConfirmado,
+      action: 'consulta_medica_agendada',
+      entity: 'consulta',
+      entityId: data?.id,
+      origin,
+      details: { medicoId, pacienteNome, scheduledAt },
+    });
+  } catch {
+    /* noop */
+  }
+
+  return data;
+}
+
 export async function listConsultasByNutricionista(nutricionistaId, { limit = 120 } = {}) {
   if (!nutricionistaId) return [];
 
@@ -292,6 +358,20 @@ export async function listConsultasByNutricionista(nutricionistaId, { limit = 12
     .from('consulta')
     .select('*')
     .eq('nutricionista_id', nutricionistaId)
+    .order('scheduled_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw error;
+  return data || [];
+}
+
+export async function listConsultasByMedico(medicoId, { limit = 120 } = {}) {
+  if (!medicoId) return [];
+
+  const { data, error } = await supabase
+    .from('consulta')
+    .select('*')
+    .eq('medico_id', medicoId)
     .order('scheduled_at', { ascending: false })
     .limit(limit);
 

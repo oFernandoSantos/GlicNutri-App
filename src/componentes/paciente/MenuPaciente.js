@@ -36,6 +36,12 @@ const menuItems = [
     library: 'ion',
   },
   {
+    label: 'Relatórios',
+    route: 'PacienteRelatorios',
+    icon: 'bar-chart-outline',
+    library: 'ion',
+  },
+  {
     label: 'Insulina Basal',
     route: 'PacientePerfilInsulinas',
     params: { initialInsulinProfileKey: 'basal' },

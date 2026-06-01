@@ -15,6 +15,7 @@ export const PATIENT_APP_ROUTE_NAMES = new Set([
   'PacienteAgendamentos',
   'PacientePlano',
   'PacienteProgresso',
+  'PacienteRelatorios',
   'PacientePerfil',
   'PacientePerfilContato',
   'PacientePerfilSaude',

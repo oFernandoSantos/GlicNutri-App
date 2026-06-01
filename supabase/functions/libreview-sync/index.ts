@@ -17,6 +17,8 @@ type NormalizedReading = {
   time: string;
 };
 
+const GLICNUTRI_TIMEZONE = 'America/Sao_Paulo';
+
 const providerUrl = Deno.env.get('LIBREVIEW_PROVIDER_URL') || '';
 const providerToken = Deno.env.get('LIBREVIEW_PROVIDER_TOKEN') || '';
 const providerAuthHeader = Deno.env.get('LIBREVIEW_PROVIDER_AUTH_HEADER') || 'Authorization';
@@ -32,12 +34,46 @@ function jsonResponse(body: Record<string, unknown>, status = 200) {
   });
 }
 
+function formatDateTimePartsInTimeZone(date: Date, timeZone = GLICNUTRI_TIMEZONE) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(date);
+
+  const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+
+  if (!lookup.year || !lookup.month || !lookup.day) {
+    return null;
+  }
+
+  const hour = lookup.hour === '24' ? '00' : lookup.hour || '00';
+
+  return {
+    date: `${lookup.year}-${lookup.month}-${lookup.day}`,
+    time: `${hour}:${lookup.minute || '00'}:${lookup.second || '00'}`,
+  };
+}
+
+function buildLocalDateFromDate(date: Date) {
+  return formatDateTimePartsInTimeZone(date)?.date || `${date.getUTCFullYear()}-01-01`;
+}
+
+function buildLocalTimeFromDate(date: Date) {
+  return formatDateTimePartsInTimeZone(date)?.time || '00:00:00';
+}
+
 function normalizeDate(value: unknown) {
-  if (!value) return new Date().toISOString().slice(0, 10);
+  if (!value) return buildLocalDateFromDate(new Date());
 
   const parsed = new Date(String(value));
   if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toISOString().slice(0, 10);
+    return buildLocalDateFromDate(parsed);
   }
 
   const text = String(value).trim();
@@ -51,11 +87,11 @@ function normalizeDate(value: unknown) {
 }
 
 function normalizeTime(value: unknown) {
-  if (!value) return new Date().toTimeString().slice(0, 8);
+  if (!value) return buildLocalTimeFromDate(new Date());
 
   const parsed = new Date(String(value));
   if (!Number.isNaN(parsed.getTime())) {
-    return parsed.toTimeString().slice(0, 8);
+    return buildLocalTimeFromDate(parsed);
   }
 
   const text = String(value).trim();
@@ -239,12 +275,21 @@ Deno.serve(async (request) => {
     );
   } catch (error) {
     console.error('libreview-sync error', error);
+    const message = error instanceof Error ? error.message : String(error);
+    const isRateLimited =
+      message.includes('429') ||
+      message.includes('430') ||
+      message.includes('limitou tentativas') ||
+      message.includes('bloqueou login');
+
     return jsonResponse(
       {
-        error: 'Erro interno ao sincronizar LibreView.',
-        details: error instanceof Error ? error.message : String(error),
+        error: isRateLimited
+          ? 'LibreLinkUp limitou tentativas (429). Aguarde 2 a 5 minutos antes de sincronizar de novo.'
+          : 'Erro interno ao sincronizar LibreView.',
+        details: message,
       },
-      500
+      isRateLimited ? 429 : 500
     );
   }
 });

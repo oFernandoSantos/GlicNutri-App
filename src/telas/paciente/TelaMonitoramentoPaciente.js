@@ -20,6 +20,11 @@ import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamen
 import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
+  DashboardMiniKpiCard,
+  KPI_ACCENTS,
+  dashboardKpiStyles,
+} from '../../componentes/comum/CartaoKpiDashboard';
+import {
   addGlucoseReading,
   addMedicationEntry,
   buildMonitorSeries,
@@ -29,13 +34,13 @@ import {
   getCachedPatientExperience,
   getPatientId,
   isPatientExperienceCacheFresh,
+  refreshPatientGlucoseReadings,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { EsqueletoBloco } from '../../componentes/comum/EsqueletoCarregamento';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   hasLibreLinkUpLinked,
-  syncLinkedLibreViewReadings,
 } from '../../servicos/servicoLibreViewAutoSync';
 import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
 import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
@@ -1437,26 +1442,24 @@ export default function PacienteMonitoramentoScreen({
     function aplicarMonitoramentoExperience(experience) {
       if (!experience) return;
 
-      const mergedReadings = mergeCachedGlucoseReadings(
-        experience.glucoseReadings,
-        getCachedGlucoseReadings(experience.patient?.id_paciente_uuid || patientId)
-      );
+      const patientUuid = experience.patient?.id_paciente_uuid || patientId;
 
       setPatient(experience.patient);
       setObjectiveText(experience.clinicalObjective);
       setAppState(experience.appState);
-      replaceCachedPatientAppState(
-        experience.patient?.id_paciente_uuid || patientId,
-        experience.appState
-      );
-      setGlucoseReadings(mergedReadings);
-      replaceCachedGlucoseReadings(
-        experience.patient?.id_paciente_uuid || patientId,
-        mergedReadings
-      );
+      replaceCachedPatientAppState(patientUuid, experience.appState);
     },
     [patientId]
   );
+
+  const refreshGlucoseForMonitor = useCallback(async () => {
+    if (!patientId) return [];
+
+    return refreshPatientGlucoseReadings(patientId, {
+      patientContext: usuarioLogado,
+      glucoseLimit: monitoramentoFetchLimits.glucoseLimit || 60,
+    });
+  }, [monitoramentoFetchLimits.glucoseLimit, patientId, usuarioLogado]);
 
   const loadMonitoringData = useCallback(async (options = {}) => {
     try {
@@ -1479,6 +1482,7 @@ export default function PacienteMonitoramentoScreen({
 
       if (cachedExperience) {
         aplicarMonitoramentoExperience(cachedExperience);
+        await refreshGlucoseForMonitor();
 
         if (cacheIsFresh && !forceRefresh) {
           return;
@@ -1488,7 +1492,10 @@ export default function PacienteMonitoramentoScreen({
           patientContext: usuarioLogado,
           ...monitoramentoFetchLimits,
         })
-          .then(aplicarMonitoramentoExperience)
+          .then(async (experience) => {
+            aplicarMonitoramentoExperience(experience);
+            await refreshGlucoseForMonitor();
+          })
           .catch((error) => {
             registrarLogTecnicoCarga('monitoramento_refresh_background', error);
             console.log('Refresh monitoramento:', error);
@@ -1503,6 +1510,7 @@ export default function PacienteMonitoramentoScreen({
       });
 
       aplicarMonitoramentoExperience(experience);
+      await refreshGlucoseForMonitor();
     } catch (error) {
       registrarLogTecnicoCarga('monitoramento_load', error);
       console.log('Erro ao carregar monitoramento:', error);
@@ -1515,6 +1523,7 @@ export default function PacienteMonitoramentoScreen({
     canResolvePatient,
     monitoramentoFetchLimits,
     patientId,
+    refreshGlucoseForMonitor,
     registrarLogTecnicoCarga,
     usuarioLogado,
   ]);
@@ -1591,31 +1600,20 @@ export default function PacienteMonitoramentoScreen({
 
       let active = true;
 
+      refreshPatientGlucoseReadings(activePatientId, {
+        patientContext: usuarioLogado,
+        glucoseLimit: monitoramentoFetchLimits.glucoseLimit || 60,
+      }).catch(() => {});
+
       hasLibreLinkUpLinked(activePatientId).then((linked) => {
         if (!active) return;
         setLibreLinkLinked(linked);
-
-        if (!linked) return;
-
-        syncLinkedLibreViewReadings({
-          patientId: activePatientId,
-          patientEmail: patient?.email_pac || usuarioLogado?.email_pac || usuarioLogado?.email,
-          actor: patient || usuarioLogado,
-          silent: true,
-        })
-          .then((result) => {
-            if (!active || !result?.readings?.length) return;
-            setGlucoseReadings(result.readings);
-          })
-          .catch((error) => {
-            console.log('Erro ao sincronizar LibreView ao abrir monitoramento:', error);
-          });
       });
 
       return () => {
         active = false;
       };
-    }, [activePatientId, patient, route?.params?.openQuickRegister, usuarioLogado])
+    }, [activePatientId, monitoramentoFetchLimits, patient, route?.params?.openQuickRegister, usuarioLogado])
   );
 
   useEffect(() => {
@@ -2774,33 +2772,28 @@ export default function PacienteMonitoramentoScreen({
         </View>
       </View>
 
-      <View style={styles.metricsRow}>
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Media</Text>
-          <Text style={styles.metricValue}>{metrics.avg}</Text>
-          <Text style={styles.metricUnit}>mg/dL</Text>
+      <View style={dashboardKpiStyles.miniRow}>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <DashboardMiniKpiCard label="Media" value={String(metrics.avg)} helper="mg/dL" accent={KPI_ACCENTS.green} />
         </View>
-
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Variabilidade</Text>
-          <Text style={styles.metricValue}>
-            {metrics.variability === '--' ? '--' : `${metrics.variability}%`}
-          </Text>
-          <Text style={styles.metricUnit}>amplitude</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <DashboardMiniKpiCard
+            label="Variabilidade"
+            value={metrics.variability === '--' ? '--' : `${metrics.variability}%`}
+            helper="amplitude"
+            accent={KPI_ACCENTS.orange}
+          />
         </View>
-
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>GMI</Text>
-          <Text style={styles.metricValue}>{metrics.gmi}</Text>
-          <Text style={styles.metricUnit}>estimado</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <DashboardMiniKpiCard label="GMI" value={String(metrics.gmi)} helper="estimado" accent={KPI_ACCENTS.blue} />
         </View>
-
-        <View style={styles.metricCard}>
-          <Text style={styles.metricLabel}>Tempo no alvo</Text>
-          <Text style={styles.metricValue}>
-            {metrics.tir === '--' ? '--' : `${metrics.tir}%`}
-          </Text>
-          <Text style={styles.metricUnit}>TIR</Text>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <DashboardMiniKpiCard
+            label="Tempo no alvo"
+            value={metrics.tir === '--' ? '--' : `${metrics.tir}%`}
+            helper="TIR"
+            accent={KPI_ACCENTS.greenBright}
+          />
         </View>
       </View>
 

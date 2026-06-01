@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { brand } from '../../temas/designSystem';
 import { inputFocusBorder, inputWebFocusReset } from '../../temas/temaFocoCampo';
 import { shouldDisableIOSPasswordAutofill } from '../../utilitarios/preenchimentoAutomaticoPlataforma';
 
@@ -151,7 +152,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   invalid: {
-    borderColor: '#d96666',
+    borderColor: brand.danger,
   },
   focused: {
     ...inputFocusBorder,

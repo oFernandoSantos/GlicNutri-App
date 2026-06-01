@@ -1255,6 +1255,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           date: effectiveDate,
           time: effectiveTime,
           mealLabel: mealType,
+          fotoUrl,
         }),
         id: recordId ? `meal-ia-${recordId}` : `meal-ia-${Date.now()}`,
         databaseId: recordId || null,

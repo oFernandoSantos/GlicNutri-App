@@ -22,7 +22,26 @@ import {
   downloadPdfDocument,
   downloadTextFile,
 } from '../utilitarios/exportarArquivo';
-import { buildNutritionistReportPdf } from '../utilitarios/relatorioNutricionistaPdf';
+import {
+  buildAdherenceSeriesForRange,
+  buildNutritionistPatientAlerts,
+  buildPortfolioReportAnalytics,
+  buildReportsDashboardAnalytics,
+  enrichPatientRowWithPeriodData,
+  resolveReportPeriodLabel,
+} from '../utilitarios/relatorioNutricionistaAnalytics';
+import {
+  buildNutritionistPatientReportPdf,
+  buildNutritionistReportPdf,
+} from '../utilitarios/relatorioNutricionistaPdf';
+import { filterReportEntriesByBounds } from '../utilitarios/relatorioPacienteAnalytics';
+import {
+  buildPatientClinicalReportBundle,
+  enrichReportPayloadFromDatabase,
+  getReportPeriodBounds,
+  isInsulinMedicationEntry,
+  resolvePatientReportProfile,
+} from './servicoRelatorioPaciente';
 
 const OBJECTIVE_CATALOG = [
   { id: 'diabetes_t1', label: 'Diabetes T1' },
@@ -53,7 +72,7 @@ function chunkArray(items, size) {
   return chunks;
 }
 
-async function loadPatientClinicalRow(patientCard) {
+async function loadPatientClinicalRow(patientCard, periodBounds = {}, inactiveDays = 7) {
   const patientId = patientCard?.id;
   if (!patientId) return null;
 
@@ -62,13 +81,24 @@ async function loadPatientClinicalRow(patientCard) {
       ...mesclarLimitesDadosPaciente('relatorio'),
     });
 
-    const mealEntries = experience?.appState?.mealEntries || [];
+    const allMeals = experience?.appState?.mealEntries || [];
+    const allGlucose = experience?.glucoseReadings || [];
+    const allMedication = experience?.appState?.medicationEntries || [];
+    const filteredMeals = filterReportEntriesByBounds(allMeals, periodBounds);
+    const filteredGlucose = filterReportEntriesByBounds(allGlucose, periodBounds);
+    const filteredMedication = filterReportEntriesByBounds(allMedication, periodBounds);
+    const filteredInsulin = filteredMedication.filter(isInsulinMedicationEntry);
+    const filteredPureMeds = filteredMedication.filter((entry) => !isInsulinMedicationEntry(entry));
+
     const targetMeals = experience?.appState?.planSections?.length || 3;
-    const weekly = buildWeeklyAdherenceFromMeals(mealEntries, targetMeals);
+    const adherenceSeries = buildAdherenceSeriesForRange(filteredMeals, periodBounds, targetMeals);
+    const weekly = adherenceSeries.hasRealData
+      ? adherenceSeries
+      : buildWeeklyAdherenceFromMeals(allMeals, targetMeals);
     const adherence = weekly.hasRealData
       ? averageAdherence(weekly.items)
       : Number(patientCard.adherence) || 0;
-    const glucoseSummary = buildGlycemicSummary(experience?.glucoseReadings || []);
+    const glucoseSummary = buildGlycemicSummary(filteredGlucose.length ? filteredGlucose : allGlucose);
     const objectiveSource =
       experience?.clinicalObjective ||
       patientCard.objective ||
@@ -77,7 +107,7 @@ async function loadPatientClinicalRow(patientCard) {
     const objectiveCategory = categorizeObjectiveText(objectiveSource);
     const riskBucket = normalizeRiskBucket(patientCard.risk, glucoseSummary.last);
 
-    return {
+    const baseRow = {
       id: patientId,
       name: patientCard.name,
       email: patientCard.email || experience?.patient?.email_pac || '',
@@ -98,11 +128,27 @@ async function loadPatientClinicalRow(patientCard) {
       glucoseTir: glucoseSummary.tir,
       glucoseCount: glucoseSummary.count,
       mealsLoggedWeek: weekly.items.reduce((sum, item) => sum + (item.mealsLogged || 0), 0),
-      medicationsCount: (experience?.appState?.medicationEntries || []).length,
+      mealsInPeriod: filteredMeals.length,
+      insulinCount: filteredInsulin.length,
+      medicationsInPeriod: filteredPureMeds.length,
+      medicationsCount: filteredMedication.length,
       lastConsultaAt: patientCard.lastConsultaAt,
       nextConsultaAt: patientCard.nextConsultaAt,
       notes: patientCard.notes,
     };
+
+    return enrichPatientRowWithPeriodData(
+      baseRow,
+      {
+        filteredMeals,
+        filteredGlucose,
+        filteredMedication,
+        filteredInsulin,
+        filteredPureMeds: filteredPureMeds,
+      },
+      periodBounds,
+      inactiveDays
+    );
   } catch (error) {
     console.log('Erro ao montar linha clinica do relatorio:', patientId, error);
     const objectiveCategory = categorizeObjectiveText(patientCard.objective);
@@ -214,11 +260,17 @@ function summarizeConsultas(consultas = []) {
 
 const MAX_REPORT_PATIENTS = 80;
 
-export async function buildNutritionistReportBundle(usuarioLogado) {
+export async function buildNutritionistReportBundle(
+  usuarioLogado,
+  { period = '7days', startDate = '', endDate = '', inactiveDays = 7 } = {}
+) {
   const nutricionistaId = getNutritionistId(usuarioLogado);
   if (!nutricionistaId) {
     throw new Error('Nutricionista sem identificador para gerar relatorios.');
   }
+
+  const periodBounds = getReportPeriodBounds(period, startDate, endDate);
+  const periodLabel = resolveReportPeriodLabel(period, periodBounds);
 
   const [patientCards, consultas] = await Promise.all([
     listPatientsByNutritionist(nutricionistaId),
@@ -230,7 +282,9 @@ export async function buildNutritionistReportBundle(usuarioLogado) {
   const batches = chunkArray(scopedPatients, 2);
 
   for (const batch of batches) {
-    const batchRows = await Promise.all(batch.map((patient) => loadPatientClinicalRow(patient)));
+    const batchRows = await Promise.all(
+      batch.map((patient) => loadPatientClinicalRow(patient, periodBounds, inactiveDays))
+    );
     rows.push(...batchRows.filter(Boolean));
   }
 
@@ -251,8 +305,12 @@ export async function buildNutritionistReportBundle(usuarioLogado) {
     ? Math.round(weeklyValues.reduce((sum, value) => sum + value, 0) / weeklyValues.length)
     : averageAdherenceValue;
 
-  return {
+  const baseBundle = {
     generatedAt: formatNowBr(),
+    period,
+    periodBounds,
+    periodLabel,
+    inactiveDays,
     nutricionista: {
       id: nutricionistaId,
       nome:
@@ -281,6 +339,12 @@ export async function buildNutritionistReportBundle(usuarioLogado) {
     ranking: buildRanking(rows),
     patients: rows,
     consultas: summarizeConsultas(consultas),
+  };
+
+  return {
+    ...baseBundle,
+    portfolioAnalytics: buildPortfolioReportAnalytics(baseBundle),
+    dashboardAnalytics: buildReportsDashboardAnalytics(baseBundle),
   };
 }
 
@@ -549,4 +613,92 @@ export async function exportNutritionistReport({
   }
 
   return downloadTextFile(`${baseName}.txt`, buildRelatorioGeralTxt(bundle));
+}
+
+export async function exportNutritionistPortfolioReport(
+  usuarioLogado,
+  { period = '7days', startDate = '', endDate = '', inactiveDays = 7, format = 'pdf' } = {}
+) {
+  const bundle = await buildNutritionistReportBundle(usuarioLogado, {
+    period,
+    startDate,
+    endDate,
+    inactiveDays,
+  });
+  return exportNutritionistReport({ bundle, type: 'geral', format });
+}
+
+export async function buildNutritionistPatientReportBundle({
+  usuarioLogado,
+  patient,
+  period = '7days',
+  startDate = '',
+  endDate = '',
+}) {
+  const nutricionistaId = getNutritionistId(usuarioLogado);
+  const patientId = patient?.id || patient?.id_paciente_uuid || patient?.pacienteId;
+
+  if (!nutricionistaId || !patientId) {
+    throw new Error('Dados insuficientes para gerar o relatório do paciente.');
+  }
+
+  const linkedPatients = await listPatientsByNutritionist(nutricionistaId, { limit: 200 });
+  const isLinked = linkedPatients.some((item) => item.id === patientId);
+  if (!isLinked) {
+    throw new Error('Paciente não vinculado à nutricionista logada.');
+  }
+
+  const periodBounds = getReportPeriodBounds(period, startDate, endDate);
+  const periodLabel = resolveReportPeriodLabel(period, periodBounds);
+
+  const enrichedPayload = await enrichReportPayloadFromDatabase({
+    patient,
+    period,
+    startDate,
+    endDate,
+    periodLabel,
+    patientName:
+      patient?.name || patient?.nome_completo || patient?.nome_pac || patient?.email_pac || 'Paciente',
+  });
+
+  const personalProfile = await resolvePatientReportProfile(patient);
+  personalProfile.nutricionistaNome =
+    usuarioLogado?.nome_completo_nutri ||
+    usuarioLogado?.nome ||
+    personalProfile.nutricionistaNome;
+
+  const bundle = buildPatientClinicalReportBundle({ ...enrichedPayload, personalProfile });
+  bundle.nutricionista = {
+    nome:
+      usuarioLogado?.nome_completo_nutri ||
+      usuarioLogado?.nome ||
+      usuarioLogado?.email ||
+      'Nutricionista',
+    email: usuarioLogado?.email || usuarioLogado?.email_nutri || '',
+  };
+  bundle.nutritionistAlerts = buildNutritionistPatientAlerts(bundle);
+
+  return bundle;
+}
+
+export async function exportNutritionistPatientReport(
+  { usuarioLogado, patient, period = '7days', startDate = '', endDate = '' },
+  { mode = 'visual', format = 'pdf' } = {}
+) {
+  const bundle = await buildNutritionistPatientReportBundle({
+    usuarioLogado,
+    patient,
+    period,
+    startDate,
+    endDate,
+  });
+  const stamp = new Date().toISOString().slice(0, 10);
+  const safeName = `glicnutri_paciente_${stamp}`;
+
+  if (format !== 'pdf') {
+    throw new Error('Relatório do paciente disponível apenas em PDF.');
+  }
+
+  const pdfDoc = await buildNutritionistPatientReportPdf(bundle, { mode });
+  return downloadPdfDocument(`${safeName}.pdf`, pdfDoc);
 }
