@@ -106,37 +106,45 @@ export default function PatientDrawer({
           edges={Platform.OS === 'web' ? undefined : ['top']}
           style={[styles.drawer, { width: drawerWidth }]}
         >
-          <TouchableOpacity
-            activeOpacity={0.86}
-            style={[styles.header, compact && styles.headerCompact]}
-            onPress={() => {
-              onClose();
-              setTimeout(() => {
-                onNavigate('PacientePerfil');
-              }, 120);
-            }}
-          >
-            <View style={[styles.avatar, compact && styles.avatarCompact]}>
-              <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>
-                {(userName || 'P').trim().slice(0, 1).toUpperCase()}
-              </Text>
-            </View>
+          <View style={[styles.header, compact && styles.headerCompact]}>
+            <TouchableOpacity
+              activeOpacity={0.86}
+              style={styles.headerProfilePress}
+              onPress={() => {
+                onClose();
+                setTimeout(() => {
+                  onNavigate('PacientePerfil');
+                }, 120);
+              }}
+            >
+              <View style={[styles.avatar, compact && styles.avatarCompact]}>
+                <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>
+                  {(userName || 'P').trim().slice(0, 1).toUpperCase()}
+                </Text>
+              </View>
 
-            <View style={styles.headerText}>
-              <Text style={[styles.title, compact && styles.titleCompact]}>Perfil</Text>
-              <Text
-                style={[styles.userName, compact && styles.userNameCompact]}
-                numberOfLines={1}
-                ellipsizeMode="tail"
-              >
-                {getFirstName(userName)}
-              </Text>
-            </View>
+              <View style={styles.headerText}>
+                <Text style={[styles.title, compact && styles.titleCompact]}>Perfil</Text>
+                <Text
+                  style={[styles.userName, compact && styles.userNameCompact]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {getFirstName(userName)}
+                </Text>
+              </View>
+            </TouchableOpacity>
 
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Fechar menu"
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
               <Ionicons name="close" size={24} color={patientTheme.colors.onPrimary} />
             </TouchableOpacity>
-          </TouchableOpacity>
+          </View>
 
           <ScrollView
             style={styles.scroll}
@@ -238,7 +246,16 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.primary,
     flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
     ...patientShadow,
+  },
+  headerProfilePress: {
+    alignItems: 'flex-start',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minWidth: 0,
   },
   headerCompact: {
     margin: 12,
@@ -294,7 +311,7 @@ const styles = StyleSheet.create({
   },
   menuList: {
     paddingHorizontal: 16,
-    gap: 8,
+    gap: 6,
   },
   menuListCompact: {
     paddingHorizontal: 12,
@@ -303,12 +320,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 10,
     borderRadius: patientTheme.radius.lg,
   },
   menuItemCompact: {
     paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingVertical: 8,
   },
   menuItemActive: {
     backgroundColor: patientTheme.colors.primarySoft,

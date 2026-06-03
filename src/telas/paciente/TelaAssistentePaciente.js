@@ -24,8 +24,10 @@ import {
 import {
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getLatestGlucose,
   getPatientId,
+  isPatientExperienceCacheFresh,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
@@ -269,14 +271,29 @@ export default function PacienteAssistenteScreen({
     [patientId, usuarioLogado]
   );
   const [input, setInput] = useState('');
-  const [loading, setLoading] = useState(true);
+  const assistenteFetchLimits = useMemo(
+    () => mesclarLimitesDadosPaciente('assistente'),
+    []
+  );
+  const cachedAssistenteInicial = useMemo(
+    () =>
+      patientId ? getCachedPatientExperience(patientId, assistenteFetchLimits) : null,
+    [patientId, assistenteFetchLimits]
+  );
+  const [loading, setLoading] = useState(!cachedAssistenteInicial);
   const [saving, setSaving] = useState(false);
   const [assistantChatVisible, setAssistantChatVisible] = useState(false);
   const [hideSuggestedQuestions, setHideSuggestedQuestions] = useState(false);
-  const [patient, setPatient] = useState(null);
-  const [objectiveText, setObjectiveText] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
-  const [glucoseReadings, setGlucoseReadings] = useState([]);
+  const [patient, setPatient] = useState(cachedAssistenteInicial?.patient || null);
+  const [objectiveText, setObjectiveText] = useState(
+    cachedAssistenteInicial?.clinicalObjective || ''
+  );
+  const [appState, setAppState] = useState(
+    cachedAssistenteInicial?.appState || createDefaultAppState()
+  );
+  const [glucoseReadings, setGlucoseReadings] = useState(
+    cachedAssistenteInicial?.glucoseReadings || []
+  );
   const chatScrollRef = useRef(null);
 
   useEffect(() => {
@@ -311,9 +328,41 @@ export default function PacienteAssistenteScreen({
           return;
         }
 
+        const cachedExperience = patientId
+          ? getCachedPatientExperience(patientId, assistenteFetchLimits)
+          : null;
+        const cacheFresco =
+          patientId && isPatientExperienceCacheFresh(patientId, assistenteFetchLimits);
+
+        if (cachedExperience) {
+          if (!active) return;
+          setPatient(cachedExperience.patient);
+          setObjectiveText(cachedExperience.clinicalObjective);
+          setAppState(cachedExperience.appState);
+          setGlucoseReadings(cachedExperience.glucoseReadings);
+
+          if (cacheFresco) {
+            return;
+          }
+
+          fetchPatientExperience(patientId, {
+            patientContext: usuarioLogado,
+            ...assistenteFetchLimits,
+          })
+            .then((experience) => {
+              if (!active || !experience) return;
+              setPatient(experience.patient);
+              setObjectiveText(experience.clinicalObjective);
+              setAppState(experience.appState);
+              setGlucoseReadings(experience.glucoseReadings);
+            })
+            .catch((error) => console.log('Refresh assistente:', error));
+          return;
+        }
+
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
-          ...mesclarLimitesDadosPaciente('assistente'),
+          ...assistenteFetchLimits,
         });
 
         if (!active) return;
@@ -334,7 +383,7 @@ export default function PacienteAssistenteScreen({
     return () => {
       active = false;
     };
-  }, [patientId, canResolvePatient, usuarioLogado]);
+  }, [assistenteFetchLimits, patientId, canResolvePatient, usuarioLogado]);
 
   const mealEntries = Array.isArray(appState?.mealEntries) ? appState.mealEntries : [];
   const todayMealEntries = useMemo(() => getTodayMealEntries(mealEntries), [mealEntries]);

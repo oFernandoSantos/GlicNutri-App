@@ -31,6 +31,7 @@ const PATIENT_ROUTES = new Set([
   'PacienteChatNutricionista',
   'PacienteChatNutricionistaDetalhe',
   'PacientePerfilNutricionista',
+  'PacientePerfilMedico',
 ]);
 const NUTRITIONIST_ROUTES = new Set([
   'GerenciarPacientes',
@@ -84,6 +85,7 @@ const routeTitles = {
   PacienteChatNutricionista: 'Mensagens',
   PacienteChatNutricionistaDetalhe: 'Conversa',
   PacientePerfilNutricionista: 'Nutricionista',
+  PacientePerfilMedico: 'Médico',
   HomeNutricionista: 'GlicNutri',
   AdminHome: 'Admin',
   AdminAuditoria: 'Auditoria',
@@ -110,6 +112,7 @@ const routeTitles = {
 const ROUTE_BACK_FALLBACK = {
   PacienteChatNutricionistaDetalhe: 'PacienteChatNutricionista',
   PacientePerfilNutricionista: 'PacienteAgendamentos',
+  PacientePerfilMedico: 'PacienteAgendamentos',
   NutriProntuarioPaciente: 'GerenciarPacientes',
   NutriConsultaNutri: 'NutricionistaAgenda',
   AdminDetalheLogSistema: 'AdminLogsSistema',

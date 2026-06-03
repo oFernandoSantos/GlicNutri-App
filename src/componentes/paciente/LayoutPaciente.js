@@ -20,6 +20,7 @@ import {
   useKeyboardBottomInset,
 } from '../comum/RolagemComTeclado';
 import GuardiaoSessaoPaciente from './GuardiaoSessaoPaciente';
+import HostToastPaciente from '../comum/HostToastPaciente';
 
 export default function PatientScreenLayout({
   navigation,
@@ -33,6 +34,8 @@ export default function PatientScreenLayout({
   showTabBar,
   scrollEnabled = true,
   footerOverlay,
+  footerDocked = false,
+  footerDockedHeight = 88,
   topOverlay,
   refreshControl,
   lockFixedContent = false,
@@ -46,7 +49,14 @@ export default function PatientScreenLayout({
       ? showTabBar
       : isPatientMainTabRoute(route?.name) && !hasFloatingFooterOverlay;
   const showHeader = Boolean(title || subtitle || rightAction);
-  const tabBarExtra = shouldShowTabBar ? PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16 : 32;
+  const dockedFooterInset = footerDocked ? footerDockedHeight + 20 : 0;
+  const tabBarExtra = shouldShowTabBar
+    ? PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16 + dockedFooterInset
+    : 32;
+  const scrollBottomInset =
+    footerDocked && shouldShowTabBar
+      ? PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + footerDockedHeight + 28
+      : 0;
   const keyboardBottomPadding = useKeyboardBottomInset(tabBarExtra);
   const keyboardOffset = getKeyboardVerticalOffset(insets);
 
@@ -83,11 +93,15 @@ export default function PatientScreenLayout({
 
         {scrollEnabled ? (
           <ScrollView
-            style={[styles.scroll, Platform.OS === 'web' && styles.webScroll]}
+            style={[
+              styles.scroll,
+              Platform.OS === 'web' && (footerDocked ? styles.webScrollDocked : styles.webScroll),
+            ]}
             contentContainerStyle={[
               styles.content,
-              shouldShowTabBar && styles.contentWithTabBar,
+              shouldShowTabBar && !footerDocked && styles.contentWithTabBar,
               Platform.OS === 'web' && styles.webContent,
+              scrollBottomInset ? { paddingBottom: scrollBottomInset } : null,
               keyboardAware && { paddingBottom: keyboardBottomPadding },
               contentContainerStyle,
             ]}
@@ -129,9 +143,18 @@ export default function PatientScreenLayout({
           <View
             style={[
               styles.footerOverlay,
+              footerDocked && styles.footerOverlayDocked,
               Platform.OS === 'web' && styles.footerOverlayWeb,
-              shouldShowTabBar && styles.footerOverlayWithTabBar,
-              Platform.OS === 'web' && shouldShowTabBar && styles.footerOverlayWithTabBarWeb,
+              footerDocked && Platform.OS === 'web' && styles.footerOverlayDockedWeb,
+              shouldShowTabBar &&
+                (footerDocked
+                  ? styles.footerOverlayWithTabBarDocked
+                  : styles.footerOverlayWithTabBar),
+              Platform.OS === 'web' &&
+                shouldShowTabBar &&
+                (footerDocked
+                  ? styles.footerOverlayWithTabBarDockedWeb
+                  : styles.footerOverlayWithTabBarWeb),
             ]}
             pointerEvents="box-none"
           >
@@ -147,6 +170,8 @@ export default function PatientScreenLayout({
           usuarioLogado={usuarioLogado}
         />
       ) : null}
+
+      <HostToastPaciente posicao="top" />
     </SafeAreaView>
     </GuardiaoSessaoPaciente>
   );
@@ -178,6 +203,10 @@ const styles = StyleSheet.create({
   webScroll: {
     overflowY: 'visible',
     overflowX: 'hidden',
+  },
+  webScrollDocked: {
+    overflowX: 'hidden',
+    overflowY: 'auto',
   },
   headerText: {
     marginRight: 72,
@@ -254,5 +283,33 @@ const styles = StyleSheet.create({
   },
   footerOverlayWithTabBarWeb: {
     bottom: PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE + 16,
+  },
+  footerOverlayDocked: {
+    backgroundColor: patientTheme.colors.background,
+    borderTopColor: patientTheme.colors.border,
+    borderTopWidth: 1,
+    bottom: 0,
+    elevation: 16,
+    left: 0,
+    paddingBottom: 12,
+    paddingHorizontal: patientTheme.spacing.screen,
+    paddingTop: 10,
+    right: 0,
+    shadowColor: '#1d232b',
+    shadowOffset: { width: 0, height: -4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    zIndex: 960,
+  },
+  footerOverlayDockedWeb: {
+    left: 0,
+    right: 0,
+    zIndex: 960,
+  },
+  footerOverlayWithTabBarDocked: {
+    bottom: PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE,
+  },
+  footerOverlayWithTabBarDockedWeb: {
+    bottom: PATIENT_TAB_BAR_HEIGHT + PATIENT_TAB_BAR_SPACE,
   },
 });

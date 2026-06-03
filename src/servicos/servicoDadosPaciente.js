@@ -1624,6 +1624,26 @@ export async function resolveCanonicalPatientId(patientId, options = {}) {
   );
 }
 
+function resolveCurrentPatientSeed(options = {}) {
+  if (options.currentPatient?.id_paciente_uuid) {
+    return options.currentPatient;
+  }
+
+  const context = options.patientContext;
+  if (!context) {
+    return null;
+  }
+
+  const contextId = context.id_paciente_uuid || getPatientId(context);
+  if (!contextId) {
+    return null;
+  }
+
+  return context.id_paciente_uuid
+    ? context
+    : { ...context, id_paciente_uuid: contextId };
+}
+
 export async function fetchPatientExperience(patientId, options = {}) {
   const mergedOptions = {
     ...options,
@@ -1634,8 +1654,10 @@ export async function fetchPatientExperience(patientId, options = {}) {
       options.planOnly === true,
   };
 
+  const seededPatient = resolveCurrentPatientSeed(mergedOptions);
+
   const candidateId =
-    options.currentPatient?.id_paciente_uuid ||
+    seededPatient?.id_paciente_uuid ||
     patientId ||
     getPatientId(options.patientContext) ||
     null;
@@ -1648,8 +1670,11 @@ export async function fetchPatientExperience(patientId, options = {}) {
   }
 
   const patient =
-    options.currentPatient ||
-    (await fetchPatientById(patientId, mergedOptions));
+    seededPatient ||
+    (await fetchPatientById(patientId, {
+      ...mergedOptions,
+      currentPatient: seededPatient,
+    }));
 
   const canonicalId =
     patient?.id_paciente_uuid ||

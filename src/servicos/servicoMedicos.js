@@ -112,7 +112,7 @@ function enrichMedicoFallback(item) {
     bio_resumo:
       item?.bio_resumo ||
       'Acompanhamento clinico de diabetes, glicemia, medicacao e insulina por teleconsulta.',
-    valor_consulta_centavos: Number(item?.valor_consulta_centavos) || 15000,
+    valor_consulta_centavos: Number(item?.valor_consulta_centavos) || 25000,
     aceita_convenio: item?.aceita_convenio !== false,
     rating_media:
       Number.isFinite(Number(item?.rating_media)) && Number(item?.rating_media) > 0

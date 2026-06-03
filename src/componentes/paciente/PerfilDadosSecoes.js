@@ -86,7 +86,7 @@ export function TherapyQuickStrip({ options, plansByCategory, onPressCategory })
     <View style={styles.therapyQuickCard}>
       <Text style={styles.therapyQuickTitle}>Insulinas em uso</Text>
       <Text style={styles.therapyQuickHelper}>
-        Toque para revisar doses e horarios. Seu nutricionista usa esses dados no plano.
+        Toque para revisar doses e horários. Seu nutricionista usa esses dados no plano.
       </Text>
 
       <View style={styles.therapyQuickRow}>
@@ -99,7 +99,7 @@ export function TherapyQuickStrip({ options, plansByCategory, onPressCategory })
             String(item?.horario || item?.dose || item?.dia_semana).trim()
           ).length;
           const metaText = configured
-            ? [usageText, doseText, scheduleCount ? `${scheduleCount} horario(s)` : '']
+            ? [usageText, doseText, scheduleCount ? `${scheduleCount} horário(s)` : '']
                 .filter(Boolean)
                 .join(' • ') || 'Plano salvo'
             : 'Toque para preencher';

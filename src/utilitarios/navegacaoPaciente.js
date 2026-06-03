@@ -32,6 +32,7 @@ export const PATIENT_APP_ROUTE_NAMES = new Set([
   'PacienteChatNutricionistaDetalhe',
   'PacientePrevisaoML',
   'PacientePerfilNutricionista',
+  'PacientePerfilMedico',
 ]);
 
 export function patientAppAlreadyActive(navigation) {

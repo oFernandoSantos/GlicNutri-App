@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import CabecalhoModalPaciente from '../../componentes/paciente/CabecalhoModalPaciente';
 import MensagemInline from '../../componentes/comum/MensagemInline';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { getPatientDisplayName, getPatientId } from '../../servicos/servicoDadosPaciente';
@@ -26,39 +27,39 @@ import {
 
 const ASSUNTOS_SUPORTE_POR_CATEGORIA = {
   bug: [
-    'Erro ao salvar informacoes',
+    'Erro ao salvar informações',
     'Tela travando ou fechando',
-    'Botao nao funciona',
-    'Problema com notificacoes',
+    'Botão não funciona',
+    'Problema com notificações',
   ],
   duvida: [
     'Como usar uma funcionalidade',
     'Como falar com a nutricionista',
-    'Como registrar refeicoes',
+    'Como registrar refeições',
     'Como registrar glicose',
   ],
   conta: [
-    'Nao consigo entrar no app',
+    'Não consigo entrar no app',
     'Problema com senha',
     'Problema com cadastro',
     'Atualizar dados da conta',
   ],
   dados: [
-    'Informacao errada no perfil',
+    'Informação errada no perfil',
     'Plano alimentar incorreto',
-    'Historico com dados inconsistentes',
-    'Consulta nao aparece',
+    'Histórico com dados inconsistentes',
+    'Consulta não aparece',
   ],
   sugestao: [
     'Melhoria de usabilidade',
     'Nova funcionalidade',
     'Melhoria no visual da tela',
-    'Melhoria nas notificacoes',
+    'Melhoria nas notificações',
   ],
   outro: [
     'Atendimento geral',
-    'Relato de experiencia',
-    'Solicitacao diversa',
+    'Relato de experiência',
+    'Solicitação diversa',
   ],
 };
 
@@ -105,7 +106,7 @@ export default function PacienteSuporteScreen({
     } catch (error) {
       setFeedback({
         tipo: 'erro',
-        texto: error?.message || 'Não foi possível selecionar a imagem.',
+        texto: error?.message || 'Não foi possível usar esta imagem.',
       });
     } finally {
       setCarregandoPrint(false);
@@ -145,7 +146,7 @@ export default function PacienteSuporteScreen({
       setMensagem('');
       setPrintAsset(null);
 
-      let textoSucesso = `Relato enviado. Se precisarmos de mais detalhes, respondemos em ${EMAIL_CONTATO_SUPORTE}.`;
+      let textoSucesso = `Recebemos seu relato. Se precisarmos de mais detalhes, respondemos em ${EMAIL_CONTATO_SUPORTE}.`;
       if (printAsset?.uri && resultado.printFotoUrl) {
         textoSucesso += ' O print foi anexado ao relato.';
       } else if (printAsset?.uri && resultado.avisoPrint) {
@@ -159,7 +160,7 @@ export default function PacienteSuporteScreen({
     } catch (error) {
       setFeedback({
         tipo: 'erro',
-        texto: error?.message || 'Não foi possível enviar o relato. Tente novamente.',
+        texto: error?.message || 'Não foi possível enviar seu relato. Tente novamente.',
       });
     } finally {
       setEnviando(false);
@@ -467,6 +468,10 @@ export default function PacienteSuporteScreen({
       >
         <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
+            <CabecalhoModalPaciente
+              title="Confirmar envio?"
+              onClose={() => setConfirmacaoEnvioVisible(false)}
+            />
             <View style={styles.confirmIconWrap}>
               <Ionicons
                 name="paper-plane-outline"
@@ -474,9 +479,8 @@ export default function PacienteSuporteScreen({
                 color={patientTheme.colors.primaryDark}
               />
             </View>
-            <Text style={styles.confirmTitle}>Confirmar envio?</Text>
             <Text style={styles.confirmText}>
-              Seu relato sera enviado para a equipe de suporte com as informacoes preenchidas.
+              Seu relato será enviado para a equipe de suporte com as informações preenchidas.
             </Text>
             <View style={styles.confirmActions}>
               <TouchableOpacity

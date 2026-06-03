@@ -1,4 +1,5 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   ActivityIndicator,
   Modal,
@@ -14,6 +15,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import CalendarioHorarios from '../../componentes/agendamento/CalendarioHorarios';
+import CabecalhoModalPaciente from '../../componentes/paciente/CabecalhoModalPaciente';
 import FiltrosAgendamentoAvancado, {
   parseDateBrToKey,
 } from '../../componentes/agendamento/FiltrosAgendamentoAvancado';
@@ -25,7 +27,8 @@ import {
   ChipFiltro,
   EsqueletoAgendamento,
 } from '../../componentes/agendamento/uiAgendamento';
-import MensagemInline from '../../componentes/comum/MensagemInline';
+import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
+import { resolverMensagemPaciente } from '../../utilitarios/mensagensPaciente';
 import { ConsultaStatusBadge } from '../../componentes/comum/ui';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import {
@@ -61,6 +64,11 @@ import {
   subscribeNotificacoesConsulta,
 } from '../../servicos/servicoNotificacoesConsulta';
 import { criarGuardiaoCarregamentoInicial, executarEmLotes } from '../../utilitarios/carregamentoTela';
+import { formatCrmMedico, formatCrnNutricionista } from '../../utilitarios/formatRegistroProfissional';
+import {
+  getMedicoFotoModeloUri,
+  getNutricionistaFotoModeloUri,
+} from '../../utilitarios/fotoModeloProfissional';
 import {
   filterNutritionists,
   filterSlotsByDateRange,
@@ -114,20 +122,6 @@ function getPacienteNome(usuario) {
   return usuario?.nome_completo || usuario?.nome_pac || usuario?.email_pac || 'Paciente';
 }
 
-function getMedicoAvatarUri(medico) {
-  const seed = encodeURIComponent(
-    String(medico?.id_medico_uuid || medico?.nome_completo_medico || 'medico').trim()
-  );
-  return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=d1fae5,c0aede,d1d4f9,ffd5dc,ffdfbf`;
-}
-
-function getNutriAvatarUri(nutri) {
-  const seed = encodeURIComponent(
-    String(nutri?.id_nutricionista_uuid || nutri?.nome_completo_nutri || 'nutri').trim()
-  );
-  return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
-}
-
 function resolveProfissionalDaConsulta(consulta, nutricionistas, medicos) {
   if (consulta?.medico_id) {
     const medico =
@@ -137,7 +131,7 @@ function resolveProfissionalDaConsulta(consulta, nutricionistas, medicos) {
       medico,
       nome: medico?.nome_completo_medico || 'Médico',
       especialidade: getMedicoEspecialidadeLabel(medico),
-      avatarUri: getMedicoAvatarUri(medico),
+      avatarUri: getMedicoFotoModeloUri(medico),
     };
   }
 
@@ -150,7 +144,7 @@ function resolveProfissionalDaConsulta(consulta, nutricionistas, medicos) {
     medico: null,
     nome: nutri?.nome_completo_nutri || 'Profissional',
     especialidade: getNutriEspecialidadeLabel(nutri),
-    avatarUri: getNutriAvatarUri(nutri),
+    avatarUri: getNutricionistaFotoModeloUri(nutri),
   };
 }
 
@@ -167,7 +161,7 @@ export default function PacienteAgendamentosScreen({
   const [loadError, setLoadError] = useState(null);
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [confirming, setConfirming] = useState(false);
-  const [mensagem, setMensagem] = useState(null);
+  const mensagensSessaoRef = useRef(new Set());
 
   const [nutricionistas, setNutricionistas] = useState([]);
   const [medicos, setMedicos] = useState([]);
@@ -206,6 +200,21 @@ export default function PacienteAgendamentosScreen({
   const [nutrisComAgendaIds, setNutrisComAgendaIds] = useState(new Set());
   const [loadingNutrisDisponiveis, setLoadingNutrisDisponiveis] = useState(false);
   const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
+
+  useFocusEffect(
+    useCallback(() => {
+      mensagensSessaoRef.current = new Set();
+      return undefined;
+    }, [])
+  );
+
+  const exibirMensagemAgendamentos = useCallback((payload) => {
+    const resolved = resolverMensagemPaciente(payload);
+    const chave = `${resolved.tipo}|${resolved.texto}|${resolved.subtexto}`;
+    if (mensagensSessaoRef.current.has(chave)) return;
+    mensagensSessaoRef.current.add(chave);
+    mostrarToastPaciente(resolved);
+  }, []);
 
   const dateFromKey = useMemo(() => parseDateBrToKey(dateFromBr), [dateFromBr]);
   const dateToKey = useMemo(() => parseDateBrToKey(dateToBr), [dateToBr]);
@@ -321,7 +330,7 @@ export default function PacienteAgendamentosScreen({
       }
     } catch (error) {
       console.log('Erro ao carregar agendamento:', error);
-      setLoadError('Nao foi possivel carregar os profissionais. Verifique a conexao e tente novamente.');
+      setLoadError('Não foi possível carregar os profissionais. Verifique a conexão e tente novamente.');
     }
   }, [
     patientId,
@@ -355,9 +364,9 @@ export default function PacienteAgendamentosScreen({
     } catch (error) {
       console.log('Erro ao carregar horarios:', error);
       setSlots([]);
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'erro',
-        texto: 'Nao foi possivel carregar os horarios deste profissional.',
+        texto: 'Não foi possível carregar os horários deste profissional.',
       });
     } finally {
       setLoadingSlots(false);
@@ -410,7 +419,7 @@ export default function PacienteAgendamentosScreen({
         const latest = items?.[0];
         if (latest && !latest._shown) {
           latest._shown = true;
-          setMensagem({
+          exibirMensagemAgendamentos({
             tipo: latest.evento === 'cancelada' ? 'aviso' : 'sucesso',
             texto: latest.mensagem || latest.titulo,
           });
@@ -434,9 +443,9 @@ export default function PacienteAgendamentosScreen({
         destinatarioId: patientId,
       });
     } catch (error) {
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'erro',
-        texto: 'Nao foi possivel carregar as notificacoes.',
+        texto: 'Não foi possível carregar as notificações.',
       });
     }
   }
@@ -741,7 +750,7 @@ export default function PacienteAgendamentosScreen({
 
   async function handleConfirmarConsulta() {
     if (!selectedSlot || !selectedNutri?.id_nutricionista_uuid || !patientId) {
-      setMensagem({ tipo: 'aviso', texto: 'Selecione um horario disponivel para continuar.' });
+      exibirMensagemAgendamentos({ tipo: 'aviso', texto: 'Selecione um horário disponível para continuar.' });
       return;
     }
 
@@ -753,10 +762,10 @@ export default function PacienteAgendamentosScreen({
       });
 
       if (!linked) {
-        setMensagem({
+        exibirMensagemAgendamentos({
           tipo: 'aviso',
           texto:
-            'Solicite o acompanhamento primeiro. Depois que o nutricionista aprovar, o agendamento fica liberado.',
+            'Solicite o acompanhamento primeiro. Depois que a nutricionista aprovar, o agendamento fica liberado.',
         });
         return;
       }
@@ -790,11 +799,11 @@ export default function PacienteAgendamentosScreen({
       await loadSlots();
     } catch (error) {
       console.log('Erro ao confirmar:', error);
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'erro',
         texto:
           error?.message ||
-          'Nao foi possivel confirmar o agendamento. Verifique a conexao e tente novamente.',
+          'Não foi possível confirmar o agendamento. Verifique a conexão e tente novamente.',
       });
     } finally {
       setConfirming(false);
@@ -806,9 +815,9 @@ export default function PacienteAgendamentosScreen({
     try {
       await abrirLinkGoogleMeet(link);
     } catch (error) {
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'erro',
-        texto: error?.message || 'Nao foi possivel abrir o Google Meet.',
+        texto: error?.message || 'Não foi possível abrir o Google Meet.',
       });
     }
   }
@@ -822,7 +831,7 @@ export default function PacienteAgendamentosScreen({
         actor: usuarioLogado,
         origin: 'agendamentos_paciente',
       });
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'sucesso',
         texto: 'Consulta cancelada com sucesso.',
       });
@@ -831,9 +840,9 @@ export default function PacienteAgendamentosScreen({
         await loadSlots();
       }
     } catch (error) {
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'erro',
-        texto: error?.message || 'Nao foi possivel cancelar a consulta.',
+        texto: error?.message || 'Não foi possível cancelar a consulta.',
       });
     }
   }
@@ -847,7 +856,7 @@ export default function PacienteAgendamentosScreen({
         actor: usuarioLogado,
         origin: 'agendamentos_paciente',
       });
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'sucesso',
         texto: 'Consulta confirmada com sucesso.',
       });
@@ -856,9 +865,9 @@ export default function PacienteAgendamentosScreen({
         await loadSlots();
       }
     } catch (error) {
-      setMensagem({
+      exibirMensagemAgendamentos({
         tipo: 'erro',
-        texto: error?.message || 'Nao foi possivel confirmar a consulta.',
+        texto: error?.message || 'Não foi possível confirmar a consulta.',
       });
     }
   }
@@ -945,13 +954,13 @@ export default function PacienteAgendamentosScreen({
             name={nutri.nome_completo_nutri}
             size={56}
             online
-            imageUri={getNutriAvatarUri(nutri)}
+            imageUri={getNutricionistaFotoModeloUri(nutri)}
           />
           <View style={styles.proBody}>
             <Text style={styles.proName}>{nutri.nome_completo_nutri}</Text>
             <Text style={styles.proSpec}>{spec} · Google Meet</Text>
             <Text style={styles.proCrn}>
-              {nutri.crm_numero ? `CRN ${nutri.crm_numero}` : 'CRN nao informado'}
+              {formatCrnNutricionista(nutri.crm_numero)}
             </Text>
 
             <Text numberOfLines={1} style={styles.proSpecVisible}>
@@ -981,7 +990,7 @@ export default function PacienteAgendamentosScreen({
               {bioPreview}
             </Text>
             <Text style={[styles.proAvailability, hasAgenda ? styles.proAvailabilityOpen : null]}>
-              {hasAgenda ? 'Agenda disponivel no periodo selecionado' : 'Sem agenda no periodo selecionado'}
+              {hasAgenda ? 'Agenda disponível no período selecionado' : 'Sem agenda no período selecionado'}
             </Text>
           </View>
         </View>
@@ -1047,7 +1056,7 @@ export default function PacienteAgendamentosScreen({
     const isLinkedMedico = forceLinked || linkedMedicoId === medico.id_medico_uuid;
     const bioPreview =
       medico.bio_resumo ||
-      'Acompanhamento clinico de diabetes, glicemia, medicacao e insulina por teleconsulta.';
+      'Acompanhamento clínico de diabetes, glicemia, medicação e insulina por teleconsulta.';
 
     return (
       <CartaoAgendamento
@@ -1072,13 +1081,13 @@ export default function PacienteAgendamentosScreen({
             name={medico.nome_completo_medico}
             size={56}
             online
-            imageUri={getMedicoAvatarUri(medico)}
+            imageUri={getMedicoFotoModeloUri(medico)}
           />
           <View style={styles.proBody}>
             <Text style={styles.proName}>{medico.nome_completo_medico}</Text>
             <Text style={styles.proSpec}>{spec} · Teleconsulta</Text>
             <Text style={styles.proCrn}>
-              {medico.crm_medico ? `CRM ${medico.crm_medico}` : 'CRM nao informado'}
+              {formatCrmMedico(medico.crm_medico)}
             </Text>
 
             <Text numberOfLines={1} style={styles.proSpecVisible}>
@@ -1089,7 +1098,7 @@ export default function PacienteAgendamentosScreen({
               <Text style={styles.proMeta}>{rating}</Text>
               <Text style={styles.proMeta}>({totalAvaliacoes})</Text>
               <Text style={styles.proMetaDot}>·</Text>
-              <Text style={styles.proMeta}>{expAnos} anos de experiencia</Text>
+              <Text style={styles.proMeta}>{expAnos} anos de experiência</Text>
             </View>
             <Text numberOfLines={2} style={styles.proBio}>
               {bioPreview}
@@ -1097,7 +1106,7 @@ export default function PacienteAgendamentosScreen({
             <Text style={[styles.proAvailability, styles.proAvailabilityOpen]}>
               {isLinkedMedico
                 ? 'Médico responsável pelo seu acompanhamento clínico'
-                : 'Disponivel para vinculo de acompanhamento clinico'}
+                : 'Disponível para vínculo de acompanhamento clínico'}
             </Text>
           </View>
         </View>
@@ -1116,7 +1125,7 @@ export default function PacienteAgendamentosScreen({
               color={patientTheme.colors.primaryDark}
             />
             <Text style={styles.highlightText}>
-              {medico.aceita_convenio ? 'Aceita convenio' : 'Particular'}
+              {medico.aceita_convenio ? 'Aceita convênio' : 'Particular'}
             </Text>
           </View>
         </View>
@@ -1151,16 +1160,7 @@ export default function PacienteAgendamentosScreen({
       footerOverlay={footerOverlay}
       refreshControl={<RefreshControl refreshing={refreshing} onRefresh={onRefresh} />}
     >
-      {mensagem?.texto ? (
-        <MensagemInline
-          tipo={mensagem.tipo || 'aviso'}
-          texto={mensagem.texto}
-          onFechar={() => setMensagem(null)}
-          autoOcultarMs={mensagem.tipo === 'sucesso' ? 5000 : 0}
-        />
-      ) : null}
-
-      {!mensagem?.texto && activeSection === 'consultas' ? (
+      {activeSection === 'consultas' ? (
         <>
           <CampoBuscaAgendamento
             value={consultasSearchQuery}
@@ -1322,7 +1322,7 @@ export default function PacienteAgendamentosScreen({
             placeholder="Buscar por nome, CRM ou especialidade"
             trailingIcon="funnel-outline"
             onTrailingPress={() => setFiltrosAbertos((prev) => !prev)}
-            trailingAccessibilityLabel="Abrir filtros de medicos"
+            trailingAccessibilityLabel="Abrir filtros de médicos"
             trailingActive={filtrosAbertos}
           />
 
@@ -1395,7 +1395,12 @@ export default function PacienteAgendamentosScreen({
           style={[styles.segmentedOption, activeSection === 'agendar' && styles.segmentedOptionActive]}
           onPress={() => setActiveSection('agendar')}
         >
-          <Text style={[styles.segmentedText, activeSection === 'agendar' && styles.segmentedTextActive]}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            style={[styles.segmentedText, activeSection === 'agendar' && styles.segmentedTextActive]}
+          >
             Nutricionistas
           </Text>
         </TouchableOpacity>
@@ -1404,7 +1409,12 @@ export default function PacienteAgendamentosScreen({
           style={[styles.segmentedOption, activeSection === 'medicos' && styles.segmentedOptionActive]}
           onPress={() => setActiveSection('medicos')}
         >
-          <Text style={[styles.segmentedText, activeSection === 'medicos' && styles.segmentedTextActive]}>
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            style={[styles.segmentedText, activeSection === 'medicos' && styles.segmentedTextActive]}
+          >
             Médicos
           </Text>
         </TouchableOpacity>
@@ -1413,8 +1423,13 @@ export default function PacienteAgendamentosScreen({
           style={[styles.segmentedOption, activeSection === 'consultas' && styles.segmentedOptionActive]}
           onPress={() => setActiveSection('consultas')}
         >
-          <Text style={[styles.segmentedText, activeSection === 'consultas' && styles.segmentedTextActive]}>
-            Minhas Consultas
+          <Text
+            numberOfLines={1}
+            adjustsFontSizeToFit
+            minimumFontScale={0.82}
+            style={[styles.segmentedText, activeSection === 'consultas' && styles.segmentedTextActive]}
+          >
+            Minhas{'\u00A0'}consultas
           </Text>
         </TouchableOpacity>
       </View>
@@ -1445,7 +1460,7 @@ export default function PacienteAgendamentosScreen({
                     name={selectedNutri?.nome_completo_nutri}
                     size={42}
                     online
-                    imageUri={getNutriAvatarUri(selectedNutri)}
+                    imageUri={getNutricionistaFotoModeloUri(selectedNutri)}
                   />
                   <View style={styles.proBody}>
                     <Text style={styles.proName}>{selectedNutri?.nome_completo_nutri}</Text>
@@ -1486,11 +1501,11 @@ export default function PacienteAgendamentosScreen({
           {assignedNutri ? (
             <View style={styles.sectionHeaderRow}>
               <View>
-                <Text style={styles.sectionTitle}>Nutricionista responsável pelo acompanhamento</Text>
+                <Text style={styles.sectionTitle}>Sua nutricionista</Text>
                 <Text style={styles.sectionSubtitle}>
                   {nutrisComAgendaIds.has(assignedNutri.id_nutricionista_uuid)
-                    ? 'Seu profissional de acompanhamento aparece primeiro para facilitar o agendamento.'
-                    : 'Sem horários no período selecionado. Ajuste as datas ou aguarde novas vagas.'}
+                    ? 'Vinculada. Toque em Agendar nos horários.'
+                    : 'Vinculada. Sem horários no filtro — tente outras datas.'}
                 </Text>
               </View>
             </View>
@@ -1513,10 +1528,10 @@ export default function PacienteAgendamentosScreen({
               </Text>
               <Text style={styles.sectionSubtitle}>
                 {linkedNutricionistaId
-                  ? 'Voce pode visualizar outros perfis, mas so troca de nutricionista apos desvincular o atual.'
+                  ? 'Para trocar, desvincule a atual antes.'
                   : loadingNutrisDisponiveis
-                  ? 'Verificando disponibilidade real...'
-                  : `${outrosNutrisDisponiveis.length} profissional(is) encontrado(s) no banco`}
+                  ? 'Carregando agendas...'
+                  : `${outrosNutrisDisponiveis.length} com agenda no período`}
               </Text>
             </View>
             {loadingNutrisDisponiveis ? (
@@ -1558,7 +1573,7 @@ export default function PacienteAgendamentosScreen({
             <>
               <View style={styles.sectionHeaderRow}>
                 <View>
-                  <Text style={styles.sectionTitle}>Calendario de horarios</Text>
+                  <Text style={styles.sectionTitle}>Calendário de horários</Text>
                   <Text style={styles.sectionSubtitle}>
                     {selectedNutri?.nome_completo_nutri || 'Selecione um profissional'}
                   </Text>
@@ -1568,7 +1583,7 @@ export default function PacienteAgendamentosScreen({
 
               {(dateFromKey || dateToKey) && !slots.length && !loadingSlots ? (
                 <CartaoAgendamento style={styles.emptyCard}>
-                  <Text style={styles.emptyTitle}>Sem horarios no periodo</Text>
+                  <Text style={styles.emptyTitle}>Sem horários no período</Text>
                   <Text style={styles.emptyText}>
                     Tente outras datas ou remova parte dos filtros para ver novas opções.
                   </Text>
@@ -1595,9 +1610,9 @@ export default function PacienteAgendamentosScreen({
               {assignedMedico ? (
                 <View style={styles.sectionHeaderRow}>
                   <View>
-                    <Text style={styles.sectionTitle}>Médico responsável pelo acompanhamento</Text>
+                    <Text style={styles.sectionTitle}>Seu médico</Text>
                     <Text style={styles.sectionSubtitle}>
-                      Seu médico de acompanhamento aparece primeiro para facilitar o vínculo clínico.
+                      Vinculado. Toque em Agendar nos horários.
                     </Text>
                   </View>
                 </View>
@@ -1616,8 +1631,8 @@ export default function PacienteAgendamentosScreen({
                   </Text>
                   <Text style={styles.sectionSubtitle}>
                     {linkedMedicoId
-                      ? 'Voce pode visualizar outros perfis, mas so troca de médico apos desvincular o atual.'
-                      : `${filteredMedicosBase.length} médico(s) encontrado(s) no banco`}
+                      ? 'Para trocar, desvincule o atual antes.'
+                      : `${filteredMedicosBase.length} médico(s) no período`}
                   </Text>
                 </View>
               </View>
@@ -1635,7 +1650,7 @@ export default function PacienteAgendamentosScreen({
                 <CartaoAgendamento style={styles.emptyCard}>
                   <Text style={styles.emptyTitle}>Nenhum outro médico listado</Text>
                   <Text style={styles.emptyText}>
-                    No momento, apenas seu médico de acompanhamento esta listado acima.
+                    No momento, apenas seu médico de acompanhamento está listado acima.
                   </Text>
                 </CartaoAgendamento>
               ) : null}
@@ -1804,9 +1819,19 @@ export default function PacienteAgendamentosScreen({
         </View>
       ) : null}
 
-      <Modal visible={confirmModalVisible} transparent animationType="fade">
+      <Modal
+        visible={confirmModalVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setConfirmModalVisible(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={styles.modalCard}>
+            <CabecalhoModalPaciente
+              title="Consulta confirmada"
+              onClose={() => setConfirmModalVisible(false)}
+              titleCentered
+            />
             <View style={styles.modalIcon}>
               <Ionicons
                 name="checkmark-circle"
@@ -1814,7 +1839,6 @@ export default function PacienteAgendamentosScreen({
                 color={patientTheme.colors.primaryDark}
               />
             </View>
-            <Text style={styles.modalTitle}>Consulta confirmada</Text>
             <Text style={styles.modalText}>
               {lastBooking?.nutri?.nome_completo_nutri}
               {'\n'}
@@ -1831,9 +1855,9 @@ export default function PacienteAgendamentosScreen({
                 try {
                   await abrirLinkGoogleMeet(lastBooking?.meetLink);
                 } catch (error) {
-                  setMensagem({
+                  exibirMensagemAgendamentos({
                     tipo: 'erro',
-                    texto: error?.message || 'Link do Meet indisponivel.',
+                    texto: error?.message || 'Link do Meet indisponível.',
                   });
                 }
               }}
@@ -1847,10 +1871,18 @@ export default function PacienteAgendamentosScreen({
         </View>
       </Modal>
 
-      <Modal visible={notificacoesModal} transparent animationType="fade">
+      <Modal
+        visible={notificacoesModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setNotificacoesModal(false)}
+      >
         <View style={styles.modalOverlay}>
           <View style={[styles.modalCard, styles.notifCard]}>
-            <Text style={styles.modalTitle}>Notificacoes</Text>
+            <CabecalhoModalPaciente
+              title="Notificações"
+              onClose={() => setNotificacoesModal(false)}
+            />
             <ScrollView style={styles.notifList}>
               {notificacoes.length ? (
                 notificacoes.map((item) => (
@@ -1860,7 +1892,7 @@ export default function PacienteAgendamentosScreen({
                   </View>
                 ))
               ) : (
-                <Text style={styles.emptyText}>Nenhuma notificacao recente.</Text>
+                <Text style={styles.emptyText}>Nenhuma notificação recente.</Text>
               )}
             </ScrollView>
             <BotaoAgendamento
@@ -1887,10 +1919,10 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     flexDirection: 'row',
-    gap: 8,
+    gap: 4,
     marginBottom: 12,
     minHeight: Platform.OS === 'web' ? 44 : 42,
-    padding: 5,
+    padding: 4,
     width: '100%',
   },
   segmentedOption: {
@@ -1899,15 +1931,18 @@ const styles = StyleSheet.create({
     flex: 1,
     justifyContent: 'center',
     minHeight: Platform.OS === 'web' ? 30 : 28,
-    paddingHorizontal: 12,
+    minWidth: 0,
+    paddingHorizontal: 6,
   },
   segmentedOptionActive: {
     backgroundColor: '#ffffff',
   },
   segmentedText: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: '700',
+    textAlign: 'center',
+    width: '100%',
   },
   segmentedTextActive: {
     color: patientTheme.colors.text,

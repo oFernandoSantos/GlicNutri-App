@@ -21,7 +21,9 @@ import {
   buildSymptomEntry,
   createDefaultAppState,
   fetchPatientExperience,
+  getCachedPatientExperience,
   getPatientId,
+  isPatientExperienceCacheFresh,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
@@ -45,11 +47,24 @@ export default function PacienteBemEstarScreen({
       ),
     [patientId, usuarioLogado]
   );
-  const [loading, setLoading] = useState(true);
+  const bemestarFetchLimits = useMemo(
+    () => mesclarLimitesDadosPaciente('bemestar'),
+    []
+  );
+  const cachedBemEstarInicial = useMemo(
+    () =>
+      patientId ? getCachedPatientExperience(patientId, bemestarFetchLimits) : null,
+    [patientId, bemestarFetchLimits]
+  );
+  const [loading, setLoading] = useState(!cachedBemEstarInicial);
   const [saving, setSaving] = useState(false);
-  const [patient, setPatient] = useState(null);
-  const [objectiveText, setObjectiveText] = useState('');
-  const [appState, setAppState] = useState(createDefaultAppState());
+  const [patient, setPatient] = useState(cachedBemEstarInicial?.patient || null);
+  const [objectiveText, setObjectiveText] = useState(
+    cachedBemEstarInicial?.clinicalObjective || ''
+  );
+  const [appState, setAppState] = useState(
+    cachedBemEstarInicial?.appState || createDefaultAppState()
+  );
   const [selectedSymptoms, setSelectedSymptoms] = useState(['focused']);
   const [selectedSleep, setSelectedSleep] = useState('good');
   const [selectedStress, setSelectedStress] = useState(2);
@@ -68,9 +83,45 @@ export default function PacienteBemEstarScreen({
           return;
         }
 
+        const cachedExperience = patientId
+          ? getCachedPatientExperience(patientId, bemestarFetchLimits)
+          : null;
+        const cacheFresco =
+          patientId && isPatientExperienceCacheFresh(patientId, bemestarFetchLimits);
+
+        if (cachedExperience) {
+          if (!active) return;
+          setPatient(cachedExperience.patient);
+          setObjectiveText(cachedExperience.clinicalObjective);
+          setAppState(cachedExperience.appState);
+          setSelectedSymptoms(cachedExperience.appState.wellness.selectedSymptoms);
+          setSelectedSleep(cachedExperience.appState.wellness.selectedSleep);
+          setSelectedStress(cachedExperience.appState.wellness.selectedStress);
+
+          if (cacheFresco) {
+            return;
+          }
+
+          fetchPatientExperience(patientId, {
+            patientContext: usuarioLogado,
+            ...bemestarFetchLimits,
+          })
+            .then((experience) => {
+              if (!active || !experience) return;
+              setPatient(experience.patient);
+              setObjectiveText(experience.clinicalObjective);
+              setAppState(experience.appState);
+              setSelectedSymptoms(experience.appState.wellness.selectedSymptoms);
+              setSelectedSleep(experience.appState.wellness.selectedSleep);
+              setSelectedStress(experience.appState.wellness.selectedStress);
+            })
+            .catch((error) => console.log('Refresh bem-estar:', error));
+          return;
+        }
+
         const experience = await fetchPatientExperience(patientId, {
           patientContext: usuarioLogado,
-          ...mesclarLimitesDadosPaciente('resumo'),
+          ...bemestarFetchLimits,
         });
 
         if (!active) return;
@@ -93,25 +144,25 @@ export default function PacienteBemEstarScreen({
     return () => {
       active = false;
     };
-  }, [patientId, canResolvePatient]);
+  }, [bemestarFetchLimits, patientId, canResolvePatient, usuarioLogado]);
 
   const insight = useMemo(() => {
     const stressed = selectedStress >= 3;
     const sleptPoorly = selectedSleep === 'poor' || selectedSleep === 'ok';
 
     if (stressed && sleptPoorly) {
-      return 'Sono irregular e estresse mais alto costumam deixar a curva mais reativa. Vale priorizar refeicoes simples, agua e pausas curtas hoje.';
+      return 'Sono irregular e estresse mais alto costumam deixar a curva mais reativa. Vale priorizar refeições simples, água e pausas curtas hoje.';
     }
 
     if (stressed) {
-      return 'Seu estresse esta acima do habitual. Respiracao guiada e uma caminhada curta podem ajudar a reduzir impacto metabolico.';
+      return 'Seu estresse está acima do habitual. Respiração guiada e uma caminhada curta podem ajudar a reduzir impacto metabólico.';
     }
 
     if (sleptPoorly) {
-      return 'Com sono abaixo do ideal, sua resposta a carboidratos pode oscilar mais. Prefira combinacoes com fibras e proteina nas proximas refeicoes.';
+      return 'Com sono abaixo do ideal, sua resposta a carboidratos pode oscilar mais. Prefira combinações com fibras e proteína nas próximas refeições.';
     }
 
-    return 'Seu contexto de bem-estar esta favoravel para um dia mais estavel. Continue registrando sintomas para refinar as correlacoes.';
+    return 'Seu contexto de bem-estar está favorável para um dia mais estável. Continue registrando sintomas para refinar as correlações.';
   }, [selectedSleep, selectedStress]);
   const canSaveWellness = selectedSymptoms.length > 0 && canResolvePatient && !saving;
   const canRegisterActivity = canResolvePatient && !saving;
@@ -136,7 +187,7 @@ export default function PacienteBemEstarScreen({
     if (!canResolvePatient) {
       setMensagemBanner({
         tipo: 'aviso',
-        texto: 'Paciente sem identificador para registrar o bem-estar.',
+        texto: 'Não encontramos seu cadastro para registrar o bem-estar.',
       });
       return;
     }
@@ -194,7 +245,7 @@ export default function PacienteBemEstarScreen({
     if (!canResolvePatient) {
       setMensagemBanner({
         tipo: 'aviso',
-        texto: 'Paciente sem identificador para registrar atividade.',
+        texto: 'Não encontramos seu cadastro para registrar atividade.',
       });
       return;
     }
@@ -259,7 +310,6 @@ export default function PacienteBemEstarScreen({
           tipo={mensagemBanner.tipo || 'aviso'}
           texto={mensagemBanner.texto}
           onFechar={() => setMensagemBanner(null)}
-          autoOcultarMs={mensagemBanner.tipo === 'sucesso' ? 4000 : 0}
         />
       ) : null}
       {loading ? (
@@ -270,7 +320,7 @@ export default function PacienteBemEstarScreen({
       ) : null}
 
       <View style={styles.card}>
-        <Text style={styles.sectionTitle}>Como voce esta se sentindo?</Text>
+        <Text style={styles.sectionTitle}>Como você está se sentindo?</Text>
         <View style={styles.symptomGrid}>
           {symptomOptions.map((item) => {
             const active = selectedSymptoms.includes(item.id);

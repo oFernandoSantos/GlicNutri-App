@@ -1,78 +1,44 @@
-import React, { useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, Platform } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
-import { patientTheme } from '../../temas/temaVisualPaciente';
+import { useEffect, useRef } from 'react';
+import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
+import { PATIENT_TOAST_DURATION_MS } from '../../utilitarios/mensagensPaciente';
 
-const tipoCor = {
-  erro: { bg: '#FFF5F5', border: 'rgba(229, 9, 20, 0.25)', icon: 'alert-circle-outline', fg: '#B80710' },
-  sucesso: { bg: '#F2FBF7', border: 'rgba(79, 223, 163, 0.45)', icon: 'checkmark-circle-outline', fg: '#0d6b4a' },
-  aviso: { bg: '#FFFBF0', border: 'rgba(200, 160, 40, 0.35)', icon: 'information-circle-outline', fg: '#8a6d1d' },
-};
-
+/**
+ * Compat: dispara toast global (4s) em vez de banner inline.
+ */
 export default function MensagemInline({
   tipo = 'aviso',
   texto,
+  subtexto = '',
   onFechar,
-  autoOcultarMs = 0,
+  autoOcultarMs = PATIENT_TOAST_DURATION_MS,
 }) {
+  const ultimoTextoRef = useRef('');
+
   useEffect(() => {
-    if (!autoOcultarMs || !texto || !onFechar) return undefined;
-    const t = setTimeout(onFechar, autoOcultarMs);
-    return () => clearTimeout(t);
-  }, [autoOcultarMs, texto, onFechar]);
+    const chave = String(texto || '').trim();
+    if (!chave) return undefined;
 
-  if (!texto) return null;
+    const assinatura = `${tipo}|${chave}|${subtexto}`;
+    if (ultimoTextoRef.current === assinatura) return undefined;
+    ultimoTextoRef.current = assinatura;
 
-  const cores = tipoCor[tipo] || tipoCor.aviso;
+    mostrarToastPaciente({
+      tipo,
+      texto: chave,
+      subtexto,
+    });
 
-  return (
-    <View
-      style={[
-        styles.wrap,
-        { backgroundColor: cores.bg, borderColor: cores.border },
-      ]}
-      accessibilityRole="alert"
-      accessibilityLiveRegion="polite"
-    >
-      <Ionicons name={cores.icon} size={20} color={cores.fg} style={styles.icon} />
-      <Text style={[styles.texto, { color: patientTheme.colors.text }]}>{texto}</Text>
-      {onFechar ? (
-        <TouchableOpacity
-          onPress={onFechar}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-          accessibilityRole="button"
-          accessibilityLabel="Fechar mensagem"
-        >
-          <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-        </TouchableOpacity>
-      ) : null}
-    </View>
-  );
+    return undefined;
+  }, [autoOcultarMs, subtexto, texto, tipo]);
+
+  useEffect(() => {
+    if (!texto) {
+      ultimoTextoRef.current = '';
+      if (typeof onFechar === 'function') {
+        onFechar();
+      }
+    }
+  }, [onFechar, texto]);
+
+  return null;
 }
-
-const styles = StyleSheet.create({
-  wrap: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 12,
-    ...(Platform.OS === 'web'
-      ? {
-          outlineStyle: 'solid',
-        }
-      : {}),
-  },
-  icon: {
-    marginTop: 1,
-  },
-  texto: {
-    flex: 1,
-    fontSize: 14,
-    lineHeight: 20,
-    fontWeight: '600',
-  },
-});

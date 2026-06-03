@@ -1,6 +1,8 @@
 import { hashIdsForCache, trimCacheMap } from '../utilitarios/chaveCache';
 
-const DEFAULT_TTL_MS = 90 * 1000;
+const DEFAULT_TTL_MS = 2 * 60 * 1000;
+const DIARIO_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
+const MONITORAMENTO_EXPERIENCE_TTL_MS = 2 * 60 * 1000;
 const MAX_EXPERIENCE_CACHE_ENTRIES = 100;
 const MAX_NUTRI_INBOX_CACHE_ENTRIES = 40;
 const HOME_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
@@ -30,6 +32,10 @@ function buildLimitsFingerprint(options = {}) {
     options.skipChat ? 'sc' : '',
     options.includeMealPlan ? 'plan' : '',
     options.minimalProfile ? 'mp' : '',
+    options.homeCritical ? 'hc' : '',
+    options.skipAlertSync ? 'sa' : '',
+    options.historicoPreset ? 'hist' : '',
+    options.experienceCachePreset ? `cp:${options.experienceCachePreset}` : '',
     `g${options.glucoseLimit ?? '*'}`,
     `m${options.medicationLimit ?? '*'}`,
     `e${options.mealLimit ?? '*'}`,
@@ -51,8 +57,16 @@ function buildExperienceCacheKey(patientId, options = {}) {
 }
 
 function resolveExperienceTtlMs(options = {}) {
-  if (options.homeOnly) return options.cacheTtlMs ?? HOME_EXPERIENCE_TTL_MS;
+  if (options.homeOnly || options.experienceCachePreset === 'home') {
+    return options.cacheTtlMs ?? HOME_EXPERIENCE_TTL_MS;
+  }
   if (options.historicoPreset) return options.cacheTtlMs ?? HISTORICO_EXPERIENCE_TTL_MS;
+  if (options.experienceCachePreset === 'diario') {
+    return options.cacheTtlMs ?? DIARIO_EXPERIENCE_TTL_MS;
+  }
+  if (options.experienceCachePreset === 'monitoramento') {
+    return options.cacheTtlMs ?? MONITORAMENTO_EXPERIENCE_TTL_MS;
+  }
   return options.cacheTtlMs ?? DEFAULT_TTL_MS;
 }
 

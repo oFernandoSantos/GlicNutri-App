@@ -92,7 +92,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
       setRows(items || []);
     } catch (loadError) {
       console.log('Erro ao carregar disponibilidade:', loadError);
-      setError('Nao foi possivel carregar a disponibilidade da agenda.');
+      setError('Não foi possível carregar a disponibilidade da agenda.');
       setRows([]);
     } finally {
       setLoading(false);
@@ -149,10 +149,10 @@ export default function PainelDisponibilidadeAgendaProfissional({
       await upsertAvailability(payload);
       await loadRows();
       resetForm();
-      setFeedback('Disponibilidade salva. Os pacientes ja podem visualizar esses horarios.');
+      setFeedback('Disponibilidade salva. Os pacientes já podem visualizar esses horários.');
     } catch (saveError) {
       console.log('Erro ao salvar disponibilidade:', saveError);
-      setError(saveError?.message || 'Nao foi possivel salvar a disponibilidade.');
+      setError(saveError?.message || 'Não foi possível salvar a disponibilidade.');
     } finally {
       setSaving(false);
     }
@@ -178,7 +178,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
       await loadRows();
     } catch (toggleError) {
       console.log('Erro ao atualizar disponibilidade:', toggleError);
-      setError(toggleError?.message || 'Nao foi possivel atualizar a disponibilidade.');
+      setError(toggleError?.message || 'Não foi possível atualizar a disponibilidade.');
     } finally {
       setSaving(false);
     }
@@ -199,7 +199,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
       if (editingId === rowId) resetForm();
     } catch (deleteError) {
       console.log('Erro ao excluir disponibilidade:', deleteError);
-      setError(deleteError?.message || 'Nao foi possivel excluir o horario.');
+      setError(deleteError?.message || 'Não foi possível excluir o horário.');
     } finally {
       setDeletingId('');
     }
@@ -211,7 +211,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
         <View style={styles.headerCopy}>
           <Text style={styles.title}>Disponibilidade para pacientes</Text>
           <Text style={styles.subtitle}>
-            Configure os dias e horarios em que pacientes podem ver vagas ao solicitar acompanhamento.
+            Configure os dias e horários em que pacientes podem ver vagas ao solicitar acompanhamento.
           </Text>
         </View>
         <View style={styles.countBadge}>
@@ -228,7 +228,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
         <>
           <View style={styles.formCard}>
             <Text style={styles.formTitle}>
-              {editingId ? 'Editar faixa de horario' : 'Nova faixa de horario'}
+              {editingId ? 'Editar faixa de horário' : 'Nova faixa de horário'}
             </Text>
 
             <Text style={styles.fieldLabel}>Dia da semana</Text>
@@ -316,7 +316,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
               >
                 <Ionicons name="save-outline" size={15} color="#ffffff" />
                 <Text style={styles.primaryButtonText}>
-                  {saving ? 'Salvando...' : editingId ? 'Atualizar horario' : 'Adicionar horario'}
+                  {saving ? 'Salvando...' : editingId ? 'Atualizar horário' : 'Adicionar horário'}
                 </Text>
               </TouchableOpacity>
             </View>
@@ -390,7 +390,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
             <View style={styles.emptyState}>
               <Ionicons name="time-outline" size={48} color={theme.colors.border} />
               <Text style={styles.emptyText}>
-                Nenhum horario cadastrado. Adicione a primeira faixa acima.
+                Nenhum horário cadastrado. Adicione a primeira faixa acima.
               </Text>
             </View>
           )}

@@ -48,7 +48,7 @@ function enrichNutricionistaFallback(item) {
     bio_resumo:
       item?.bio_resumo ||
       'Atendimento por teleconsulta com foco em controle glicêmico e plano alimentar personalizado.',
-    valor_consulta_centavos: Number(item?.valor_consulta_centavos) || 12000,
+    valor_consulta_centavos: Number(item?.valor_consulta_centavos) || 25000,
     meet_link_padrao: item?.meet_link_padrao || '',
     aceita_convenio: item?.aceita_convenio !== false,
     formacao_resumo: item?.formacao_resumo || '',

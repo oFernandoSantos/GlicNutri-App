@@ -6,14 +6,9 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import CalendarioHorarios from '../../componentes/agendamento/CalendarioHorarios';
-import {
-  AvatarProfissional,
-  BotaoAgendamento,
-  CartaoAgendamento,
-} from '../../componentes/agendamento/uiAgendamento';
+import { BotaoAgendamento, CartaoAgendamento } from '../../componentes/agendamento/uiAgendamento';
 import { patientTheme } from '../../temas/temaVisualPaciente';
 import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
 import { getMedicoById, getMedicoEspecialidadeLabel } from '../../servicos/servicoMedicos';
@@ -37,17 +32,21 @@ import {
   unlinkPatientDoctor,
 } from '../../servicos/servicoVinculosMedico';
 import { createDoctorFollowUpRequest } from '../../servicos/servicoSolicitacoesAcompanhamento';
+import { mostrarToastPaciente, mostrarToastPacienteErro } from '../../servicos/servicoToastPaciente';
+import SecaoMeetConsultasProfissional from '../../componentes/paciente/SecaoMeetConsultasProfissional';
+import CartaoPerfilProfissionalPaciente from '../../componentes/paciente/CartaoPerfilProfissionalPaciente';
+import {
+  formatValorConsulta,
+  VALOR_CONSULTA_PERFIL_CENTAVOS,
+} from '../../servicos/servicoGoogleMeet';
+import { abrirMensagensProfissionalVinculado } from '../../utilitarios/navegacaoMensagensProfissionalPaciente';
+import { formatCrmMedico } from '../../utilitarios/formatRegistroProfissional';
+import { getMedicoFotoModeloUri } from '../../utilitarios/fotoModeloProfissional';
 
 function getPacienteNome(usuario) {
   return usuario?.nome_completo || usuario?.nome_pac || usuario?.email_pac || 'Paciente';
 }
 
-function getMedicoAvatarUri(medico) {
-  const seed = encodeURIComponent(
-    String(medico?.id_medico_uuid || medico?.nome_completo_medico || 'medico').trim()
-  );
-  return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=d1fae5,c0aede,d1d4f9,ffd5dc,ffdfbf`;
-}
 
 function uniqueSlotsByScheduledAt(items) {
   const seen = new Set();
@@ -74,21 +73,41 @@ export default function PacientePerfilMedicoScreen({
   const [desvinculando, setDesvinculando] = useState(false);
   const [linkedToMedico, setLinkedToMedico] = useState(false);
   const [linkedDoctorId, setLinkedDoctorId] = useState(null);
-  const [feedback, setFeedback] = useState('');
   const [slots, setSlots] = useState([]);
   const [selectedDayKey, setSelectedDayKey] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [erroAgenda, setErroAgenda] = useState('');
   const [observacoes, setObservacoes] = useState('');
 
   useEffect(() => {
     setMedico(medicoBase);
   }, [medicoBase]);
 
+  const abrirMensagensMedico = useCallback(() => {
+    abrirMensagensProfissionalVinculado(navigation, {
+      usuarioLogado,
+      profissional: medico,
+      papel: 'medico',
+      vinculado: linkedToMedico,
+    });
+  }, [navigation, usuarioLogado, medico, linkedToMedico]);
+
   useEffect(() => {
-    navigation.setOptions({ readerTitle: 'Perfil do Medico' });
-    return () => navigation.setOptions({ readerTitle: null });
-  }, [navigation]);
+    navigation.setOptions({
+      readerTitle: 'Perfil do Médico',
+      readerRightAction: abrirMensagensMedico,
+      readerRightIcon: 'chatbubble-outline',
+      readerRightAccessibilityLabel: 'Mensagem para o médico',
+      readerRightDisabled: !linkedToMedico,
+    });
+    return () =>
+      navigation.setOptions({
+        readerTitle: null,
+        readerRightAction: undefined,
+        readerRightIcon: undefined,
+        readerRightAccessibilityLabel: undefined,
+        readerRightDisabled: undefined,
+      });
+  }, [navigation, abrirMensagensMedico, linkedToMedico]);
 
   useEffect(() => {
     let active = true;
@@ -136,6 +155,7 @@ export default function PacientePerfilMedicoScreen({
   }, [carregarVinculo]);
 
   const especialidade = getMedicoEspecialidadeLabel(medico);
+  const valorLabel = formatValorConsulta(VALOR_CONSULTA_PERFIL_CENTAVOS);
   const rating = useMemo(
     () => getStableRating(medico?.id_medico_uuid),
     [medico?.id_medico_uuid]
@@ -166,17 +186,16 @@ export default function PacientePerfilMedicoScreen({
       return;
     }
 
-    if (!selectedDayKey || !availableDays.some((day) => day.dateKey === selectedDayKey)) {
-      setSelectedDayKey(availableDays[0].dateKey);
+    if (selectedDayKey && !calendarDays.some((day) => day.dateKey === selectedDayKey)) {
+      setSelectedDayKey('');
       setSelectedSlot(null);
     }
-  }, [availableDays, selectedDayKey]);
+  }, [calendarDays, selectedDayKey]);
 
   const carregarAgenda = useCallback(async () => {
     if (!medico?.id_medico_uuid) return;
 
     try {
-      setErroAgenda('');
       setLoadingAgenda(true);
       const [availability, consultas] = await Promise.all([
         listMedicoAvailability(medico.id_medico_uuid),
@@ -190,7 +209,11 @@ export default function PacientePerfilMedicoScreen({
     } catch (error) {
       console.log('Erro ao carregar agenda do medico:', error);
       setSlots([]);
-      setErroAgenda('Nao foi possivel carregar datas e horarios deste medico.');
+      mostrarToastPaciente({
+        tipo: 'erro',
+        texto: 'Agenda indisponível agora',
+        subtexto: 'Não foi possível carregar horários deste médico.',
+      });
     } finally {
       setLoadingAgenda(false);
     }
@@ -202,38 +225,45 @@ export default function PacientePerfilMedicoScreen({
 
   async function handleSolicitarAcompanhamento() {
     if (!medico?.id_medico_uuid || !patientId) {
-      setFeedback('Nao foi possivel identificar o paciente ou medico.');
+      mostrarToastPaciente({
+        tipo: 'erro',
+        texto: 'Não encontramos seu cadastro ou o médico',
+      });
       return;
     }
 
     if (linkedDoctorId && linkedDoctorId !== medico.id_medico_uuid) {
-      setFeedback(
-        'Voce ja possui um medico vinculado. Desvincule o acompanhamento atual antes de solicitar outro.'
-      );
+      mostrarToastPaciente({
+        tipo: 'aviso',
+        texto: 'Você já tem um médico vinculado',
+        subtexto: 'Encerre o acompanhamento atual antes de solicitar outro.',
+      });
       return;
     }
 
     try {
       setSolicitando(true);
-      setFeedback('');
       const result = await createDoctorFollowUpRequest({
         medicoId: medico.id_medico_uuid,
         pacienteId: patientId,
-        mensagem: `${especialidade} · acompanhamento clinico diabetes`,
+        mensagem: `${especialidade} · acompanhamento clínico diabetes`,
         actor: usuarioLogado,
       });
 
-      setFeedback(
-        result?.message ||
-          'Solicitacao enviada. O medico precisa aprovar o acompanhamento antes do vinculo clinico.'
-      );
+      mostrarToastPaciente({
+        tipo: 'sucesso',
+        texto: 'Solicitação enviada',
+        subtexto:
+          result?.message ||
+          'O médico precisa aprovar antes do vínculo clínico.',
+      });
       if (result?.alreadyLinked) {
         setLinkedToMedico(true);
         setLinkedDoctorId(medico.id_medico_uuid);
       }
     } catch (error) {
       console.log('Erro ao solicitar acompanhamento medico:', error);
-      setFeedback(error?.message || 'Nao foi possivel enviar a solicitacao. Tente novamente.');
+      mostrarToastPacienteErro(error, 'Não foi possível enviar sua solicitação agora.');
     } finally {
       setSolicitando(false);
     }
@@ -241,13 +271,15 @@ export default function PacientePerfilMedicoScreen({
 
   async function handleDesvincularAcompanhamento() {
     if (!medico?.id_medico_uuid || !patientId) {
-      setFeedback('Nao foi possivel identificar o acompanhamento para desvincular.');
+      mostrarToastPaciente({
+        tipo: 'erro',
+        texto: 'Não foi possível desvincular agora',
+      });
       return;
     }
 
     try {
       setDesvinculando(true);
-      setFeedback('');
       await unlinkPatientDoctor({
         pacienteId: patientId,
         medicoId: medico.id_medico_uuid,
@@ -255,10 +287,14 @@ export default function PacientePerfilMedicoScreen({
       });
       setLinkedToMedico(false);
       setLinkedDoctorId(null);
-      setFeedback('Acompanhamento medico encerrado. Voce pode vincular outro medico quando precisar.');
+      mostrarToastPaciente({
+        tipo: 'sucesso',
+        texto: 'Acompanhamento com médico encerrado',
+        subtexto: 'Você pode vincular outro profissional quando quiser.',
+      });
     } catch (error) {
       console.log('Erro ao desvincular medico:', error);
-      setFeedback(error?.message || 'Nao foi possivel desvincular o medico.');
+      mostrarToastPacienteErro(error, 'Não foi possível desvincular o médico agora.');
     } finally {
       setDesvinculando(false);
     }
@@ -266,20 +302,26 @@ export default function PacientePerfilMedicoScreen({
 
   async function handleConfirmarAgendamento() {
     if (!selectedSlot || !medico?.id_medico_uuid || !patientId) {
-      setErroAgenda('Selecione um horario disponivel para continuar.');
+      mostrarToastPaciente({
+        tipo: 'aviso',
+        texto: 'Escolha um horário',
+        subtexto: 'Selecione um horário livre na agenda.',
+      });
       return;
     }
 
     if (!linkedToMedico) {
-      setErroAgenda(
-        'Solicite o acompanhamento primeiro. Depois da aprovacao do medico, o agendamento fica liberado.'
-      );
+      mostrarToastPaciente({
+        tipo: 'aviso',
+        texto: 'Solicite acompanhamento primeiro',
+        subtexto: 'Depois da aprovação do médico, você poderá agendar.',
+      });
       return;
     }
 
     try {
       setConfirmando(true);
-      const motivo = [observacoes.trim(), `${especialidade} · teleconsulta clinica`]
+      const motivo = [observacoes.trim(), `${especialidade} · teleconsulta clínica`]
         .filter(Boolean)
         .join(' · ');
 
@@ -294,13 +336,19 @@ export default function PacientePerfilMedicoScreen({
         actor: usuarioLogado,
       });
 
+      mostrarToastPaciente({
+        tipo: 'sucesso',
+        texto: 'Consulta agendada',
+        subtexto: 'Veja os detalhes em Minhas consultas.',
+      });
+
       navigation.navigate('PacienteAgendamentos', {
         usuarioLogado,
         activeSection: 'consultas',
       });
     } catch (error) {
       console.log('Erro ao agendar consulta medica:', error);
-      setErroAgenda(error?.message || 'Nao foi possivel confirmar o agendamento. Tente novamente.');
+      mostrarToastPacienteErro(error, 'Não foi possível confirmar seu agendamento agora.');
     } finally {
       setConfirmando(false);
     }
@@ -318,66 +366,49 @@ export default function PacientePerfilMedicoScreen({
 
   return (
     <PatientScreenLayout navigation={navigation} route={route} usuarioLogado={usuarioLogado}>
-      <CartaoAgendamento style={[styles.card, linkedToMedico && styles.cardLinked]}>
-        {linkedToMedico ? (
-          <View style={styles.linkedBadge}>
-            <Ionicons name="checkmark-circle" size={15} color={patientTheme.colors.primaryDark} />
-            <Text style={styles.linkedBadgeText}>Medico vinculado</Text>
-          </View>
-        ) : null}
+      <CartaoPerfilProfissionalPaciente
+        linked={linkedToMedico}
+        linkedLabel="Médico vinculado"
+        name={medico.nome_completo_medico}
+        specialty={especialidade}
+        registration={formatCrmMedico(medico.crm_medico)}
+        avatarName={medico.nome_completo_medico}
+        avatarUri={getMedicoFotoModeloUri(medico)}
+        rating={rating}
+        reviewCount={totalAvaliacoes}
+        yearsExperience={anosExperiencia}
+        bio={
+          medico.bio_resumo ||
+          'Acompanhamento clínico de diabetes, glicemia e medicação por teleconsulta.'
+        }
+        detailItems={[
+          { label: 'Valor', value: valorLabel },
+          { label: 'Tipo', value: 'Teleconsulta clínica' },
+          { label: 'Canal', value: 'Google Meet' },
+        ]}
+      />
 
-        <View style={styles.row}>
-          <AvatarProfissional
-            name={medico.nome_completo_medico}
-            size={64}
-            online
-            imageUri={getMedicoAvatarUri(medico)}
-          />
-          <View style={styles.body}>
-            <Text style={styles.name}>{medico.nome_completo_medico}</Text>
-            <Text style={styles.spec}>{especialidade}</Text>
-            <Text style={styles.crm}>
-              {medico.crm_medico ? `CRM ${medico.crm_medico}` : 'CRM nao informado'}
-            </Text>
-            <View style={styles.metaRow}>
-              <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-              <Text style={styles.meta}>{rating}</Text>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={styles.meta}>{totalAvaliacoes} avaliacoes</Text>
-              <Text style={styles.metaDot}>·</Text>
-              <Text style={styles.meta}>{anosExperiencia} anos</Text>
-            </View>
-          </View>
-        </View>
+      <SecaoMeetConsultasProfissional
+        patientId={patientId}
+        profissionalId={medico.id_medico_uuid}
+        profissionalTipo="medico"
+        profissional={medico}
+      />
 
-        <Text style={styles.bio}>
-          {medico.bio_resumo ||
-            'Acompanhamento clinico de diabetes, glicemia, medicacao e insulina.'}
-        </Text>
-
-        <View style={styles.scopeBox}>
-          <Text style={styles.scopeTitle}>Escopo do acompanhamento medico</Text>
-          <Text style={styles.scopeText}>
-            Glicemia, medicacao, insulina e prontuario clinico. O plano alimentar continua com o
-            nutricionista vinculado.
-          </Text>
-        </View>
-      </CartaoAgendamento>
-
-      <CartaoAgendamento style={styles.calendarCard}>
+      <CartaoAgendamento style={[styles.calendarCard, styles.cardWhite]}>
         <View style={styles.scheduleHeader}>
           <View>
-            <Text style={styles.blockTitle}>Calendario de horarios</Text>
+            <Text style={styles.blockTitle}>Calendário de horários</Text>
             <Text style={styles.scheduleSubtitle}>{medico.nome_completo_medico}</Text>
           </View>
           {loadingAgenda ? <ActivityIndicator color={patientTheme.colors.primaryDark} /> : null}
         </View>
 
-        {!linkedToMedico ? (
-          <Text style={styles.scheduleHint}>
-            Visualize a disponibilidade do medico. Solicite acompanhamento para liberar o agendamento.
-          </Text>
-        ) : null}
+        <Text style={styles.scheduleHint}>
+          {linkedToMedico
+            ? 'Escolha dia e horário e confirme abaixo.'
+            : 'Solicite acompanhamento para liberar o agendamento.'}
+        </Text>
 
         {loadingAgenda ? (
           <View style={styles.scheduleLoading}>
@@ -385,28 +416,24 @@ export default function PacientePerfilMedicoScreen({
           </View>
         ) : (
           <CalendarioHorarios
+            variant="compact"
+            slotsInModal
             days={calendarDays}
             selectedDayKey={selectedDayKey}
             onSelectDay={(dayKey) => {
               setSelectedDayKey(dayKey);
               setSelectedSlot(null);
-              setErroAgenda('');
             }}
             selectedSlot={selectedSlot}
             onSelectSlot={(slot) => {
               setSelectedSlot(slot);
-              setErroAgenda('');
             }}
           />
         )}
 
-        {!loadingAgenda && !calendarDays.length && erroAgenda ? (
-          <Text style={styles.errorText}>{erroAgenda}</Text>
-        ) : null}
-
         {linkedToMedico && calendarDays.length ? (
           <>
-            <Text style={styles.fieldLabel}>Observacoes (opcional)</Text>
+            <Text style={styles.fieldLabel}>Observações (opcional)</Text>
             <TextInput
               value={observacoes}
               onChangeText={setObservacoes}
@@ -418,8 +445,6 @@ export default function PacientePerfilMedicoScreen({
               style={styles.notesInput}
             />
 
-            {erroAgenda ? <Text style={styles.errorText}>{erroAgenda}</Text> : null}
-
             <BotaoAgendamento
               label="Confirmar agendamento"
               onPress={handleConfirmarAgendamento}
@@ -430,27 +455,18 @@ export default function PacientePerfilMedicoScreen({
         ) : null}
       </CartaoAgendamento>
 
-      {feedback ? <Text style={styles.feedback}>{feedback}</Text> : null}
-
       {linkedToMedico ? (
-        <>
-          <BotaoAgendamento
-            label="Ver acompanhamento"
-            icon="checkmark-circle-outline"
-            onPress={() => navigation.navigate('PacienteMonitoramento', { usuarioLogado })}
-            style={styles.primaryBtn}
-          />
-          <BotaoAgendamento
-            label="Desvincular medico"
-            variant="ghost"
-            loading={desvinculando}
-            onPress={handleDesvincularAcompanhamento}
-            style={styles.secondaryBtn}
-          />
-        </>
+        <BotaoAgendamento
+          label="Desvincular médico"
+          icon="close-circle-outline"
+          variant="unlink"
+          loading={desvinculando}
+          onPress={handleDesvincularAcompanhamento}
+          style={styles.secondaryBtn}
+        />
       ) : (
         <BotaoAgendamento
-          label="Solicitar acompanhamento medico"
+          label="Solicitar acompanhamento"
           icon="medkit-outline"
           loading={solicitando}
           onPress={handleSolicitarAcompanhamento}
@@ -463,33 +479,13 @@ export default function PacientePerfilMedicoScreen({
 
 const styles = StyleSheet.create({
   centered: { flex: 1, alignItems: 'center', justifyContent: 'center' },
-  card: { gap: 14, marginBottom: 14 },
+  cardWhite: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E8ECF0',
+    borderWidth: 1,
+    borderRadius: 16,
+  },
   calendarCard: { gap: 12, marginBottom: 14 },
-  cardLinked: { borderColor: patientTheme.colors.primary, borderWidth: 1.5 },
-  linkedBadge: {
-    alignSelf: 'flex-start',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    backgroundColor: '#E8F8F1',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 999,
-  },
-  linkedBadgeText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  row: { flexDirection: 'row', gap: 14 },
-  body: { flex: 1, gap: 4 },
-  name: { fontSize: 18, fontWeight: '700', color: patientTheme.colors.text },
-  spec: { fontSize: 13, color: patientTheme.colors.textMuted },
-  crm: { fontSize: 12, color: patientTheme.colors.textMuted },
-  metaRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 4, marginTop: 4 },
-  meta: { fontSize: 12, color: patientTheme.colors.textMuted },
-  metaDot: { fontSize: 12, color: patientTheme.colors.textMuted },
-  bio: { fontSize: 13, lineHeight: 19, color: patientTheme.colors.text },
   scopeBox: {
     backgroundColor: '#F7FAFC',
     borderRadius: 12,

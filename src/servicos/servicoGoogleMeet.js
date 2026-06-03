@@ -40,7 +40,8 @@ export function buildGoogleMeetLinkFromConsulta(consultaId) {
   return `https://meet.google.com/${code}`;
 }
 
-export function resolveMeetLink({ consulta, nutricionista }) {
+export function resolveMeetLink({ consulta, nutricionista, profissional, medico } = {}) {
+  const prof = profissional || nutricionista || medico;
   const stored = normalizeGoogleMeetUrl(consulta?.meet_link);
   const generatedPlaceholder = consulta?.id ? buildGoogleMeetLinkFromConsulta(consulta.id) : '';
 
@@ -48,7 +49,7 @@ export function resolveMeetLink({ consulta, nutricionista }) {
     return stored;
   }
 
-  const padrao = normalizeGoogleMeetUrl(nutricionista?.meet_link_padrao);
+  const padrao = normalizeGoogleMeetUrl(prof?.meet_link_padrao);
   if (padrao && isValidGoogleMeetUrl(padrao)) {
     return padrao;
   }
@@ -56,7 +57,10 @@ export function resolveMeetLink({ consulta, nutricionista }) {
   return '';
 }
 
+/** R$ 250,00 — valor padrão exibido no perfil (teleconsulta). */
+export const VALOR_CONSULTA_PERFIL_CENTAVOS = 25000;
+
 export function formatValorConsulta(centavos) {
-  const value = Number(centavos) || 0;
+  const value = (Number(centavos) || 0) / 100;
   return value.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
 }

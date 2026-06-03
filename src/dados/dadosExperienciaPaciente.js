@@ -43,7 +43,7 @@ export const dailyTimelineEntries = [
     id: 'meal-1',
     time: '07:20',
     kind: 'meal',
-    title: 'Cafe da manha',
+    title: 'Café da manhã',
     description: 'Iogurte natural, aveia, chia e morangos.',
     glucoseNote: 'Impacto glicemico baixo',
     glucoseDelta: '+12 mg/dL',
@@ -63,7 +63,7 @@ export const dailyTimelineEntries = [
     id: 'meal-2',
     time: '12:40',
     kind: 'meal',
-    title: 'Almoco',
+    title: 'Almoço',
     description: 'Arroz integral, feijao, frango grelhado e salada.',
     glucoseNote: 'Pico leve',
     glucoseDelta: '+18 mg/dL',
@@ -147,49 +147,148 @@ export const stressOptions = [
 
 export const mealPlanSections = [
   {
-    id: 'breakfast',
-    title: 'Cafe da manha',
+    id: 'cafe-manha',
+    title: 'Café da Manhã',
     time: '07:00',
-    objective: 'Comecar o dia com energia estavel.',
-    foods: ['Iogurte natural', 'Aveia', 'Chia', 'Morangos'],
+    targetKcal: 360,
+    objective: 'Quebrar o jejum com fibras, proteina e glicemia estavel ate o lanche.',
+    foods: [
+      'Pao integral (2 fatias)',
+      'Ricota ou cottage (2 col. sopa)',
+      'Mamao ou morango (1 porcao)',
+      'Cafe ou cha sem acucar',
+    ],
     substitutions: [
       {
-        anchor: 'Iogurte natural',
-        options: ['Kefir sem acucar', 'Leite fermentado sem adicao de acucar'],
+        anchor: 'Pao integral (2 fatias)',
+        options: ['Tapioca pequena com queijo branco', 'Aveia cozida com canela'],
       },
       {
-        anchor: 'Aveia',
-        options: ['Farelo de aveia', 'Granola sem acucar'],
+        anchor: 'Ricota ou cottage (2 col. sopa)',
+        options: ['Ovo cozido', 'Iogurte natural sem acucar'],
       },
     ],
   },
   {
-    id: 'lunch',
-    title: 'Almoco',
-    time: '12:30',
-    objective: 'Garantir saciedade com boa distribuicao de carboidratos.',
-    foods: ['Arroz integral', 'Feijao', 'Frango grelhado', 'Salada colorida'],
+    id: 'lanche-manha',
+    title: 'Lanche da Manhã',
+    time: '10:00',
+    targetKcal: 160,
+    objective: 'Evitar queda de energia e picos antes do almoco.',
+    foods: ['Castanhas (3 unidades)', 'Iogurte natural', 'Canela a gosto'],
     substitutions: [
       {
-        anchor: 'Arroz integral',
+        anchor: 'Castanhas (3 unidades)',
+        options: ['Amendoas (10 unidades)', 'Mix de sementes (1 col. sopa)'],
+      },
+      {
+        anchor: 'Iogurte natural',
+        options: ['Kefir sem acucar', 'Queijo branco (1 fatia)'],
+      },
+    ],
+  },
+  {
+    id: 'almoco',
+    title: 'Almoço',
+    time: '12:30',
+    targetKcal: 560,
+    objective: 'Refeicao principal com carboidrato de baixo indice e boa saciedade.',
+    foods: [
+      'Arroz integral (4 col. sopa)',
+      'Feijao (1 concha)',
+      'Frango grelhado ou peixe (1 file)',
+      'Salada colorida com azeite (1 col. cha)',
+    ],
+    substitutions: [
+      {
+        anchor: 'Arroz integral (4 col. sopa)',
         options: ['Quinoa cozida', 'Batata-doce assada'],
       },
       {
-        anchor: 'Frango grelhado',
-        options: ['Peixe assado', 'Tofu grelhado'],
+        anchor: 'Frango grelhado ou peixe (1 file)',
+        options: ['Carne magra grelhada', 'Tofu grelhado'],
       },
     ],
   },
   {
-    id: 'dinner',
-    title: 'Jantar',
-    time: '19:30',
-    objective: 'Fechar o dia com digestao leve.',
-    foods: ['Sopa de legumes', 'Carne desfiada', 'Torradas integrais'],
+    id: 'lanche-tarde',
+    title: 'Lanche da Tarde',
+    time: '16:00',
+    targetKcal: 190,
+    objective: 'Manter glicemia controlada entre almoco e jantar.',
+    foods: [
+      'Fruta de baixo indice (maca ou pera)',
+      'Queijo branco (1 fatia) ou hummus (2 col. sopa)',
+      'Palitos de cenoura ou pepino',
+    ],
     substitutions: [
       {
-        anchor: 'Torradas integrais',
-        options: ['Pao de fermentacao natural', 'Biscoito integral sem acucar'],
+        anchor: 'Fruta de baixo indice (maca ou pera)',
+        options: ['Morango', 'Kiwi'],
+      },
+      {
+        anchor: 'Queijo branco (1 fatia) ou hummus (2 col. sopa)',
+        options: ['Iogurte natural', 'Ovo cozido'],
+      },
+    ],
+  },
+  {
+    id: 'jantar',
+    title: 'Jantar',
+    time: '19:30',
+    targetKcal: 470,
+    objective: 'Encerrar o dia com digestao leve e boa distribuicao de macros.',
+    foods: [
+      'Legumes refogados (1 prato raso)',
+      'Peixe assado ou omelete (1 porcao)',
+      'Quinoa ou batata-doce (3 col. sopa)',
+    ],
+    substitutions: [
+      {
+        anchor: 'Peixe assado ou omelete (1 porcao)',
+        options: ['Frango desfiado', 'Carne magra cozida'],
+      },
+      {
+        anchor: 'Quinoa ou batata-doce (3 col. sopa)',
+        options: ['Arroz integral', 'Abobora cabotiá'],
+      },
+    ],
+  },
+  {
+    id: 'ceia',
+    title: 'Ceia',
+    time: '22:00',
+    targetKcal: 130,
+    objective: 'Opcao leve para reduzir glicemia noturna sem fome antes de dormir.',
+    foods: [
+      'Leite vegetal morno sem acucar (1 xicara)',
+      'Castanhas (2 unidades)',
+    ],
+    substitutions: [
+      {
+        anchor: 'Leite vegetal morno sem acucar (1 xicara)',
+        options: ['Cha de camomila', 'Iogurte natural (meia porcao)'],
+      },
+      {
+        anchor: 'Castanhas (2 unidades)',
+        options: ['Amendoas (6 unidades)', 'Queijo branco (1 fatia)'],
+      },
+    ],
+  },
+  {
+    id: 'outro-momento',
+    title: 'Outro momento',
+    time: '--:--',
+    targetKcal: 120,
+    objective: 'Ajuste pontual alinhado com sua nutricionista (treino, evento ou rotina atipica).',
+    foods: [
+      'Substituicao equivalente definida com a nutricionista',
+      'Priorize proteina + fibra em porcoes medidas',
+    ],
+    substitutions: [
+      {
+        anchor: 'Substituicao equivalente definida com a nutricionista',
+        options: ['Registre o horario real no app', 'Envie foto da refeicao para revisao'],
       },
     ],
   },

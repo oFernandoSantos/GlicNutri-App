@@ -135,7 +135,7 @@ export default function ToastPaciente({
 
   onFechar,
 
-  autoOcultarMs = 5000,
+  autoOcultarMs = 4000,
 
   bottomOffset = 0,
 

@@ -60,6 +60,7 @@ export function BotaoAgendamento({
   const isPrimary = variant === 'primary';
   const isGhost = variant === 'ghost';
   const isDanger = variant === 'danger';
+  const isUnlink = variant === 'unlink';
 
   return (
     <TouchableOpacity
@@ -68,6 +69,7 @@ export function BotaoAgendamento({
         isPrimary && styles.buttonPrimary,
         isGhost && styles.buttonGhost,
         isDanger && styles.buttonDanger,
+        isUnlink && styles.buttonUnlink,
         disabled && styles.buttonDisabled,
         style,
       ]}
@@ -78,7 +80,15 @@ export function BotaoAgendamento({
       accessibilityLabel={label}
     >
       {loading ? (
-        <ActivityIndicator color={isPrimary || isDanger ? patientTheme.colors.onPrimary : patientTheme.colors.primaryDark} />
+        <ActivityIndicator
+          color={
+            isPrimary || isDanger
+              ? patientTheme.colors.onPrimary
+              : isUnlink
+                ? patientTheme.colors.danger
+                : patientTheme.colors.primaryDark
+          }
+        />
       ) : (
         <>
           {icon ? (
@@ -88,7 +98,9 @@ export function BotaoAgendamento({
               color={
                 isPrimary || isDanger
                   ? patientTheme.colors.onPrimary
-                  : patientTheme.colors.primaryDark
+                  : isUnlink
+                    ? patientTheme.colors.danger
+                    : patientTheme.colors.primaryDark
               }
             />
           ) : null}
@@ -101,6 +113,7 @@ export function BotaoAgendamento({
               isPrimary && styles.buttonTextPrimary,
               isGhost && styles.buttonTextGhost,
               isDanger && styles.buttonTextDanger,
+              isUnlink && styles.buttonTextUnlink,
             ]}
           >
             {label}
@@ -244,6 +257,7 @@ export function AvatarProfissional({ name, size = 48, online, imageUri }) {
         <Image
           source={{ uri: imageUri }}
           style={[styles.avatarImage, { width: size, height: size, borderRadius: size / 2 }]}
+          resizeMode="cover"
           onError={() => setImageFailed(true)}
         />
       ) : (
@@ -283,6 +297,10 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: patientTheme.colors.border,
   },
+  buttonUnlink: {
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+  },
   buttonDanger: {
     backgroundColor: patientTheme.colors.danger,
   },
@@ -301,8 +319,11 @@ const styles = StyleSheet.create({
   buttonTextGhost: {
     color: patientTheme.colors.primaryDark,
   },
+  buttonTextUnlink: {
+    color: patientTheme.colors.danger,
+  },
   buttonTextDanger: {
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.onPrimary,
   },
   badge: {
     alignSelf: 'flex-start',

@@ -51,11 +51,13 @@ import {
   enrichMealEntryWithPlanLink,
   resolvePlanSections,
 } from '../../utilitarios/vinculoPlanoRefeicao';
+import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
+import { PATIENT_TOAST_DURATION_MS } from '../../utilitarios/mensagensPaciente';
 
 const FOOD_SEARCH_MIN_CHARS = 2;
 const FOOD_SEARCH_PAGE_SIZE = 12;
 const FOOD_SEARCH_LIST_MAX_HEIGHT = 200;
-const NOTIFICACAO_AUTO_MS = 5000;
+const NOTIFICACAO_AUTO_MS = PATIENT_TOAST_DURATION_MS;
 const PHOTO_DROPZONE_HEIGHT = 170;
 
 const EDITABLE_ITEM_FIELDS = [
@@ -70,13 +72,13 @@ const EDITABLE_ITEM_FIELDS = [
 ];
 
 const mealTypeOptions = [
-  'Cafe da Manha',
-  'Lanche da Manha',
-  'Almoco',
+  'Café da Manhã',
+  'Lanche da Manhã',
+  'Almoço',
   'Lanche da Tarde',
   'Jantar',
   'Ceia',
-  'Outro Momento',
+  'Outro momento',
 ];
 
 function formatNutrient(value, suffix = '') {
@@ -95,7 +97,7 @@ function parseEditableValue(value) {
 }
 
 function getMealTimingLabel(mode) {
-  return mode === 'current' ? 'Refeicao atual' : 'Refeicao anterior';
+  return mode === 'current' ? 'Refeição atual' : 'Refeição anterior';
 }
 
 function buildLocalDateString(date = new Date()) {
@@ -186,17 +188,18 @@ function normalizeAnalysisErrorMessage(error) {
   const normalized = rawMessage.toLowerCase();
 
   if (!rawMessage) {
-    return 'Nao foi possivel analisar a foto.';
+    return 'Não foi possível analisar a foto.';
   }
 
   if (normalized.includes('non-2xx status code')) {
-    return 'Servidor indisponivel. Tente de novo em instantes.';
+    return 'Servidor indisponível. Tente de novo em instantes.';
   }
 
   if (
     normalized.includes('limite') ||
-    normalized.includes('gemini') ||
-    normalized.includes('quota')
+    normalized.includes('openai') ||
+    normalized.includes('quota') ||
+    normalized.includes('billing')
   ) {
     return 'Limite da IA atingido. Use anexar sem IA ou adicione manualmente.';
   }
@@ -208,10 +211,10 @@ function feedbackErroAnalise(error) {
   const detalhe = normalizeAnalysisErrorMessage(error);
   const texto = detalhe.toLowerCase();
 
-  if (texto.includes('limite') || texto.includes('gemini') || texto.includes('quota')) {
+  if (texto.includes('limite') || texto.includes('openai') || texto.includes('quota')) {
     return {
       tipo: 'aviso',
-      title: 'IA indisponivel agora',
+      title: 'IA indisponível agora',
       detail: 'Continuaremos no modo manual.',
     };
   }
@@ -219,14 +222,14 @@ function feedbackErroAnalise(error) {
   if (texto.includes('identificar') || texto.includes('reconhecer')) {
     return {
       tipo: 'aviso',
-      title: 'Nao vimos alimentos na foto',
+      title: 'Não vimos alimentos na foto',
       detail: 'Outro angulo, mais luz, ou adicione manualmente.',
     };
   }
 
   return {
     tipo: 'erro',
-    title: 'Analise nao concluida',
+    title: 'Análise não concluída',
     detail: detalhe,
   };
 }
@@ -409,8 +412,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setMealTimingDetailsVisible(true);
     mostrarToast(
       'aviso',
-      'Tipo obrigatorio',
-      'Selecione o tipo da refeicao para continuar.'
+      'Tipo obrigatório',
+      'Selecione o tipo da refeição para continuar.'
     );
     return false;
   }
@@ -427,8 +430,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     if (!hasMealType) {
       mostrarToast(
         'aviso',
-        'Tipo obrigatorio',
-        'Selecione o tipo da refeicao para continuar.'
+        'Tipo obrigatório',
+        'Selecione o tipo da refeição para continuar.'
       );
       return;
     }
@@ -438,12 +441,19 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   }
 
   function mostrarAvisoTopo({ tipo = 'aviso', titulo, detalhe = '' }) {
+    if (loadingAction) {
+      setToast(null);
+      setStatusFoto({
+        tipo,
+        title: titulo,
+        detail: detalhe,
+      });
+      return;
+    }
+
+    setStatusFoto(null);
     setToast(null);
-    setStatusFoto({
-      tipo,
-      title: titulo,
-      detail: detalhe,
-    });
+    mostrarToastPaciente({ tipo, texto: titulo, subtexto: detalhe });
   }
 
   function mostrarToast(tipo, texto, detalhe = '') {
@@ -458,8 +468,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   function mostrarFotoSelecionada(origem) {
     const detalhe =
       origem === 'camera'
-        ? 'Foto da camera pronta. Analise com IA ou anexe sem IA.'
-        : 'Foto da galeria pronta. Analise com IA ou anexe sem IA.';
+        ? 'Foto da câmera pronta. Análise com IA ou anexe sem IA.'
+        : 'Foto da galeria pronta. Análise com IA ou anexe sem IA.';
 
     mostrarAvisoTopo({
       tipo: 'info',
@@ -473,7 +483,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       return {
         tipo: 'processando',
         texto: 'Enviando foto...',
-        subtexto: 'Preparando imagem para a refeicao',
+        subtexto: 'Preparando imagem para a refeição',
         carregando: true,
       };
     }
@@ -490,7 +500,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     if (loadingAction === 'save') {
       return {
         tipo: 'processando',
-        texto: 'Salvando refeicao...',
+        texto: 'Salvando refeição...',
         subtexto: 'Registrando alimentos e nutrientes',
         carregando: true,
       };
@@ -683,7 +693,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     }
 
     if (!patientId) {
-      mostrarToast('aviso', 'Sessao expirada', 'Faca login novamente no app.');
+      mostrarToast('aviso', 'Sessão expirada', 'Faça login novamente no app.');
       return;
     }
 
@@ -711,13 +721,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       if (!itens.length) {
         throw new Error(
           response.message ||
-            'Nao foi possivel identificar alimentos nesta foto. Continue preenchendo manualmente.'
+            'Não foi possível identificar alimentos nesta foto. Continue preenchendo manualmente.'
         );
       }
 
       setAlimentos(itens);
       setAnalysisMeta({
-        source: response.source || 'gemini-vision',
+        source: response.source || 'openai-vision',
         imageId: response.imageId || null,
       });
       mostrarAvisoTopo({
@@ -735,7 +745,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       const feedback = feedbackErroAnalise(error);
       mostrarAvisoTopo({
         tipo: feedback.tipo || 'aviso',
-        titulo: feedback.title || 'IA indisponivel',
+        titulo: feedback.title || 'IA indisponível',
         detalhe: 'Foto anexada. Continue adicionando os alimentos na lista.',
       });
     } finally {
@@ -767,8 +777,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
       mostrarAvisoTopo({
         tipo: 'erro',
-        titulo: 'Galeria indisponivel',
-        detalhe: error?.message || 'Nao foi possivel abrir a galeria.',
+        titulo: 'Galeria indisponível',
+        detalhe: error?.message || 'Não foi possível abrir a galeria.',
       });
     }
   }
@@ -786,7 +796,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       mostrarAvisoTopo({
         tipo: 'aviso',
         titulo: 'Use a galeria no navegador',
-        detalhe: 'No computador, escolha a foto pelo botao Galeria.',
+        detalhe: 'No computador, escolha a foto pelo botão Galeria.',
       });
       return;
     }
@@ -810,8 +820,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
       mostrarAvisoTopo({
         tipo: 'erro',
-        titulo: 'Camera indisponivel',
-        detalhe: error?.message || 'Nao foi possivel abrir a camera.',
+        titulo: 'Câmera indisponível',
+        detalhe: error?.message || 'Não foi possível abrir a câmera.',
       });
     }
   }
@@ -1015,7 +1025,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       titulo: 'Item removido',
       detalhe: nomeRemovido
         ? `${nomeRemovido} saiu da lista`
-        : 'Voce pode adicionar outro alimento.',
+        : 'Você pode adicionar outro alimento.',
     });
   }
 
@@ -1093,7 +1103,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     const parsedValue = Number(String(mealGlucoseValue || '').replace(',', '.'));
 
     if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
-      mostrarToast('aviso', 'Glicose invalida', 'Informe um valor maior que zero em mg/dL.');
+      mostrarToast('aviso', 'Glicose inválida', 'Informe um valor maior que zero em mg/dL.');
       return;
     }
 
@@ -1111,20 +1121,20 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         auditSource: 'registro_refeicao_fluxo',
         symptoms:
           mealTimingMode === 'current'
-            ? 'Tipo da glicemia: Antes da refeicao'
+            ? 'Tipo da glicemia: Antes da refeição'
             : 'Tipo da glicemia: Outro Momento',
       });
       mostrarAvisoTopo({
         tipo: 'sucesso',
         titulo: 'Glicose registrada',
-        detalhe: `${parsedValue} mg/dL · antes da refeicao`,
+        detalhe: `${parsedValue} mg/dL · antes da refeição`,
       });
       continueAfterMealGlucose();
     } catch (error) {
       console.log('Erro ao salvar glicemia no fluxo da refeicao:', error);
       mostrarAvisoTopo({
         tipo: 'erro',
-        titulo: 'Glicose nao salva',
+        titulo: 'Glicose não salva',
         detalhe: 'Continue sem ela ou tente de novo.',
       });
     } finally {
@@ -1138,8 +1148,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         'aviso',
         'Dados incompletos',
         mealTimingMode === 'current'
-          ? 'Selecione o tipo da refeicao.'
-          : 'Informe tipo, data e hora da refeicao.'
+          ? 'Selecione o tipo da refeição.'
+          : 'Informe tipo, data e hora da refeição.'
       );
       return;
     }
@@ -1150,7 +1160,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
     mostrarAvisoTopo({
       tipo: 'info',
-      titulo: 'Refeicao configurada',
+      titulo: 'Refeição configurada',
       detalhe: `${mealType} · ${mealTimingDate} ${mealTimingTime}`,
     });
 
@@ -1198,14 +1208,14 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     if (!hasMealContent) {
       mostrarToast(
         'aviso',
-        'Refeicao incompleta',
-        'Adicione itens na lista ou anexe uma foto da refeicao.'
+        'Refeição incompleta',
+        'Adicione itens na lista ou anexe uma foto da refeição.'
       );
       return;
     }
 
     if (!patientId) {
-      mostrarToast('aviso', 'Sessao expirada', 'Faca login novamente no app.');
+      mostrarToast('aviso', 'Sessão expirada', 'Faça login novamente no app.');
       return;
     }
 
@@ -1274,8 +1284,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       console.log('Erro ao salvar refeicao IA:', error);
       mostrarAvisoTopo({
         tipo: 'erro',
-        titulo: 'Refeicao nao salva',
-        detalhe: error?.message || 'Verifique a conexao e tente de novo.',
+        titulo: 'Refeição não salva',
+        detalhe: error?.message || 'Verifique a conexão e tente de novo.',
       });
     } finally {
       setLoadingAction('');
@@ -1340,7 +1350,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
             >
               <View style={styles.modalCard}>
                 <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Registrar alimentacao</Text>
+                  <Text style={styles.modalTitle}>Registrar alimentação</Text>
                   <TouchableOpacity
                     style={styles.modalCloseButton}
                     onPress={fecharEscolhaHorarioEVoltar}
@@ -1350,7 +1360,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 </View>
 
                 <Text style={styles.modalText}>
-                  Escolha se esta refeicao e de agora ou se deseja registrar uma refeicao anterior.
+                  Escolha se esta refeição é de agora ou se deseja registrar uma refeição anterior.
                 </Text>
 
                 <View style={styles.measurementChoiceList}>
@@ -1370,7 +1380,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                           : styles.measurementChoiceTextPrevious,
                       ]}
                     >
-                      Refeicao Atual
+                      Refeição Atual
                     </Text>
                   </TouchableOpacity>
 
@@ -1390,7 +1400,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                           : styles.measurementChoiceTextPrevious,
                       ]}
                     >
-                      Refeicao Anterior
+                      Refeição Anterior
                     </Text>
                   </TouchableOpacity>
                 </View>
@@ -1427,7 +1437,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 </View>
 
                 <Text style={styles.modalText}>
-                  Antes de continuar, informe a glicose atual em mg/dL. Se preferir, voce pode
+                  Antes de continuar, informe a glicose atual em mg/dL. Se preferir, você pode
                   seguir sem preencher.
                 </Text>
 
@@ -1494,68 +1504,93 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 </View>
 
                 <Text style={styles.modalText}>
-                  Informe o tipo, a data e a hora da refeicao. O tipo e obrigatorio.
+                  Informe o tipo, a data e a hora da refeição. O tipo é obrigatório.
                 </Text>
 
                 <View style={styles.previousMealFields}>
-                  <Text style={styles.modalFieldLabel}>Tipo da Refeicao</Text>
-                  <TouchableOpacity
-                    style={[styles.input, styles.manualModalInput, styles.dropdownButton]}
-                    onPress={() => setMealTypeMenuVisible((current) => !current)}
-                    activeOpacity={0.85}
-                  >
-                    <Text
+                  <Text style={styles.modalFieldLabel}>Tipo da Refeição</Text>
+                  <View style={styles.mealTypePickerWrap}>
+                    <TouchableOpacity
                       style={[
-                        styles.dropdownButtonText,
-                        !mealType && styles.dropdownPlaceholderText,
+                        styles.input,
+                        styles.manualModalInput,
+                        styles.dropdownButton,
+                        mealTypeMenuVisible && styles.dropdownButtonOpen,
+                        mealType && styles.dropdownButtonFilled,
                       ]}
+                      onPress={() => setMealTypeMenuVisible((current) => !current)}
+                      activeOpacity={0.85}
+                      accessibilityRole="button"
+                      accessibilityState={{ expanded: mealTypeMenuVisible }}
                     >
-                      {mealType || 'Selecione o tipo'}
-                    </Text>
-                    <Ionicons
-                      name={mealTypeMenuVisible ? 'chevron-up' : 'chevron-forward'}
-                      size={18}
-                      color={patientTheme.colors.textMuted}
-                    />
-                  </TouchableOpacity>
+                      <Text
+                        style={[
+                          styles.dropdownButtonText,
+                          !mealType && styles.dropdownPlaceholderText,
+                        ]}
+                        numberOfLines={1}
+                      >
+                        {mealType || 'Selecione o tipo'}
+                      </Text>
+                      <Ionicons
+                        name={mealTypeMenuVisible ? 'chevron-up' : 'chevron-down'}
+                        size={18}
+                        color={
+                          mealTypeMenuVisible
+                            ? patientTheme.colors.primaryDark
+                            : patientTheme.colors.textMuted
+                        }
+                      />
+                    </TouchableOpacity>
 
-                  {mealTypeMenuVisible ? (
-                    <View style={styles.mealTypeInlineList}>
-                      {mealTypeOptions.map((option) => {
-                        const isSelected = mealType === option;
+                    {mealTypeMenuVisible ? (
+                      <View style={styles.mealTypeMenuPanel}>
+                        <ScrollView
+                          style={styles.mealTypeMenuScroll}
+                          contentContainerStyle={styles.mealTypeMenuList}
+                          nestedScrollEnabled
+                          keyboardShouldPersistTaps="handled"
+                          showsVerticalScrollIndicator={false}
+                        >
+                          {mealTypeOptions.map((option) => {
+                            const isSelected = mealType === option;
 
-                        return (
-                          <TouchableOpacity
-                            key={option}
-                            style={[
-                              styles.mealTypeOptionButton,
-                              isSelected && styles.mealTypeOptionButtonSelected,
-                            ]}
-                            onPress={() => {
-                              setMealType(option);
-                              setMealTypeMenuVisible(false);
-                            }}
-                          >
-                            <Text
-                              style={[
-                                styles.mealTypeOptionText,
-                                isSelected && styles.mealTypeOptionTextSelected,
-                              ]}
-                            >
-                              {option}
-                            </Text>
-                            {isSelected ? (
-                              <Ionicons
-                                name="checkmark"
-                                size={18}
-                                color={patientTheme.colors.primaryDark}
-                              />
-                            ) : null}
-                          </TouchableOpacity>
-                        );
-                      })}
-                    </View>
-                  ) : null}
+                            return (
+                              <TouchableOpacity
+                                key={option}
+                                style={[
+                                  styles.mealTypeOption,
+                                  isSelected && styles.mealTypeOptionSelected,
+                                ]}
+                                onPress={() => {
+                                  setMealType(option);
+                                  setMealTypeMenuVisible(false);
+                                }}
+                                activeOpacity={0.82}
+                              >
+                                <Text
+                                  style={[
+                                    styles.mealTypeOptionText,
+                                    isSelected && styles.mealTypeOptionTextSelected,
+                                  ]}
+                                  numberOfLines={2}
+                                >
+                                  {option}
+                                </Text>
+                                {isSelected ? (
+                                  <Ionicons
+                                    name="checkmark"
+                                    size={18}
+                                    color={patientTheme.colors.primaryDark}
+                                  />
+                                ) : null}
+                              </TouchableOpacity>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    ) : null}
+                  </View>
 
                   <Text style={styles.modalFieldLabel}>Data</Text>
                   <TextInput
@@ -1847,7 +1882,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           <View style={styles.emptySelectedState}>
             <Text style={styles.emptySelectedTitle}>Nenhum item na lista ainda</Text>
             <Text style={styles.emptySelectedText}>
-              Busque um alimento (ex.: arroz, frango, salada) ou analise uma foto com IA
+              Busque um alimento (ex.: arroz, frango, salada) ou analisar uma foto com IA
             </Text>
           </View>
         )}
@@ -1871,7 +1906,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           onPress={openNutritionistChat}
           activeOpacity={0.88}
         >
-          <Ionicons name="chatbubble-ellipses-outline" size={15} color={patientTheme.colors.primaryDark} />
+          <Ionicons name="chatbubble-ellipses-outline" size={17} color={patientTheme.colors.primaryDark} />
           <Text style={styles.mealQuestionButtonText}>Dúvida sobre esta refeição?</Text>
         </TouchableOpacity>
       </View>
@@ -2526,23 +2561,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   mealQuestionButton: {
-    alignSelf: 'flex-start',
+    alignSelf: 'center',
+    width: '100%',
     marginTop: 14,
-    minHeight: 34,
+    minHeight: 44,
     borderRadius: patientTheme.radius.pill,
-    borderWidth: 1,
+    borderWidth: 1.5,
     borderColor: patientTheme.colors.primarySoft,
-    backgroundColor: '#ffffff',
+    backgroundColor: '#F4FBF7',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 12,
+    gap: 8,
+    paddingHorizontal: 18,
+    paddingVertical: 10,
   },
   mealQuestionButtonText: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '800',
+    textAlign: 'center',
   },
   summaryStatUnit: {
     marginTop: 1,
@@ -2582,8 +2620,11 @@ const styles = StyleSheet.create({
     padding: 22,
   },
   overlayLayer: {
-    ...StyleSheet.absoluteFillObject,
-    zIndex: 1000,
+    alignItems: 'center',
+    backgroundColor: 'rgba(47, 52, 56, 0.32)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 22,
   },
   modalKeyboard: {
     alignItems: 'center',
@@ -2611,8 +2652,10 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '800',
-    paddingHorizontal: 42,
+    paddingHorizontal: 44,
+    pointerEvents: 'none',
     textAlign: 'center',
+    zIndex: 1,
   },
   modalSubtitle: {
     color: patientTheme.colors.textMuted,
@@ -2624,12 +2667,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderRadius: 18,
+    elevation: 4,
     height: 36,
     justifyContent: 'center',
     position: 'absolute',
     right: 0,
     top: 0,
     width: 36,
+    zIndex: 4,
   },
   modalText: {
     color: patientTheme.colors.textMuted,
@@ -2782,6 +2827,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginRight: 10,
+    textAlign: 'left',
   },
   dropdownPlaceholderText: {
     color: '#8a9095',
@@ -2807,32 +2853,56 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
   },
-  mealTypeInlineList: {
-    gap: 8,
-    marginTop: 14,
+  mealTypePickerWrap: {
+    width: '100%',
   },
-  mealTypeOptionButton: {
-    backgroundColor: '#f1f3f5',
-    borderColor: patientTheme.colors.border,
+  dropdownButtonOpen: {
+    borderColor: patientTheme.colors.primaryDark,
+    backgroundColor: '#F8FFFB',
+  },
+  dropdownButtonFilled: {
+    borderColor: patientTheme.colors.primarySoft,
+  },
+  mealTypeMenuPanel: {
+    backgroundColor: 'transparent',
+    marginTop: 8,
+    maxHeight: 320,
+    overflow: 'hidden',
+    padding: 0,
+  },
+  mealTypeMenuScroll: {
+    maxHeight: 304,
+  },
+  mealTypeMenuList: {
+    gap: 8,
+    paddingBottom: 2,
+  },
+  mealTypeOption: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.surfaceBorder,
     borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
     minHeight: 46,
-    paddingHorizontal: 16,
-    alignItems: 'center',
+    paddingHorizontal: 14,
+    width: '100%',
   },
-  mealTypeOptionButtonSelected: {
+  mealTypeOptionSelected: {
     backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
   },
   mealTypeOptionText: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '600',
+    color: patientTheme.colors.textMuted,
+    flex: 1,
+    fontSize: 13,
+    fontWeight: '700',
+    marginRight: 8,
+    textAlign: 'left',
   },
   mealTypeOptionTextSelected: {
     color: patientTheme.colors.primaryDark,
-    fontWeight: '700',
+    fontWeight: '800',
   },
 });

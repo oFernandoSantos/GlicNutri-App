@@ -15,12 +15,19 @@ import { Ionicons } from '@expo/vector-icons';
 import BotaoVoltar from '../../componentes/comum/BotaoVoltar';
 import { RolagemComTeclado } from '../../componentes/comum/RolagemComTeclado';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
-import { markPatientOnboardingSeen } from '../../servicos/servicoOnboardingPaciente';
+import {
+  buildOnboardingAnswersFromPatient,
+  getPatientLocalOnboardingData,
+  getPendingOnboardingStepKeys,
+  hasAllOnboardingStepsAnswered,
+  markPatientOnboardingSeen,
+  mergePatientOnboardingData,
+} from '../../servicos/servicoOnboardingPaciente';
 
 const ONBOARDING_WEB_MAX_WIDTH = 440;
 const ONBOARDING_READER_HEIGHT = 68;
 
-const steps = [
+const ALL_ONBOARDING_STEPS = [
   {
     key: 'objetivos',
     title: 'Quais são seus objetivos nutricionais?',
@@ -90,10 +97,19 @@ const steps = [
 ];
 
 function createInitialAnswers() {
-  return steps.reduce((acc, step) => {
+  return ALL_ONBOARDING_STEPS.reduce((acc, step) => {
     acc[step.key] = [];
     return acc;
   }, {});
+}
+
+function buildAnswersState(prefill = {}) {
+  return {
+    objetivos: Array.isArray(prefill.objetivos) ? prefill.objetivos : [],
+    condicoes: Array.isArray(prefill.condicoes) ? prefill.condicoes : [],
+    situacoes: Array.isArray(prefill.situacoes) ? prefill.situacoes : [],
+    procedimentos: Array.isArray(prefill.procedimentos) ? prefill.procedimentos : [],
+  };
 }
 
 export default function PacienteOnboardingScreen({
@@ -106,6 +122,8 @@ export default function PacienteOnboardingScreen({
   const insets = useSafeAreaInsets();
   const stepProgressAnim = useRef(new Animated.Value(1)).current;
   const { width: windowWidth } = useWindowDimensions();
+  const [bootstrapping, setBootstrapping] = useState(true);
+  const [visibleSteps, setVisibleSteps] = useState(ALL_ONBOARDING_STEPS);
   const [stepIndex, setStepIndex] = useState(0);
   const [highestStepUnlocked, setHighestStepUnlocked] = useState(0);
   const [answers, setAnswers] = useState(createInitialAnswers);
@@ -114,14 +132,14 @@ export default function PacienteOnboardingScreen({
   const [finished, setFinished] = useState(false);
   const [completedPatient, setCompletedPatient] = useState(null);
 
-  const currentStep = steps[stepIndex];
+  const currentStep = visibleSteps[stepIndex];
   const selectedOptions = answers[currentStep.key] || [];
   const canAdvance = selectedOptions.length > 0 && !saving;
   const availableWidth = Math.max(windowWidth - 40, 1);
   const contentWidth = Math.min(availableWidth, ONBOARDING_WEB_MAX_WIDTH);
   const stepProgressWidth = stepProgressAnim.interpolate({
-    inputRange: [1, steps.length],
-    outputRange: [`${100 / steps.length}%`, '100%'],
+    inputRange: [1, Math.max(visibleSteps.length, 1)],
+    outputRange: [`${100 / Math.max(visibleSteps.length, 1)}%`, '100%'],
     extrapolate: 'clamp',
   });
 
@@ -135,6 +153,63 @@ export default function PacienteOnboardingScreen({
     }),
     [answers, outrosProcedimento]
   );
+
+  useEffect(() => {
+    let isMounted = true;
+
+    async function bootstrapOnboarding() {
+      if (!usuarioLogado) {
+        if (isMounted) {
+          setBootstrapping(false);
+        }
+        return;
+      }
+
+      const localData = await getPatientLocalOnboardingData(usuarioLogado);
+      const mergedPatient = mergePatientOnboardingData(usuarioLogado, localData) || usuarioLogado;
+      const prefill = buildOnboardingAnswersFromPatient(mergedPatient, null);
+
+      if (hasAllOnboardingStepsAnswered(prefill)) {
+        const updatedPatient = await markPatientOnboardingSeen(mergedPatient, {
+          ...prefill,
+          skipped: false,
+        });
+        const nextPatient = updatedPatient || mergedPatient;
+
+        if (!isMounted) return;
+
+        navigation.reset({
+          index: 0,
+          routes: [
+            {
+              name: 'HomePaciente',
+              params: { usuarioLogado: nextPatient },
+            },
+          ],
+        });
+        onOnboardingFinished?.(nextPatient);
+        return;
+      }
+
+      const pendingKeys = getPendingOnboardingStepKeys(prefill);
+      const pendingSteps = ALL_ONBOARDING_STEPS.filter((step) => pendingKeys.includes(step.key));
+
+      if (!isMounted) return;
+
+      setAnswers(buildAnswersState(prefill));
+      setOutrosProcedimento(prefill.procedimento_outros || '');
+      setVisibleSteps(pendingSteps.length ? pendingSteps : ALL_ONBOARDING_STEPS);
+      setStepIndex(0);
+      setHighestStepUnlocked(0);
+      setBootstrapping(false);
+    }
+
+    bootstrapOnboarding();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigation, onOnboardingFinished, usuarioLogado]);
 
   useEffect(() => {
     if (!finished) return undefined;
@@ -164,8 +239,12 @@ export default function PacienteOnboardingScreen({
   }, [stepIndex, stepProgressAnim]);
 
   function isStepComplete(index) {
-    const step = steps[index];
+    const step = visibleSteps[index];
     if (!step) return false;
+
+    if (step.key === 'procedimentos') {
+      return (answers.procedimentos || []).length > 0 || Boolean(outrosProcedimento.trim());
+    }
 
     return (answers[step.key] || []).length > 0;
   }
@@ -210,7 +289,7 @@ export default function PacienteOnboardingScreen({
   }
 
   function goToStep(index) {
-    const boundedIndex = Math.max(0, Math.min(steps.length - 1, index));
+    const boundedIndex = Math.max(0, Math.min(visibleSteps.length - 1, index));
     const canMoveForward =
       boundedIndex <= highestStepUnlocked ||
       (boundedIndex === stepIndex + 1 && isStepComplete(stepIndex));
@@ -253,7 +332,7 @@ export default function PacienteOnboardingScreen({
   function handleAdvance() {
     if (!canAdvance) return;
 
-    if (stepIndex === steps.length - 1) {
+    if (stepIndex === visibleSteps.length - 1) {
       finishOnboarding(false);
       return;
     }
@@ -320,7 +399,7 @@ export default function PacienteOnboardingScreen({
           <Animated.View style={[styles.stepTrackFill, { width: stepProgressWidth }]} />
         </View>
         <View style={styles.stepItems}>
-          {steps.map((step, index) => {
+          {visibleSteps.map((step, index) => {
             const isActive = index <= stepIndex;
             const isReachable =
               index <= highestStepUnlocked || (index === stepIndex + 1 && isStepComplete(stepIndex));
@@ -373,13 +452,27 @@ export default function PacienteOnboardingScreen({
               <ActivityIndicator color="#ffffff" />
             ) : (
               <Text style={styles.primaryButtonText}>
-                {index === steps.length - 1 ? 'Concluir' : 'Próximo'}
+                {index === visibleSteps.length - 1 ? 'Concluir' : 'Próximo'}
               </Text>
             )}
           </TouchableOpacity>
         </View>
       </View>
     );
+  }
+
+  if (bootstrapping) {
+    return (
+      <SafeAreaView edges={Platform.OS === 'web' ? undefined : ['top']} style={styles.container}>
+        <View style={styles.bootstrapContent}>
+          <ActivityIndicator size="large" color={patientTheme.colors.primary} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!currentStep) {
+    return null;
   }
 
   if (finished) {
@@ -441,6 +534,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: patientTheme.colors.background,
+  },
+  bootstrapContent: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   scroll: {
     flex: 1,

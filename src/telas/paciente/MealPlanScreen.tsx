@@ -44,7 +44,7 @@ const weekDaysMock: DayItem[] = [
   { id: 'wed', label: 'Qua', dayNumber: '14', isToday: true },
   { id: 'thu', label: 'Qui', dayNumber: '15' },
   { id: 'fri', label: 'Sex', dayNumber: '16' },
-  { id: 'sat', label: 'Sab', dayNumber: '17' },
+  { id: 'sat', label: 'Sáb', dayNumber: '17' },
   { id: 'sun', label: 'Dom', dayNumber: '18' },
 ];
 
@@ -62,7 +62,7 @@ const dailyOverviewMock = {
     },
     {
       id: 'proteins',
-      label: 'Proteinas',
+      label: 'Proteínas',
       consumed: 92,
       target: 120,
       unit: 'g',
@@ -83,22 +83,22 @@ const mealsMock: MealItem[] = [
   {
     id: 'breakfast',
     time: '07:30',
-    title: 'Cafe da Manha',
+    title: 'Café da Manhã',
     kcal: 380,
     foods: [
-      { id: 'f1', quantity: '2 fatias', name: 'Pao integral' },
-      { id: 'f2', quantity: '1 porcao', name: 'Ovos mexidos' },
-      { id: 'f3', quantity: '200ml', name: 'Cafe com leite sem acucar' },
+      { id: 'f1', quantity: '2 fatias', name: 'Pão integral' },
+      { id: 'f2', quantity: '1 porção', name: 'Ovos mexidos' },
+      { id: 'f3', quantity: '200ml', name: 'Café com leite sem açúcar' },
     ],
   },
   {
     id: 'lunch',
     time: '12:30',
-    title: 'Almoco',
+    title: 'Almoço',
     kcal: 540,
     foods: [
       { id: 'f4', quantity: '4 colheres', name: 'Arroz integral' },
-      { id: 'f5', quantity: '1 concha', name: 'Feijao carioca' },
+      { id: 'f5', quantity: '1 concha', name: 'Feijão carioca' },
       { id: 'f6', quantity: '120g', name: 'Frango grelhado' },
       { id: 'f7', quantity: '1 prato', name: 'Salada verde com azeite' },
     ],
@@ -138,7 +138,7 @@ function HeaderSection({
       <View className="mb-4 flex-row items-center justify-between">
         <View>
           <Text className="text-sm font-medium text-[#686d71]">Seu plano de hoje</Text>
-          <Text className="mt-1 text-3xl font-bold text-[#2f3438]">Bom dia, Joao!</Text>
+          <Text className="mt-1 text-3xl font-bold text-[#2f3438]">Bom dia, João!</Text>
         </View>
 
         <View className="h-11 w-11 items-center justify-center rounded-full bg-[#e8fff5]">
@@ -230,7 +230,7 @@ function DailyOverview() {
         </View>
 
         <Text className="text-sm font-semibold text-[#4fdfa3]">
-          {Math.round(caloriesProgress * 100)}% concluido
+          {Math.round(caloriesProgress * 100)}% concluído
         </Text>
       </View>
 
@@ -261,8 +261,8 @@ function AIInsightCard() {
         <View className="flex-1">
           <Text className="text-sm font-semibold text-[#2f3438]">Insight da IA</Text>
           <Text className="mt-2 text-sm leading-6 text-[#686d71]">
-            Sua curva glicemica esta otima! O almoco sugerido mantera seus niveis mais
-            estaveis ao longo da tarde.
+            Sua curva glicêmica está ótima! O almoço sugerido manterá seus níveis mais
+            estáveis ao longo da tarde.
           </Text>
         </View>
       </View>
@@ -320,7 +320,7 @@ function MealCard({ meal }: { meal: MealItem }) {
 function MealsList() {
   return (
     <View className="mb-2 px-4">
-      <Text className="mb-4 text-xl font-bold text-[#2f3438]">Refeicoes do dia</Text>
+      <Text className="mb-4 text-xl font-bold text-[#2f3438]">Refeições do dia</Text>
 
       {mealsMock.map((meal) => (
         <MealCard key={meal.id} meal={meal} />
@@ -340,7 +340,7 @@ function WaterTracker() {
     <View className="mx-4 mb-8 rounded-[24px] bg-white p-5">
       <View className="flex-row items-center justify-between">
         <View>
-          <Text className="text-xl font-bold text-[#2f3438]">Hidratacao</Text>
+          <Text className="text-xl font-bold text-[#2f3438]">Hidratação</Text>
           <Text className="mt-1 text-sm text-[#686d71]">
             {waterConsumed}/{waterTarget}ml
           </Text>

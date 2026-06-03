@@ -61,10 +61,10 @@ const NUTRIENT_BASE = {
 const MACRO_NUTRIENTS = [
   { id: 'calories', label: 'Calorias', unit: 'kcal', target: 1800 },
   { id: 'carbs', label: 'Carboidratos', unit: 'g', target: 225 },
-  { id: 'protein', label: 'Proteinas', unit: 'g', target: 90 },
+  { id: 'protein', label: 'Proteínas', unit: 'g', target: 90 },
   { id: 'fat', label: 'Gorduras totais', unit: 'g', target: 60 },
   { id: 'fiber', label: 'Fibras', unit: 'g', target: 25 },
-  { id: 'sugar', label: 'Acucares', unit: 'g', target: 50 },
+  { id: 'sugar', label: 'Açúcares', unit: 'g', target: 50 },
   { id: 'saturatedFat', label: 'Gordura saturada', unit: 'g', target: 20 },
   { id: 'sodium', label: 'Sodio', unit: 'mg', target: 2000 },
 ];
@@ -375,11 +375,11 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         patientId && isPatientExperienceCacheFresh(patientId, diarioFetchLimits);
       loadDiario({
         silent: hasLoadedRef.current || experienceCacheFresco || Boolean(cachedAppStateInicial),
-        forceRefresh: hasLoadedRef.current,
+        forceRefresh: false,
       });
       hasLoadedRef.current = true;
 
-      if (patientId) {
+      if (patientId && !experienceCacheFresco) {
         refreshPatientMealEntries(patientId, {
           patientContext: usuarioLogado,
           mealLimit: diarioFetchLimits.mealLimit,
@@ -496,31 +496,31 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
     () => [
       {
         id: 'meals',
-        label: 'Refeicoes no periodo',
+        label: 'Refeições no período',
         value: `${selectedNutritionEntries.length}`,
         helper: range === 'Hoje' ? 'registradas hoje' : 'registradas',
-        accent: KPI_ACCENTS.blue,
+        accent: KPI_ACCENTS.greenBright,
       },
       {
         id: 'carbs',
-        label: 'Carboidratos do periodo',
+        label: 'Carboidratos do período',
         value: `${Math.round(selectedNutritionSummary.carbs)}g`,
-        helper: 'estimativa da alimentacao',
-        accent: KPI_ACCENTS.orange,
+        helper: 'estimativa da alimentação',
+        accent: KPI_ACCENTS.greenBright,
       },
       {
         id: 'calories',
         label: 'Energia consumida',
         value: `${Math.round(selectedNutritionSummary.calories)}`,
         helper: 'kcal estimadas',
-        accent: KPI_ACCENTS.green,
+        accent: KPI_ACCENTS.greenBright,
       },
       {
         id: 'last',
         label: 'Ultimo registro',
         value: selectedLastMealTime,
         helper: selectedAiMealEntriesCount ? `${selectedAiMealEntriesCount} com foto e IA` : 'sem foto com IA',
-        accent: KPI_ACCENTS.purple,
+        accent: KPI_ACCENTS.greenBright,
       },
     ],
     [range, selectedAiMealEntriesCount, selectedLastMealTime, selectedNutritionEntries.length, selectedNutritionSummary]
@@ -553,6 +553,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
   );
   const emptyTimeline = !loading && !timelineEntries.length;
   const nutritionCarouselCardWidth = Math.max(windowWidth - 36, 280);
+  const summaryCardWidth = Math.max(Math.floor((windowWidth - 74) / 4), 68);
 
   return (
     <PatientScreenLayout
@@ -596,14 +597,19 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
       </View>
 
       <View style={styles.metricsPanel}>
-        <View style={dashboardKpiStyles.miniRow}>
+        <View style={[dashboardKpiStyles.miniRow, styles.metricsRow]}>
           {summaryCards.map((item) => (
-            <View key={item.id} style={dashboardKpiStyles.miniCell}>
+            <View key={item.id} style={[dashboardKpiStyles.miniCell, styles.metricsCell, { width: summaryCardWidth, minWidth: summaryCardWidth, maxWidth: summaryCardWidth }]}>
               <DashboardMiniKpiCard
                 label={item.label}
                 value={item.value}
                 helper={item.helper}
                 accent={item.accent}
+                style={styles.metricsMiniCard}
+                labelStyle={styles.metricsMiniLabel}
+                valueStyle={styles.metricsMiniValue}
+                helperStyle={styles.metricsMiniHelper}
+                accentBarStyle={styles.metricsMiniAccentBar}
               />
             </View>
           ))}
@@ -629,7 +635,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
             <View style={styles.nutritionHeaderCopy}>
               <Text style={styles.nutritionTitle}>Macronutrientes</Text>
               <Text style={styles.nutritionSubtitle}>
-                {selectedNutritionEntries.length} refeicoes analisadas em {range.toLowerCase()}.
+                {selectedNutritionEntries.length} refeições analisadas em {range.toLowerCase()}.
               </Text>
             </View>
             <View style={styles.chartRangePill}>
@@ -667,7 +673,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
             <View style={styles.nutritionHeaderCopy}>
               <Text style={styles.nutritionTitle}>Micronutrientes</Text>
               <Text style={styles.nutritionSubtitle}>
-                Estimativa com base nos alimentos descritos nas refeicoes.
+                Estimativa com base nos alimentos descritos nas refeições.
               </Text>
             </View>
             <View style={styles.chartRangePill}>
@@ -721,7 +727,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
           <View style={styles.mealLogBadge}>
             <Text style={styles.mealLogBadgeText}>
               {displayedTimelineEntries.length}{' '}
-              {displayedTimelineEntries.length === 1 ? 'refeicao' : 'refeicoes'}
+              {displayedTimelineEntries.length === 1 ? 'refeição' : 'refeições'}
             </Text>
           </View>
         </View>
@@ -738,7 +744,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
                 <View key={entry.id} style={styles.mealLogEntry}>
                   <View style={styles.mealLogTimeBlock}>
                     <Text style={styles.mealLogTimeLabel}>
-                      {range === 'Hoje' ? 'Horario' : 'Data'}
+                      {range === 'Hoje' ? 'Horário' : 'Data'}
                     </Text>
                     <Text style={styles.mealLogTimeValue}>
                       {range === 'Hoje'
@@ -749,7 +755,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
 
                   <View style={styles.mealLogContent}>
                     <Text style={styles.mealLogEntryTitle}>
-                      {entry.mealLabel || entry.title || 'Refeicao registrada'}
+                      {entry.mealLabel || entry.title || 'Refeição registrada'}
                     </Text>
                     <Text style={styles.mealLogEntryDescription} numberOfLines={2}>
                       {description}
@@ -772,7 +778,7 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
                   <Ionicons name="camera-outline" size={22} color={patientTheme.colors.primaryDark} />
                 </View>
                 <Text style={styles.emptyStateText}>
-                  Nenhuma refeicao salva ainda. Comece pela primeira foto para montar seu historico alimentar com ajuda da IA.
+                  Nenhuma refeição salva ainda. Comece pela primeira foto para montar seu histórico alimentar com ajuda da IA.
                 </Text>
                 <TouchableOpacity
                   style={[styles.primaryButton, styles.emptyPrimaryButton]}
@@ -783,12 +789,12 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
                   }
                   disabled={!canResolvePatient}
                 >
-                  <Text style={styles.primaryButtonText}>Registrar primeira refeicao</Text>
+                  <Text style={styles.primaryButtonText}>Registrar primeira refeição</Text>
                 </TouchableOpacity>
               </>
             ) : (
               <Text style={styles.emptyStateText}>
-                Nenhuma refeicao registrada neste periodo. Troque para 7 dias ou registre uma nova refeicao.
+                Nenhuma refeição registrada neste período. Troque para 7 dias ou registre uma nova refeição.
               </Text>
             )}
           </View>
@@ -804,8 +810,49 @@ const styles = StyleSheet.create({
     paddingBottom: 160,
   },
   metricsPanel: {
-    marginTop: 12,
-    marginBottom: 18,
+    marginTop: 10,
+    marginBottom: 16,
+  },
+  metricsRow: {
+    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+    gap: 6,
+  },
+  metricsCell: {
+    flexGrow: 0,
+    flexShrink: 0,
+  },
+  metricsMiniCard: {
+    minWidth: 0,
+    minHeight: 96,
+    paddingHorizontal: 7,
+    paddingVertical: 10,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    ...patientShadow,
+  },
+  metricsMiniLabel: {
+    minHeight: 22,
+    fontSize: 8,
+    lineHeight: 10,
+    textTransform: 'uppercase',
+  },
+  metricsMiniValue: {
+    marginTop: 7,
+    fontSize: 15,
+    lineHeight: 17,
+  },
+  metricsMiniHelper: {
+    minHeight: 18,
+    marginTop: 4,
+    fontSize: 8.5,
+    lineHeight: 10,
+  },
+  metricsMiniAccentBar: {
+    marginTop: 7,
+    width: 20,
   },
   heroMetrics: {
     flexDirection: 'row',
@@ -1241,10 +1288,6 @@ const styles = StyleSheet.create({
     marginTop: 16,
   },
 });
-
-
-
-
 
 
 
