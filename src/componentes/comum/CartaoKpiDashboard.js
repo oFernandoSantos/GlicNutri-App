@@ -50,13 +50,23 @@ export function DashboardKpiCard({
   );
 }
 
-export function DashboardMiniKpiCard({ label, value, helper, accent = KPI_ACCENTS.green, style }) {
+export function DashboardMiniKpiCard({
+  label,
+  value,
+  helper,
+  accent = KPI_ACCENTS.green,
+  style,
+  labelStyle,
+  valueStyle,
+  helperStyle,
+  accentBarStyle,
+}) {
   return (
     <View style={[styles.miniCard, style]}>
-      <Text style={styles.miniLabel}>{label}</Text>
-      <Text style={[styles.miniValue, { color: accent }]}>{value}</Text>
-      {helper ? <Text style={styles.miniHelper}>{helper}</Text> : null}
-      <View style={[styles.miniAccentBar, { backgroundColor: accent }]} />
+      <Text style={[styles.miniLabel, labelStyle]}>{label}</Text>
+      <Text style={[styles.miniValue, { color: accent }, valueStyle]}>{value}</Text>
+      {helper ? <Text style={[styles.miniHelper, helperStyle]}>{helper}</Text> : null}
+      <View style={[styles.miniAccentBar, { backgroundColor: accent }, accentBarStyle]} />
     </View>
   );
 }
@@ -88,7 +98,7 @@ const styles = StyleSheet.create({
     minWidth: 150,
     minHeight: 92,
     padding: 14,
-    backgroundColor: brand.white,
+    backgroundColor: brand.surface,
     borderWidth: 1,
     borderColor: brand.border,
     borderRadius: radius.xl,
@@ -142,7 +152,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: brand.border,
-    backgroundColor: brand.white,
+    backgroundColor: brand.surface,
   },
   miniLabel: {
     color: brand.slateMuted,

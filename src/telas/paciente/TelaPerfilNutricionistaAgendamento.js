@@ -18,7 +18,10 @@ import {
 import CalendarioHorarios from '../../componentes/agendamento/CalendarioHorarios';
 import { patientTheme } from '../../temas/temaVisualPaciente';
 import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
-import { formatValorConsulta } from '../../servicos/servicoGoogleMeet';
+import {
+  formatValorConsulta,
+  VALOR_CONSULTA_PERFIL_CENTAVOS,
+} from '../../servicos/servicoGoogleMeet';
 import {
   createConsulta,
   listConsultasByNutricionista,
@@ -42,16 +45,15 @@ import {
   markSlotsWithBooking,
 } from '../../utilitarios/slotsTeleconsulta';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
+import { mostrarToastPaciente, mostrarToastPacienteErro } from '../../servicos/servicoToastPaciente';
+import SecaoMeetConsultasProfissional from '../../componentes/paciente/SecaoMeetConsultasProfissional';
+import CartaoPerfilProfissionalPaciente from '../../componentes/paciente/CartaoPerfilProfissionalPaciente';
+import { abrirMensagensProfissionalVinculado } from '../../utilitarios/navegacaoMensagensProfissionalPaciente';
+import { formatCrnNutricionista } from '../../utilitarios/formatRegistroProfissional';
+import { getNutricionistaFotoModeloUri } from '../../utilitarios/fotoModeloProfissional';
 
 function getPacienteNome(usuario) {
   return usuario?.nome_completo || usuario?.nome_pac || usuario?.email_pac || 'Paciente';
-}
-
-function getNutriAvatarUri(nutri) {
-  const seed = encodeURIComponent(
-    String(nutri?.id_nutricionista_uuid || nutri?.nome_completo_nutri || 'nutri').trim()
-  );
-  return `https://api.dicebear.com/8.x/thumbs/png?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf`;
 }
 
 function uniqueSlotsByScheduledAt(items) {
@@ -82,11 +84,9 @@ export default function PacientePerfilNutricionistaScreen({
   const [desvinculando, setDesvinculando] = useState(false);
   const [linkedToNutri, setLinkedToNutri] = useState(false);
   const [linkedNutritionistId, setLinkedNutritionistId] = useState(null);
-  const [feedback, setFeedback] = useState('');
   const [slots, setSlots] = useState([]);
   const [selectedDayKey, setSelectedDayKey] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [erroAgenda, setErroAgenda] = useState('');
   const [observacoes, setObservacoes] = useState('');
 
   useEffect(() => {
@@ -140,7 +140,7 @@ export default function PacientePerfilNutricionistaScreen({
   );
 
   const especialidade = getNutriEspecialidadeLabel(nutricionista);
-  const valorLabel = formatValorConsulta(nutricionista?.valor_consulta_centavos);
+  const valorLabel = formatValorConsulta(VALOR_CONSULTA_PERFIL_CENTAVOS);
   const normalizedSlots = useMemo(() => uniqueSlotsByScheduledAt(slots), [slots]);
   const calendarDays = useMemo(() => groupSlotsByDay(normalizedSlots), [normalizedSlots]);
   const availableDays = useMemo(
@@ -150,17 +150,34 @@ export default function PacientePerfilNutricionistaScreen({
       ),
     [calendarDays]
   );
+  const abrirMensagensNutri = useCallback(() => {
+    abrirMensagensProfissionalVinculado(navigation, {
+      usuarioLogado,
+      profissional: nutricionista,
+      papel: 'nutricionista',
+      vinculado: linkedToNutri,
+    });
+  }, [navigation, usuarioLogado, nutricionista, linkedToNutri]);
+
   useEffect(() => {
     navigation.setOptions({
-      readerTitle: 'Perfil do Profissional',
+      readerTitle: 'Perfil do Nutricionista',
+      readerRightAction: abrirMensagensNutri,
+      readerRightIcon: 'chatbubble-outline',
+      readerRightAccessibilityLabel: 'Mensagem para a nutricionista',
+      readerRightDisabled: !linkedToNutri,
     });
 
     return () => {
       navigation.setOptions({
         readerTitle: null,
+        readerRightAction: undefined,
+        readerRightIcon: undefined,
+        readerRightAccessibilityLabel: undefined,
+        readerRightDisabled: undefined,
       });
     };
-  }, [navigation]);
+  }, [navigation, abrirMensagensNutri, linkedToNutri]);
 
   useEffect(() => {
     if (!availableDays.length) {
@@ -169,17 +186,16 @@ export default function PacientePerfilNutricionistaScreen({
       return;
     }
 
-    if (!selectedDayKey || !availableDays.some((day) => day.dateKey === selectedDayKey)) {
-      setSelectedDayKey(availableDays[0].dateKey);
+    if (selectedDayKey && !calendarDays.some((day) => day.dateKey === selectedDayKey)) {
+      setSelectedDayKey('');
       setSelectedSlot(null);
     }
-  }, [availableDays, selectedDayKey]);
+  }, [calendarDays, selectedDayKey]);
 
   const carregarAgenda = useCallback(async () => {
     if (!nutricionista?.id_nutricionista_uuid) return;
 
     try {
-      setErroAgenda('');
       setLoadingAgenda(true);
       const [availability, consultas] = await Promise.all([
         listNutriAvailability(nutricionista.id_nutricionista_uuid),
@@ -193,7 +209,11 @@ export default function PacientePerfilNutricionistaScreen({
     } catch (error) {
       console.log('Erro ao carregar agenda do profissional:', error);
       setSlots([]);
-      setErroAgenda('Não foi possível carregar datas e horários deste profissional.');
+      mostrarToastPaciente({
+        tipo: 'erro',
+        texto: 'Agenda indisponível agora',
+        subtexto: 'Não foi possível carregar horários desta nutricionista.',
+      });
     } finally {
       setLoadingAgenda(false);
     }
@@ -244,7 +264,7 @@ export default function PacientePerfilNutricionistaScreen({
 
   async function handleSolicitarAcompanhamento() {
     if (!nutricionista?.id_nutricionista_uuid || !patientId) {
-      setFeedback('Nao foi possivel identificar o paciente ou nutricionista.');
+      mostrarToastPaciente({ tipo: 'erro', texto: 'Não encontramos seu cadastro ou a nutricionista' });
       return;
     }
 
@@ -252,15 +272,16 @@ export default function PacientePerfilNutricionistaScreen({
       linkedNutritionistId &&
       linkedNutritionistId !== nutricionista.id_nutricionista_uuid
     ) {
-      setFeedback(
-        'Voce ja possui um nutricionista vinculado. Desvincule o acompanhamento atual antes de solicitar outro.'
-      );
+      mostrarToastPaciente({
+        tipo: 'aviso',
+        texto: 'Você já tem nutricionista vinculada',
+        subtexto: 'Encerre o acompanhamento atual antes de solicitar outra.',
+      });
       return;
     }
 
     try {
       setSolicitando(true);
-      setFeedback('');
       const result = await createFollowUpRequest({
         nutricionistaId: nutricionista.id_nutricionista_uuid,
         pacienteId: patientId,
@@ -268,14 +289,17 @@ export default function PacientePerfilNutricionistaScreen({
         actor: usuarioLogado,
       });
 
-      setFeedback(
-        result?.message ||
-          'Solicitacao enviada. O nutricionista precisa aprovar o acompanhamento antes do agendamento.'
-      );
+      mostrarToastPaciente({
+        tipo: 'sucesso',
+        texto: 'Solicitação enviada',
+        subtexto:
+          result?.message ||
+          'A nutricionista precisa aprovar antes do agendamento.',
+      });
       if (result?.alreadyLinked) setLinkedToNutri(true);
     } catch (error) {
       console.log('Erro ao solicitar acompanhamento:', error);
-      setFeedback(error?.message || 'Nao foi possivel enviar a solicitacao. Tente novamente.');
+      mostrarToastPacienteErro(error, 'Não foi possível enviar sua solicitação agora.');
     } finally {
       setSolicitando(false);
     }
@@ -283,13 +307,12 @@ export default function PacientePerfilNutricionistaScreen({
 
   async function handleDesvincularAcompanhamento() {
     if (!nutricionista?.id_nutricionista_uuid || !patientId) {
-      setFeedback('Nao foi possivel identificar o acompanhamento para desvincular.');
+      mostrarToastPaciente({ tipo: 'erro', texto: 'Não foi possível desvincular agora' });
       return;
     }
 
     try {
       setDesvinculando(true);
-      setFeedback('');
       await unlinkPatientNutritionist({
         pacienteId: patientId,
         nutricionistaId: nutricionista.id_nutricionista_uuid,
@@ -297,10 +320,14 @@ export default function PacientePerfilNutricionistaScreen({
         origin: 'paciente',
       });
       setLinkedToNutri(false);
-      setFeedback('Acompanhamento encerrado. Voce pode solicitar novamente quando precisar.');
+      mostrarToastPaciente({
+        tipo: 'sucesso',
+        texto: 'Acompanhamento encerrado',
+        subtexto: 'Você pode solicitar novamente quando quiser.',
+      });
     } catch (error) {
       console.log('Erro ao desvincular acompanhamento:', error);
-      setFeedback(error?.message || 'Nao foi possivel desvincular o acompanhamento.');
+      mostrarToastPacienteErro(error, 'Não foi possível desvincular o acompanhamento agora.');
     } finally {
       setDesvinculando(false);
     }
@@ -309,7 +336,6 @@ export default function PacientePerfilNutricionistaScreen({
   function handleFecharAgenda() {
     setSelectedSlot(null);
     setObservacoes('');
-    setErroAgenda('');
     navigation.setParams({
       openSchedulePopup: false,
     });
@@ -317,7 +343,20 @@ export default function PacientePerfilNutricionistaScreen({
 
   async function handleConfirmarAgendamento() {
     if (!selectedSlot || !nutricionista?.id_nutricionista_uuid || !patientId) {
-      setErroAgenda('Selecione um horário disponível para continuar.');
+      mostrarToastPaciente({
+        tipo: 'aviso',
+        texto: 'Escolha um horário',
+        subtexto: 'Selecione um horário livre na agenda.',
+      });
+      return;
+    }
+
+    if (!linkedToNutri) {
+      mostrarToastPaciente({
+        tipo: 'aviso',
+        texto: 'Solicite acompanhamento primeiro',
+        subtexto: 'Depois da aprovação da nutricionista, você poderá agendar.',
+      });
       return;
     }
 
@@ -327,13 +366,6 @@ export default function PacientePerfilNutricionistaScreen({
         .filter(Boolean)
         .join(' · ');
 
-      if (!linkedToNutri) {
-        setErroAgenda(
-          'Solicite o acompanhamento primeiro. Depois da aprovacao do nutricionista, o agendamento fica liberado.'
-        );
-        return;
-      }
-
       await createConsulta({
         nutricionistaId: nutricionista.id_nutricionista_uuid,
         pacienteId: patientId,
@@ -342,10 +374,16 @@ export default function PacientePerfilNutricionistaScreen({
         tipoConsulta,
         convenio,
         especialidade,
-        valorCentavos: nutricionista.valor_consulta_centavos,
+        valorCentavos: VALOR_CONSULTA_PERFIL_CENTAVOS,
         nutricionista,
         pacienteNome: getPacienteNome(usuarioLogado),
         actor: usuarioLogado,
+      });
+
+      mostrarToastPaciente({
+        tipo: 'sucesso',
+        texto: 'Consulta agendada',
+        subtexto: 'Veja os detalhes em Minhas consultas.',
       });
 
       handleFecharAgenda();
@@ -355,9 +393,7 @@ export default function PacientePerfilNutricionistaScreen({
       });
     } catch (error) {
       console.log('Erro ao agendar consulta pelo perfil:', error);
-      setErroAgenda(
-        error?.message || 'Não foi possível confirmar o agendamento. Tente novamente.'
-      );
+      mostrarToastPacienteErro(error, 'Não foi possível confirmar seu agendamento agora.');
     } finally {
       setConfirmando(false);
     }
@@ -369,7 +405,7 @@ export default function PacientePerfilNutricionistaScreen({
         navigation={navigation}
         route={route}
         usuarioLogado={usuarioLogado}
-        title="Perfil do profissional"
+        title="Perfil do Nutricionista"
         subtitle="Profissional não encontrado."
       >
         <Text style={styles.empty}>Volte e selecione um nutricionista na lista.</Text>
@@ -386,102 +422,40 @@ export default function PacientePerfilNutricionistaScreen({
       showTabBar={false}
     >
       <View style={styles.content}>
-        <CartaoAgendamento style={styles.hero}>
-          <View style={styles.heroRow}>
-            <AvatarProfissional
-              name={nutricionista.nome_completo_nutri}
-              size={72}
-              online
-              imageUri={getNutriAvatarUri(nutricionista)}
-            />
-            <View style={styles.heroBody}>
-              <Text style={styles.name}>{nutricionista.nome_completo_nutri}</Text>
-              <Text style={styles.spec}>{especialidade}</Text>
-              <Text style={styles.crn}>
-                {nutricionista.crm_numero
-                  ? `CRN ${nutricionista.crm_numero}`
-                  : 'CRN não informado'}
-              </Text>
-              <View style={styles.ratingRow}>
-                <View style={styles.metaGroup}>
-                  <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-                  <Text style={styles.rating}>{rating}</Text>
-                </View>
-                {anosExperiencia != null ? (
-                  <>
-                    <Text style={styles.dot}>•</Text>
-                    <Text style={styles.metaInfo}>{anosExperiencia} anos de experiÃªncia</Text>
-                  </>
-                ) : null}
-                {totalAvaliacoes != null ? (
-                  <Text style={styles.ratingCount}>({totalAvaliacoes} avaliações)</Text>
-                ) : null}
-                <Text style={styles.dot}>•</Text>
-                <Ionicons
-                  name="videocam-outline"
-                  size={14}
-                  color={patientTheme.colors.primaryDark}
-                />
-                <Text style={styles.channel}>Google Meet</Text>
-              </View>
-              <View style={styles.ratingRowCompact}>
-                <View style={styles.metaGroup}>
-                  <Ionicons name="star" size={14} color={patientTheme.colors.warning} />
-                  <Text style={styles.rating}>{rating}</Text>
-                </View>
-                <Text style={styles.ratingCount}>({totalAvaliacoes})</Text>
-                <Text style={styles.dot}>·</Text>
-                <Text style={styles.metaInfo}>{anosExperiencia} anos de experiência</Text>
-              </View>
-            </View>
-          </View>
-        </CartaoAgendamento>
+        <CartaoPerfilProfissionalPaciente
+          linked={linkedToNutri}
+          linkedLabel="Nutricionista vinculada"
+          name={nutricionista.nome_completo_nutri}
+          specialty={especialidade}
+          registration={formatCrnNutricionista(nutricionista.crm_numero)}
+          avatarName={nutricionista.nome_completo_nutri}
+          avatarUri={getNutricionistaFotoModeloUri(nutricionista)}
+          rating={rating}
+          reviewCount={totalAvaliacoes}
+          yearsExperience={anosExperiencia}
+          bio={
+            nutricionista.bio_resumo ||
+            'Teleconsulta com foco em controle glicêmico e plano alimentar personalizado.'
+          }
+          tags={(nutricionista.especialidades || [especialidade]).slice(0, 4)}
+          detailItems={[
+            { label: 'Valor', value: valorLabel },
+            { label: 'Tipo', value: tipoConsulta },
+            {
+              label: 'Convênio',
+              value: nutricionista.aceita_convenio ? convenio : 'Particular',
+            },
+          ]}
+        />
 
-        <CartaoAgendamento style={styles.block}>
-          <Text style={styles.blockTitle}>Sobre o profissional</Text>
-          <Text style={styles.blockText}>
-            {nutricionista.bio_resumo ||
-              'Atendimento por teleconsulta com foco em controle glicêmico e plano alimentar personalizado.'}
-          </Text>
-          {nutricionista.formacao_resumo ? (
-            <Text style={styles.blockText}>{nutricionista.formacao_resumo}</Text>
-          ) : null}
-        </CartaoAgendamento>
+        <SecaoMeetConsultasProfissional
+          patientId={patientId}
+          profissionalId={nutricionista.id_nutricionista_uuid}
+          profissionalTipo="nutricionista"
+          profissional={nutricionista}
+        />
 
-        <CartaoAgendamento style={styles.block}>
-          <Text style={styles.blockTitle}>Especialidades</Text>
-          <View style={styles.tags}>
-            {(nutricionista.especialidades || [especialidade]).map((item) => (
-              <View key={item} style={styles.tag}>
-                <Text style={styles.tagText}>{item}</Text>
-              </View>
-            ))}
-          </View>
-        </CartaoAgendamento>
-
-        <CartaoAgendamento style={styles.block}>
-          <Text style={styles.blockTitle}>Detalhes da teleconsulta</Text>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Valor da consulta</Text>
-            <Text style={styles.detailValue}>{valorLabel}</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Canal</Text>
-            <Text style={styles.detailValue}>Google Meet (link enviado após confirmação)</Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Convênio</Text>
-            <Text style={styles.detailValue}>
-              {nutricionista.aceita_convenio ? convenio : 'Somente particular'}
-            </Text>
-          </View>
-          <View style={styles.detailRow}>
-            <Text style={styles.detailLabel}>Tipo selecionado</Text>
-            <Text style={styles.detailValue}>{tipoConsulta}</Text>
-          </View>
-        </CartaoAgendamento>
-
-        <CartaoAgendamento style={styles.block}>
+        <CartaoAgendamento style={[styles.block, styles.cardWhite]}>
           <View style={styles.scheduleHeader}>
             <View>
               <Text style={styles.blockTitle}>Calendário de horários</Text>
@@ -490,30 +464,32 @@ export default function PacientePerfilNutricionistaScreen({
             {loadingAgenda ? <ActivityIndicator color={patientTheme.colors.primaryDark} /> : null}
           </View>
 
+          <Text style={styles.scheduleHint}>
+            {linkedToNutri
+              ? 'Escolha dia e horário e confirme abaixo.'
+              : 'Solicite acompanhamento para liberar o agendamento.'}
+          </Text>
+
           {loadingAgenda ? (
             <View style={styles.scheduleLoading}>
               <Text style={styles.blockText}>Carregando disponibilidade...</Text>
             </View>
           ) : (
             <CalendarioHorarios
+              variant="compact"
+              slotsInModal
               days={calendarDays}
               selectedDayKey={selectedDayKey}
               onSelectDay={(dayKey) => {
                 setSelectedDayKey(dayKey);
                 setSelectedSlot(null);
-                setErroAgenda('');
               }}
               selectedSlot={selectedSlot}
               onSelectSlot={(slot) => {
                 setSelectedSlot(slot);
-                setErroAgenda('');
               }}
             />
           )}
-
-          {!loadingAgenda && !calendarDays.length && erroAgenda ? (
-            <Text style={styles.errorText}>{erroAgenda}</Text>
-          ) : null}
 
           {linkedToNutri && calendarDays.length ? (
             <>
@@ -529,11 +505,9 @@ export default function PacientePerfilNutricionistaScreen({
                 style={styles.notesInput}
               />
 
-              {erroAgenda ? <Text style={styles.errorText}>{erroAgenda}</Text> : null}
-
               <View style={styles.inlineAgendaActions}>
                 <BotaoAgendamento
-                  label="Confirmar Agendamento"
+                  label="Confirmar agendamento"
                   onPress={handleConfirmarAgendamento}
                   loading={confirmando}
                 />
@@ -542,8 +516,6 @@ export default function PacientePerfilNutricionistaScreen({
           ) : null}
         </CartaoAgendamento>
 
-        {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
-
         {!linkedToNutri ? (
           <BotaoAgendamento
             label="Solicitar acompanhamento"
@@ -551,17 +523,15 @@ export default function PacientePerfilNutricionistaScreen({
             onPress={handleSolicitarAcompanhamento}
             loading={solicitando}
           />
-        ) : null}
-
-        {linkedToNutri ? (
+        ) : (
           <BotaoAgendamento
             label="Desvincular nutricionista"
             icon="close-circle-outline"
-            variant="ghost"
+            variant="unlink"
             onPress={handleDesvincularAcompanhamento}
             loading={desvinculando}
           />
-        ) : null}
+        )}
       </View>
 
       {false ? (
@@ -590,7 +560,7 @@ export default function PacientePerfilNutricionistaScreen({
                   <AvatarProfissional
                     name={nutricionista.nome_completo_nutri}
                     size={44}
-                    imageUri={getNutriAvatarUri(nutricionista)}
+                    imageUri={getNutricionistaFotoModeloUri(nutricionista)}
                   />
                   <View style={styles.modalProfileBody}>
                     <Text style={styles.modalProfileName}>{nutricionista.nome_completo_nutri}</Text>
@@ -612,7 +582,6 @@ export default function PacientePerfilNutricionistaScreen({
                   activeOpacity={0.9}
                   style={styles.selectField}
                   onPress={() => {
-                    setErroAgenda('');
                     setSelectorAberto((prev) => (prev === 'dia' ? '' : 'dia'));
                   }}
                 >
@@ -632,7 +601,6 @@ export default function PacientePerfilNutricionistaScreen({
                             onPress={() => {
                               setSelectedDayKey(day.dateKey);
                               setSelectedSlot(null);
-                              setErroAgenda('');
                               setSelectorAberto('');
                             }}
                           >
@@ -655,10 +623,13 @@ export default function PacientePerfilNutricionistaScreen({
                   activeOpacity={0.9}
                   style={styles.selectField}
                   onPress={() => {
-                    setErroAgenda('');
                     if (!selectedDay) {
                       setSelectorAberto('dia');
-                      setErroAgenda('Selecione primeiro um dia com disponibilidade.');
+                      mostrarToastPaciente({
+                        tipo: 'aviso',
+                        texto: 'Escolha o dia primeiro',
+                        subtexto: 'Selecione um dia com horários disponíveis.',
+                      });
                       return;
                     }
                     setSelectorAberto((prev) => (prev === 'horario' ? '' : 'horario'));
@@ -708,8 +679,6 @@ export default function PacientePerfilNutricionistaScreen({
                   style={styles.notesInput}
                 />
 
-                {erroAgenda ? <Text style={styles.errorText}>{erroAgenda}</Text> : null}
-
                 <View style={styles.actionsRow}>
                   <BotaoAgendamento
                     label="Cancelar"
@@ -741,80 +710,11 @@ const styles = StyleSheet.create({
     paddingBottom: 32,
     gap: 12,
   },
-  hero: {
-    marginBottom: 4,
-  },
-  heroRow: {
-    flexDirection: 'row',
-    gap: 14,
-  },
-  heroBody: {
-    flex: 1,
-  },
-  name: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: patientTheme.colors.text,
-  },
-  spec: {
-    marginTop: 4,
-    color: patientTheme.colors.textMuted,
-    fontWeight: '700',
-  },
-  crn: {
-    marginTop: 4,
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '800',
-    fontSize: 12,
-  },
-  ratingRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    display: 'none',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 10,
-  },
-  ratingRowCompact: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 4,
-    marginTop: 10,
-  },
-  metaGroup: {
-    alignItems: 'center',
-    flexDirection: 'row',
-    flexShrink: 0,
-    gap: 4,
-  },
-  rating: {
-    flexShrink: 0,
-    fontWeight: '800',
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-  },
-  ratingCount: {
-    color: patientTheme.colors.textMuted,
-    flexShrink: 0,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  metaInfo: {
-    color: patientTheme.colors.textMuted,
-    flexShrink: 0,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  dot: {
-    color: patientTheme.colors.textMuted,
-    flexShrink: 0,
-  },
-  channel: {
-    fontWeight: '700',
-    color: patientTheme.colors.textMuted,
-    flexShrink: 0,
-    fontSize: 12,
+  cardWhite: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#E8ECF0',
+    borderWidth: 1,
+    borderRadius: 16,
   },
   block: {
     gap: 8,
@@ -850,21 +750,10 @@ const styles = StyleSheet.create({
     lineHeight: 20,
     paddingHorizontal: 4,
   },
-  tags: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  tag: {
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderRadius: 999,
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-  },
-  tagText: {
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '800',
+  scheduleHint: {
+    color: patientTheme.colors.textMuted,
     fontSize: 12,
+    lineHeight: 18,
   },
   detailRow: {
     gap: 4,

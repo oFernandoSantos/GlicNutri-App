@@ -43,7 +43,6 @@ import {
   ProfileDataSectionCard,
   TherapyQuickStrip,
 } from '../../componentes/paciente/PerfilDadosSecoes';
-import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
 import {
   getPatientLocalOnboardingData,
   mergePatientOnboardingData,
@@ -61,7 +60,11 @@ import {
 } from '../../servicos/servicoVerificacaoEmail';
 import { isLibreViewSyncConfigured } from '../../servicos/servicoLibreView';
 import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
+import { getMedicoById, getMedicoEspecialidadeLabel } from '../../servicos/servicoMedicos';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
+import HostToastPaciente from '../../componentes/comum/HostToastPaciente';
+import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
+import CabecalhoModalPaciente from '../../componentes/paciente/CabecalhoModalPaciente';
 
 const EMPTY_PROFILE_FORM = {
   nome_completo: '',
@@ -2433,6 +2436,7 @@ export default function PacientePerfilScreen({
     () => cachedProfileInicial || usuarioLogado || null
   );
   const [linkedNutritionist, setLinkedNutritionist] = useState(null);
+  const [linkedMedico, setLinkedMedico] = useState(null);
   const [loading, setLoading] = useState(() => !perfilTemDadosIniciais);
   const [openSections, setOpenSections] = useState({
     patient: false,
@@ -2681,6 +2685,32 @@ export default function PacientePerfilScreen({
   }, [paciente?.id_nutricionista_uuid]);
 
   useEffect(() => {
+    let active = true;
+    const medicoId = paciente?.id_medico_uuid || null;
+
+    async function carregarMedicoVinculado() {
+      if (!medicoId) {
+        setLinkedMedico(null);
+        return;
+      }
+
+      try {
+        const medico = await getMedicoById(medicoId);
+        if (active) setLinkedMedico(medico || null);
+      } catch (error) {
+        console.log('Erro ao carregar medico vinculado no perfil:', error);
+        if (active) setLinkedMedico(null);
+      }
+    }
+
+    carregarMedicoVinculado();
+
+    return () => {
+      active = false;
+    };
+  }, [paciente?.id_medico_uuid]);
+
+  useEffect(() => {
     const basalOption = findBasalProfileOption(clinicalForm.basal_insulin_type);
     const allowedDevices = basalOption?.allowedDevices || [];
 
@@ -2739,7 +2769,7 @@ export default function PacientePerfilScreen({
         if (!active) return;
 
         if (data.erro) {
-          setCepFeedback({ type: 'error', message: 'CEP não encontrado.' });
+          mostrarToastPaciente({ tipo: 'aviso', texto: 'CEP não encontrado' });
           return;
         }
 
@@ -2754,12 +2784,12 @@ export default function PacientePerfilScreen({
             uf: (data.uf || current.uf).toUpperCase(),
           };
         });
-        setCepFeedback({ type: 'success', message: 'Endereço preenchido pelo CEP.' });
+        mostrarToastPaciente({ tipo: 'sucesso', texto: 'Endereço preenchido pelo CEP' });
       } catch (error) {
         console.log('Erro ao buscar CEP:', error);
 
         if (active) {
-          setCepFeedback({ type: 'error', message: 'Não foi possível buscar esse CEP agora.' });
+          mostrarToastPaciente({ tipo: 'erro', texto: 'Não foi possível buscar esse CEP agora' });
         }
       } finally {
         if (active) {
@@ -4075,6 +4105,7 @@ export default function PacientePerfilScreen({
     [paciente, clinicalForm, diabetesSummary, heightSummary, imcSummary, bloodPressureSummary]
   );
   const nutritionistRouteData = linkedNutritionist || route?.params?.nutricionista || null;
+  const medicoRouteData = linkedMedico || route?.params?.medico || null;
   const profileRouteName = route?.name || 'PacientePerfil';
   const profileScreenMode =
     profileRouteName === 'PacientePerfilContato'
@@ -4111,6 +4142,39 @@ export default function PacientePerfilScreen({
   const hasLinkedNutritionist = Boolean(
     paciente?.id_nutricionista_uuid && nutritionistRouteData?.id_nutricionista_uuid
   );
+  const medicoName =
+    medicoRouteData?.nome_completo_medico ||
+    paciente?.nome_completo_medico ||
+    'Médico';
+  const medicoInitials = useMemo(() => getInitials(medicoName), [medicoName]);
+  const medicoCrm =
+    medicoRouteData?.crm_medico ||
+    paciente?.crm_medico ||
+    '';
+  const medicoEspecialidade = medicoRouteData
+    ? getMedicoEspecialidadeLabel(medicoRouteData)
+    : '';
+  const hasLinkedMedico = Boolean(paciente?.id_medico_uuid);
+
+  function openMedicoProfile() {
+    if (hasLinkedMedico) {
+      navigation.navigate('PacientePerfilMedico', {
+        usuarioLogado,
+        medico:
+          medicoRouteData ||
+          (paciente?.id_medico_uuid
+            ? { id_medico_uuid: paciente.id_medico_uuid }
+            : null),
+      });
+      return;
+    }
+
+    navigation.navigate('PacienteAgendamentos', {
+      usuarioLogado,
+      activeSection: 'medicos',
+    });
+  }
+
   const libreConnected = isLibreViewSyncConfigured();
   const insulinClinicalFieldKeys = useMemo(
     () => new Set([
@@ -4471,6 +4535,30 @@ export default function PacientePerfilScreen({
           <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
         </TouchableOpacity>
 
+        <TouchableOpacity
+          activeOpacity={0.82}
+          onPress={openMedicoProfile}
+          style={[styles.nutritionistCard, styles.linkedProfessionalCardBelow]}
+        >
+          <View style={styles.nutritionistAvatar}>
+            <Text style={styles.nutritionistAvatarText}>{medicoInitials}</Text>
+          </View>
+          <View style={styles.nutritionistCopy}>
+            <Text style={styles.nutritionistName}>{medicoName}</Text>
+            <Text style={styles.nutritionistMeta}>
+              {hasLinkedMedico
+                ? `Médico vinculado${medicoCrm ? ` • CRM ${medicoCrm}` : ''}${
+                    medicoEspecialidade ? ` • ${medicoEspecialidade}` : ''
+                  }`
+                : 'Nenhum médico vinculado'}
+            </Text>
+            {!hasLinkedMedico ? (
+              <Text style={styles.nutritionistHint}>Toque para escolher um profissional.</Text>
+            ) : null}
+          </View>
+          <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
+        </TouchableOpacity>
+
         <IntroHealthOverviewCard rows={healthInfoRows} />
 
         <TherapyQuickStrip
@@ -4816,15 +4904,13 @@ export default function PacientePerfilScreen({
           <TouchableOpacity
             activeOpacity={0.78}
             onPress={openLibreIntegration}
-            style={[styles.settingsRow, styles.settingsRowLibre]}
+            style={styles.settingsRow}
           >
             <View style={styles.settingsRowLeft}>
-              <IconeSensorLibre size={18} />
-              <Text style={[styles.settingsRowText, styles.settingsRowTextLibre]}>
-                Integração do sensor
-              </Text>
+              <Ionicons name="radio-outline" size={18} color={patientTheme.colors.text} />
+              <Text style={styles.settingsRowText}>Integração do sensor</Text>
             </View>
-            <Ionicons name="chevron-forward" size={18} color={LIBRE_BLUE} />
+            <Ionicons name="chevron-forward" size={18} color={patientTheme.colors.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity
@@ -4861,12 +4947,12 @@ export default function PacientePerfilScreen({
             {
               key: 'aiInsights',
               title: 'Insights de IA',
-              helper: 'Recomendacoes personalizadas',
+              helper: 'Recomendações personalizadas',
             },
             {
               key: 'nutritionistMessages',
               title: 'Mensagens do nutricionista',
-              helper: 'Comunicacao com o profissional',
+              helper: 'Comunicação com o profissional',
             },
           ].map((item) => (
             <View key={item.key} style={styles.preferenceRow}>
@@ -4906,8 +4992,8 @@ export default function PacientePerfilScreen({
               <Text style={styles.integrationLabel}>Status</Text>
               <Text style={styles.integrationHelper}>
                 {libreConnected
-                  ? 'Sincronizacao automatica disponivel no app.'
-                  : 'Importacao manual de CSV do LibreView disponivel no monitoramento.'}
+                  ? 'Sincronização automática disponível no app.'
+                  : 'Importação manual de CSV do LibreView disponível no monitoramento.'}
               </Text>
             </View>
             <View
@@ -4924,7 +5010,7 @@ export default function PacientePerfilScreen({
                     : styles.integrationBadgeTextPending,
                 ]}
               >
-                {libreConnected ? 'Conectado' : 'Importacao'}
+                {libreConnected ? 'Conectado' : 'Importação'}
               </Text>
             </View>
           </View>
@@ -5047,8 +5133,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Gênero</Text>
-                <Text style={styles.emailModalText}>Como você se identifica?</Text>
+                <CabecalhoModalPaciente
+                  title="Gênero"
+                  subtitle="Como você se identifica?"
+                  onClose={() => setGenderModalVisible(false)}
+                />
 
                 {GENDER_OPTIONS.map((option) => (
                   <TouchableOpacity
@@ -5079,8 +5168,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Diabetes</Text>
-                <Text style={styles.emailModalText}>Você possui diagnóstico de diabetes?</Text>
+                <CabecalhoModalPaciente
+                  title="Diabetes"
+                  subtitle="Você possui diagnóstico de diabetes?"
+                  onClose={() => setDiabetesModalVisible(false)}
+                />
 
                 {['Não', 'Sim'].map((option) => (
                   <TouchableOpacity
@@ -5111,8 +5203,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Tipo de diabetes</Text>
-                <Text style={styles.emailModalText}>Selecione o diagnóstico informado.</Text>
+                <CabecalhoModalPaciente
+                  title="Tipo de diabetes"
+                  subtitle="Selecione o diagnóstico informado."
+                  onClose={() => setDiabetesTypeModalVisible(false)}
+                />
 
                 {DIABETES_TYPE_OPTIONS.map((option) => (
                   <TouchableOpacity
@@ -5149,18 +5244,21 @@ export default function PacientePerfilScreen({
                   showsVerticalScrollIndicator={false}
                   keyboardShouldPersistTaps="handled"
                 >
-                  <Text style={styles.emailModalTitle}>
-                    {therapyDraft.categoria_funcional === 'bolus'
-                      ? 'Registrar Insulina Bolus'
-                      : editingTherapyId
-                        ? 'Editar terapia farmacológica'
-                        : 'Nova terapia farmacológica'}
-                  </Text>
-                  <Text style={styles.emailModalText}>
-                    {therapyDraft.categoria_funcional === 'bolus'
-                      ? 'Simule a dose com base na sua prescrição (tabela de parâmetros). Confira a dose aplicada, refeição e horário antes de salvar o plano.'
-                      : 'Confira a categoria fixa, selecione a insulina e confirme os dados de uso domiciliar.'}
-                  </Text>
+                  <CabecalhoModalPaciente
+                    title={
+                      therapyDraft.categoria_funcional === 'bolus'
+                        ? 'Registrar Insulina Bolus'
+                        : editingTherapyId
+                          ? 'Editar terapia farmacológica'
+                          : 'Nova terapia farmacológica'
+                    }
+                    subtitle={
+                      therapyDraft.categoria_funcional === 'bolus'
+                        ? 'Simule a dose com base na sua prescrição (tabela de parâmetros). Confira a dose aplicada, refeição e horário antes de salvar o plano.'
+                        : 'Confira a categoria fixa, selecione a insulina e confirme os dados de uso domiciliar.'
+                    }
+                    onClose={closeTherapyEditor}
+                  />
 
                   <View style={styles.editForm}>
                     <View style={styles.editField}>
@@ -5800,18 +5898,13 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.selectionModalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Selecionar opção</Text>
-                  <TouchableOpacity
-                    style={styles.modalCloseButton}
-                    onPress={() => {
-                      setTherapyOptionModalVisible(false);
-                      setTherapyOptionField('');
-                    }}
-                  >
-                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
+                <CabecalhoModalPaciente
+                  title="Selecionar opção"
+                  onClose={() => {
+                    setTherapyOptionModalVisible(false);
+                    setTherapyOptionField('');
+                  }}
+                />
 
                 <Text style={styles.emailModalText}>
                   {therapyOptionField === 'marca'
@@ -5881,11 +5974,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.emailModalCard}>
-                <Text style={styles.emailModalTitle}>Configuração de insulina</Text>
-                  <Text style={styles.emailModalText}>
-                    Preencha aqui os dados padrão da insulinoterapia. A configuração salva no perfil
-                    será usada para pré-preencher o registro de insulina no app.
-                  </Text>
+                <CabecalhoModalPaciente
+                  title="Configuração de insulina"
+                  subtitle="Preencha aqui os dados padrão da insulinoterapia. A configuração salva no perfil será usada para pré-preencher o registro de insulina no app."
+                  onClose={() => setInsulinConfigModalVisible(false)}
+                />
 
                 <View style={styles.editForm}>
                   <View style={styles.editField}>
@@ -6226,8 +6319,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Perfil de insulina</Text>
-                <Text style={styles.emailModalText}>Escolha se você quer editar a basal ou a bolus.</Text>
+                <CabecalhoModalPaciente
+                  title="Perfil de insulina"
+                  subtitle="Escolha se você quer editar a basal ou a bolus."
+                  onClose={() => setInsulinCategoryModalVisible(false)}
+                />
 
                 {INSULIN_CATEGORY_OPTIONS.map((option) => (
                   <TouchableOpacity
@@ -6259,16 +6355,19 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>
-                  {activeInsulinProfileKey === 'basal'
-                    ? 'Marca/Tipo da Basal'
-                    : 'Tipo da insulina bolus'}
-                </Text>
-                <Text style={styles.emailModalText}>
-                  {activeInsulinProfileKey === 'basal'
-                    ? 'Selecione a basal configurada para uso diário.'
-                    : 'Selecione o tipo usado com mais frequencia nesse perfil.'}
-                </Text>
+                <CabecalhoModalPaciente
+                  title={
+                    activeInsulinProfileKey === 'basal'
+                      ? 'Marca/Tipo da Basal'
+                      : 'Tipo da insulina bolus'
+                  }
+                  subtitle={
+                    activeInsulinProfileKey === 'basal'
+                      ? 'Selecione a basal configurada para uso diário.'
+                      : 'Selecione o tipo usado com mais frequência nesse perfil.'
+                  }
+                  onClose={() => setInsulinTypeModalVisible(false)}
+                />
 
                 {selectedInsulinTypeOptions.map((option) => (
                   <TouchableOpacity
@@ -6299,10 +6398,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Dispositivo da basal</Text>
-                <Text style={styles.emailModalText}>
-                  Selecione o dispositivo compatível com a basal configurada.
-                </Text>
+                <CabecalhoModalPaciente
+                  title="Dispositivo da basal"
+                  subtitle="Selecione o dispositivo compatível com a basal configurada."
+                  onClose={() => setInsulinDeviceModalVisible(false)}
+                />
 
                 {activeBasalDeviceOptions.map((option) => (
                   <TouchableOpacity
@@ -6333,12 +6433,13 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>
-                  {activeInsulinProfileKey === 'basal' ? 'Objetivo da basal' : 'Objetivo da bolus'}
-                </Text>
-                <Text style={styles.emailModalText}>
-                  Selecione como essa insulina costuma ser usada.
-                </Text>
+                <CabecalhoModalPaciente
+                  title={
+                    activeInsulinProfileKey === 'basal' ? 'Objetivo da basal' : 'Objetivo da bolus'
+                  }
+                  subtitle="Selecione como essa insulina costuma ser usada."
+                  onClose={() => setInsulinUsageModalVisible(false)}
+                />
 
                 {selectedInsulinUsageOptions.map((option) => (
                   <TouchableOpacity
@@ -6369,8 +6470,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Objetivos nutricionais</Text>
-                <Text style={styles.emailModalText}>Selecione até 3 objetivos.</Text>
+                <CabecalhoModalPaciente
+                  title="Objetivos nutricionais"
+                  subtitle="Selecione até 3 objetivos."
+                  onClose={() => setObjectiveModalVisible(false)}
+                />
                 {ONBOARDING_OBJECTIVE_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.objetivos).includes(option);
                   return (
@@ -6409,8 +6513,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Condições clínicas</Text>
-                <Text style={styles.emailModalText}>Selecione as condições que se aplicam.</Text>
+                <CabecalhoModalPaciente
+                  title="Condições clínicas"
+                  subtitle="Selecione as condições que se aplicam."
+                  onClose={() => setConditionModalVisible(false)}
+                />
                 {ONBOARDING_CONDITION_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.condicoes).includes(option);
                   return (
@@ -6449,8 +6556,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Situações clínicas</Text>
-                <Text style={styles.emailModalText}>Selecione as situações que já ocorreram.</Text>
+                <CabecalhoModalPaciente
+                  title="Situações clínicas"
+                  subtitle="Selecione as situações que já ocorreram."
+                  onClose={() => setSituationModalVisible(false)}
+                />
                 {ONBOARDING_SITUATION_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.situacoes).includes(option);
                   return (
@@ -6489,8 +6599,11 @@ export default function PacientePerfilScreen({
           <View style={styles.modalOverlay}>
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.genderModalCard}>
-                <Text style={styles.emailModalTitle}>Procedimentos clínicos</Text>
-                <Text style={styles.emailModalText}>Selecione procedimentos relevantes.</Text>
+                <CabecalhoModalPaciente
+                  title="Procedimentos clínicos"
+                  subtitle="Selecione procedimentos relevantes."
+                  onClose={() => setProcedureModalVisible(false)}
+                />
                 {ONBOARDING_PROCEDURE_OPTIONS.map((option) => {
                   const selected = ensureArray(clinicalForm.procedimentos).includes(option);
                   return (
@@ -6534,11 +6647,11 @@ export default function PacientePerfilScreen({
             <View style={styles.modalOverlay}>
               <TouchableWithoutFeedback onPress={() => {}}>
                 <View style={styles.emailModalCard}>
-                  <Text style={styles.emailModalTitle}>Código enviado</Text>
-                  <Text style={styles.emailModalText}>
-                    Digite o código de 6 dígitos enviado para{' '}
-                    {emailPendingVerification || getNormalizedProfileEmail()}.
-                  </Text>
+                  <CabecalhoModalPaciente
+                    title="Código enviado"
+                    subtitle={`Digite o código de 6 dígitos enviado para ${emailPendingVerification || getNormalizedProfileEmail()}.`}
+                    onClose={cancelEmailVerification}
+                  />
 
                   <TextInput
                     style={[
@@ -6606,6 +6719,7 @@ export default function PacientePerfilScreen({
         </KeyboardAvoidingView>
       </Modal>
 
+      <HostToastPaciente posicao="top" />
     </View>
   );
 }
@@ -6856,6 +6970,9 @@ const styles = StyleSheet.create({
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
+  linkedProfessionalCardBelow: {
+    marginTop: 12,
+  },
   nutritionistAvatar: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.primarySoft,
@@ -6907,17 +7024,6 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginLeft: 12,
-  },
-  settingsRowLibre: {
-    backgroundColor: 'rgba(255, 209, 0, 0.14)',
-    borderRadius: patientTheme.radius.lg,
-    borderBottomWidth: 0,
-    marginTop: 4,
-    paddingHorizontal: 10,
-  },
-  settingsRowTextLibre: {
-    color: LIBRE_BLUE,
-    fontWeight: '700',
   },
   preferenceRow: {
     alignItems: 'center',

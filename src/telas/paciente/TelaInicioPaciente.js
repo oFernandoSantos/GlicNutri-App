@@ -62,6 +62,7 @@ import {
 } from '../../servicos/centralAppState';
 import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
 import MensagemInline from '../../componentes/comum/MensagemInline';
+import HostToastPaciente from '../../componentes/comum/HostToastPaciente';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import { listPatientClinicalAlerts } from '../../servicos/servicoAlertasClinicos';
 import {
@@ -969,50 +970,30 @@ export default function PacienteHomeScreen({
           return;
         }
 
-        const criticalOptions = {
+        const experience = await fetchPatientExperience(idPaciente, {
           ...cacheOptions,
-          homeCritical: true,
-          includeMealPlan: false,
-          mealLimit: 0,
-          medicationLimit: 0,
-        };
-
-        const criticalExperience = await fetchPatientExperience(idPaciente, {
-          ...criticalOptions,
           patientContext: usuarioLogado,
+          currentPatient: usuarioLogado?.id_paciente_uuid ? usuarioLogado : undefined,
         });
 
-        aplicarExperience(criticalExperience);
+        aplicarExperience(experience);
         setLoadError(null);
         setMetricsLoading(false);
         setRefreshing(false);
-        agendarAlertasClinicos(criticalExperience.patient?.id_paciente_uuid || idPaciente);
+        agendarAlertasClinicos(experience.patient?.id_paciente_uuid || idPaciente);
 
-        fetchPatientExperience(idPaciente, {
-          ...cacheOptions,
-          forceRefresh: true,
-          patientContext: usuarioLogado,
-        })
-          .then((experience) => {
-            aplicarExperience(experience);
-
-            if (!experience.patient && usuarioLogado?.id) {
-              syncGooglePatientRecord(usuarioLogado)
-                .then((pacienteSincronizado) => {
-                  if (pacienteSincronizado?.id_paciente_uuid) {
-                    aplicarExperience({
-                      ...experience,
-                      patient: pacienteSincronizado,
-                    });
-                  }
-                })
-                .catch(() => {});
-            }
-          })
-          .catch((error) => {
-            registrarLogTecnicoCarga('home_enrichment_background', error);
-            console.log('Enriquecimento home paciente:', error);
-          });
+        if (!experience.patient && usuarioLogado?.id) {
+          syncGooglePatientRecord(usuarioLogado)
+            .then((pacienteSincronizado) => {
+              if (pacienteSincronizado?.id_paciente_uuid) {
+                aplicarExperience({
+                  ...experience,
+                  patient: pacienteSincronizado,
+                });
+              }
+            })
+            .catch(() => {});
+        }
       } catch (error) {
         registrarLogTecnicoCarga('home_load', error);
         console.log('Erro ao carregar dados:', error);
@@ -1149,12 +1130,20 @@ export default function PacienteHomeScreen({
         return undefined;
       }
 
-      refreshPatientMealEntries(idPaciente, {
-        patientContext: usuarioLogado,
-        mealLimit: homeFetchOptions.mealLimit,
-      }).catch((error) => {
-        console.log('Refresh refeicoes na home:', error);
-      });
+      const cacheFresco = isPatientExperienceCacheFresh(idPaciente, homeFetchOptions);
+
+      if (!cacheFresco) {
+        refreshPatientMealEntries(idPaciente, {
+          patientContext: usuarioLogado,
+          mealLimit: homeFetchOptions.mealLimit,
+        }).catch((error) => {
+          console.log('Refresh refeicoes na home:', error);
+        });
+      }
+
+      if (cacheFresco) {
+        return undefined;
+      }
 
       const refreshGlucose = async () => {
         try {
@@ -1180,7 +1169,7 @@ export default function PacienteHomeScreen({
       refreshGlucose();
 
       return undefined;
-    }, [carregarDados, homeFetchOptions.mealLimit, homeFetchOptions.glucoseLimit, idPaciente, navigation, usuarioLogado])
+    }, [carregarDados, homeFetchOptions, idPaciente, navigation, usuarioLogado])
   );
 
   function navegarParaTela(rota, params = {}) {
@@ -1467,7 +1456,7 @@ export default function PacienteHomeScreen({
         const nutrition = getMealEntryNutrition(entry) || {};
         return {
           id: entry.id,
-          title: entry.mealLabel || entry.title || 'Refeicao',
+          title: entry.mealLabel || entry.title || 'Refeição',
           time: entry.time || '--:--',
           description: entry.description || '',
           summary: {
@@ -1503,7 +1492,7 @@ export default function PacienteHomeScreen({
 
         return {
           id: `clinical-${alert.id}`,
-          title: alert.titulo || 'Alerta clinico',
+          title: alert.titulo || 'Alerta clínico',
           text: alert.mensagem || '',
           date: formatNotificationDate(createdAt),
           time: formatNotificationTime(createdAt),
@@ -1692,7 +1681,7 @@ export default function PacienteHomeScreen({
                 <View style={styles.notificationHeaderActions}>
                   {notificationCount > 0 ? (
                     <TouchableOpacity
-                      accessibilityLabel="Limpar todas as notificacoes"
+                      accessibilityLabel="Limpar todas as notificações"
                       accessibilityRole="button"
                       activeOpacity={0.78}
                       onPress={limparTodasNotificacoes}
@@ -1703,7 +1692,7 @@ export default function PacienteHomeScreen({
                   ) : null}
 
                   <TouchableOpacity
-                    accessibilityLabel="Fechar notificacoes"
+                    accessibilityLabel="Fechar notificações"
                     accessibilityRole="button"
                     activeOpacity={0.78}
                     onPress={() => setNotificationsVisible(false)}
@@ -1787,7 +1776,6 @@ export default function PacienteHomeScreen({
             tipo={mensagemHome.tipo || 'aviso'}
             texto={mensagemHome.texto}
             onFechar={() => setMensagemHome(null)}
-            autoOcultarMs={mensagemHome.tipo === 'sucesso' ? 3500 : 0}
           />
         ) : null}
         <View style={styles.metricCarouselWrap}>
@@ -1831,7 +1819,7 @@ export default function PacienteHomeScreen({
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Alimentacao de hoje</Text>
+        <Text style={styles.sectionTitle}>Alimentação de hoje</Text>
         <SectionCard>
           <View style={styles.homePlanHeader}>
             <View style={styles.homePlanHeaderLeft}>
@@ -1851,7 +1839,7 @@ export default function PacienteHomeScreen({
 
           <View style={styles.homePlanProgressRow}>
             <Text style={styles.homePlanProgressLabel}>
-              {todayMealEntries.length ? 'Refeicoes registradas hoje' : 'Adesao de hoje'}
+              {todayMealEntries.length ? 'Refeições registradas hoje' : 'Adesão de hoje'}
             </Text>
             <Text style={styles.homePlanProgressValue}>{homePlanProgress}%</Text>
           </View>
@@ -1922,7 +1910,7 @@ export default function PacienteHomeScreen({
             style={styles.homePlanButton}
             onPress={() => navegarParaTela('PacienteDiario')}
           >
-            <Text style={styles.homePlanButtonText}>Abrir alimentacao completa</Text>
+            <Text style={styles.homePlanButtonText}>Abrir alimentação completa</Text>
           </TouchableOpacity>
 
           {!todayMealEntries.length ? (
@@ -1936,7 +1924,7 @@ export default function PacienteHomeScreen({
                   </View>
                   <View style={styles.planCopy}>
                     <Text style={styles.planTitle}>
-                      {item?.title || (index === 0 ? 'Cafe da manha' : 'Almoco equilibrado')}
+                      {item?.title || (index === 0 ? 'Café da manhã' : 'Almoço equilibrado')}
                     </Text>
                     <Text style={styles.planText}>
                       {item?.foods?.join(', ') ||
@@ -1963,13 +1951,6 @@ export default function PacienteHomeScreen({
           onPress={() => navegarParaTela('PacienteProgresso')}
         >
           <Text style={styles.homePlanExternalButtonText}>Ver meu progresso</Text>
-        </TouchableOpacity>
-
-        <TouchableOpacity
-          style={styles.homeReportsButton}
-          onPress={() => navegarParaTela('PacienteRelatorios')}
-        >
-          <Text style={styles.homeReportsButtonText}>Baixar relatorios (PDF)</Text>
         </TouchableOpacity>
 
         <View style={styles.listFooter} />
@@ -2013,6 +1994,8 @@ export default function PacienteHomeScreen({
           <Text style={styles.overlayText}>Encerrando sessao...</Text>
         </View>
       ) : null}
+
+      <HostToastPaciente posicao="top" />
     </View>
   );
 }
@@ -2861,23 +2844,6 @@ const styles = StyleSheet.create({
   homePlanExternalButtonText: {
     color: patientTheme.colors.primaryDark,
     fontWeight: '700',
-    fontSize: 14,
-  },
-  homeReportsButton: {
-    minHeight: 46,
-    marginTop: 8,
-    marginBottom: 2,
-    borderRadius: patientTheme.radius.pill,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.primaryDark,
-    backgroundColor: patientTheme.colors.primarySoft,
-    alignItems: 'center',
-    justifyContent: 'center',
-    ...patientShadow,
-  },
-  homeReportsButtonText: {
-    color: patientTheme.colors.primaryDark,
-    fontWeight: '800',
     fontSize: 14,
   },
   overlay: {

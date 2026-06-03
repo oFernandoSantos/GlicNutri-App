@@ -50,11 +50,14 @@ import {
   LIBRE_BLUE_SOFT,
   LIBRE_YELLOW,
 } from '../../temas/coresLibre';
+import { LIBRE_APP_ICON_SOURCE } from '../../componentes/paciente/IconeSensorLibre';
+import { READER_HEADER_HEIGHT } from '../../componentes/comum/RolagemComTeclado';
 
 const CONTENT_MAX_WIDTH = 520;
+const HERO_IMAGE_ASPECT = 1.48;
 const H_PADDING = patientTheme.spacing.screen;
 const SECTION_GAP = 12;
-const INTEGRACAO_SENSOR_HERO = require('../../../assets/imagens/freestyle-libre2-playstore.png');
+const INTEGRACAO_SENSOR_HERO = LIBRE_APP_ICON_SOURCE;
 
 function getContentWidth(windowWidth) {
   return Math.min(windowWidth, CONTENT_MAX_WIDTH);
@@ -86,7 +89,8 @@ export default function PacienteIntegracaoSensorScreen({
   const [feedback, setFeedback] = useState(null);
   const { width: windowWidth } = useWindowDimensions();
   const contentWidth = getContentWidth(windowWidth);
-  const heroImageSize = Math.min(Math.round(contentWidth * 0.36), 168);
+  const heroImageWidth = Math.min(Math.round(contentWidth * 0.26), 96);
+  const heroImageHeight = Math.round(heroImageWidth * HERO_IMAGE_ASPECT);
 
   const loadLinkedState = useCallback(async () => {
     if (!patientId) {
@@ -187,7 +191,7 @@ export default function PacienteIntegracaoSensorScreen({
     if (!patientId) {
       setFeedback({
         tipo: 'aviso',
-        texto: 'Paciente sem identificador para importar o LibreView.',
+        texto: 'Não encontramos seu cadastro para importar o LibreView.',
       });
       return;
     }
@@ -197,7 +201,7 @@ export default function PacienteIntegracaoSensorScreen({
     if (!parsedReadings.length) {
       setFeedback({
         tipo: 'aviso',
-        texto: 'Nao encontramos leituras validas no conteudo do LibreView.',
+        texto: 'Não encontramos leituras válidas no arquivo do LibreView.',
       });
       return;
     }
@@ -210,13 +214,13 @@ export default function PacienteIntegracaoSensorScreen({
         tipo: 'sucesso',
         texto: newReadings.length
           ? `LibreView: ${newReadings.length} leitura(s) importada(s) do arquivo.`
-          : 'Importacao concluida: nenhuma leitura nova encontrada.',
+          : 'Importação concluída: nenhuma leitura nova encontrada.',
       });
     } catch (error) {
       console.log('Erro ao importar LibreView:', error);
       setFeedback({
         tipo: 'erro',
-        texto: 'Nao foi possivel importar o arquivo do LibreView agora.',
+        texto: 'Não foi possível importar o arquivo do LibreView agora.',
       });
       AppLogger.erro(MODULOS_LOG_SISTEMA.GLICEMIA, 'Importacao LibreView', error, {
         usuario: usuarioLogado,
@@ -231,7 +235,7 @@ export default function PacienteIntegracaoSensorScreen({
     if (!patientId) {
       setFeedback({
         tipo: 'aviso',
-        texto: 'Paciente sem identificador para vincular o sensor.',
+        texto: 'Não encontramos seu cadastro para vincular o sensor.',
       });
       return;
     }
@@ -284,7 +288,7 @@ export default function PacienteIntegracaoSensorScreen({
         tipo: 'erro',
         texto:
           error?.message ||
-          'Nao foi possivel vincular o LibreLinkUp. Verifique e-mail, senha e compartilhamento.',
+          'Não foi possível vincular o LibreLinkUp. Verifique e-mail, senha e compartilhamento.',
       });
     } finally {
       setLibreLinkSaving(false);
@@ -309,7 +313,7 @@ export default function PacienteIntegracaoSensorScreen({
     if (!patientId) {
       setFeedback({
         tipo: 'aviso',
-        texto: 'Paciente sem identificador para sincronizar o sensor.',
+        texto: 'Não encontramos seu cadastro para sincronizar o sensor.',
       });
       return;
     }
@@ -325,7 +329,7 @@ export default function PacienteIntegracaoSensorScreen({
     if (!isLibreViewSyncConfigured()) {
       setFeedback({
         tipo: 'erro',
-        texto: 'Sincronizacao indisponivel. Configure EXPO_PUBLIC_SUPABASE_URL no app.',
+        texto: 'Sincronização indisponível no momento. Tente importar por arquivo.',
       });
       return;
     }
@@ -350,7 +354,7 @@ export default function PacienteIntegracaoSensorScreen({
         tipo: 'erro',
         texto:
           error?.message ||
-          'Nao foi possivel sincronizar o LibreView. Verifique a conexao e tente novamente.',
+          'Não foi possível sincronizar o LibreView. Verifique a conexão e tente novamente.',
       });
     } finally {
       setSyncingLibreView(false);
@@ -365,15 +369,26 @@ export default function PacienteIntegracaoSensorScreen({
       showTabBar={false}
       keyboardAware
       backgroundColor={LIBRE_YELLOW}
-      contentContainerStyle={styles.screenContent}
+      contentContainerStyle={[
+        styles.screenContent,
+        Platform.OS === 'web' && styles.screenContentWeb,
+      ]}
     >
       <View style={styles.page}>
-        <View style={styles.heroSection}>
-          <Image
-            source={INTEGRACAO_SENSOR_HERO}
-            style={[styles.heroImage, { width: heroImageSize, height: heroImageSize }]}
-            resizeMode="contain"
-          />
+        <View style={[styles.heroSection, Platform.OS === 'web' && styles.heroSectionWeb]}>
+          <View
+            style={[
+              styles.heroImageWrap,
+              { width: heroImageWidth, height: heroImageHeight },
+              Platform.OS === 'web' && styles.heroImageWrapWeb,
+            ]}
+          >
+            <Image
+              source={INTEGRACAO_SENSOR_HERO}
+              style={styles.heroImage}
+              resizeMode="contain"
+            />
+          </View>
           <Text style={styles.heroSubtitle}>
             Conecte seu FreeStyle Libre via LibreLinkUp para importar leituras automaticamente na
             tela de glicose.
@@ -399,7 +414,7 @@ export default function PacienteIntegracaoSensorScreen({
         <View style={styles.card}>
         <Text style={styles.cardTitle}>Acesso LibreLinkUp</Text>
         <Text style={styles.cardText}>
-          Use o e-mail e a senha da conta LibreLinkUp em que o sensor esta compartilhado. Depois de
+          Use o e-mail e a senha da conta LibreLinkUp em que o sensor está compartilhado. Depois de
           vincular, o app sincroniza sozinho enquanto estiver aberto.
         </Text>
 
@@ -443,7 +458,7 @@ export default function PacienteIntegracaoSensorScreen({
                 <ActivityIndicator color={LIBRE_YELLOW} />
               ) : (
                 <Text style={styles.primaryButtonText}>
-                  {libreLinkLinked ? 'Atualizar vinculo' : 'Vincular sensor'}
+                  {libreLinkLinked ? 'Atualizar vínculo' : 'Vincular sensor'}
                 </Text>
               )}
             </TouchableOpacity>
@@ -481,7 +496,7 @@ export default function PacienteIntegracaoSensorScreen({
         >
           <View style={styles.manualToggleCopy}>
             <Ionicons name="document-text-outline" size={20} color={LIBRE_BLUE} />
-            <Text style={styles.manualToggleTitle}>Importacao manual (CSV)</Text>
+            <Text style={styles.manualToggleTitle}>Importação manual (CSV)</Text>
           </View>
           <Ionicons
             name={libreManualImportVisible ? 'chevron-up' : 'chevron-down'}
@@ -493,7 +508,7 @@ export default function PacienteIntegracaoSensorScreen({
         {libreManualImportVisible ? (
           <View style={styles.manualSection}>
             <Text style={styles.cardText}>
-              Exporte o historico no LibreView e cole o conteudo CSV abaixo, ou escolha o arquivo no
+              Exporte o histórico no LibreView e cole o conteúdo CSV abaixo, ou escolha o arquivo no
               navegador.
             </Text>
 
@@ -507,7 +522,7 @@ export default function PacienteIntegracaoSensorScreen({
               multiline
               value={libreViewImportText}
               onChangeText={setLibreViewImportText}
-              placeholder="Cole aqui o conteudo CSV/texto exportado do LibreView..."
+              placeholder="Cole aqui o conteúdo CSV/texto exportado do LibreView..."
               placeholderTextColor={LIBRE_BLUE_PLACEHOLDER}
               textAlignVertical="top"
             />
@@ -533,7 +548,7 @@ export default function PacienteIntegracaoSensorScreen({
       <View style={styles.tipCard}>
         <Ionicons name="information-circle-outline" size={20} color={LIBRE_BLUE} />
         <Text style={styles.tipText}>
-          Se o login falhar, confirme no app Abbott que os termos foram aceitos e que o sensor esta
+          Se o login falhar, confirme no app Abbott que os termos foram aceitos e que o sensor está
           compartilhado com a conta LibreLinkUp informada.
         </Text>
       </View>
@@ -552,6 +567,9 @@ const styles = StyleSheet.create({
     paddingTop: 0,
     width: '100%',
   },
+  screenContentWeb: {
+    paddingTop: READER_HEADER_HEIGHT + 10,
+  },
   page: {
     alignSelf: 'center',
     maxWidth: CONTENT_MAX_WIDTH,
@@ -565,9 +583,23 @@ const styles = StyleSheet.create({
     paddingTop: 4,
     width: '100%',
   },
-  heroImage: {
+  heroSectionWeb: {
+    overflow: 'visible',
+  },
+  heroImageWrap: {
+    alignItems: 'center',
     alignSelf: 'center',
     backgroundColor: LIBRE_YELLOW,
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  heroImageWrapWeb: {
+    overflow: 'visible',
+  },
+  heroImage: {
+    backgroundColor: LIBRE_YELLOW,
+    height: '100%',
+    width: '100%',
   },
   heroSubtitle: {
     color: LIBRE_BLUE,

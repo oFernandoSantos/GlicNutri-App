@@ -20,6 +20,7 @@ import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { useKeyboardBottomInset } from '../../componentes/comum/RolagemComTeclado';
 import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
 import MensagemInline from '../../componentes/comum/MensagemInline';
+import { alertPaciente, mostrarToastPacienteErro } from '../../servicos/servicoToastPaciente';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
@@ -64,7 +65,7 @@ const historyTabs = [
 ];
 
 const historyTitles = {
-  glucose: 'Registros de Glicemias',
+  glucose: 'Registros de glicemias',
   medication: 'Registros de Medicações',
   food: 'Registros de Alimentares',
 };
@@ -260,7 +261,7 @@ function getMedicationDisplay(entry) {
   const usage =
     entry.medicationKind === 'medicine'
       ? entry.medicineContinuousUse
-        ? 'Uso continuo'
+        ? 'Uso contínuo'
         : String(entry.medicineDays || '').trim()
           ? `${String(entry.medicineDays).trim()} dia(s)`
           : parsedLabel.usage
@@ -820,10 +821,7 @@ export default function PacienteHistoricoRegistrosScreen({
     const photoRef = getMealEntryPhotoRef(entry);
 
     if (!photoRef) {
-      Alert.alert(
-        'Sem foto',
-        'Este registro alimentar não possui imagem anexada.'
-      );
+      alertPaciente('Sem foto neste registro', 'Este item de alimentação não tem imagem anexada.');
       return;
     }
 
@@ -848,10 +846,7 @@ export default function PacienteHistoricoRegistrosScreen({
     } catch (error) {
       console.log('Erro ao abrir foto da refeicao:', error);
       setMealPhotoViewer(null);
-      Alert.alert(
-        'Foto indisponível',
-        error?.message || 'Não foi possível exibir a imagem agora. Tente novamente.'
-      );
+      mostrarToastPacienteErro(error, 'Não foi possível abrir a foto agora.');
     }
   }
 

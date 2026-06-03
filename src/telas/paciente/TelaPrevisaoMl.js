@@ -66,12 +66,15 @@ export default function TelaPrevisaoMl({ route }) {
       const res = await mlHealthcheck(connectionOptions);
       setMensagemTopo({
         tipo: 'sucesso',
-        texto: `Conexão OK — servidor respondeu: ${res?.status || 'ok'}`,
+        texto: 'Conexão com o servidor OK',
+        subtexto: `Resposta: ${res?.status || 'ok'}`,
       });
     } catch (error) {
       setMensagemTopo({
         tipo: 'erro',
-        texto: `Não consegui conectar: ${error?.message || error}. Dica: emulador Android usa 10.0.2.2; no celular use o IP do PC.`,
+        texto: 'Não conectamos ao servidor de previsão',
+        subtexto:
+          'No emulador use 10.0.2.2; no celular, o IP do seu computador na mesma rede Wi‑Fi.',
       });
     } finally {
       setLoading(false);
@@ -98,7 +101,8 @@ export default function TelaPrevisaoMl({ route }) {
     } catch (error) {
       setMensagemTopo({
         tipo: 'erro',
-        texto: error?.message || String(error) || 'Erro ao prever.',
+        texto: 'Previsão indisponível agora',
+        subtexto: error?.message || 'Tente novamente em instantes.',
       });
     } finally {
       setLoading(false);
@@ -117,6 +121,7 @@ export default function TelaPrevisaoMl({ route }) {
           <MensagemInline
             tipo={mensagemTopo.tipo || 'aviso'}
             texto={mensagemTopo.texto}
+            subtexto={mensagemTopo.subtexto || ''}
             onFechar={() => setMensagemTopo(null)}
           />
         ) : null}

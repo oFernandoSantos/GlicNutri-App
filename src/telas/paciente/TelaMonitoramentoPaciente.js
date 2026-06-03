@@ -8,7 +8,6 @@ import {
   ScrollView,
   TextInput,
   ActivityIndicator,
-  Alert,
   Modal,
   KeyboardAvoidingView,
   Platform,
@@ -43,6 +42,7 @@ import {
   hasLibreLinkUpLinked,
 } from '../../servicos/servicoLibreViewAutoSync';
 import IconeSensorLibre from '../../componentes/paciente/IconeSensorLibre';
+import CabecalhoModalPaciente from '../../componentes/paciente/CabecalhoModalPaciente';
 import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
 import { buscarMedicamentosAnvisa } from '../../servicos/servicoMedicamentosAnvisa';
 import {
@@ -60,6 +60,7 @@ import {
   subscribeToPatientAppState,
 } from '../../servicos/centralAppState';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
 import { AppLogger, MODULOS_LOG_SISTEMA } from '../../servicos/servicoLogSistema';
 
 const rangeOptions = ['Hoje', '7 dias', '14 dias'];
@@ -698,7 +699,7 @@ function getGlucoseStatus(value) {
 
 async function mostrarPopupAlertaGlicemiaAlta(reading) {
   const titulo = 'Alerta de glicose alta';
-  const mensagem = `Glicemia de ${reading?.value} mg/dL registrada. Siga o plano orientado pela equipe de saude.`;
+  const mensagem = `Glicemia de ${reading?.value} mg/dL registrada. Siga o plano orientado pela equipe de saúde.`;
 
   if (Platform.OS === 'web' && typeof window !== 'undefined' && 'Notification' in window) {
     try {
@@ -719,7 +720,11 @@ async function mostrarPopupAlertaGlicemiaAlta(reading) {
     }
   }
 
-  Alert.alert(titulo, mensagem);
+  mostrarToastPaciente({
+    tipo: 'aviso',
+    texto: titulo,
+    subtexto: mensagem,
+  });
 }
 
 function GlucoseLineChart({ series }) {
@@ -1482,10 +1487,13 @@ export default function PacienteMonitoramentoScreen({
 
       if (cachedExperience) {
         aplicarMonitoramentoExperience(cachedExperience);
-        await refreshGlucoseForMonitor();
 
         if (cacheIsFresh && !forceRefresh) {
           return;
+        }
+
+        if (!cacheIsFresh) {
+          await refreshGlucoseForMonitor();
         }
 
         fetchPatientExperience(patientId, {
@@ -1494,7 +1502,9 @@ export default function PacienteMonitoramentoScreen({
         })
           .then(async (experience) => {
             aplicarMonitoramentoExperience(experience);
-            await refreshGlucoseForMonitor();
+            if (!isPatientExperienceCacheFresh(patientId, monitoramentoFetchLimits)) {
+              await refreshGlucoseForMonitor();
+            }
           })
           .catch((error) => {
             registrarLogTecnicoCarga('monitoramento_refresh_background', error);
@@ -1598,12 +1608,18 @@ export default function PacienteMonitoramentoScreen({
         return undefined;
       }
 
+      const cacheFresco =
+        isPatientExperienceCacheFresh(activePatientId, monitoramentoFetchLimits) &&
+        getCachedGlucoseReadings(activePatientId).length > 0;
+
       let active = true;
 
-      refreshPatientGlucoseReadings(activePatientId, {
-        patientContext: usuarioLogado,
-        glucoseLimit: monitoramentoFetchLimits.glucoseLimit || 60,
-      }).catch(() => {});
+      if (!cacheFresco) {
+        refreshPatientGlucoseReadings(activePatientId, {
+          patientContext: usuarioLogado,
+          glucoseLimit: monitoramentoFetchLimits.glucoseLimit || 60,
+        }).catch(() => {});
+      }
 
       hasLibreLinkUpLinked(activePatientId).then((linked) => {
         if (!active) return;
@@ -2030,6 +2046,14 @@ export default function PacienteMonitoramentoScreen({
   }
 
   function handleCloseManualModal() {
+    if (glucoseConfirmVisible) {
+      setGlucoseConfirmVisible(false);
+      return;
+    }
+    if (glucoseTypeDropdownVisible) {
+      handleCloseGlucoseTypeModal();
+      return;
+    }
     setManualModalVisible(false);
     setGlucoseTypeDropdownVisible(false);
     setGlucoseConfirmVisible(false);
@@ -2047,6 +2071,21 @@ export default function PacienteMonitoramentoScreen({
   }
 
   function handleCloseMedicationModal() {
+    if (insulinTypeVisible) {
+      setInsulinTypeVisible(false);
+      setFocusedManualField(null);
+      return;
+    }
+    if (insulinDeviceVisible) {
+      setInsulinDeviceVisible(false);
+      setFocusedManualField(null);
+      return;
+    }
+    if (insulinUsageVisible) {
+      setInsulinUsageVisible(false);
+      setFocusedManualField(null);
+      return;
+    }
     setInsulinTimingChoiceVisible(false);
     setMedicationModalVisible(false);
     setMedicationKind('');
@@ -2541,14 +2580,14 @@ export default function PacienteMonitoramentoScreen({
                     ? `Molecula: ${selectedBasalInsulinOption.molecule}`
                     : '',
                   selectedBasalInsulinOption?.actionClass
-                    ? `Classe de acao: ${selectedBasalInsulinOption.actionClass}`
+                    ? `Classe de ação: ${selectedBasalInsulinOption.actionClass}`
                     : '',
                   insulinDevice ? `Dispositivo: ${insulinDevice}` : '',
                   selectedBasalInsulinOption?.suggestedRoute
                     ? `Via sugerida: ${selectedBasalInsulinOption.suggestedRoute}`
                     : '',
                   trimmedInsulinNotes
-                    ? `Observacao adicional: ${trimmedInsulinNotes}`
+                    ? `Observação adicional: ${trimmedInsulinNotes}`
                     : '',
                 ]
                   .filter(Boolean)
@@ -2689,7 +2728,6 @@ export default function PacienteMonitoramentoScreen({
           tipo={avisoUsuario.tipo || 'aviso'}
           texto={avisoUsuario.texto}
           onFechar={() => setAvisoUsuario(null)}
-          autoOcultarMs={avisoUsuario.tipo === 'sucesso' ? 4200 : 0}
         />
       ) : null}
       {!loading && loadError ? (
@@ -2772,27 +2810,77 @@ export default function PacienteMonitoramentoScreen({
         </View>
       </View>
 
-      <View style={dashboardKpiStyles.miniRow}>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <DashboardMiniKpiCard label="Media" value={String(metrics.avg)} helper="mg/dL" accent={KPI_ACCENTS.green} />
+      <View style={styles.evolutionMiniRow}>
+        <View
+          style={[
+            dashboardKpiStyles.miniCell,
+            styles.evolutionMiniCell,
+          ]}
+        >
+          <DashboardMiniKpiCard
+            label="Média"
+            value={String(metrics.avg)}
+            helper="mg/dL"
+            accent={KPI_ACCENTS.greenBright}
+            style={styles.evolutionMiniCard}
+            labelStyle={styles.evolutionMiniLabel}
+            valueStyle={styles.evolutionMiniValue}
+            helperStyle={styles.evolutionMiniHelper}
+            accentBarStyle={styles.evolutionMiniAccentBar}
+          />
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <View
+          style={[
+            dashboardKpiStyles.miniCell,
+            styles.evolutionMiniCell,
+          ]}
+        >
           <DashboardMiniKpiCard
             label="Variabilidade"
             value={metrics.variability === '--' ? '--' : `${metrics.variability}%`}
             helper="amplitude"
-            accent={KPI_ACCENTS.orange}
+            accent={KPI_ACCENTS.greenBright}
+            style={styles.evolutionMiniCard}
+            labelStyle={styles.evolutionMiniLabel}
+            valueStyle={styles.evolutionMiniValue}
+            helperStyle={styles.evolutionMiniHelper}
+            accentBarStyle={styles.evolutionMiniAccentBar}
           />
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <DashboardMiniKpiCard label="GMI" value={String(metrics.gmi)} helper="estimado" accent={KPI_ACCENTS.blue} />
+        <View
+          style={[
+            dashboardKpiStyles.miniCell,
+            styles.evolutionMiniCell,
+          ]}
+        >
+          <DashboardMiniKpiCard
+            label="GMI"
+            value={String(metrics.gmi)}
+            helper="estimado"
+            accent={KPI_ACCENTS.greenBright}
+            style={styles.evolutionMiniCard}
+            labelStyle={styles.evolutionMiniLabel}
+            valueStyle={styles.evolutionMiniValue}
+            helperStyle={styles.evolutionMiniHelper}
+            accentBarStyle={styles.evolutionMiniAccentBar}
+          />
         </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
+        <View
+          style={[
+            dashboardKpiStyles.miniCell,
+            styles.evolutionMiniCell,
+          ]}
+        >
           <DashboardMiniKpiCard
             label="Tempo no alvo"
             value={metrics.tir === '--' ? '--' : `${metrics.tir}%`}
             helper="TIR"
             accent={KPI_ACCENTS.greenBright}
+            style={styles.evolutionMiniCard}
+            labelStyle={styles.evolutionMiniLabel}
+            valueStyle={styles.evolutionMiniValue}
+            helperStyle={styles.evolutionMiniHelper}
+            accentBarStyle={styles.evolutionMiniAccentBar}
           />
         </View>
       </View>
@@ -2800,7 +2888,7 @@ export default function PacienteMonitoramentoScreen({
       <View style={styles.chartCard}>
         <View style={styles.chartHeader}>
           <View>
-            <Text style={styles.chartTitle}>Curva glicemica</Text>
+            <Text style={styles.chartTitle}>Curva glicêmica</Text>
             <Text style={styles.chartSubtitle}>
               Role horizontalmente para observar melhor causa e efeito.
             </Text>
@@ -3155,6 +3243,11 @@ export default function PacienteMonitoramentoScreen({
           {glucoseConfirmVisible ? (
             <View style={styles.inlinePopupOverlay}>
               <View style={styles.confirmCard}>
+                <CabecalhoModalPaciente
+                  title="Confirmar glicemia?"
+                  onClose={() => setGlucoseConfirmVisible(false)}
+                  titleCentered
+                />
                 <View style={styles.confirmIconWrap}>
                   <Ionicons
                     name="water-outline"
@@ -3163,7 +3256,6 @@ export default function PacienteMonitoramentoScreen({
                   />
                 </View>
 
-                <Text style={styles.confirmTitle}>Confirmar glicemia?</Text>
                 <Text style={styles.confirmText}>
                   Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
                   {isPreviousGlucoseEntry
@@ -4181,7 +4273,7 @@ export default function PacienteMonitoramentoScreen({
               ) : (
                 <>
                   <Text style={styles.modalText}>
-                    Descreva o medicamento, dose ou horario para aparecer junto da curva.
+                    Descreva o medicamento, dose ou horário para aparecer junto da curva.
                   </Text>
 
                   <TextInput
@@ -4424,10 +4516,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'flex-start',
     marginTop: 14,
-    minHeight: 58,
-    position: 'relative',
-    paddingHorizontal: 18,
-    paddingVertical: 10,
+    minHeight: 62,
+    overflow: 'visible',
+    paddingLeft: 10,
+    paddingRight: 18,
+    paddingVertical: 12,
     gap: 12,
   },
   libreViewStandaloneButtonLinked: {
@@ -4435,7 +4528,13 @@ const styles = StyleSheet.create({
     borderColor: LIBRE_BLUE,
   },
   libreViewStandaloneIcon: {
-    marginLeft: 2,
+    alignItems: 'center',
+    flexShrink: 0,
+    height: 42,
+    justifyContent: 'center',
+    marginLeft: -2,
+    overflow: 'visible',
+    width: 42,
   },
   libreViewStandaloneCopy: {
     flex: 1,
@@ -4543,6 +4642,51 @@ const styles = StyleSheet.create({
   },
   evolutionSection: {
     marginTop: 18,
+    marginBottom: 12,
+  },
+  evolutionMiniRow: {
+    flexDirection: 'row',
+    flexWrap: 'nowrap',
+    justifyContent: 'space-between',
+    alignItems: 'stretch',
+    gap: 6,
+    marginHorizontal: 2,
+    marginBottom: 4,
+    paddingBottom: 2,
+  },
+  evolutionMiniCell: {
+    flex: 1,
+    minWidth: 0,
+  },
+  evolutionMiniCard: {
+    minWidth: 0,
+    minHeight: 94,
+    paddingHorizontal: 9,
+    paddingVertical: 11,
+    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    ...patientShadow,
+  },
+  evolutionMiniLabel: {
+    minHeight: 22,
+    fontSize: 10,
+    lineHeight: 12,
+  },
+  evolutionMiniValue: {
+    marginTop: 4,
+    fontSize: 18,
+    lineHeight: 21,
+  },
+  evolutionMiniHelper: {
+    minHeight: 15,
+    marginTop: 3,
+    fontSize: 9,
+    lineHeight: 10,
+  },
+  evolutionMiniAccentBar: {
+    marginTop: 8,
+    width: 20,
   },
   evolutionTitle: {
     color: patientTheme.colors.text,
@@ -4553,6 +4697,7 @@ const styles = StyleSheet.create({
   tabRow: {
     flexDirection: 'row',
     gap: 10,
+    marginBottom: 0,
   },
   tab: {
     flex: 1,
@@ -4577,7 +4722,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.onPrimary,
   },
   chartCard: {
-    marginTop: 18,
+    marginTop: 8,
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     padding: patientTheme.spacing.card,
@@ -4894,19 +5039,23 @@ const styles = StyleSheet.create({
     flex: 1,
     fontSize: 18,
     fontWeight: '800',
-    paddingHorizontal: 42,
+    paddingHorizontal: 44,
+    pointerEvents: 'none',
     textAlign: 'center',
+    zIndex: 1,
   },
   modalCloseButton: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderRadius: 18,
+    elevation: 4,
     height: 36,
     justifyContent: 'center',
     position: 'absolute',
     right: 0,
     top: 0,
     width: 36,
+    zIndex: 4,
   },
   modalText: {
     color: patientTheme.colors.textMuted,

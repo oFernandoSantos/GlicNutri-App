@@ -42,7 +42,7 @@ function normalizeErrorMessage(error) {
     message.includes('429')
   ) {
     return (
-      'Limite da API Gemini atingido. Aguarde alguns minutos ou verifique o plano em aistudio.google.com. ' +
+      'Limite ou saldo da OpenAI insuficiente. Adicione creditos em platform.openai.com/settings/billing. ' +
       'Enquanto isso, use "Anexar foto sem IA" e busque na TACO.'
     );
   }
@@ -50,11 +50,12 @@ function normalizeErrorMessage(error) {
   if (
     message.includes('api key not valid') ||
     message.includes('invalid api key') ||
-    message.includes('gemini_api_key') ||
-    message.includes('google ai studio')
+    message.includes('incorrect api key') ||
+    message.includes('openai_api_key') ||
+    message.includes('platform.openai.com')
   ) {
     return (
-      'Chave Gemini invalida no servidor. Configure GEMINI_API_KEY no Supabase e publique analisar-refeicao-ia.'
+      'Chave OpenAI invalida no servidor. Configure OPENAI_API_KEY no Supabase e publique analisar-refeicao-ia.'
     );
   }
 

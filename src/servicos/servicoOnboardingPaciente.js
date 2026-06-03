@@ -94,6 +94,23 @@ function mergeOnboardingAnswers(patientAnswers, localAnswers) {
   return Object.keys(merged).length ? merged : null;
 }
 
+export const PATIENT_ONBOARDING_STEP_KEYS = [
+  'objetivos',
+  'condicoes',
+  'situacoes',
+  'procedimentos',
+];
+
+function splitListFromText(value) {
+  const text = String(value || '').trim();
+  if (!text) return [];
+
+  return text
+    .split(/[,;|]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 function hasCompletedOnboardingData(usuario) {
   const onboardingAnswers = parseJsonMaybe(usuario?.onboarding_respostas);
 
@@ -104,8 +121,48 @@ function hasCompletedOnboardingData(usuario) {
   );
 }
 
+export function buildOnboardingAnswersFromPatient(usuario, localData = null) {
+  const patient = mergePatientOnboardingData(usuario, localData);
+  const raw = parseJsonMaybe(patient?.onboarding_respostas) || {};
+
+  const objetivos = ensureArray(raw.objetivos);
+  const condicoes = ensureArray(raw.condicoes);
+  const situacoes = ensureArray(raw.situacoes);
+  const procedimentos = ensureArray(raw.procedimentos);
+
+  return {
+    objetivos: objetivos.length ? objetivos : splitListFromText(patient?.objetivo_principal_consulta),
+    condicoes: condicoes.length ? condicoes : splitListFromText(patient?.comorbidades_texto),
+    situacoes,
+    procedimentos,
+    procedimento_outros: String(raw.procedimento_outros || '').trim(),
+  };
+}
+
+export function isOnboardingStepAnswered(stepKey, answers = {}) {
+  if (stepKey === 'procedimentos') {
+    return hasFilledValue(answers.procedimentos) || Boolean(String(answers.procedimento_outros || '').trim());
+  }
+
+  return hasFilledValue(answers[stepKey]);
+}
+
+export function getPendingOnboardingStepKeys(answers = {}) {
+  return PATIENT_ONBOARDING_STEP_KEYS.filter((stepKey) => !isOnboardingStepAnswered(stepKey, answers));
+}
+
+export function hasAllOnboardingStepsAnswered(answers = {}) {
+  return getPendingOnboardingStepKeys(answers).length === 0;
+}
+
 export async function hasPatientOnboardingSeen(usuario) {
   if (hasCompletedOnboardingData(usuario)) {
+    return true;
+  }
+
+  const localData = await getPatientLocalOnboardingData(usuario);
+  const answers = buildOnboardingAnswersFromPatient(usuario, localData);
+  if (hasAllOnboardingStepsAnswered(answers)) {
     return true;
   }
 

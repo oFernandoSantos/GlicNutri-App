@@ -1,37 +1,44 @@
 import React from 'react';
-import { View, StyleSheet } from 'react-native';
-import { LIBRE_YELLOW } from '../../temas/coresLibre';
+import { Image, StyleSheet, View } from 'react-native';
 
-export default function IconeSensorLibre({ size = 30 }) {
-  const outer = size;
-  const middle = Math.round(size * 0.67);
-  const center = Math.round(size * 0.27);
+/** FreeStyle LibreLink - BR (Google Play) */
+export const LIBRE_APP_ICON_SOURCE = require('../../../assets/imagens/freestyle-librelink-br-playstore.png');
 
+/** Mesmo slot dos botões com Ionicons (ex.: Histórico de Registros). */
+export const LIBRE_BUTTON_ICON_SLOT = 42;
+export const LIBRE_APP_ICON_SIZE = 34;
+
+export default function IconeSensorLibre({
+  slotSize = LIBRE_BUTTON_ICON_SLOT,
+  iconSize = LIBRE_APP_ICON_SIZE,
+}) {
   return (
-    <View style={[styles.outer, { width: outer, height: outer, borderRadius: outer / 2 }]}>
-      <View
-        style={[styles.middle, { width: middle, height: middle, borderRadius: middle / 2 }]}
-      >
-        <View
-          style={[styles.center, { width: center, height: center, borderRadius: center / 4 }]}
-        />
-      </View>
+    <View
+      style={[
+        styles.slot,
+        {
+          width: slotSize,
+          height: slotSize,
+        },
+      ]}
+    >
+      <Image
+        source={LIBRE_APP_ICON_SOURCE}
+        style={{
+          width: iconSize,
+          height: iconSize,
+        }}
+        resizeMode="contain"
+        accessibilityLabel="FreeStyle Libre"
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  outer: {
+  slot: {
     alignItems: 'center',
-    backgroundColor: LIBRE_YELLOW,
     justifyContent: 'center',
-  },
-  middle: {
-    alignItems: 'center',
-    backgroundColor: '#FFFFFF',
-    justifyContent: 'center',
-  },
-  center: {
-    backgroundColor: LIBRE_YELLOW,
+    overflow: 'visible',
   },
 });

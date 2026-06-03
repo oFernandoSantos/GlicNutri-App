@@ -10,6 +10,7 @@ export const LIMITES_DADOS_PACIENTE = {
     mealLimit: 56,
     includeMealPlan: true,
     skipAlertSync: true,
+    experienceCachePreset: 'home',
   },
   diario: {
     skipChat: true,
@@ -18,6 +19,7 @@ export const LIMITES_DADOS_PACIENTE = {
     mealLimit: 56,
     includeMealPlan: true,
     skipAlertSync: true,
+    experienceCachePreset: 'diario',
   },
   monitoramento: {
     skipChat: true,
@@ -25,6 +27,7 @@ export const LIMITES_DADOS_PACIENTE = {
     glucoseLimit: 60,
     medicationLimit: 40,
     mealLimit: 30,
+    experienceCachePreset: 'monitoramento',
   },
   historico: {
     glucoseLimit: 100,
@@ -46,6 +49,7 @@ export const LIMITES_DADOS_PACIENTE = {
     medicationLimit: 0,
     mealLimit: 32,
     skipAlertSync: true,
+    experienceCachePreset: 'plano',
   },
   assistente: {
     skipChat: true,
@@ -53,6 +57,17 @@ export const LIMITES_DADOS_PACIENTE = {
     medicationLimit: 16,
     mealLimit: 20,
     skipAlertSync: true,
+    experienceCachePreset: 'assistente',
+  },
+  bemestar: {
+    skipChat: true,
+    minimalProfile: true,
+    allowGoogleSync: false,
+    glucoseLimit: 0,
+    medicationLimit: 0,
+    mealLimit: 0,
+    skipAlertSync: true,
+    experienceCachePreset: 'bemestar',
   },
   progresso: {
     skipChat: true,
@@ -61,6 +76,7 @@ export const LIMITES_DADOS_PACIENTE = {
     mealLimit: 40,
     includeMealPlan: true,
     skipAlertSync: true,
+    experienceCachePreset: 'progresso',
   },
   prontuario: {
     glucoseLimit: 80,
@@ -73,6 +89,8 @@ export const LIMITES_DADOS_PACIENTE = {
     medicationLimit: 500,
     mealLimit: 500,
     skipAlertSync: true,
+    historicoPreset: true,
+    experienceCachePreset: 'relatorio',
   },
 };
 

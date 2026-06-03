@@ -17,6 +17,7 @@ import { useFocusEffect } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { patientTheme } from '../../temas/temaVisualPaciente';
+import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
 import { supabase } from '../../servicos/configSupabase';
 import {
   createDefaultAppState,
@@ -346,7 +347,11 @@ export default function TelaChatNutricionistaDetalhePaciente({
       console.log('Erro ao enviar mensagem para nutricionista:', error);
       setDraft(text);
       setAppState((current) => ({ ...current, nutritionistThread: messages }));
-      Alert.alert('Nao foi possivel enviar', 'Tente novamente em alguns instantes.');
+      mostrarToastPaciente({
+        tipo: 'erro',
+        texto: 'Não enviamos sua mensagem',
+        subtexto: 'Tente novamente em alguns instantes.',
+      });
     } finally {
       setSending(false);
     }

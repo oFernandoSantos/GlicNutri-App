@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Platform,
   TextInput,
 } from 'react-native';
@@ -14,7 +13,7 @@ import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import {
   DashboardKpiCard,
-  KPI_ACCENTS,
+  DashboardMiniKpiCard,
   dashboardKpiStyles,
 } from '../../componentes/comum/CartaoKpiDashboard';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
@@ -43,6 +42,7 @@ import {
   buildPlanAdherenceSeries,
   resolvePlanSections,
 } from '../../utilitarios/vinculoPlanoRefeicao';
+import { alertPaciente, mostrarToastPacienteErro } from '../../servicos/servicoToastPaciente';
 
 const PERIOD_TABS = [
   { key: 'today', label: 'Hoje' },
@@ -50,6 +50,13 @@ const PERIOD_TABS = [
   { key: '14days', label: '14 dias' },
   { key: 'search', label: 'Pesquisa' },
 ];
+const PANEL_GAP = patientTheme.spacing.lg;
+const SECTION_INNER_GAP = patientTheme.spacing.md;
+const GLIC_GREEN = patientTheme.colors.primary;
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
 
 function toNumber(value, fallback = 0) {
   const numeric = Number(String(value ?? '').replace(',', '.'));
@@ -161,15 +168,15 @@ function filterEntriesByPeriod(items, period, startDateInput, endDateInput, getD
   });
 }
 
-function CountBars({ items, emptyLabel = 'Sem registros no periodo.' }) {
+function CountBars({ items, emptyLabel = 'Sem registros no período.' }) {
   if (!items?.length) {
-    return <Text style={styles.emptyText}>{emptyLabel}</Text>;
+    return <Text style={styles.emptyStateText}>{emptyLabel}</Text>;
   }
 
   const max = Math.max(...items.map((item) => Number(item.value) || 0), 1);
 
   return (
-    <View style={styles.chartWrap}>
+    <View style={[styles.chartWrap, styles.chartBlock]}>
       <View style={styles.chartRow}>
         {items.map((item) => (
           <View key={item.id || item.label} style={styles.chartColumn}>
@@ -179,7 +186,7 @@ function CountBars({ items, emptyLabel = 'Sem registros no periodo.' }) {
                   styles.chartFill,
                   {
                     height: `${Math.max(8, (Number(item.value) / max) * 100)}%`,
-                    backgroundColor: item.color || patientTheme.colors.primaryDark,
+                    backgroundColor: item.color || GLIC_GREEN,
                   },
                 ]}
               />
@@ -237,6 +244,36 @@ export default function PacienteRelatoriosScreen({
           setPatient(null);
           setAppState(createDefaultAppState());
           setGlucoseReadings([]);
+          return;
+        }
+
+        const cachedExperience =
+          !forceRefresh && patientId
+            ? getCachedPatientExperience(patientId, fetchLimits)
+            : null;
+        const cacheFresco =
+          patientId && isPatientExperienceCacheFresh(patientId, fetchLimits);
+
+        if (cachedExperience) {
+          setPatient(cachedExperience.patient || null);
+          setAppState(cachedExperience.appState || createDefaultAppState());
+          setGlucoseReadings(cachedExperience.glucoseReadings || []);
+
+          if (cacheFresco && !forceRefresh) {
+            return;
+          }
+
+          fetchPatientExperience(patientId, {
+            patientContext: usuarioLogado,
+            forceRefresh: forceRefresh || !cacheFresco,
+            ...fetchLimits,
+          })
+            .then((experience) => {
+              setPatient(experience?.patient || null);
+              setAppState(experience?.appState || createDefaultAppState());
+              setGlucoseReadings(experience?.glucoseReadings || []);
+            })
+            .catch((error) => console.log('Refresh relatorios:', error));
           return;
         }
 
@@ -365,7 +402,7 @@ export default function PacienteRelatoriosScreen({
       buildGlucoseDailyAverageSeries(filteredGlucoseReadings).map((item) => ({
         ...item,
         id: `glucose-${item.date}`,
-        color: item.value < 70 ? '#fc8181' : item.value > 180 ? '#ed8936' : patientTheme.colors.primaryDark,
+        color: item.value < 70 ? '#fc8181' : item.value > 180 ? '#ed8936' : GLIC_GREEN,
       })),
     [filteredGlucoseReadings]
   );
@@ -375,7 +412,7 @@ export default function PacienteRelatoriosScreen({
       buildCountByDay(filteredMealEntries, (entry) => entry?.date).map((item) => ({
         ...item,
         id: `meal-${item.date}`,
-        color: '#4299e1',
+        color: GLIC_GREEN,
       })),
     [filteredMealEntries]
   );
@@ -385,7 +422,7 @@ export default function PacienteRelatoriosScreen({
       buildCountByDay(filteredInsulinEntries, (entry) => entry?.date).map((item) => ({
         ...item,
         id: `insulin-${item.date}`,
-        color: '#9f7aea',
+        color: GLIC_GREEN,
       })),
     [filteredInsulinEntries]
   );
@@ -395,7 +432,7 @@ export default function PacienteRelatoriosScreen({
       buildCountByDay(filteredPureMedicationEntries, (entry) => entry?.date).map((item) => ({
         ...item,
         id: `med-${item.date}`,
-        color: '#ed8936',
+        color: GLIC_GREEN,
       })),
     [filteredPureMedicationEntries]
   );
@@ -410,7 +447,7 @@ export default function PacienteRelatoriosScreen({
       ).map((item) => ({
         ...item,
         id: `meal-week-${item.date}`,
-        color: '#4299e1',
+        color: GLIC_GREEN,
       })),
     [filteredMealEntries, periodBounds.endDate, periodBounds.startDate]
   );
@@ -425,7 +462,7 @@ export default function PacienteRelatoriosScreen({
       ).map((item) => ({
         ...item,
         id: `insulin-week-${item.date}`,
-        color: '#9f7aea',
+        color: GLIC_GREEN,
       })),
     [filteredInsulinEntries, periodBounds.endDate, periodBounds.startDate]
   );
@@ -440,17 +477,17 @@ export default function PacienteRelatoriosScreen({
       ).map((item) => ({
         ...item,
         id: `med-week-${item.date}`,
-        color: '#ed8936',
+        color: GLIC_GREEN,
       })),
     [filteredPureMedicationEntries, periodBounds.endDate, periodBounds.startDate]
   );
 
   const summaryItems = useMemo(
     () => [
-      { id: 'meals', label: 'Refeicoes', value: filteredMealEntries.length },
+      { id: 'meals', label: 'Refeições', value: filteredMealEntries.length },
       { id: 'glucose', label: 'Glicose', value: filteredGlucoseReadings.length },
       { id: 'insulin', label: 'Insulina', value: filteredInsulinEntries.length },
-      { id: 'medication', label: 'Medicacao', value: filteredPureMedicationEntries.length },
+      { id: 'medication', label: 'Medicação', value: filteredPureMedicationEntries.length },
     ],
     [
       filteredGlucoseReadings.length,
@@ -469,7 +506,7 @@ export default function PacienteRelatoriosScreen({
     }
   }
 
-  async function handleExport(format) {
+  async function handleExport() {
     try {
       setExportingReport(true);
 
@@ -548,19 +585,19 @@ export default function PacienteRelatoriosScreen({
           glucoseReadings: exportGlucose,
           medicationEntries: exportMedication,
         },
-        { format }
+        { format: 'pdf' }
       );
 
       if (result?.ok) {
-        Alert.alert(
-          format === 'pdf' ? 'Relatorio PDF' : 'Relatorio TXT',
+        alertPaciente(
+          'Relatório pronto',
           Platform.OS === 'web'
-            ? `O arquivo ${format.toUpperCase()} foi baixado com graficos e registros do periodo.`
-            : 'Use o compartilhamento para salvar o arquivo.'
+            ? 'O PDF foi baixado com seus dados do período.'
+            : 'Use compartilhar para salvar o PDF no celular.'
         );
       }
     } catch (error) {
-      Alert.alert('Exportacao', error?.message || 'Nao foi possivel exportar o relatorio.');
+      mostrarToastPacienteErro(error, 'Não foi possível exportar seu relatório agora.');
     } finally {
       setExportingReport(false);
     }
@@ -576,118 +613,123 @@ export default function PacienteRelatoriosScreen({
     >
       {loading ? (
         <View style={styles.loadingCard}>
-          <ActivityIndicator color={patientTheme.colors.primaryDark} />
-          <Text style={styles.loadingText}>Carregando relatorios...</Text>
+          <ActivityIndicator color={GLIC_GREEN} />
+          <Text style={styles.loadingText}>Carregando relatórios...</Text>
         </View>
       ) : null}
 
       {!loading ? (
-        <>
-          <View style={styles.introCard}>
-            <Text style={styles.introTitle}>Relatorios clinicos</Text>
-            <Text style={styles.introText}>
-              Exporte glicose, alimentacao, insulina e medicacao do periodo selecionado em PDF ou TXT,
-              com graficos e tabelas dos seus registros.
-            </Text>
-          </View>
-
-          <View style={styles.periodSelectorWrap}>
-            {PERIOD_TABS.map((item) => {
-              const active = selectedPeriod === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[styles.periodChip, active && styles.periodChipActive]}
-                  activeOpacity={0.88}
-                  onPress={() => handleSelectPeriod(item.key)}
-                >
-                  <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-
-          {selectedPeriod === 'search' ? (
-            <View style={styles.searchFiltersCard}>
-              <View style={styles.searchDateRow}>
-                <View style={styles.searchDateField}>
-                  <Text style={styles.searchDateLabel}>Data inicial</Text>
-                  <TextInput
-                    style={styles.searchDateInput}
-                    value={searchStartDate}
-                    onChangeText={(value) => setSearchStartDate(formatDateInput(value))}
-                    placeholder="DD/MM/AAAA"
-                    placeholderTextColor={patientTheme.colors.textMuted}
-                    keyboardType="number-pad"
-                    maxLength={10}
-                  />
-                </View>
-                <View style={styles.searchDateField}>
-                  <Text style={styles.searchDateLabel}>Data final</Text>
-                  <TextInput
-                    style={styles.searchDateInput}
-                    value={searchEndDate}
-                    onChangeText={(value) => setSearchEndDate(formatDateInput(value))}
-                    placeholder="DD/MM/AAAA"
-                    placeholderTextColor={patientTheme.colors.textMuted}
-                    keyboardType="number-pad"
-                    maxLength={10}
-                  />
-                </View>
-              </View>
-              <Text style={styles.searchDateHint}>
-                Periodo: {formatDateLabel(periodBounds.startDate)} ate {formatDateLabel(periodBounds.endDate)}.
-              </Text>
+        <View style={styles.pageStack}>
+          <View style={styles.toolbarPanel}>
+            <View style={styles.periodSelectorWrap}>
+              {PERIOD_TABS.map((item) => {
+                const active = selectedPeriod === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.periodChip, active && styles.periodChipActive]}
+                    activeOpacity={0.88}
+                    onPress={() => handleSelectPeriod(item.key)}
+                  >
+                    <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
             </View>
-          ) : null}
 
-          <View style={dashboardKpiStyles.grid}>
-            <View style={dashboardKpiStyles.cell}>
+            {selectedPeriod === 'search' ? (
+              <View style={styles.searchFiltersCard}>
+                <View style={styles.searchDateRow}>
+                  <View style={styles.searchDateField}>
+                    <Text style={styles.searchDateLabel}>Data inicial</Text>
+                    <TextInput
+                      style={styles.searchDateInput}
+                      value={searchStartDate}
+                      onChangeText={(value) => setSearchStartDate(formatDateInput(value))}
+                      placeholder="DD/MM/AAAA"
+                      placeholderTextColor={patientTheme.colors.textMuted}
+                      keyboardType="number-pad"
+                      maxLength={10}
+                    />
+                  </View>
+                  <View style={styles.searchDateField}>
+                    <Text style={styles.searchDateLabel}>Data final</Text>
+                    <TextInput
+                      style={styles.searchDateInput}
+                      value={searchEndDate}
+                      onChangeText={(value) => setSearchEndDate(formatDateInput(value))}
+                      placeholder="DD/MM/AAAA"
+                      placeholderTextColor={patientTheme.colors.textMuted}
+                      keyboardType="number-pad"
+                      maxLength={10}
+                    />
+                  </View>
+                </View>
+                <Text style={styles.searchDateHint}>
+                  Exibindo relatório de {formatDateLabel(periodBounds.startDate)} até{' '}
+                  {formatDateLabel(periodBounds.endDate)}.
+                </Text>
+              </View>
+            ) : null}
+          </View>
+
+          <View style={[dashboardKpiStyles.grid, styles.overviewKpiGrid]}>
+            <View style={[dashboardKpiStyles.cell, styles.overviewKpiCell]}>
               <DashboardKpiCard
                 icon="restaurant-outline"
-                accent={KPI_ACCENTS.blue}
-                label="Refeicoes"
+                accent={GLIC_GREEN}
+                label="Refeições"
                 value={String(filteredMealEntries.length)}
+                style={styles.overviewKpiCard}
               />
             </View>
-            <View style={dashboardKpiStyles.cell}>
+            <View style={[dashboardKpiStyles.cell, styles.overviewKpiCell]}>
               <DashboardKpiCard
                 icon="pulse-outline"
-                accent={KPI_ACCENTS.green}
+                accent={GLIC_GREEN}
                 label="Glicose"
                 value={String(filteredGlucoseReadings.length)}
+                style={styles.overviewKpiCard}
               />
             </View>
-            <View style={dashboardKpiStyles.cell}>
+            <View style={[dashboardKpiStyles.cell, styles.overviewKpiCell]}>
               <DashboardKpiCard
                 icon="water-outline"
-                accent={KPI_ACCENTS.purple}
+                accent={GLIC_GREEN}
                 label="Insulina"
                 value={String(filteredInsulinEntries.length)}
+                style={styles.overviewKpiCard}
               />
             </View>
-            <View style={dashboardKpiStyles.cell}>
+            <View style={[dashboardKpiStyles.cell, styles.overviewKpiCell]}>
               <DashboardKpiCard
                 icon="medkit-outline"
-                accent={KPI_ACCENTS.orange}
-                label="Medicacao"
+                accent={GLIC_GREEN}
+                label="Medicação"
                 value={String(filteredPureMedicationEntries.length)}
+                style={styles.overviewKpiCard}
               />
             </View>
           </View>
 
-          <View style={styles.exportSection}>
-            <Text style={styles.sectionTitle}>Exportar relatorio</Text>
+          <View style={styles.exportPanel}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Exportar relatório</Text>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>{periodLabel}</Text>
+              </View>
+            </View>
             <Text style={styles.sectionHint}>
-              Periodo: {periodLabel}
-              {glycemicMetrics.hasData ? ` · media ${glycemicMetrics.average} mg/dL` : ''}
+              {glycemicMetrics.hasData
+                ? `Média ${glycemicMetrics.average} mg/dL no período`
+                : 'Gráficos e totais do período selecionado'}
             </Text>
 
             <TouchableOpacity
               style={styles.exportButtonPrimary}
-              onPress={() => handleExport('pdf')}
+              onPress={handleExport}
               disabled={exportingReport}
               activeOpacity={0.9}
             >
@@ -697,74 +739,169 @@ export default function PacienteRelatoriosScreen({
                 <Ionicons name="document-text-outline" size={18} color={patientTheme.colors.onPrimary} />
               )}
               <Text style={styles.exportButtonPrimaryText}>
-                {exportingReport ? 'Gerando PDF…' : 'Baixar PDF com graficos'}
+                {exportingReport ? 'Gerando PDF…' : 'Baixar relatório PDF'}
               </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={styles.exportButtonSecondary}
-              onPress={() => handleExport('txt')}
-              disabled={exportingReport}
-              activeOpacity={0.9}
-            >
-              <Ionicons name="download-outline" size={16} color={patientTheme.colors.primaryDark} />
-              <Text style={styles.exportButtonSecondaryText}>Exportar resumo em TXT</Text>
             </TouchableOpacity>
           </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Glicose — media diaria</Text>
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="pulse-outline" size={15} color={GLIC_GREEN} />
+                <Text style={styles.sectionTitle}>Controle glicêmico</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>
+                  {filteredGlucoseReadings.length} leitura(s)
+                </Text>
+              </View>
+            </View>
+
             {glycemicMetrics.hasData ? (
               <>
-                <Text style={styles.sectionHint}>
-                  TIR {glycemicMetrics.tir}% · variabilidade {glycemicMetrics.variability} mg/dL
-                </Text>
-                <CountBars items={glucoseDailySeries} emptyLabel="Sem leituras para grafico." />
+                <View style={styles.glycemicTirBlock}>
+                  <View style={styles.glycemicTrackHeader}>
+                    <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
+                    <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
+                  </View>
+                  <View style={styles.glycemicTrack}>
+                    <View
+                      style={[
+                        styles.glycemicTrackFill,
+                        { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
+                      ]}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.subsectionDivider} />
+
+                <View style={styles.progressMiniRow}>
+                  <View style={[dashboardKpiStyles.miniCell, styles.progressMiniCell]}>
+                    <DashboardMiniKpiCard
+                      label="Média"
+                      value={String(glycemicMetrics.average)}
+                      helper="mg/dL"
+                      accent={GLIC_GREEN}
+                      style={styles.progressMiniCard}
+                      labelStyle={styles.progressMiniLabel}
+                      valueStyle={styles.progressMiniValue}
+                      helperStyle={styles.progressMiniHelper}
+                      accentBarStyle={styles.progressMiniAccentBar}
+                    />
+                  </View>
+                  <View style={[dashboardKpiStyles.miniCell, styles.progressMiniCell]}>
+                    <DashboardMiniKpiCard
+                      label="A1C estimada"
+                      value={glycemicMetrics.gmi?.toFixed(1) ?? '—'}
+                      helper="%"
+                      accent={GLIC_GREEN}
+                      style={styles.progressMiniCard}
+                      labelStyle={styles.progressMiniLabel}
+                      valueStyle={styles.progressMiniValue}
+                      helperStyle={styles.progressMiniHelper}
+                      accentBarStyle={styles.progressMiniAccentBar}
+                    />
+                  </View>
+                  <View style={[dashboardKpiStyles.miniCell, styles.progressMiniCell]}>
+                    <DashboardMiniKpiCard
+                      label="Variabilidade"
+                      value={String(glycemicMetrics.variability)}
+                      helper="mg/dL"
+                      accent={GLIC_GREEN}
+                      style={styles.progressMiniCard}
+                      labelStyle={styles.progressMiniLabel}
+                      valueStyle={styles.progressMiniValue}
+                      helperStyle={styles.progressMiniHelper}
+                      accentBarStyle={styles.progressMiniAccentBar}
+                    />
+                  </View>
+                </View>
+
+                <View style={styles.chartSection}>
+                  <View style={styles.subsectionDivider} />
+                  <Text style={styles.chartSectionTitle}>Média diária no período</Text>
+                  <CountBars items={glucoseDailySeries} emptyLabel="Sem leituras para gráfico." />
+                </View>
               </>
             ) : (
-              <Text style={styles.emptyText}>Nenhuma leitura de glicose no periodo.</Text>
+              <Text style={styles.emptyStateText}>Nenhuma leitura de glicose no período.</Text>
             )}
           </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Alimentacao — por dia</Text>
-            <CountBars items={mealsDailySeries} emptyLabel="Sem refeicoes no periodo." />
-            <Text style={[styles.sectionTitle, styles.subSectionTitle]}>Alimentacao — por semana</Text>
-            <CountBars items={mealsWeeklySeries} emptyLabel="Sem refeicoes no periodo." />
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="restaurant-outline" size={15} color={GLIC_GREEN} />
+                <Text style={styles.sectionTitle}>Alimentação</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>{filteredMealEntries.length} refeição(ões)</Text>
+              </View>
+            </View>
+            <Text style={styles.chartSectionTitle}>Por dia</Text>
+            <CountBars items={mealsDailySeries} emptyLabel="Sem refeições no período." />
+            <View style={styles.subsectionDivider} />
+            <Text style={styles.chartSectionTitle}>Por semana</Text>
+            <CountBars items={mealsWeeklySeries} emptyLabel="Sem refeições no período." />
           </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Insulina — por dia</Text>
-            <CountBars items={insulinDailySeries} emptyLabel="Sem aplicacoes no periodo." />
-            <Text style={[styles.sectionTitle, styles.subSectionTitle]}>Insulina — por semana</Text>
-            <CountBars items={insulinWeeklySeries} emptyLabel="Sem aplicacoes no periodo." />
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="water-outline" size={15} color={GLIC_GREEN} />
+                <Text style={styles.sectionTitle}>Insulina</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>{filteredInsulinEntries.length} registro(s)</Text>
+              </View>
+            </View>
+            <Text style={styles.chartSectionTitle}>Por dia</Text>
+            <CountBars items={insulinDailySeries} emptyLabel="Sem aplicações no período." />
+            <View style={styles.subsectionDivider} />
+            <Text style={styles.chartSectionTitle}>Por semana</Text>
+            <CountBars items={insulinWeeklySeries} emptyLabel="Sem aplicações no período." />
           </View>
 
           <View style={styles.sectionCard}>
-            <Text style={styles.sectionTitle}>Medicacao — por dia</Text>
-            <CountBars items={medicationDailySeries} emptyLabel="Sem medicacao no periodo." />
-            <Text style={[styles.sectionTitle, styles.subSectionTitle]}>Medicacao — por semana</Text>
-            <CountBars items={medicationWeeklySeries} emptyLabel="Sem medicacao no periodo." />
+            <View style={styles.sectionHeader}>
+              <View style={styles.sectionTitleRow}>
+                <Ionicons name="medkit-outline" size={15} color={GLIC_GREEN} />
+                <Text style={styles.sectionTitle}>Medicação</Text>
+              </View>
+              <View style={styles.badgeSoft}>
+                <Text style={styles.badgeSoftText}>
+                  {filteredPureMedicationEntries.length} registro(s)
+                </Text>
+              </View>
+            </View>
+            <Text style={styles.chartSectionTitle}>Por dia</Text>
+            <CountBars items={medicationDailySeries} emptyLabel="Sem medicação no período." />
+            <View style={styles.subsectionDivider} />
+            <Text style={styles.chartSectionTitle}>Por semana</Text>
+            <CountBars items={medicationWeeklySeries} emptyLabel="Sem medicação no período." />
           </View>
 
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => navigation.navigate('PacienteProgresso', { usuarioLogado })}
-            activeOpacity={0.88}
-          >
-            <Ionicons name="stats-chart-outline" size={16} color={patientTheme.colors.primaryDark} />
-            <Text style={styles.linkButtonText}>Ver evolucao e conquistas</Text>
-          </TouchableOpacity>
+          <View style={styles.navPanel}>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => navigation.navigate('PacienteProgresso', { usuarioLogado })}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="stats-chart-outline" size={16} color={GLIC_GREEN} />
+              <Text style={styles.linkButtonText}>Ver evolução e conquistas</Text>
+            </TouchableOpacity>
 
-          <TouchableOpacity
-            style={styles.linkButton}
-            onPress={() => navigation.navigate('PacienteHistoricoRegistros', { usuarioLogado })}
-            activeOpacity={0.88}
-          >
-            <Ionicons name="document-text-outline" size={16} color={patientTheme.colors.primaryDark} />
-            <Text style={styles.linkButtonText}>Abrir historico de registros</Text>
-          </TouchableOpacity>
-        </>
+            <TouchableOpacity
+              style={styles.linkButton}
+              onPress={() => navigation.navigate('PacienteHistoricoRegistros', { usuarioLogado })}
+              activeOpacity={0.88}
+            >
+              <Ionicons name="document-text-outline" size={16} color={GLIC_GREEN} />
+              <Text style={styles.linkButtonText}>Abrir histórico de registros</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
       ) : null}
     </PatientScreenLayout>
   );
@@ -772,74 +909,86 @@ export default function PacienteRelatoriosScreen({
 
 const styles = StyleSheet.create({
   contentContainer: {
-    paddingBottom: 36,
+    paddingBottom: patientTheme.spacing.xl + 8,
+  },
+  pageStack: {
+    gap: PANEL_GAP,
+  },
+  toolbarPanel: {
+    gap: SECTION_INNER_GAP,
   },
   loadingCard: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    marginTop: 8,
-    padding: 24,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    marginTop: 4,
+    padding: patientTheme.spacing.xl,
     ...patientShadow,
   },
   loadingText: {
     color: patientTheme.colors.textMuted,
     fontSize: 14,
-    marginTop: 10,
+    marginTop: 12,
   },
-  introCard: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    ...patientShadow,
+  overviewKpiGrid: {
+    flexWrap: 'nowrap',
+    gap: 8,
+    marginBottom: 0,
   },
-  introTitle: {
-    color: patientTheme.colors.text,
-    fontSize: 18,
-    fontWeight: '800',
-    marginBottom: 6,
+  overviewKpiCell: {
+    flex: 1,
+    minWidth: 0,
+    width: undefined,
+    maxWidth: undefined,
   },
-  introText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 19,
+  overviewKpiCard: {
+    alignSelf: 'stretch',
+    borderWidth: 0,
+    minWidth: 0,
+    minHeight: 108,
+    paddingHorizontal: 8,
+    paddingVertical: 12,
+    width: '100%',
   },
   periodSelectorWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
+    gap: 10,
   },
   periodChip: {
-    paddingHorizontal: 14,
-    paddingVertical: 8,
-    borderRadius: 999,
+    flex: 1,
+    minWidth: 72,
+    minHeight: 42,
+    alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
+    borderRadius: 18,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    ...patientShadow,
   },
   periodChipActive: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.primaryDark,
     borderColor: patientTheme.colors.primaryDark,
   },
   periodChipText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 13,
+    color: patientTheme.colors.text,
+    fontSize: 12,
     fontWeight: '700',
+    textAlign: 'center',
   },
   periodChipTextActive: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.onPrimary,
   },
   searchFiltersCard: {
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 14,
-    marginBottom: 12,
+    borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
+    padding: SECTION_INNER_GAP,
   },
   searchDateRow: {
     flexDirection: 'row',
@@ -855,169 +1004,244 @@ const styles = StyleSheet.create({
     marginBottom: 6,
   },
   searchDateInput: {
+    minHeight: 46,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
     color: patientTheme.colors.text,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    fontSize: 14,
+    paddingHorizontal: 12,
+    paddingVertical: Platform.OS === 'ios' ? 12 : 9,
   },
   searchDateHint: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
     marginTop: 10,
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
   },
-  metricsGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginBottom: 12,
-  },
-  metricCard: {
-    flexBasis: '47%',
-    flexGrow: 1,
+  exportPanel: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    padding: 14,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    ...patientShadow,
-  },
-  metricValue: {
-    marginTop: 8,
-    fontSize: 24,
-    fontWeight: '900',
-    color: patientTheme.colors.text,
-  },
-  metricLabel: {
-    marginTop: 2,
-    fontSize: 12,
-    fontWeight: '700',
-    color: patientTheme.colors.textMuted,
-  },
-  exportSection: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    padding: 16,
-    marginBottom: 12,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
+    gap: SECTION_INNER_GAP,
+    padding: patientTheme.spacing.card,
     ...patientShadow,
   },
   sectionTitle: {
     color: patientTheme.colors.text,
     fontSize: 16,
-    fontWeight: '800',
+    fontWeight: '700',
   },
-  subSectionTitle: {
-    fontSize: 14,
-    marginTop: 14,
+  sectionHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 0,
+  },
+  sectionTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 8,
+  },
+  badgeSoft: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: patientTheme.radius.pill,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  badgeSoftText: {
+    color: patientTheme.colors.primaryDark,
+    fontSize: 12,
+    fontWeight: '700',
   },
   sectionHint: {
-    marginTop: 4,
-    marginBottom: 12,
     color: patientTheme.colors.textMuted,
     fontSize: 12,
-    lineHeight: 17,
+    lineHeight: 18,
+    marginBottom: 0,
   },
   exportButtonPrimary: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
     backgroundColor: patientTheme.colors.primaryDark,
-    borderRadius: patientTheme.radius.xl,
-    paddingVertical: 13,
-    marginBottom: 8,
+    borderRadius: patientTheme.radius.pill,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   exportButtonPrimaryText: {
     color: patientTheme.colors.onPrimary,
     fontSize: 14,
     fontWeight: '800',
   },
-  exportButtonSecondary: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    borderRadius: patientTheme.radius.xl,
-    paddingVertical: 11,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.primarySoft,
-  },
-  exportButtonSecondaryText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 13,
-    fontWeight: '700',
-  },
   sectionCard: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    padding: 16,
-    marginBottom: 12,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
+    gap: SECTION_INNER_GAP,
+    padding: patientTheme.spacing.card,
     ...patientShadow,
   },
+  subsectionDivider: {
+    backgroundColor: patientTheme.colors.border,
+    height: 1,
+    opacity: 0.65,
+    width: '100%',
+  },
+  chartSection: {
+    gap: 12,
+  },
+  chartSectionTitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chartBlock: {
+    marginTop: 0,
+  },
   chartWrap: {
-    marginTop: 8,
+    paddingTop: 4,
   },
   chartRow: {
-    flexDirection: 'row',
     alignItems: 'flex-end',
-    gap: 8,
-    minHeight: 120,
+    flexDirection: 'row',
+    gap: 6,
+    justifyContent: 'space-between',
   },
   chartColumn: {
-    flex: 1,
     alignItems: 'center',
+    flex: 1,
+    minWidth: 0,
   },
   chartTrack: {
-    width: '100%',
-    height: 92,
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
     borderRadius: 10,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderWidth: 1,
+    height: 104,
     justifyContent: 'flex-end',
     overflow: 'hidden',
+    width: '72%',
+    maxWidth: 28,
   },
   chartFill: {
+    borderRadius: 8,
     width: '100%',
-    borderRadius: 10,
   },
   chartLabel: {
-    marginTop: 6,
-    fontSize: 10,
+    color: patientTheme.colors.text,
+    fontSize: 11,
     fontWeight: '700',
-    color: patientTheme.colors.textMuted,
+    marginTop: 8,
   },
   chartValue: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    marginTop: 2,
   },
-  emptyText: {
-    marginTop: 8,
+  emptyStateText: {
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
     color: patientTheme.colors.textMuted,
     fontSize: 13,
-    lineHeight: 18,
+    lineHeight: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    textAlign: 'center',
+  },
+  glycemicTirBlock: {
+    gap: 10,
+  },
+  glycemicTrackHeader: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  glycemicTrackLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+  },
+  glycemicTrackValue: {
+    color: GLIC_GREEN,
+    fontSize: 22,
+    fontWeight: '700',
+  },
+  glycemicTrack: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: patientTheme.radius.pill,
+    height: 12,
+    overflow: 'hidden',
+  },
+  glycemicTrackFill: {
+    backgroundColor: GLIC_GREEN,
+    borderRadius: patientTheme.radius.pill,
+    height: '100%',
+  },
+  progressMiniRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  progressMiniCell: {
+    minWidth: 0,
+  },
+  progressMiniCard: {
+    minWidth: 0,
+    minHeight: 106,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
+    ...patientShadow,
+  },
+  progressMiniLabel: {
+    minHeight: 24,
+    fontSize: 11,
+    lineHeight: 13,
+  },
+  progressMiniValue: {
+    marginTop: 5,
+    fontSize: 18,
+    lineHeight: 21,
+  },
+  progressMiniHelper: {
+    minHeight: 16,
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 11,
+  },
+  progressMiniAccentBar: {
+    marginTop: 8,
+    width: 28,
+  },
+  navPanel: {
+    gap: 10,
   },
   linkButton: {
-    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingVertical: 12,
-    marginBottom: 8,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
     borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.surface,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    ...patientShadow,
   },
   linkButtonText: {
-    color: patientTheme.colors.primaryDark,
-    fontSize: 13,
+    color: patientTheme.colors.text,
+    fontSize: 14,
     fontWeight: '700',
   },
 });

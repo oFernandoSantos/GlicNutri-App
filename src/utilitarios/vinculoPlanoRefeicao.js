@@ -73,6 +73,71 @@ export function resolvePlanSections({ mealPlan, appState } = {}) {
     .map(normalizeSection);
 }
 
+const PLAN_SECTION_LEGACY_IDS = {
+  breakfast: 'cafe-manha',
+  lunch: 'almoco',
+  dinner: 'jantar',
+  snack: 'lanche-tarde',
+  lanche: 'lanche-tarde',
+};
+
+function resolveSavedSectionKey(section) {
+  const normalizedId = section?.normalizedId || normalizeKey(section?.id);
+  return PLAN_SECTION_LEGACY_IDS[normalizedId] || normalizedId;
+}
+
+function findSavedSectionForTemplate(templateSection, savedSections = []) {
+  const templateKey = templateSection.normalizedId || normalizeKey(templateSection.id);
+  const templateTitle = templateSection.normalizedTitle;
+
+  return savedSections.find((saved) => {
+    const savedKey = resolveSavedSectionKey(saved);
+    if (savedKey && templateKey && savedKey === templateKey) return true;
+    if (!templateTitle || !saved.normalizedTitle) return false;
+    return (
+      saved.normalizedTitle === templateTitle ||
+      saved.normalizedTitle.includes(templateTitle) ||
+      templateTitle.includes(saved.normalizedTitle)
+    );
+  });
+}
+
+/** Garante todos os momentos do dia no painel de estrutura, preservando dados salvos quando existirem. */
+export function mergePlanStructureSections(savedSections = [], templateSections = []) {
+  const normalizedSaved = (Array.isArray(savedSections) ? savedSections : [])
+    .filter(Boolean)
+    .map(normalizeSection);
+  const normalizedTemplate = (Array.isArray(templateSections) ? templateSections : [])
+    .filter(Boolean)
+    .map(normalizeSection);
+
+  if (!normalizedTemplate.length) return normalizedSaved;
+
+  return normalizedTemplate.map((template) => {
+    const saved = findSavedSectionForTemplate(template, normalizedSaved);
+    if (!saved) return { ...template, planSectionId: template.id };
+
+    return {
+      ...template,
+      ...saved,
+      id: template.id,
+      planSectionId: template.id,
+      title: saved.title || template.title,
+      time: saved.time && saved.time !== '--:--' ? saved.time : template.time,
+      objective: saved.objective || template.objective,
+      targetKcal: saved.targetKcal ?? saved.kcal ?? template.targetKcal,
+      foods:
+        Array.isArray(saved.foods) && saved.foods.length
+          ? saved.foods
+          : template.foods,
+      substitutions:
+        Array.isArray(saved.substitutions) && saved.substitutions.length
+          ? saved.substitutions
+          : template.substitutions,
+    };
+  });
+}
+
 function getEntryMealText(entry) {
   return normalizeText(
     [

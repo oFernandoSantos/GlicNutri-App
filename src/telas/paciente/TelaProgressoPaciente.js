@@ -6,16 +6,13 @@ import {
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
-  Alert,
   Platform,
   TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import {
-  DashboardKpiCard,
   DashboardMiniKpiCard,
-  KPI_ACCENTS,
   dashboardKpiStyles,
 } from '../../componentes/comum/CartaoKpiDashboard';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
@@ -30,12 +27,17 @@ import {
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { subscribeToPatientAppState } from '../../servicos/centralAppState';
 import { exportPatientProgressReport, buildCountByDay, buildGlucoseDailyAverageSeries, buildGlycemicMetrics, filterReportEntriesByPeriod, getReportPeriodBounds, isInsulinMedicationEntry } from '../../servicos/servicoRelatorioPaciente';
+import { alertPaciente, mostrarToastPacienteErro } from '../../servicos/servicoToastPaciente';
 import {
   buildPlanAdherenceSeries,
   resolvePlanSections,
 } from '../../utilitarios/vinculoPlanoRefeicao';
 
 const WEEKDAY_LABELS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
+const PANEL_GAP = patientTheme.spacing.lg;
+const SECTION_INNER_GAP = patientTheme.spacing.md;
+/** Verde marca GlicNutri (#4FDFA3) — KPIs Progresso */
+const GLIC_GREEN = patientTheme.colors.primary;
 const PROGRESS_PERIOD_TABS = [
   { key: 'today', label: 'Hoje' },
   { key: '7days', label: '7 dias' },
@@ -305,8 +307,8 @@ function buildAchievements(weeklyAdherence, weightSeries, mealEntries, glucoseRe
       title: streak >= 7 ? '7 dias consecutivos' : `${Math.max(streak, 1)} dias consistentes`,
       description:
         streak >= 7
-          ? 'Rotina forte de registros e adesao ao plano.'
-          : 'Continue registrando refeicoes para aumentar sua sequencia.',
+          ? 'Rotina forte de registros e adesão ao plano.'
+          : 'Continue registrando refeições para aumentar sua sequência.',
       badge: streak >= 7 ? 'Novo' : null,
       tone: '#fff8e6',
       border: '#f4c86c',
@@ -318,8 +320,8 @@ function buildAchievements(weeklyAdherence, weightSeries, mealEntries, glucoseRe
       title: achievedWeightLoss >= 3 ? 'Meta em andamento' : 'Meta iniciada',
       description:
         achievedWeightLoss >= 3
-          ? `${Math.abs(weightSeries.loss).toFixed(1)}kg de evolucao no periodo.`
-          : 'Seu plano ja esta gerando os primeiros sinais de progresso.',
+          ? `${Math.abs(weightSeries.loss).toFixed(1)}kg de evolução no período.`
+          : 'Seu plano já está gerando os primeiros sinais de progresso.',
       badge: null,
       tone: patientTheme.colors.primarySoft,
       border: patientTheme.colors.primary,
@@ -328,11 +330,11 @@ function buildAchievements(weeklyAdherence, weightSeries, mealEntries, glucoseRe
       id: 'achievement-glycemia',
       icon: 'flash-outline',
       iconColor: '#8a6df0',
-      title: readingsCount >= 7 ? 'Controle glicemico ativo' : 'Monitoramento em construcao',
+      title: readingsCount >= 7 ? 'Controle glicêmico ativo' : 'Monitoramento em construção',
       description:
         readingsCount >= 7
           ? `${readingsCount} leituras recentes ajudando a IA a refinar os insights.`
-          : 'Quanto mais leituras voce fizer, melhor fica a leitura do seu padrao glicemico.',
+          : 'Quanto mais leituras você fizer, melhor fica a leitura do seu padrão glicêmico.',
       badge: activeDays >= 5 ? 'Consistente' : null,
       tone: '#f7f2ff',
       border: '#d8c8ff',
@@ -354,7 +356,7 @@ function buildMonthlySummary(appState, glucoseReadings, weeklyAdherence) {
   return [
     {
       id: 'summary-meals',
-      label: 'Refeicoes registradas',
+      label: 'Refeições registradas',
       value: mealEntries.length || 0,
     },
     {
@@ -369,7 +371,7 @@ function buildMonthlySummary(appState, glucoseReadings, weeklyAdherence) {
     },
     {
       id: 'summary-insights',
-      label: 'Adesao media',
+      label: 'Adesão média',
       value: `${adherenceAverage}%`,
     },
     {
@@ -379,7 +381,7 @@ function buildMonthlySummary(appState, glucoseReadings, weeklyAdherence) {
     },
     {
       id: 'summary-water',
-      label: 'Copos de agua',
+      label: 'Copos de água',
       value: Number(appState?.waterCount || 0),
     },
   ];
@@ -484,15 +486,15 @@ function WeightChart({ points }) {
   );
 }
 
-function CountBars({ items, emptyLabel = 'Sem registros no periodo.' }) {
+function CountBars({ items, emptyLabel = 'Sem registros no período.' }) {
   if (!items?.length) {
-    return <Text style={styles.emptyMealText}>{emptyLabel}</Text>;
+    return <Text style={styles.emptyStateText}>{emptyLabel}</Text>;
   }
 
   const max = Math.max(...items.map((item) => Number(item.value) || 0), 1);
 
   return (
-    <View style={styles.adherenceChartWrap}>
+    <View style={[styles.adherenceChartWrap, styles.chartBlock]}>
       <View style={styles.adherenceBarsRow}>
         {items.map((item) => (
           <View key={item.id || item.label} style={styles.adherenceBarColumn}>
@@ -517,8 +519,12 @@ function CountBars({ items, emptyLabel = 'Sem registros no periodo.' }) {
 }
 
 function AdherenceBars({ items }) {
+  if (!items?.length) {
+    return <Text style={styles.emptyStateText}>Sem dados de adesão no período.</Text>;
+  }
+
   return (
-    <View style={styles.adherenceChartWrap}>
+    <View style={[styles.adherenceChartWrap, styles.chartBlock]}>
       <View style={styles.adherenceBarsRow}>
         {items.map((item) => (
           <View key={item.id} style={styles.adherenceBarColumn}>
@@ -561,7 +567,7 @@ export default function PacienteProgressoScreen({
       ),
     [patientId, usuarioLogado]
   );
-  const progressoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('relatorio'), []);
+  const progressoFetchLimits = useMemo(() => mesclarLimitesDadosPaciente('progresso'), []);
   const cachedProgressoInicial = useMemo(
     () => (patientId ? getCachedPatientExperience(patientId, progressoFetchLimits) : null),
     [patientId, progressoFetchLimits]
@@ -589,6 +595,36 @@ export default function PacienteProgressoScreen({
           setPatient(null);
           setAppState(createDefaultAppState());
           setGlucoseReadings([]);
+          return;
+        }
+
+        const cachedExperience =
+          !forceRefresh && patientId
+            ? getCachedPatientExperience(patientId, progressoFetchLimits)
+            : null;
+        const cacheFresco =
+          patientId && isPatientExperienceCacheFresh(patientId, progressoFetchLimits);
+
+        if (cachedExperience) {
+          setPatient(cachedExperience.patient || null);
+          setAppState(cachedExperience.appState || createDefaultAppState());
+          setGlucoseReadings(cachedExperience.glucoseReadings || []);
+
+          if (cacheFresco && !forceRefresh) {
+            return;
+          }
+
+          fetchPatientExperience(patientId, {
+            patientContext: usuarioLogado,
+            forceRefresh: forceRefresh || !cacheFresco,
+            ...progressoFetchLimits,
+          })
+            .then((experience) => {
+              setPatient(experience?.patient || null);
+              setAppState(experience?.appState || createDefaultAppState());
+              setGlucoseReadings(experience?.glucoseReadings || []);
+            })
+            .catch((error) => console.log('Refresh progresso:', error));
           return;
         }
 
@@ -718,7 +754,6 @@ export default function PacienteProgressoScreen({
     return `${formatShortDateLabel(periodBounds.startDate)} - ${formatShortDateLabel(periodBounds.endDate)}`;
   }, [periodBounds.endDate, periodBounds.startDate, selectedPeriod]);
 
-  const displayName = getPatientDisplayName(patient || usuarioLogado).split(' ')[0] || 'Paciente';
   const planSections = useMemo(
     () => resolvePlanSections({ mealPlan: appState?.activeMealPlan, appState }),
     [appState]
@@ -868,15 +903,15 @@ export default function PacienteProgressoScreen({
         medicationEntries: exportMedication,
       }, { format: 'pdf' });
       if (result?.ok) {
-        Alert.alert(
-          'Relatorio PDF',
+        alertPaciente(
+          'Relatório pronto',
           Platform.OS === 'web'
-            ? 'O PDF foi baixado com graficos e registros do periodo.'
-            : 'Use o compartilhamento para salvar o PDF.'
+            ? 'O PDF foi baixado com seus dados do período.'
+            : 'Use compartilhar para salvar o PDF no celular.'
         );
       }
     } catch (error) {
-      Alert.alert('Exportacao', error?.message || 'Nao foi possivel exportar o relatorio.');
+      mostrarToastPacienteErro(error, 'Não foi possível exportar seu relatório agora.');
     } finally {
       setExportingReport(false);
     }
@@ -898,27 +933,28 @@ export default function PacienteProgressoScreen({
       ) : null}
 
       {!loading ? (
-        <>
-          <View style={styles.periodSelectorWrap}>
-            {PROGRESS_PERIOD_TABS.map((item) => {
-              const active = selectedPeriod === item.key;
-              return (
-                <TouchableOpacity
-                  key={item.key}
-                  style={[styles.periodChip, active && styles.periodChipActive]}
-                  activeOpacity={0.88}
-                  onPress={() => handleSelectPeriod(item.key)}
-                >
-                  <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
-                    {item.label}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
+        <View style={styles.pageStack}>
+          <View style={styles.toolbarPanel}>
+            <View style={styles.periodSelectorWrap}>
+              {PROGRESS_PERIOD_TABS.map((item) => {
+                const active = selectedPeriod === item.key;
+                return (
+                  <TouchableOpacity
+                    key={item.key}
+                    style={[styles.periodChip, active && styles.periodChipActive]}
+                    activeOpacity={0.88}
+                    onPress={() => handleSelectPeriod(item.key)}
+                  >
+                    <Text style={[styles.periodChipText, active && styles.periodChipTextActive]}>
+                      {item.label}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
 
-          {selectedPeriod === 'search' ? (
-            <View style={styles.searchFiltersCard}>
+            {selectedPeriod === 'search' ? (
+              <View style={styles.searchFiltersCard}>
               <View style={styles.searchDateRow}>
                 <View style={styles.searchDateField}>
                   <Text style={styles.searchDateLabel}>Data inicial</Text>
@@ -946,27 +982,40 @@ export default function PacienteProgressoScreen({
                 </View>
               </View>
               <Text style={styles.searchDateHint}>
-                Exibindo progresso de {formatDateLabel(periodBounds.startDate)} ate {formatDateLabel(periodBounds.endDate)}.
+                Exibindo progresso de {formatDateLabel(periodBounds.startDate)} até {formatDateLabel(periodBounds.endDate)}.
               </Text>
-            </View>
-          ) : null}
+              </View>
+            ) : null}
+          </View>
 
-          <View style={dashboardKpiStyles.grid}>
-            <View style={dashboardKpiStyles.cell}>
-              <DashboardKpiCard
-                icon="trending-down-outline"
-                accent={KPI_ACCENTS.green}
-                label="Perda de peso"
-                value={weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
-              />
+          <View style={[dashboardKpiStyles.grid, styles.overviewKpiGrid]}>
+            <View style={[dashboardKpiStyles.cell, styles.overviewMetricCell]}>
+              <View style={styles.overviewMetricCard}>
+                <View style={styles.overviewMetricIconRow}>
+                  <Ionicons name="trending-down-outline" size={20} color={GLIC_GREEN} />
+                </View>
+                <Text style={styles.overviewMetricLabel}>Perda de peso</Text>
+                <Text style={[styles.overviewMetricValue, { color: GLIC_GREEN }]}>
+                  {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
+                </Text>
+                <View
+                  style={[styles.overviewMetricAccentBar, { backgroundColor: GLIC_GREEN }]}
+                />
+              </View>
             </View>
-            <View style={dashboardKpiStyles.cell}>
-              <DashboardKpiCard
-                icon="analytics-outline"
-                accent={KPI_ACCENTS.blue}
-                label={`Adesao media (${periodLabel})`}
-                value={`${adherenceAverage}%`}
-              />
+            <View style={[dashboardKpiStyles.cell, styles.overviewMetricCell]}>
+              <View style={styles.overviewMetricCard}>
+                <View style={styles.overviewMetricIconRow}>
+                  <Ionicons name="analytics-outline" size={20} color={GLIC_GREEN} />
+                </View>
+                <Text style={styles.overviewMetricLabel}>Adesão média</Text>
+                <Text style={[styles.overviewMetricValue, { color: GLIC_GREEN }]}>
+                  {`${adherenceAverage}%`}
+                </Text>
+                <View
+                  style={[styles.overviewMetricAccentBar, { backgroundColor: GLIC_GREEN }]}
+                />
+              </View>
             </View>
           </View>
 
@@ -998,7 +1047,7 @@ export default function PacienteProgressoScreen({
                 <WeightChart points={weightSeries.points} />
               </>
             ) : (
-              <Text style={styles.emptyMealText}>
+              <Text style={styles.emptyStateText}>
                 Informe seu peso no perfil para acompanhar a evolução.
               </Text>
             )}
@@ -1006,7 +1055,7 @@ export default function PacienteProgressoScreen({
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Registros do periodo</Text>
+              <Text style={styles.sectionTitle}>Registros do período</Text>
               <View style={styles.badgeSoft}>
                 <Text style={styles.badgeSoftText}>
                   {periodMealRecords.length} refeiç{periodMealRecords.length === 1 ? 'ão' : 'ões'}
@@ -1043,20 +1092,20 @@ export default function PacienteProgressoScreen({
                 ))}
               </View>
             ) : (
-              <Text style={styles.emptyMealText}>Nenhum registro alimentar encontrado no periodo.</Text>
+              <Text style={styles.emptyStateText}>Nenhum registro alimentar encontrado no período.</Text>
             )}
           </View>
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
-              <Text style={styles.sectionTitle}>Adesao ao plano</Text>
+              <Text style={styles.sectionTitle}>Adesão ao plano</Text>
               <View style={styles.badgeSoft}>
                 <Text style={styles.badgeSoftText}>{adherenceAverage}%</Text>
               </View>
             </View>
 
             <AdherenceBars items={adherenceSeries} />
-            <Text style={styles.sectionFootnote}>Media do periodo: {adherenceAverage}%</Text>
+            <Text style={styles.sectionFootnote}>Média do período: {adherenceAverage}%</Text>
           </View>
 
           <View style={styles.sectionCard}>
@@ -1065,65 +1114,85 @@ export default function PacienteProgressoScreen({
                 <Ionicons
                   name="pulse-outline"
                   size={15}
-                  color={patientTheme.colors.primaryDark}
+                  color={GLIC_GREEN}
                 />
-                <Text style={styles.sectionTitle}>Controle glicemico</Text>
+                <Text style={styles.sectionTitle}>Controle glicêmico</Text>
               </View>
             </View>
 
             {glycemicMetrics.hasData ? (
               <>
-                <View style={styles.glycemicTrackHeader}>
-                  <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
-                  <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
-                </View>
-                <View style={styles.glycemicTrack}>
-                  <View
-                    style={[
-                      styles.glycemicTrackFill,
-                      { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
-                    ]}
-                  />
-                </View>
-
-                <View style={dashboardKpiStyles.miniRow}>
-                  <View style={dashboardKpiStyles.miniCell}>
-                    <DashboardMiniKpiCard
-                      label="Media"
-                      value={String(glycemicMetrics.average)}
-                      helper="mg/dL"
-                      accent={KPI_ACCENTS.green}
+                <View style={styles.glycemicTirBlock}>
+                  <View style={styles.glycemicTrackHeader}>
+                    <Text style={styles.glycemicTrackLabel}>Tempo no alvo</Text>
+                    <Text style={styles.glycemicTrackValue}>{glycemicMetrics.tir}%</Text>
+                  </View>
+                  <View style={styles.glycemicTrack}>
+                    <View
+                      style={[
+                        styles.glycemicTrackFill,
+                        { width: `${clamp(glycemicMetrics.tir, 0, 100)}%` },
+                      ]}
                     />
                   </View>
-                  <View style={dashboardKpiStyles.miniCell}>
+                </View>
+
+                <View style={styles.subsectionDivider} />
+
+                <View style={styles.progressMiniRow}>
+                  <View style={[dashboardKpiStyles.miniCell, styles.progressMiniCell]}>
+                    <DashboardMiniKpiCard
+                      label="Média"
+                      value={String(glycemicMetrics.average)}
+                      helper="mg/dL"
+                      accent={GLIC_GREEN}
+                      style={styles.progressMiniCard}
+                      labelStyle={styles.progressMiniLabel}
+                      valueStyle={styles.progressMiniValue}
+                      helperStyle={styles.progressMiniHelper}
+                      accentBarStyle={styles.progressMiniAccentBar}
+                    />
+                  </View>
+                  <View style={[dashboardKpiStyles.miniCell, styles.progressMiniCell]}>
                     <DashboardMiniKpiCard
                       label="A1C estimada"
                       value={glycemicMetrics.gmi?.toFixed(1) ?? '—'}
                       helper="%"
-                      accent={KPI_ACCENTS.blue}
+                      accent={GLIC_GREEN}
+                      style={styles.progressMiniCard}
+                      labelStyle={styles.progressMiniLabel}
+                      valueStyle={styles.progressMiniValue}
+                      helperStyle={styles.progressMiniHelper}
+                      accentBarStyle={styles.progressMiniAccentBar}
                     />
                   </View>
-                  <View style={dashboardKpiStyles.miniCell}>
+                  <View style={[dashboardKpiStyles.miniCell, styles.progressMiniCell]}>
                     <DashboardMiniKpiCard
                       label="Variabilidade"
                       value={String(glycemicMetrics.variability)}
                       helper="mg/dL"
-                      accent={KPI_ACCENTS.orange}
+                      accent={GLIC_GREEN}
+                      style={styles.progressMiniCard}
+                      labelStyle={styles.progressMiniLabel}
+                      valueStyle={styles.progressMiniValue}
+                      helperStyle={styles.progressMiniHelper}
+                      accentBarStyle={styles.progressMiniAccentBar}
                     />
                   </View>
                 </View>
               </>
             ) : (
-              <Text style={styles.emptyMealText}>
+              <Text style={styles.emptyStateText}>
                 Registre glicemias no monitoramento para ver tendências aqui.
               </Text>
             )}
 
             {glycemicMetrics.hasData ? (
-              <>
-                <Text style={styles.sectionFootnote}>Media diaria no periodo</Text>
-                <CountBars items={glucoseDailySeries} emptyLabel="Sem leituras para grafico." />
-              </>
+              <View style={styles.chartSection}>
+                <View style={styles.subsectionDivider} />
+                <Text style={styles.chartSectionTitle}>Média diária no período</Text>
+                <CountBars items={glucoseDailySeries} emptyLabel="Sem leituras para gráfico." />
+              </View>
             ) : null}
           </View>
 
@@ -1139,7 +1208,7 @@ export default function PacienteProgressoScreen({
             </View>
             <CountBars
               items={insulinDailySeries}
-              emptyLabel="Nenhuma aplicacao de insulina no periodo."
+              emptyLabel="Nenhuma aplicação de insulina no período."
             />
           </View>
 
@@ -1147,7 +1216,7 @@ export default function PacienteProgressoScreen({
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
                 <Ionicons name="medkit-outline" size={15} color="#ed8936" />
-                <Text style={styles.sectionTitle}>Medicacao</Text>
+                <Text style={styles.sectionTitle}>Medicação</Text>
               </View>
               <View style={styles.badgeSoft}>
                 <Text style={styles.badgeSoftText}>{filteredPureMedicationEntries.length} registro(s)</Text>
@@ -1155,7 +1224,7 @@ export default function PacienteProgressoScreen({
             </View>
             <CountBars
               items={medicationDailySeries}
-              emptyLabel="Nenhuma medicacao registrada no periodo."
+              emptyLabel="Nenhuma medicação registrada no período."
             />
           </View>
 
@@ -1163,13 +1232,13 @@ export default function PacienteProgressoScreen({
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
                 <Ionicons name="restaurant-outline" size={15} color="#4299e1" />
-                <Text style={styles.sectionTitle}>Alimentacao no periodo</Text>
+                <Text style={styles.sectionTitle}>Alimentação no período</Text>
               </View>
               <View style={styles.badgeSoft}>
-                <Text style={styles.badgeSoftText}>{filteredMealEntries.length} refeicao(oes)</Text>
+                <Text style={styles.badgeSoftText}>{filteredMealEntries.length} refeição(ões)</Text>
               </View>
             </View>
-            <CountBars items={mealsDailySeries} emptyLabel="Sem refeicoes para grafico." />
+            <CountBars items={mealsDailySeries} emptyLabel="Sem refeições para gráfico." />
           </View>
 
           <View style={styles.sectionCard}>
@@ -1180,6 +1249,7 @@ export default function PacienteProgressoScreen({
               </View>
             </View>
 
+            <View style={styles.achievementsList}>
             {achievements.map((item) => (
               <View
                 key={item.id}
@@ -1205,10 +1275,11 @@ export default function PacienteProgressoScreen({
                 ) : null}
               </View>
             ))}
+            </View>
           </View>
 
           <View style={styles.summaryCard}>
-            <Text style={styles.sectionTitle}>Resumo do periodo</Text>
+            <Text style={styles.sectionTitle}>Resumo do período</Text>
 
             <View style={styles.summaryGrid}>
               {monthlySummary.map((item) => (
@@ -1233,22 +1304,27 @@ export default function PacienteProgressoScreen({
             </TouchableOpacity>
           </View>
 
-          <TouchableOpacity
-            style={styles.exportButton}
-            onPress={handleExportProgress}
-            disabled={exportingReport}
-            activeOpacity={0.9}
-          >
-            {exportingReport ? (
-              <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
-            ) : (
-              <Ionicons name="download-outline" size={18} color={patientTheme.colors.primaryDark} />
-            )}
-            <Text style={styles.exportButtonText}>
-              {exportingReport ? 'Gerando PDF…' : 'Baixar relatorio PDF (glicose, alimentacao, insulina, medicacao)'}
+          <View style={styles.exportPanel}>
+            <TouchableOpacity
+              style={styles.exportButton}
+              onPress={handleExportProgress}
+              disabled={exportingReport}
+              activeOpacity={0.9}
+            >
+              {exportingReport ? (
+                <ActivityIndicator size="small" color={patientTheme.colors.onPrimary} />
+              ) : (
+                <Ionicons name="download-outline" size={18} color={patientTheme.colors.onPrimary} />
+              )}
+              <Text style={styles.exportButtonText}>
+                {exportingReport ? 'Gerando PDF…' : 'Baixar relatório PDF'}
+              </Text>
+            </TouchableOpacity>
+            <Text style={styles.exportHint}>
+              Glicose, alimentação, insulina e medicação do período selecionado.
             </Text>
-          </TouchableOpacity>
-        </>
+          </View>
+        </View>
       ) : null}
     </PatientScreenLayout>
   );
@@ -1256,71 +1332,100 @@ export default function PacienteProgressoScreen({
 
 const styles = StyleSheet.create({
   contentContainer: {
-    paddingBottom: 36,
+    paddingBottom: patientTheme.spacing.xl + 8,
+  },
+  pageStack: {
+    gap: PANEL_GAP,
+  },
+  toolbarPanel: {
+    gap: SECTION_INNER_GAP,
   },
   loadingCard: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    marginTop: 8,
-    padding: 24,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    marginTop: 4,
+    padding: patientTheme.spacing.xl,
     ...patientShadow,
   },
   loadingText: {
     color: patientTheme.colors.textMuted,
     fontSize: 14,
-    marginTop: 10,
+    marginTop: 12,
   },
-  exportButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    marginBottom: 12,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+  overviewKpiGrid: {
+    marginBottom: 0,
+  },
+  exportPanel: {
+    backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.primarySoft,
+    gap: 10,
+    padding: patientTheme.spacing.card,
+    ...patientShadow,
+  },
+  exportButton: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: patientTheme.radius.pill,
+    flexDirection: 'row',
+    gap: 8,
+    justifyContent: 'center',
+    minHeight: 48,
+    paddingHorizontal: 16,
+    paddingVertical: 12,
   },
   exportButtonText: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.onPrimary,
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
+  },
+  exportHint: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: 'center',
   },
   periodSelectorWrap: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 12,
+    flexWrap: 'wrap',
+    gap: 10,
   },
   periodChip: {
     flex: 1,
-    minHeight: 40,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
+    minWidth: 72,
+    minHeight: 42,
     alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     justifyContent: 'center',
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     ...patientShadow,
   },
   periodChipActive: {
-    backgroundColor: patientTheme.colors.primary,
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderColor: patientTheme.colors.primaryDark,
   },
   periodChipText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    fontWeight: '800',
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   periodChipTextActive: {
     color: patientTheme.colors.onPrimary,
   },
   searchFiltersCard: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
-    marginBottom: 12,
-    padding: patientTheme.spacing.card,
-    ...patientShadow,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    padding: SECTION_INNER_GAP,
   },
   searchDateRow: {
     flexDirection: 'row',
@@ -1338,7 +1443,7 @@ const styles = StyleSheet.create({
   searchDateInput: {
     minHeight: 46,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     color: patientTheme.colors.text,
@@ -1356,6 +1461,45 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 12,
     marginBottom: 12,
+  },
+  overviewMetricCell: {
+    minWidth: 0,
+  },
+  overviewMetricCard: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.xl,
+    borderWidth: 1,
+    justifyContent: 'center',
+    minHeight: 132,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
+    ...patientShadow,
+  },
+  overviewMetricIconRow: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+  },
+  overviewMetricLabel: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  overviewMetricValue: {
+    marginTop: 8,
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: '900',
+    textAlign: 'center',
+  },
+  overviewMetricAccentBar: {
+    marginTop: 10,
+    width: 30,
+    height: 3,
+    borderRadius: 999,
   },
   topMetricCard: {
     flex: 1,
@@ -1383,7 +1527,9 @@ const styles = StyleSheet.create({
   sectionCard: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    gap: SECTION_INNER_GAP,
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
@@ -1391,7 +1537,24 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 14,
+    marginBottom: 0,
+  },
+  subsectionDivider: {
+    backgroundColor: patientTheme.colors.border,
+    height: 1,
+    opacity: 0.65,
+    width: '100%',
+  },
+  chartSection: {
+    gap: 12,
+  },
+  chartSectionTitle: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  chartBlock: {
+    marginTop: 0,
   },
   sectionTitleRow: {
     alignItems: 'center',
@@ -1416,8 +1579,9 @@ const styles = StyleSheet.create({
   },
   weightStatsRow: {
     flexDirection: 'row',
+    gap: 12,
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 4,
   },
   weightStat: {
     flex: 1,
@@ -1433,14 +1597,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   weightStatValueHighlight: {
-    color: patientTheme.colors.primaryDark,
+    color: GLIC_GREEN,
   },
   chartCardFrame: {
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
-    height: 170,
+    height: 178,
+    marginTop: 4,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -1476,24 +1641,29 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   adherenceChartWrap: {
-    paddingTop: 6,
+    paddingTop: 4,
   },
   adherenceBarsRow: {
     alignItems: 'flex-end',
     flexDirection: 'row',
+    gap: 6,
     justifyContent: 'space-between',
   },
   adherenceBarColumn: {
     alignItems: 'center',
     flex: 1,
+    minWidth: 0,
   },
   adherenceBarTrack: {
-    backgroundColor: '#ffffff',
-    borderRadius: 8,
-    height: 96,
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
+    borderRadius: 10,
+    borderWidth: 1,
+    height: 104,
     justifyContent: 'flex-end',
     overflow: 'hidden',
-    width: 20,
+    width: '72%',
+    maxWidth: 28,
   },
   adherenceBarFill: {
     borderRadius: 8,
@@ -1513,11 +1683,12 @@ const styles = StyleSheet.create({
   sectionFootnote: {
     color: patientTheme.colors.textMuted,
     fontSize: 13,
-    marginTop: 12,
+    lineHeight: 18,
+    marginTop: 4,
     textAlign: 'center',
   },
   todayMealsList: {
-    gap: 10,
+    gap: 12,
   },
   todayMealCard: {
     backgroundColor: patientTheme.colors.surfaceMuted,
@@ -1577,6 +1748,21 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  emptyStateText: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    lineHeight: 20,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+    textAlign: 'center',
+  },
+  glycemicTirBlock: {
+    gap: 10,
+  },
   glycemicTrackHeader: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -1587,7 +1773,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
   },
   glycemicTrackValue: {
-    color: patientTheme.colors.primaryDark,
+    color: GLIC_GREEN,
     fontSize: 22,
     fontWeight: '700',
   },
@@ -1599,9 +1785,48 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   glycemicTrackFill: {
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: GLIC_GREEN,
     borderRadius: patientTheme.radius.pill,
     height: '100%',
+  },
+  progressMiniRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 0,
+  },
+  progressMiniCell: {
+    minWidth: 0,
+  },
+  progressMiniCard: {
+    minWidth: 0,
+    minHeight: 106,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
+    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
+    ...patientShadow,
+  },
+  progressMiniLabel: {
+    minHeight: 24,
+    fontSize: 11,
+    lineHeight: 13,
+  },
+  progressMiniValue: {
+    marginTop: 5,
+    fontSize: 18,
+    lineHeight: 21,
+  },
+  progressMiniHelper: {
+    minHeight: 16,
+    marginTop: 4,
+    fontSize: 10,
+    lineHeight: 11,
+  },
+  progressMiniAccentBar: {
+    marginTop: 8,
+    width: 28,
   },
   glycemicMetricsRow: {
     flexDirection: 'row',
@@ -1631,13 +1856,15 @@ const styles = StyleSheet.create({
     fontSize: 11,
     marginTop: 4,
   },
+  achievementsList: {
+    gap: 10,
+  },
   achievementCard: {
     alignItems: 'center',
     borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     flexDirection: 'row',
-    marginTop: 10,
-    padding: 12,
+    padding: 14,
   },
   achievementIconWrap: {
     alignItems: 'center',
@@ -1675,28 +1902,29 @@ const styles = StyleSheet.create({
   summaryCard: {
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.xl,
-    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    gap: SECTION_INNER_GAP,
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
   summaryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    marginTop: 12,
+    gap: 12,
     justifyContent: 'space-between',
   },
   summaryItem: {
-    width: '48%',
-    minHeight: 96,
-    marginTop: 10,
-    paddingHorizontal: 12,
-    paddingVertical: 14,
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    alignItems: 'center',
     justifyContent: 'center',
+    minHeight: 100,
+    paddingHorizontal: 12,
+    paddingVertical: 16,
+    width: '47.5%',
   },
   summaryValue: {
     color: patientTheme.colors.primaryDark,
@@ -1718,8 +1946,8 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.pill,
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 18,
-    minHeight: 46,
+    marginTop: 4,
+    minHeight: 48,
   },
   summaryButtonText: {
     color: patientTheme.colors.onPrimary,

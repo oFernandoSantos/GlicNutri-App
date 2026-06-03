@@ -180,9 +180,11 @@ export function generateSlotsForNextDays(availabilityRows, { days = 14 } = {}) {
       const startAt = setTimeOnDate(dayCursor, row.start_time);
       const endAt = setTimeOnDate(dayCursor, row.end_time);
 
+      const now = new Date();
       for (let t = new Date(startAt); t < endAt; t = addMinutes(t, slotMinutes)) {
         const nextT = addMinutes(t, slotMinutes);
         if (nextT > endAt) break;
+        if (t.getTime() <= now.getTime()) continue;
         slots.push({
           scheduledAt: t.toISOString(),
           localLabel: t.toLocaleString('pt-BR', { weekday: 'short', hour: '2-digit', minute: '2-digit' }),
