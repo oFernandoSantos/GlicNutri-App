@@ -508,6 +508,14 @@ function hasRealNutritionTable(item) {
   return keys.some((key) => item[key] !== null && typeof item[key] !== 'undefined');
 }
 
+export function pontuarMatchRotuloBrasil(item, query) {
+  return scoreRotuloMatch(item, query);
+}
+
+export function pontuarMatchCatalogoBrasil(item, query) {
+  return pontuarAlimento(item, montarContextoBusca(query));
+}
+
 function scoreRotuloMatch(item, query) {
   const queryText = normalizarTextoBusca(query);
   const name = normalizarTextoBusca(item?.nome);
@@ -779,9 +787,145 @@ function montarDicaBusca(contexto, melhorItem) {
   return '';
 }
 
+const MARCAS_COMERCIAIS = new Set([
+  'coca',
+  'pepsi',
+  'nestle',
+  'danone',
+  'italac',
+  'yoki',
+  'knorr',
+  'maggi',
+  'heinz',
+  'quaker',
+  'activia',
+  'nescau',
+  'toddy',
+  'bis',
+  'oreo',
+  'pringles',
+  'doritos',
+  'sadia',
+  'perdigao',
+  'seara',
+  'friboi',
+  'aurora',
+  'skol',
+  'brahma',
+  'antarctica',
+  'garoto',
+  'lacta',
+  'lactalis',
+  'piracanjuba',
+  'itambe',
+  'vigor',
+  'pullman',
+  'wickbold',
+  'mabel',
+  'panco',
+  'bauducco',
+  'marilan',
+  'tostines',
+  'guarana',
+  'fanta',
+  'sprite',
+  'kuat',
+  'redbull',
+  'monster',
+]);
+
+const PADRAO_NOME_TACO_IA =
+  /cozido|frito|cru|assado|grelhado|refogado|sem pele|tipo 1|tipo 2|carioca|preto|in natura/;
+const PADRAO_PRODUTO_EMBALADO_IA =
+  /(refrigerante|iogurte|biscoito|snack|achocolatado|suco de caixa|embalagem|embalado|lata|garrafa|pacote|sache)/;
+
 /**
- * Busca unificada: TACO + produtos industrializados (marcas comerciais).
+ * Detecta nomes de produto embalado/comercial (IA ou busca manual).
  */
+export function pareceProdutoComercial(query = '') {
+  const texto = normalizarTextoBusca(query);
+  if (!texto) {
+    return false;
+  }
+
+  const partes = texto
+    .split(',')
+    .map((parte) => parte.trim())
+    .filter(Boolean);
+  if (partes.length >= 2 && PADRAO_NOME_TACO_IA.test(texto)) {
+    return false;
+  }
+
+  if (PADRAO_PRODUTO_EMBALADO_IA.test(texto)) {
+    return true;
+  }
+
+  const hitCatalogo = CATALOGO_INDUSTRIAL.some((item) => {
+    if (item.nomeNormalizado === texto) {
+      return true;
+    }
+
+    return item.aliasesNormalizados?.some((alias) => alias === texto || texto === alias);
+  });
+  if (hitCatalogo) {
+    return true;
+  }
+
+  const tokens = tokenizarTextoLivre(texto);
+  return tokens.some((token) => token.length >= 3 && MARCAS_COMERCIAIS.has(token));
+}
+
+/**
+ * Busca rótulo real (Open Food Facts + cache) para nomes comerciais.
+ */
+export async function buscarRotuloNutricionalParaNome(query = '') {
+  const nome = String(query || '').trim();
+  if (nome.length < 2) {
+    return null;
+  }
+
+  const comercial = pareceProdutoComercial(nome);
+  const minScore = comercial ? 90 : 108;
+
+  return buscarMelhorProdutoRotuloBrasil(nome, { minScore });
+}
+
+/**
+ * Melhor item TACO/industrializado para um nome vindo da IA (evita match fraco).
+ */
+export function melhorAlimentoBrasilParaNome(query = '', { minScore = 72, preferTaco = false } = {}) {
+  const contexto = montarContextoBusca(query);
+  const tokens = contexto.tokens;
+
+  if (!tokens.length) {
+    return null;
+  }
+
+  const ranqueados = CATALOGO_UNIFICADO.map((item) => ({
+    item,
+    score: pontuarAlimento(item, contexto),
+  }))
+    .filter((entry) => entry.score > 0)
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+
+      if (left.item.origem !== right.item.origem) {
+        if (preferTaco) {
+          return left.item.origem === 'taco' ? -1 : 1;
+        }
+
+        return left.item.origem === 'industrializado' ? -1 : 1;
+      }
+
+      return left.item.nome.localeCompare(right.item.nome, 'pt-BR');
+    });
+
+  const melhor = ranqueados[0];
+  return melhor && melhor.score >= minScore ? melhor.item : null;
+}
+
 export function buscarAlimentosBrasil(query = '', { limit = 50, offset = 0 } = {}) {
   const contexto = montarContextoBusca(query);
   const tokens = contexto.tokens;
