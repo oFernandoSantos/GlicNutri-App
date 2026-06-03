@@ -30,12 +30,12 @@ const DEFAULT_OPENAI_MODEL = 'gpt-4o-mini';
 const OPENAI_MODEL_FALLBACKS = ['gpt-4o-mini', 'gpt-4o'];
 
 const VISION_PROMPT =
-  'Voce e nutricionista analisando uma foto de refeicao tipica do Brasil. ' +
-  'Liste SOMENTE alimentos claramente visiveis (maximo 8). ' +
-  'Use nomes em portugues brasileiro adequados a tabela TACO (ex: "Arroz, tipo 1, cozido", "Mandioca, cozida", "Carne, bovina, acém, sem gordura, cozido"). ' +
-  'Cada alimento em um item separado — nunca "prato feito" ou "refeicao completa". ' +
-  'Estime gramas por porcao visivel. Macros podem ser 0 — o app corrige com TACO. ' +
-  'Responda APENAS JSON valido: {"alimentos":[{"nome":"string","gramas_estimados":number,"categoria":"string","calorias":0,"carboidratos":0,"proteinas":0,"gorduras":0}]}';
+  'Voce analisa fotos de refeicoes no Brasil. Liste SOMENTE alimentos claramente visiveis (maximo 8). ' +
+  'REGRA EMBALAGEM: se ver caixa/garrafa/pacote com texto, use MARCA e produto do rotulo + peso impresso no nome ' +
+  '(ex: "Oreo, 90g", "Chamyto BIG, 120g"). gramas_estimados = peso do rotulo em gramas (90, 120). Nao troque Oreo por biscoito generico. ' +
+  'REGRA PRATO: sem embalagem, use nome TACO (ex: "Arroz, tipo 1, cozido"). ' +
+  'Um item por produto. Nunca "prato feito". Macros = 0. ' +
+  'JSON: {"alimentos":[{"nome":"string","gramas_estimados":number,"categoria":"string","calorias":0,"carboidratos":0,"proteinas":0,"gorduras":0}]}';
 
 function resolveOpenAiModelName(raw: string) {
   const name = String(raw || '').trim();
@@ -186,6 +186,44 @@ async function blobToBase64(blob: Blob) {
   return btoa(binary);
 }
 
+function parseGramsFromNome(text: string) {
+  const raw = String(text || '')
+    .toLowerCase()
+    .replace(/,/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!raw) {
+    return 0;
+  }
+
+  const multiPack = raw.match(/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*g\b/);
+  if (multiPack) {
+    const total = Number(multiPack[1]) * Number(multiPack[2]);
+    if (Number.isFinite(total) && total > 0) {
+      return roundValue(total);
+    }
+  }
+
+  const gramsMatch = raw.match(/(\d+(?:\.\d+)?)\s*-?\s*g(?:ramas)?\b/);
+  if (gramsMatch) {
+    const grams = Number(gramsMatch[1]);
+    if (Number.isFinite(grams) && grams > 0) {
+      return roundValue(grams);
+    }
+  }
+
+  const mlMatch = raw.match(/(\d+(?:\.\d+)?)\s*-?\s*ml\b/);
+  if (mlMatch) {
+    const ml = Number(mlMatch[1]);
+    if (Number.isFinite(ml) && ml > 0) {
+      return roundValue(ml);
+    }
+  }
+
+  return 0;
+}
+
 function isGenericMealLabel(nome: string) {
   const texto = nome
     .normalize('NFD')
@@ -206,8 +244,10 @@ function mapVisionFoodsToItems(rawFoods: unknown[]): FoodItem[] {
       const nome = String(record.nome || record.name || record.alimento || '').trim();
       if (!nome || isGenericMealLabel(nome)) return null;
 
+      const gramsFromNome = parseGramsFromNome(nome);
       const grams = roundValue(
         pickNumber(record, ['gramas_estimados', 'quantidade_gramas', 'grams', 'gram', 'porcao_gramas']) ||
+          gramsFromNome ||
           100
       );
 
@@ -300,7 +340,7 @@ async function analyzeMealImageWithOpenAI(blob: Blob, mimeType: string) {
         },
         body: JSON.stringify({
           model: modelId,
-          temperature: 0.15,
+          temperature: 0,
           max_tokens: 1200,
           response_format: { type: 'json_object' },
           messages: [

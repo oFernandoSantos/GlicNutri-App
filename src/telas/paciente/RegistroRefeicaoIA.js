@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Image,
@@ -22,6 +23,7 @@ import {
   appendNewestEntry,
   fetchPatientExperience,
   getPatientId,
+  refreshPatientMealEntries,
   savePatientAppState,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
@@ -51,6 +53,7 @@ import {
   enrichMealEntryWithPlanLink,
   resolvePlanSections,
 } from '../../utilitarios/vinculoPlanoRefeicao';
+import { voltarParaAlimentacaoAposSalvarRefeicao } from '../../utilitarios/navegacaoPaciente';
 import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
 import { PATIENT_TOAST_DURATION_MS } from '../../utilitarios/mensagensPaciente';
 
@@ -59,6 +62,49 @@ const FOOD_SEARCH_PAGE_SIZE = 12;
 const FOOD_SEARCH_LIST_MAX_HEIGHT = 200;
 const NOTIFICACAO_AUTO_MS = PATIENT_TOAST_DURATION_MS;
 const PHOTO_DROPZONE_HEIGHT = 170;
+
+const BOAS_VINDAS_STORAGE_KEY = 'glicnutri:refeicao-ia:boas-vindas:v1';
+
+const AVISO_SALVAR_ATTENTION_SOFT = '#FFF3E0';
+const AVISO_SALVAR_ATTENTION_BORDER = '#FF9800';
+const AVISO_SALVAR_GRADIENT_START = '#F9A825';
+const AVISO_SALVAR_GRADIENT_MID = '#FF8F00';
+const AVISO_SALVAR_GRADIENT_END = '#E65100';
+
+const AVISO_FOTO_TITULO = 'Praticidade para a sua rotina alimentar!';
+const AVISO_FOTO_SECOES = [
+  {
+    text: 'A foto serve para carregar os alimentos muito mais rápido e facilitar o seu registro diário.',
+  },
+  {
+    label: 'Facilidade, não perfeição:',
+    text: 'A Inteligência Artificial estima os tamanhos das porções, mas ela não substitui o seu olhar atento.',
+  },
+  {
+    label: 'Confira os nutrientes:',
+    text: 'Olhe a lista que vai aparecer na tela. Se as quantidades de carboidratos, proteínas ou calorias estiverem diferentes do seu prato real, ajuste manualmente.',
+  },
+];
+
+const AVISO_SALVAR_TITULO = 'Tudo pronto com o seu prato! 🥗';
+const AVISO_SALVAR_TEXTO =
+  'Antes de salvar definitivo no seu histórico de saúde, dê uma última olhada nos valores calculados pela IA.';
+const AVISO_SALVAR_DIABETES_TITULO = '⚠️ ATENÇÃO: VOCÊ USA INSULINA?';
+const AVISO_SALVAR_DIABETES_TEXTO =
+  'Se você calcula sua dose com base nesses dados, lembre-se: errar a quantidade de carboidratos, gorduras ou não considerar sua glicemia atual pode causar hipoglicemia ou picos de glicose. Não use a estimativa da IA como 100% exata para tomar decisões médicas. Verifique linha por linha!';
+
+const BOAS_VINDAS_TITULO = 'Que bom ter você aqui! 💚';
+const BOAS_VINDAS_SECOES = [
+  {
+    text: 'Comer bem é o melhor caminho para uma vida saudável. Nosso aplicativo usa Inteligência Artificial para que registrar suas refeições não seja uma tarefa chata ou demorada.',
+  },
+  {
+    text: 'Seja para manter o peso, melhorar os hábitos ou controlar o diabetes, a tecnologia é sua assistente ágil, mas você conhece o seu corpo melhor do que ninguém.',
+  },
+  {
+    text: 'Use as sugestões da IA como um ponto de partida e ajuste o que for necessário para a sua realidade!',
+  },
+];
 
 const EDITABLE_ITEM_FIELDS = [
   { itemKey: 'calorias', baseKey: 'base_calorias', label: 'kcal', unit: '', color: '#111827' },
@@ -316,6 +362,49 @@ function buildItemDraft(item) {
   );
 }
 
+function scaleItemNutrientsForQuantity(item, nextQuantity) {
+  const baseQuantity =
+    Number(item?.base_quantidade_gramas) > 0 ? Number(item.base_quantidade_gramas) : 100;
+  const factor = baseQuantity > 0 ? nextQuantity / baseQuantity : 0;
+  const scaled = {
+    ...item,
+    quantidade_gramas: nextQuantity,
+  };
+
+  EDITABLE_ITEM_FIELDS.forEach((field) => {
+    const baseValue = Number(item?.[field.baseKey]);
+    scaled[field.itemKey] =
+      Number.isFinite(baseValue) && baseValue >= 0
+        ? Math.round(baseValue * factor * 10) / 10
+        : 0;
+  });
+
+  return scaled;
+}
+
+function rescaleDraftForQuantity(item, draft, quantityInput) {
+  const sanitizedQuantity = String(quantityInput || '').replace(/[^0-9,.]/g, '');
+  const nextQuantity = parseEditableValue(sanitizedQuantity);
+  const baseQuantity =
+    Number(item?.base_quantidade_gramas) > 0 ? Number(item.base_quantidade_gramas) : 100;
+  const factor = baseQuantity > 0 ? nextQuantity / baseQuantity : 0;
+  const nextDraft = {
+    ...(draft || buildItemDraft(item)),
+    quantidade_gramas: sanitizedQuantity,
+  };
+
+  EDITABLE_ITEM_FIELDS.forEach((field) => {
+    const baseValue = Number(item?.[field.baseKey]);
+    const scaled =
+      Number.isFinite(baseValue) && baseValue >= 0
+        ? Math.round(baseValue * factor * 10) / 10
+        : 0;
+    nextDraft[field.itemKey] = formatEditableValue(scaled);
+  });
+
+  return nextDraft;
+}
+
 function buildItemFromDraft(item, draft) {
   const quantidade = parseEditableValue(draft?.quantidade_gramas);
   const baseQuantity = Number(item?.base_quantidade_gramas) > 0 ? Number(item.base_quantidade_gramas) : 100;
@@ -361,10 +450,282 @@ function getFoodSuggestionCalories(item) {
   return Math.round(Number(item?.calorias ?? item?.base_calorias) || 0);
 }
 
+function TextoTituloAtencaoSalvar({ text }) {
+  const tituloStyle = styles.avisoSalvarAttentionTitle;
+
+  if (Platform.OS === 'web') {
+    return (
+      <Text
+        style={[
+          tituloStyle,
+          {
+            backgroundImage: `linear-gradient(90deg, ${AVISO_SALVAR_GRADIENT_START} 0%, ${AVISO_SALVAR_GRADIENT_MID} 50%, ${AVISO_SALVAR_GRADIENT_END} 100%)`,
+            backgroundClip: 'text',
+            WebkitBackgroundClip: 'text',
+            color: 'transparent',
+            WebkitTextFillColor: 'transparent',
+          },
+        ]}
+      >
+        {text}
+      </Text>
+    );
+  }
+
+  const marcador = 'ATENÇÃO:';
+  const indice = text.indexOf(marcador);
+
+  if (indice === -1) {
+    return <Text style={tituloStyle}>{text}</Text>;
+  }
+
+  const prefixo = text.slice(0, indice);
+  const sufixo = text.slice(indice + marcador.length);
+
+  return (
+    <Text style={tituloStyle}>
+      {prefixo ? <Text style={styles.avisoSalvarAttentionTituloAmarelo}>{prefixo}</Text> : null}
+      <Text style={styles.avisoSalvarAttentionTituloAmarelo}>{marcador}</Text>
+      <Text style={styles.avisoSalvarAttentionTituloLaranja}>{sufixo}</Text>
+    </Text>
+  );
+}
+
+function pacienteTemDiabetes(usuario = null) {
+  const fontes = [
+    usuario,
+    usuario?.onboarding,
+    usuario?.onboarding_paciente,
+    usuario?.perfil_clinico,
+    usuario?.perfil,
+    usuario?.paciente,
+  ].filter(Boolean);
+
+  for (const fonte of fontes) {
+    const status = String(fonte?.diabetes_status || fonte?.diabetes || '').trim();
+    if (status === 'Sim') {
+      return true;
+    }
+
+    if (String(fonte?.tipo_diabetes || fonte?.diabetes_tipo || '').trim()) {
+      return true;
+    }
+
+    const condicoes = [
+      ...(Array.isArray(fonte?.condicoes) ? fonte.condicoes : []),
+      ...(Array.isArray(fonte?.condicoes_clinicas) ? fonte.condicoes_clinicas : []),
+      ...(Array.isArray(fonte?.comorbidades) ? fonte.comorbidades : []),
+    ];
+
+    if (condicoes.some((item) => String(item).toLowerCase().includes('diabetes'))) {
+      return true;
+    }
+
+    const insulinas = fonte?.terapia_farmacologica_insulinas;
+    if (Array.isArray(insulinas) && insulinas.length > 0) {
+      return true;
+    }
+  }
+
+  const textoClinico = [usuario?.objetivo_principal_consulta, usuario?.comorbidades_texto]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  return textoClinico.includes('diabetes');
+}
+
+function ModalAvisoRefeicao({
+  visible,
+  onRequestClose,
+  modalCommonProps,
+  variant = 'foto',
+  title,
+  secoes = [],
+  attentionBlock = null,
+  primaryLabel,
+  onPrimary,
+  secondaryLabel,
+  onSecondary,
+  primaryBusy = false,
+  showSecondary = true,
+}) {
+  const isFoto = variant === 'foto';
+  const isBoasVindas = variant === 'boasvindas';
+  const isSalvar = variant === 'salvar';
+
+  const cardStyle = [
+    styles.modalCard,
+    isFoto && styles.avisoFotoCard,
+    isBoasVindas && styles.avisoBoasVindasCard,
+    isSalvar && styles.avisoSalvarCard,
+  ];
+  const titleStyle = [
+    styles.avisoRefeicaoTitle,
+    isFoto && styles.avisoFotoTitle,
+    isBoasVindas && styles.avisoBoasVindasTitle,
+    isSalvar && styles.avisoSalvarTitle,
+  ];
+  const bodyStyle = [
+    styles.avisoRefeicaoBody,
+    isFoto && styles.avisoFotoBody,
+    isBoasVindas && styles.avisoBoasVindasBody,
+    isSalvar && styles.avisoSalvarBody,
+  ];
+  const paragraphStyle = [
+    styles.avisoRefeicaoParagraph,
+    isFoto && styles.avisoFotoParagraph,
+    isBoasVindas && styles.avisoBoasVindasParagraph,
+    isSalvar && styles.avisoSalvarParagraph,
+  ];
+  const labelStyle = [
+    styles.avisoRefeicaoLabel,
+    isFoto && styles.avisoFotoLabel,
+    isBoasVindas && styles.avisoBoasVindasLabel,
+    isSalvar && styles.avisoSalvarLabel,
+  ];
+
+  return (
+    <Modal visible={visible} {...modalCommonProps} onRequestClose={onRequestClose}>
+      <View style={styles.modalRoot}>
+        <View style={[styles.modalKeyboard, styles.avisoRefeicaoKeyboard]}>
+          <View style={cardStyle}>
+            <View style={[styles.avisoRefeicaoHeader, isFoto && styles.avisoFotoHeader]}>
+              {isFoto ? (
+                <View style={styles.avisoFotoHeaderCenter}>
+                  <View style={styles.avisoFotoIconBadge}>
+                    <Ionicons name="camera" size={18} color={patientTheme.colors.onPrimary} />
+                  </View>
+                  <Text style={[titleStyle, styles.avisoFotoTitleText]}>{title}</Text>
+                </View>
+              ) : (
+                <Text
+                  style={titleStyle}
+                  numberOfLines={2}
+                  adjustsFontSizeToFit
+                  minimumFontScale={0.82}
+                >
+                  {title}
+                </Text>
+              )}
+              <TouchableOpacity
+                style={[
+                  styles.avisoRefeicaoCloseButton,
+                  isFoto && styles.avisoFotoCloseButton,
+                  isSalvar && styles.avisoSalvarCloseButton,
+                  isBoasVindas && styles.avisoBoasVindasCloseButton,
+                ]}
+                onPress={onRequestClose}
+                accessibilityLabel="Fechar"
+              >
+                <Ionicons
+                  name="close"
+                  size={18}
+                  color={
+                    isFoto || isBoasVindas
+                      ? patientTheme.colors.primaryDark
+                      : patientTheme.colors.textMuted
+                  }
+                />
+              </TouchableOpacity>
+            </View>
+
+            {isBoasVindas ? (
+              <View style={styles.avisoBoasVindasIconBadge}>
+                <Ionicons name="heart" size={22} color={patientTheme.colors.primaryDark} />
+              </View>
+            ) : null}
+
+            <View style={bodyStyle}>
+              {secoes.map((secao, index) => (
+                <Text
+                  key={`${variant}-${index}`}
+                  style={[
+                    paragraphStyle,
+                    index === secoes.length - 1 && !attentionBlock && styles.avisoRefeicaoParagraphLast,
+                  ]}
+                >
+                  {secao.label ? <Text style={labelStyle}>{secao.label} </Text> : null}
+                  {secao.text}
+                </Text>
+              ))}
+
+              {attentionBlock ? (
+                <View style={styles.avisoSalvarAttentionBox}>
+                  <TextoTituloAtencaoSalvar text={attentionBlock.title} />
+                  <Text style={styles.avisoSalvarAttentionText}>{attentionBlock.text}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            <View
+              style={[
+                styles.avisoRefeicaoActions,
+                isSalvar && styles.avisoSalvarActions,
+                isFoto && styles.avisoFotoActions,
+              ]}
+            >
+              <TouchableOpacity
+                style={[
+                  styles.avisoRefeicaoPrimaryButton,
+                  isFoto && styles.avisoFotoPrimaryButton,
+                  isSalvar && styles.avisoSalvarPrimaryButton,
+                  isBoasVindas && styles.avisoBoasVindasPrimaryButton,
+                  primaryBusy && styles.primaryButtonDisabled,
+                ]}
+                onPress={onPrimary}
+                disabled={primaryBusy}
+                activeOpacity={0.88}
+              >
+                {primaryBusy ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Text
+                    style={[
+                      styles.avisoRefeicaoPrimaryButtonText,
+                      isFoto && styles.avisoFotoPrimaryButtonText,
+                    ]}
+                  >
+                    {primaryLabel}
+                  </Text>
+                )}
+              </TouchableOpacity>
+
+              {showSecondary && secondaryLabel ? (
+                <TouchableOpacity
+                  style={[
+                    styles.avisoRefeicaoSecondaryButton,
+                    isSalvar && styles.avisoSalvarSecondaryButton,
+                  ]}
+                  onPress={onSecondary}
+                  disabled={primaryBusy}
+                  activeOpacity={0.7}
+                >
+                  <Text
+                    style={[
+                      styles.avisoRefeicaoSecondaryButtonText,
+                      isSalvar && styles.avisoSalvarSecondaryButtonText,
+                      isFoto && styles.avisoFotoSecondaryButtonText,
+                    ]}
+                  >
+                    {secondaryLabel}
+                  </Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: usuarioProp }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
-  const [mealTimingChoiceVisible, setMealTimingChoiceVisible] = useState(true);
+  const [mealTimingChoiceVisible, setMealTimingChoiceVisible] = useState(false);
+  const [boasVindasVisible, setBoasVindasVisible] = useState(false);
+  const [pacienteComDiabetes, setPacienteComDiabetes] = useState(() => pacienteTemDiabetes(usuarioLogado));
   const [mealTimingDetailsVisible, setMealTimingDetailsVisible] = useState(false);
   const [mealGlucoseVisible, setMealGlucoseVisible] = useState(false);
   const [mealTimingMode, setMealTimingMode] = useState('current');
@@ -382,6 +743,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   const [loadingAction, setLoadingAction] = useState('');
   const [analysisMeta, setAnalysisMeta] = useState(null);
   const [photoOptionsVisible, setPhotoOptionsVisible] = useState(false);
+  const [iaPhotoDisclaimerVisible, setIaPhotoDisclaimerVisible] = useState(false);
+  const [iaSaveConfirmVisible, setIaSaveConfirmVisible] = useState(false);
   const [toast, setToast] = useState(null);
   const [foodSearch, setFoodSearch] = useState('');
   const [foodSearchLimit, setFoodSearchLimit] = useState(FOOD_SEARCH_PAGE_SIZE);
@@ -406,6 +769,101 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   const hasMealType = Boolean(mealType);
   const hasMealContent = hasFoods || hasSelectedImage;
   const canSaveMeal = hasMealType && hasMealContent && !isBusy;
+
+  useEffect(() => {
+    setPacienteComDiabetes(pacienteTemDiabetes(usuarioLogado));
+  }, [usuarioLogado]);
+
+  useEffect(() => {
+    let ativo = true;
+
+    async function iniciarFluxoEntrada() {
+      if (!patientId) {
+        if (ativo) {
+          setBoasVindasVisible(false);
+          setMealTimingChoiceVisible(true);
+        }
+        return;
+      }
+
+      try {
+        const chave = `${BOAS_VINDAS_STORAGE_KEY}:${patientId}`;
+        const visto = await AsyncStorage.getItem(chave);
+
+        if (!ativo) {
+          return;
+        }
+
+        if (!visto) {
+          setBoasVindasVisible(true);
+          setMealTimingChoiceVisible(false);
+        } else {
+          setBoasVindasVisible(false);
+          setMealTimingChoiceVisible(true);
+        }
+      } catch (_error) {
+        if (ativo) {
+          setBoasVindasVisible(false);
+          setMealTimingChoiceVisible(true);
+        }
+      }
+    }
+
+    iniciarFluxoEntrada();
+
+    return () => {
+      ativo = false;
+    };
+  }, [patientId]);
+
+  useEffect(() => {
+    if (!patientId) {
+      return undefined;
+    }
+
+    let ativo = true;
+
+    async function carregarDiabetesDoPerfil() {
+      try {
+        const experience = await fetchPatientExperience(patientId, {
+          patientContext: usuarioLogado,
+        });
+        if (!ativo) {
+          return;
+        }
+
+        const onboarding = experience?.onboarding || experience?.appState?.onboarding || null;
+        const patient = experience?.patient || null;
+
+        if (pacienteTemDiabetes({ onboarding, ...patient })) {
+          setPacienteComDiabetes(true);
+        }
+      } catch (_error) {
+        // Mantém detecção local do usuarioLogado.
+      }
+    }
+
+    carregarDiabetesDoPerfil();
+
+    return () => {
+      ativo = false;
+    };
+  }, [patientId, usuarioLogado]);
+
+  async function fecharBoasVindas() {
+    setBoasVindasVisible(false);
+    setMealTimingChoiceVisible(true);
+
+    if (!patientId) {
+      return;
+    }
+
+    try {
+      await AsyncStorage.setItem(`${BOAS_VINDAS_STORAGE_KEY}:${patientId}`, '1');
+    } catch (_error) {
+      // Segue fluxo mesmo se storage falhar.
+    }
+  }
 
   function solicitarTipoRefeicao() {
     setMealTypeMenuVisible(false);
@@ -673,11 +1131,34 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   function abrirOpcoesFoto() {
     if (isBusy) return;
     if (!exigirTipoRefeicao()) return;
+    setIaPhotoDisclaimerVisible(true);
+  }
+
+  function fecharAvisoIaFoto() {
+    setIaPhotoDisclaimerVisible(false);
+  }
+
+  function continuarParaOpcoesFoto() {
+    setIaPhotoDisclaimerVisible(false);
     setPhotoOptionsVisible(true);
   }
 
   function fecharOpcoesFoto() {
     setPhotoOptionsVisible(false);
+  }
+
+  function solicitarConfirmacaoSalvar() {
+    if (!canSaveMeal) return;
+    setIaSaveConfirmVisible(true);
+  }
+
+  function fecharConfirmacaoSalvar() {
+    setIaSaveConfirmVisible(false);
+  }
+
+  async function confirmarSalvarAposAviso() {
+    setIaSaveConfirmVisible(false);
+    await confirmarSalvar();
   }
 
   async function processarFotoComFallback(imagem, origem) {
@@ -714,9 +1195,26 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         path: upload.path,
         mimeType: upload.mimeType,
         fileName: upload.fileName,
+        mealContext: mealType || undefined,
       });
 
-      const itens = (response.alimentos || []).map((item) => criarAlimentoEditavel(item));
+      const itens = (response.alimentos || [])
+        .map((item) => {
+          try {
+            return item?.id && item?.base_quantidade_gramas != null
+              ? item
+              : criarAlimentoEditavel(item);
+          } catch (_mapError) {
+            return criarAlimentoEditavel({
+              nome: String(item?.nome || item?.foodName || 'Alimento').trim(),
+              quantidade_gramas:
+                Number(item?.quantidade_gramas || item?.gramas_estimados) || 100,
+              categoria: item?.categoria || 'Reconhecido por IA',
+            });
+          }
+        })
+        .filter((item) => String(item?.nome || '').trim())
+        .map((item) => aplicarAprendizadoNutricional(item, aprendizadoNutricional));
 
       if (!itens.length) {
         throw new Error(
@@ -733,7 +1231,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
       mostrarAvisoTopo({
         tipo: 'sucesso',
         titulo: `${itens.length} alimento(s) pela IA`,
-        detalhe: 'Confira porcoes (g) e ajuste se precisar.',
+        detalhe: 'Confira porções (g) e ajuste se precisar.',
       });
     } catch (error) {
       console.log('Falha na IA, seguindo manual:', error);
@@ -914,6 +1412,24 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
   }
 
   function atualizarDraftItem(field, value) {
+    if (field === 'quantidade_gramas' && editingFoodIndex !== null) {
+      const item = alimentos[editingFoodIndex];
+      if (!item) return;
+
+      const nextDraft = rescaleDraftForQuantity(item, editingFoodDraft, value);
+      const nextQuantity = parseEditableValue(nextDraft.quantidade_gramas);
+
+      setEditingFoodDraft(nextDraft);
+      setAlimentos((current) =>
+        current.map((currentItem, index) =>
+          index === editingFoodIndex
+            ? scaleItemNutrientsForQuantity(currentItem, nextQuantity)
+            : currentItem
+        )
+      );
+      return;
+    }
+
     setEditingFoodDraft((current) => ({
       ...(current || {}),
       [field]: field === 'nome' ? value : value.replace(/[^0-9,.]/g, ''),
@@ -1257,7 +1773,13 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         mealTypeLabel: mealType,
       });
 
-      const recordId = String(saved.record?.id || '').trim();
+      const recordId = String(saved?.record?.id || '').trim();
+
+      if (!recordId) {
+        throw new Error(
+          'O servidor não confirmou o registro. Verifique a conexão e tente salvar novamente.'
+        );
+      }
       const timelineEntry = {
         ...buildMealTimelineEntryFromAI({
           alimentos: saved.foods,
@@ -1274,12 +1796,23 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
       await sincronizarTimeline(timelineEntry);
 
-      navigation.navigate('PacienteDiario', {
+      await refreshPatientMealEntries(patientId, {
+        patientContext: usuarioLogado,
+        mealLimit: mesclarLimitesDadosPaciente('diario').mealLimit,
+      }).catch((refreshError) => {
+        console.log('Refresh refeicoes apos salvar:', refreshError);
+      });
+
+      const paramsAlimentacao = {
         usuarioLogado,
         mealEntryIA: timelineEntry,
         mealIARefreshToken: Date.now(),
         mealDataRefresh: Date.now(),
-      });
+      };
+
+      mostrarToast('sucesso', 'Refeição salva', 'Seu registro foi adicionado ao diário alimentar.');
+
+      voltarParaAlimentacaoAposSalvarRefeicao(navigation, paramsAlimentacao);
     } catch (error) {
       console.log('Erro ao salvar refeicao IA:', error);
       mostrarAvisoTopo({
@@ -1328,10 +1861,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
               !canSaveMeal && styles.saveButtonDisabled,
               isBusy && styles.saveButtonBusy,
             ]}
-            onPress={() => {
-              if (!canSaveMeal) return;
-              confirmarSalvar();
-            }}
+            onPress={solicitarConfirmacaoSalvar}
             activeOpacity={canSaveMeal ? 0.88 : 1}
             accessibilityState={{ disabled: !canSaveMeal }}
           >
@@ -1367,12 +1897,12 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
 
       <View style={styles.photoCard}>
         <TouchableOpacity
-          style={styles.photoDropzone}
+          style={[styles.photoDropzone, selectedImage?.uri && styles.photoDropzoneFilled]}
           onPress={abrirOpcoesFoto}
           activeOpacity={0.88}
         >
           {selectedImage?.uri ? (
-            <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="contain" />
+            <Image source={{ uri: selectedImage.uri }} style={styles.previewImage} resizeMode="cover" />
           ) : (
             <>
               <Ionicons name="camera-outline" size={48} color={patientTheme.colors.primary} />
@@ -1867,6 +2397,50 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </View>
       </Modal>
 
+      <ModalAvisoRefeicao
+        visible={boasVindasVisible}
+        modalCommonProps={modalCommonProps}
+        onRequestClose={() => void fecharBoasVindas()}
+        variant="boasvindas"
+        title={BOAS_VINDAS_TITULO}
+        secoes={BOAS_VINDAS_SECOES}
+        primaryLabel="Começar a registrar"
+        onPrimary={() => void fecharBoasVindas()}
+        showSecondary={false}
+      />
+
+      <ModalAvisoRefeicao
+        visible={iaPhotoDisclaimerVisible}
+        modalCommonProps={modalCommonProps}
+        onRequestClose={fecharAvisoIaFoto}
+        variant="foto"
+        title={AVISO_FOTO_TITULO}
+        secoes={AVISO_FOTO_SECOES}
+        primaryLabel="Entendi, quero usar a foto"
+        onPrimary={continuarParaOpcoesFoto}
+        secondaryLabel="Agora não"
+        onSecondary={fecharAvisoIaFoto}
+      />
+
+      <ModalAvisoRefeicao
+        visible={iaSaveConfirmVisible}
+        modalCommonProps={modalCommonProps}
+        onRequestClose={fecharConfirmacaoSalvar}
+        variant="salvar"
+        title={AVISO_SALVAR_TITULO}
+        secoes={[{ text: AVISO_SALVAR_TEXTO }]}
+        attentionBlock={
+          pacienteComDiabetes
+            ? { title: AVISO_SALVAR_DIABETES_TITULO, text: AVISO_SALVAR_DIABETES_TEXTO }
+            : null
+        }
+        primaryLabel="Salvar Refeição"
+        onPrimary={() => void confirmarSalvarAposAviso()}
+        secondaryLabel="Voltar"
+        onSecondary={fecharConfirmacaoSalvar}
+        primaryBusy={loadingAction === 'save'}
+      />
+
       <Modal
         visible={photoOptionsVisible}
         {...modalCommonProps}
@@ -2143,6 +2717,12 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     width: '100%',
   },
+  photoDropzoneFilled: {
+    height: PHOTO_DROPZONE_HEIGHT,
+    minHeight: PHOTO_DROPZONE_HEIGHT,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
   photoDropzoneTitle: {
     marginTop: 12,
     color: patientTheme.colors.text,
@@ -2155,9 +2735,8 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   previewImage: {
-    backgroundColor: '#fff',
-    borderRadius: patientTheme.radius.md,
-    height: PHOTO_DROPZONE_HEIGHT - 24,
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    height: PHOTO_DROPZONE_HEIGHT,
     width: '100%',
   },
   photoPickerOptions: {
@@ -2692,6 +3271,272 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 20,
     marginTop: 12,
+  },
+  avisoRefeicaoKeyboard: {
+    maxWidth: 400,
+  },
+  avisoRefeicaoHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 36,
+    position: 'relative',
+    width: '100%',
+  },
+  avisoRefeicaoTitle: {
+    fontSize: 16,
+    fontWeight: '800',
+    lineHeight: 21,
+    paddingHorizontal: 40,
+    textAlign: 'center',
+    width: '100%',
+  },
+  avisoRefeicaoCloseButton: {
+    alignItems: 'center',
+    backgroundColor: '#ffffff',
+    borderRadius: 16,
+    height: 32,
+    justifyContent: 'center',
+    position: 'absolute',
+    right: 0,
+    top: 0,
+    width: 32,
+  },
+  avisoRefeicaoBody: {
+    marginTop: 4,
+    width: '100%',
+  },
+  avisoRefeicaoParagraph: {
+    fontSize: 12.5,
+    fontWeight: '500',
+    lineHeight: 17,
+    marginBottom: 8,
+  },
+  avisoRefeicaoParagraphLast: {
+    marginBottom: 0,
+  },
+  avisoRefeicaoLabel: {
+    fontWeight: '800',
+  },
+  avisoRefeicaoActions: {
+    gap: 4,
+    marginTop: 12,
+    width: '100%',
+  },
+  avisoRefeicaoPrimaryButton: {
+    alignItems: 'center',
+    borderRadius: patientTheme.radius.xl,
+    justifyContent: 'center',
+    minHeight: 46,
+    width: '100%',
+  },
+  avisoRefeicaoPrimaryButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  avisoRefeicaoSecondaryButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    minHeight: 38,
+    width: '100%',
+  },
+  avisoRefeicaoSecondaryButtonText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  avisoFotoCard: {
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 0,
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+  },
+  avisoFotoHeader: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 2,
+    minHeight: 0,
+    width: '100%',
+  },
+  avisoFotoHeaderCenter: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 36,
+    width: '100%',
+  },
+  avisoFotoIconBadge: {
+    alignItems: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+    borderRadius: 17,
+    height: 34,
+    justifyContent: 'center',
+    marginBottom: 6,
+    width: 34,
+  },
+  avisoFotoTitle: {
+    color: patientTheme.colors.text,
+    paddingHorizontal: 0,
+    textAlign: 'center',
+    width: '100%',
+  },
+  avisoFotoTitleText: {
+    fontSize: 15,
+    lineHeight: 20,
+    marginBottom: 8,
+    marginTop: 0,
+    paddingHorizontal: 0,
+    textAlign: 'center',
+    width: '100%',
+  },
+  avisoFotoCloseButton: {
+    borderColor: patientTheme.colors.primary,
+    borderWidth: 1.5,
+  },
+  avisoFotoBody: {
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.primary,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1.5,
+    marginTop: 0,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  avisoFotoParagraph: {
+    color: patientTheme.colors.text,
+  },
+  avisoFotoLabel: {
+    color: patientTheme.colors.primaryDark,
+  },
+  avisoFotoActions: {
+    borderTopColor: 'rgba(79, 223, 163, 0.35)',
+    borderTopWidth: 1,
+    paddingTop: 12,
+  },
+  avisoFotoPrimaryButton: {
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  avisoFotoPrimaryButtonText: {
+    color: patientTheme.colors.onPrimary,
+  },
+  avisoFotoSecondaryButtonText: {
+    color: patientTheme.colors.primaryDark,
+  },
+  avisoSalvarCard: {
+    backgroundColor: '#ffffff',
+    paddingBottom: 14,
+    paddingHorizontal: 16,
+    paddingTop: 14,
+  },
+  avisoSalvarTitle: {
+    color: patientTheme.colors.text,
+  },
+  avisoSalvarCloseButton: {
+    borderColor: patientTheme.colors.border,
+    borderWidth: 1,
+  },
+  avisoSalvarBody: {
+    width: '100%',
+  },
+  avisoSalvarParagraph: {
+    color: patientTheme.colors.textMuted,
+  },
+  avisoSalvarLabel: {
+    color: patientTheme.colors.text,
+  },
+  avisoSalvarAttentionBox: {
+    backgroundColor: AVISO_SALVAR_ATTENTION_SOFT,
+    borderColor: AVISO_SALVAR_ATTENTION_BORDER,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1.5,
+    marginTop: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+  },
+  avisoSalvarAttentionTitle: {
+    fontSize: 12.5,
+    fontWeight: '800',
+    lineHeight: 16,
+    marginBottom: 6,
+  },
+  avisoSalvarAttentionTituloAmarelo: {
+    color: AVISO_SALVAR_GRADIENT_START,
+    fontSize: 12.5,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  avisoSalvarAttentionTituloLaranja: {
+    color: AVISO_SALVAR_GRADIENT_END,
+    fontSize: 12.5,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  avisoSalvarAttentionText: {
+    color: '#6D4C41',
+    fontSize: 11.5,
+    fontWeight: '600',
+    lineHeight: 16,
+  },
+  avisoSalvarActions: {
+    borderTopColor: patientTheme.colors.border,
+    borderTopWidth: 1,
+    paddingTop: 12,
+  },
+  avisoSalvarPrimaryButton: {
+    backgroundColor: patientTheme.colors.primaryDark,
+  },
+  avisoSalvarSecondaryButton: {
+    backgroundColor: 'transparent',
+    minHeight: 38,
+  },
+  avisoSalvarSecondaryButtonText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  avisoBoasVindasCard: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primary,
+    borderWidth: 1.5,
+    paddingBottom: 16,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+  },
+  avisoBoasVindasTitle: {
+    color: patientTheme.colors.text,
+  },
+  avisoBoasVindasCloseButton: {
+    borderColor: patientTheme.colors.primary,
+    borderWidth: 1.5,
+  },
+  avisoBoasVindasIconBadge: {
+    alignItems: 'center',
+    alignSelf: 'center',
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.primary,
+    borderRadius: 24,
+    borderWidth: 1.5,
+    height: 48,
+    justifyContent: 'center',
+    marginBottom: 10,
+    marginTop: 4,
+    width: 48,
+  },
+  avisoBoasVindasBody: {
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.primarySoft,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  avisoBoasVindasParagraph: {
+    color: patientTheme.colors.text,
+  },
+  avisoBoasVindasLabel: {
+    color: patientTheme.colors.primaryDark,
+  },
+  avisoBoasVindasPrimaryButton: {
+    backgroundColor: patientTheme.colors.primaryDark,
   },
   measurementChoiceList: {
     gap: 10,

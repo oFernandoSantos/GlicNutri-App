@@ -3,7 +3,12 @@ import { Platform } from 'react-native';
 import { invalidatePatientExperienceCache } from './cacheExperienciaPaciente';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
 import { enrichRpcClinicalParams } from './servicoSessaoRpc';
-import { buscarAlimentosBrasil } from './servicoBuscaAlimentosBrasil';
+import {
+  buscarAlimentosBrasil,
+  materializarAlimentoDaBusca,
+  melhorAlimentoBrasilParaNome,
+  pareceProdutoComercial,
+} from './servicoBuscaAlimentosBrasil';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { AppLogger, MODULOS_LOG_SISTEMA } from './servicoLogSistema';
 
@@ -628,10 +633,27 @@ export async function resolveMealPhotoDisplayUri(photoRef) {
   return data?.signedUrl || null;
 }
 
+function normalizarRespostaFuncaoIA(data) {
+  if (!data) {
+    return null;
+  }
+
+  if (typeof data === 'string') {
+    try {
+      return JSON.parse(data);
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  return data;
+}
+
 export async function analisarImagemRefeicaoIA(payload) {
-  const { data, error } = await supabase.functions.invoke('analisar-refeicao-ia', {
+  const { data: rawData, error } = await supabase.functions.invoke('analisar-refeicao-ia', {
     body: payload,
   });
+  const data = normalizarRespostaFuncaoIA(rawData);
 
   if (error) {
     const detailedMessage = await extractFunctionErrorMessage('analisar-refeicao-ia', payload);
@@ -665,8 +687,46 @@ function escalarNutrienteTaco(valorPor100g, gramas) {
   return roundNutrient(normalizeNumber(valorPor100g) * factor);
 }
 
+function extrairGramasDoTexto(text) {
+  const raw = String(text || '')
+    .toLowerCase()
+    .replace(/,/g, '.')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!raw) {
+    return 0;
+  }
+
+  const multiPack = raw.match(/(\d+)\s*x\s*(\d+(?:\.\d+)?)\s*g\b/);
+  if (multiPack) {
+    const total = Number(multiPack[1]) * Number(multiPack[2]);
+    if (Number.isFinite(total) && total > 0) {
+      return roundNutrient(total);
+    }
+  }
+
+  const gramsMatch = raw.match(/(\d+(?:\.\d+)?)\s*-?\s*g(?:ramas)?\b/);
+  if (gramsMatch) {
+    const grams = Number(gramsMatch[1]);
+    if (Number.isFinite(grams) && grams > 0) {
+      return roundNutrient(grams);
+    }
+  }
+
+  const mlMatch = raw.match(/(\d+(?:\.\d+)?)\s*-?\s*ml\b/);
+  if (mlMatch) {
+    const ml = Number(mlMatch[1]);
+    if (Number.isFinite(ml) && ml > 0) {
+      return roundNutrient(ml);
+    }
+  }
+
+  return 0;
+}
+
 /**
- * Refina macros da IA com a TACO quando a porcao ou os totais parecem inconsistentes.
+ * Refina macros com TACO/catálogo. Nome da IA (marca + peso) não é trocado em embalagens.
  */
 export function enriquecerAlimentosIdentificadosComTaco(alimentos = []) {
   return (Array.isArray(alimentos) ? alimentos : []).map((item) => {
@@ -677,37 +737,56 @@ export function enriquecerAlimentosIdentificadosComTaco(alimentos = []) {
       return normalized;
     }
 
-    const match = buscarAlimentosBrasil(nomeBusca, { limit: 1 }).items[0];
+    const comercial = pareceProdutoComercial(nomeBusca);
+    const gramsFromTexto = extrairGramasDoTexto(nomeBusca);
+    const grams =
+      gramsFromTexto > 0
+        ? gramsFromTexto
+        : normalizeNumber(normalized.quantidade_gramas) > 0
+          ? normalized.quantidade_gramas
+          : 100;
+
+    const match = comercial
+      ? melhorAlimentoBrasilParaNome(nomeBusca, { minScore: 48, preferTaco: false })
+      : buscarAlimentosBrasil(nomeBusca, { limit: 1 }).items[0];
+
     if (!match) {
-      return normalized;
+      return criarAlimentoEditavel({
+        ...normalized,
+        nome: nomeBusca,
+        quantidade_gramas: grams,
+      });
     }
 
-    const grams = normalizeNumber(normalized.quantidade_gramas) > 0 ? normalized.quantidade_gramas : 100;
+    const materializado = materializarAlimentoDaBusca({
+      ...match,
+      quantidade_gramas: grams,
+      nomeComercial: nomeBusca,
+    });
+
+    const nomeExibir = comercial ? nomeBusca : match.nome;
     const iaCalories = normalizeNumber(normalized.calorias);
-    const tacoCalories = escalarNutrienteTaco(match.calorias, grams);
-    const preferTaco =
+    const refCalories = normalizeNumber(materializado.calorias);
+    const preferTabela =
       iaCalories <= 0 ||
-      iaCalories < tacoCalories * 0.35 ||
+      iaCalories < refCalories * 0.35 ||
       normalizeNumber(normalized.carboidratos) <= 0;
 
     return criarAlimentoEditavel({
       ...normalized,
-      nome: match.nome,
+      ...materializado,
+      nome: nomeExibir,
       categoria:
         normalized.categoria && normalized.categoria !== 'Nao informada'
           ? normalized.categoria
-          : match.categoria,
+          : materializado.categoria || match.categoria,
       quantidade_gramas: grams,
-      refTacoId: match.id,
-      calorias: preferTaco ? tacoCalories : normalized.calorias,
-      carboidratos: preferTaco
-        ? escalarNutrienteTaco(match.carboidratos, grams)
-        : normalized.carboidratos,
-      proteinas: preferTaco
-        ? escalarNutrienteTaco(match.proteinas, grams)
-        : normalized.proteinas,
-      gorduras: preferTaco ? escalarNutrienteTaco(match.gorduras, grams) : normalized.gorduras,
-      fibras: preferTaco ? escalarNutrienteTaco(match.fibras, grams) : normalized.fibras,
+      refTacoId: materializado.refTacoId || match.refTacoId || match.id,
+      calorias: preferTabela ? materializado.calorias : normalized.calorias,
+      carboidratos: preferTabela ? materializado.carboidratos : normalized.carboidratos,
+      proteinas: preferTabela ? materializado.proteinas : normalized.proteinas,
+      gorduras: preferTabela ? materializado.gorduras : normalized.gorduras,
+      fibras: preferTabela ? materializado.fibras : normalized.fibras,
     });
   });
 }
@@ -886,6 +965,12 @@ export function criarAlimentoEditavel(alimento = {}) {
     novaGroup: alimento.novaGroup || alimento.nova_group || null,
     fonteNutricional: alimento.fonteNutricional || alimento.fonte_nutricional || null,
     unidade_quantidade: alimento.unidade_quantidade || alimento.unidade || null,
+    quantidade_lida: alimento.quantidade_lida || null,
+    quantidade_do_rotulo: Boolean(alimento.quantidade_do_rotulo),
+    texto_rotulo_lido: alimento.texto_rotulo_lido || null,
+    confiancaNutricional: alimento.confiancaNutricional || null,
+    nomeTabelaConectada: alimento.nomeTabelaConectada || alimento.nomeTabelaReferencia || null,
+    tipoItemIdentificado: alimento.tipoItemIdentificado || null,
   };
 }
 
@@ -1044,12 +1129,31 @@ export async function salvarRefeicaoIA({
     mealTypeLabel: mealTypeLabel || mealLabel || null,
     planSectionId: planSectionId || null,
   };
+  function compactarAlimentoParaPersistencia(item = {}) {
+    return {
+      id: item.id || null,
+      nome: item.nome,
+      categoria: item.categoria || null,
+      quantidade_gramas: item.quantidade_gramas,
+      unidade_quantidade: item.unidade_quantidade || null,
+      calorias: item.calorias,
+      carboidratos: item.carboidratos,
+      proteinas: item.proteinas,
+      gorduras: item.gorduras,
+      fibras: item.fibras,
+      acucares: item.acucares,
+      acucares_adicionados: item.acucares_adicionados,
+      gorduras_saturadas: item.gorduras_saturadas,
+      gordura_trans: item.gordura_trans,
+      sodio: item.sodio,
+      refTacoId: item.refTacoId || null,
+      ...mealMetadata,
+    };
+  }
+
   const normalizedFoods = (Array.isArray(alimentos) ? alimentos : [])
     .map((item) => criarAlimentoEditavel(item))
-    .map((item) => ({
-      ...item,
-      ...mealMetadata,
-    }))
+    .map((item) => compactarAlimentoParaPersistencia(item))
     .filter((item) => item.nome);
 
   const hasFoto = Boolean(String(fotoUrl || '').trim());
@@ -1151,6 +1255,10 @@ export async function salvarRefeicaoIA({
       data = directResult.data;
       error = directResult.error;
     }
+  }
+
+  if (!data?.id && !error) {
+    throw new Error('Nao foi possivel confirmar o salvamento da refeicao no servidor.');
   }
 
   if (error) {

@@ -120,3 +120,31 @@ export function navigatePatientFeature(navigation, routeName, params = {}) {
 
   navigation.navigate(routeName, params);
 }
+
+/**
+ * Após salvar refeição IA: pilha limpa Início → Alimentação (params do diário preservados).
+ */
+export function voltarParaAlimentacaoAposSalvarRefeicao(navigation, params = {}) {
+  if (!navigation?.dispatch) {
+    navigation?.replace?.('PacienteDiario', params);
+    return;
+  }
+
+  stripAuthRoutesFromPatientStack(navigation);
+
+  navigation.dispatch(
+    CommonActions.reset({
+      index: 1,
+      routes: [
+        {
+          name: 'HomePaciente',
+          params: { usuarioLogado: params.usuarioLogado },
+        },
+        {
+          name: 'PacienteDiario',
+          params,
+        },
+      ],
+    })
+  );
+}

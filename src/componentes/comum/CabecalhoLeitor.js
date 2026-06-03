@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { adminTheme } from '../../temas/temaVisualAdmin';
+import { StackActions } from '@react-navigation/native';
 import { stripAuthRoutesFromPatientStack } from '../../utilitarios/navegacaoPaciente';
 
 const HOME_ROUTES = new Set(['HomePaciente', 'HomeNutricionista', 'HomeMedico', 'AdminHome']);
@@ -192,6 +193,28 @@ export default function ReaderTopo({ navigation, route, options }) {
   const shouldShowNotificationButton = Boolean(notificationAction) && !isAdminContext;
   const shouldShowMenuButton = Boolean(menuAction) && (isHome || isAdminContext);
 
+  function voltarDaAlimentacaoParaInicio() {
+    if (route?.name !== 'PacienteDiario') {
+      return false;
+    }
+
+    const state = navigation?.getState?.();
+    const routes = state?.routes || [];
+    const index = typeof state?.index === 'number' ? state.index : routes.length - 1;
+    const telaAnterior = routes[index - 1]?.name;
+
+    if (
+      index <= 0 ||
+      !['RegistroRefeicaoIA', 'PacienteDiario'].includes(telaAnterior)
+    ) {
+      return false;
+    }
+
+    stripAuthRoutesFromPatientStack(navigation);
+    navigation.dispatch(StackActions.popToTop());
+    return true;
+  }
+
   function handleBack() {
     if (backAction) {
       backAction();
@@ -199,6 +222,10 @@ export default function ReaderTopo({ navigation, route, options }) {
     }
 
     stripAuthRoutesFromPatientStack(navigation);
+
+    if (voltarDaAlimentacaoParaInicio()) {
+      return;
+    }
 
     if (navigation?.canGoBack?.()) {
       navigation.goBack();
