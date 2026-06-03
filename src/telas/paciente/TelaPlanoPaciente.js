@@ -64,7 +64,6 @@ function getStructureKcalLabel(meal) {
 
 const PANEL_GAP = patientTheme.spacing.lg;
 const GLIC_GREEN = patientTheme.colors.primary;
-const PLANO_FOOTER_DOCK_HEIGHT = 88;
 
 export default function PacientePlanoScreen({
   navigation,
@@ -256,24 +255,6 @@ export default function PacientePlanoScreen({
       route={route}
       usuarioLogado={usuarioLogado}
       showTabBar
-      footerDocked
-      footerDockedHeight={PLANO_FOOTER_DOCK_HEIGHT}
-      footerOverlay={
-        <TouchableOpacity
-          style={styles.nutritionistChatButton}
-          onPress={openNutritionistChat}
-          activeOpacity={0.9}
-        >
-          <Ionicons
-            name="chatbubble-ellipses-outline"
-            size={18}
-            color={patientTheme.colors.onPrimary}
-          />
-          <Text style={styles.nutritionistChatButtonText}>
-            Falar com minha Nutricionista
-          </Text>
-        </TouchableOpacity>
-      }
     >
       {loading ? <EsqueletoPlanoPaciente /> : null}
 
@@ -536,7 +517,20 @@ export default function PacientePlanoScreen({
             Adesão média da semana: {weeklyAverage}%
           </Text>
 
-          <View style={styles.scrollFooterSpacer} />
+          <TouchableOpacity
+            style={styles.nutritionistChatButton}
+            onPress={openNutritionistChat}
+            activeOpacity={0.9}
+          >
+            <Ionicons
+              name="chatbubble-ellipses-outline"
+              size={18}
+              color={patientTheme.colors.onPrimary}
+            />
+            <Text style={styles.nutritionistChatButtonText}>
+              Falar com minha Nutricionista
+            </Text>
+          </TouchableOpacity>
         </View>
       ) : null}
     </PatientScreenLayout>
@@ -544,10 +538,6 @@ export default function PacientePlanoScreen({
 }
 
 const styles = StyleSheet.create({
-  scrollFooterSpacer: {
-    height: PLANO_FOOTER_DOCK_HEIGHT + 12,
-    width: '100%',
-  },
   pageStack: {
     gap: PANEL_GAP,
   },
@@ -895,15 +885,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   nutritionistChatButton: {
-    minHeight: 56,
-    borderRadius: 18,
-    backgroundColor: patientTheme.colors.primary,
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.primary,
+    borderRadius: 999,
     flexDirection: 'row',
     gap: 8,
+    justifyContent: 'center',
+    marginTop: 14,
+    minHeight: 56,
     paddingHorizontal: 20,
     width: '100%',
+    ...patientShadow,
   },
   nutritionistChatButtonText: {
     color: patientTheme.colors.onPrimary,

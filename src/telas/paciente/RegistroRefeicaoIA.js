@@ -1292,7 +1292,15 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     }
   }
 
+  const modalCommonProps = {
+    transparent: true,
+    animationType: 'fade',
+    statusBarTranslucent: true,
+    presentationStyle: 'overFullScreen',
+  };
+
   return (
+    <>
     <PatientScreenLayout
       navigation={navigation}
       route={route}
@@ -1336,342 +1344,6 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </View>
       }
     >
-      <Modal
-        visible={mealTimingChoiceVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={fecharEscolhaHorarioEVoltar}
-      >
-        <View style={styles.overlayLayer}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView
-              style={styles.modalKeyboard}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-              <View style={styles.modalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Registrar alimentação</Text>
-                  <TouchableOpacity
-                    style={styles.modalCloseButton}
-                    onPress={fecharEscolhaHorarioEVoltar}
-                  >
-                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={styles.modalText}>
-                  Escolha se esta refeição é de agora ou se deseja registrar uma refeição anterior.
-                </Text>
-
-                <View style={styles.measurementChoiceList}>
-                  <TouchableOpacity
-                    style={[
-                      styles.measurementChoiceButton,
-                      mealTimingMode === 'current'
-                        ? styles.measurementChoiceButtonCurrent
-                        : styles.measurementChoiceButtonPrevious,
-                    ]}
-                    onPress={() => handleSelectMealTiming('current')}
-                  >
-                    <Text
-                      style={[
-                        mealTimingMode === 'current'
-                          ? styles.measurementChoiceTextCurrent
-                          : styles.measurementChoiceTextPrevious,
-                      ]}
-                    >
-                      Refeição Atual
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={[
-                      styles.measurementChoiceButton,
-                      mealTimingMode === 'previous'
-                        ? styles.measurementChoiceButtonCurrent
-                        : styles.measurementChoiceButtonPrevious,
-                    ]}
-                    onPress={() => handleSelectMealTiming('previous')}
-                  >
-                    <Text
-                      style={[
-                        mealTimingMode === 'previous'
-                          ? styles.measurementChoiceTextCurrent
-                          : styles.measurementChoiceTextPrevious,
-                      ]}
-                    >
-                      Refeição Anterior
-                    </Text>
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </KeyboardAvoidingView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={mealGlucoseVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setMealGlucoseVisible(false);
-          setMealTimingDetailsVisible(true);
-        }}
-      >
-        <View style={styles.overlayLayer}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView
-              style={styles.modalKeyboard}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-              <View style={styles.modalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Registrar glicose</Text>
-                  <TouchableOpacity
-                    style={styles.modalCloseButton}
-                    onPress={() => continueAfterMealGlucose()}
-                  >
-                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={styles.modalText}>
-                  Antes de continuar, informe a glicose atual em mg/dL. Se preferir, você pode
-                  seguir sem preencher.
-                </Text>
-
-                <View style={styles.previousMealFields}>
-                  <Text style={styles.modalFieldLabel}>Glicose atual</Text>
-                  <TextInput
-                    style={[styles.input, styles.manualModalInput]}
-                    placeholder="Ex: 110"
-                    placeholderTextColor="#8a9095"
-                    keyboardType="decimal-pad"
-                    value={mealGlucoseValue}
-                    onChangeText={setMealGlucoseValue}
-                  />
-                </View>
-
-                <TouchableOpacity
-                  style={[styles.modalPrimaryButton, savingMealGlucose && styles.primaryButtonDisabled]}
-                  onPress={handleSaveMealGlucose}
-                  disabled={savingMealGlucose}
-                >
-                  {savingMealGlucose ? (
-                    <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                  ) : (
-                    <Text style={styles.primaryButtonText}>Salvar glicose</Text>
-                  )}
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.skipInlineButton}
-                  onPress={() => continueAfterMealGlucose()}
-                  disabled={savingMealGlucose}
-                >
-                  <Text style={styles.skipInlineButtonText}>Continuar sem glicose</Text>
-                </TouchableOpacity>
-              </View>
-            </KeyboardAvoidingView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={mealTimingDetailsVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={tentarFecharDetalhesRefeicao}
-      >
-        <View style={styles.overlayLayer}>
-          <View style={styles.modalOverlay}>
-            <KeyboardAvoidingView
-              style={styles.modalKeyboard}
-              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-            >
-              <View style={styles.modalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>
-                    {mealTimingMode === 'current' ? 'Registro atual' : 'Registro anterior'}
-                  </Text>
-                  <TouchableOpacity
-                    style={styles.modalCloseButton}
-                    onPress={tentarFecharDetalhesRefeicao}
-                  >
-                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-
-                <Text style={styles.modalText}>
-                  Informe o tipo, a data e a hora da refeição. O tipo é obrigatório.
-                </Text>
-
-                <View style={styles.previousMealFields}>
-                  <Text style={styles.modalFieldLabel}>Tipo da Refeição</Text>
-                  <View style={styles.mealTypePickerWrap}>
-                    <TouchableOpacity
-                      style={[
-                        styles.input,
-                        styles.manualModalInput,
-                        styles.dropdownButton,
-                        mealTypeMenuVisible && styles.dropdownButtonOpen,
-                        mealType && styles.dropdownButtonFilled,
-                      ]}
-                      onPress={() => setMealTypeMenuVisible((current) => !current)}
-                      activeOpacity={0.85}
-                      accessibilityRole="button"
-                      accessibilityState={{ expanded: mealTypeMenuVisible }}
-                    >
-                      <Text
-                        style={[
-                          styles.dropdownButtonText,
-                          !mealType && styles.dropdownPlaceholderText,
-                        ]}
-                        numberOfLines={1}
-                      >
-                        {mealType || 'Selecione o tipo'}
-                      </Text>
-                      <Ionicons
-                        name={mealTypeMenuVisible ? 'chevron-up' : 'chevron-down'}
-                        size={18}
-                        color={
-                          mealTypeMenuVisible
-                            ? patientTheme.colors.primaryDark
-                            : patientTheme.colors.textMuted
-                        }
-                      />
-                    </TouchableOpacity>
-
-                    {mealTypeMenuVisible ? (
-                      <View style={styles.mealTypeMenuPanel}>
-                        <ScrollView
-                          style={styles.mealTypeMenuScroll}
-                          contentContainerStyle={styles.mealTypeMenuList}
-                          nestedScrollEnabled
-                          keyboardShouldPersistTaps="handled"
-                          showsVerticalScrollIndicator={false}
-                        >
-                          {mealTypeOptions.map((option) => {
-                            const isSelected = mealType === option;
-
-                            return (
-                              <TouchableOpacity
-                                key={option}
-                                style={[
-                                  styles.mealTypeOption,
-                                  isSelected && styles.mealTypeOptionSelected,
-                                ]}
-                                onPress={() => {
-                                  setMealType(option);
-                                  setMealTypeMenuVisible(false);
-                                }}
-                                activeOpacity={0.82}
-                              >
-                                <Text
-                                  style={[
-                                    styles.mealTypeOptionText,
-                                    isSelected && styles.mealTypeOptionTextSelected,
-                                  ]}
-                                  numberOfLines={2}
-                                >
-                                  {option}
-                                </Text>
-                                {isSelected ? (
-                                  <Ionicons
-                                    name="checkmark"
-                                    size={18}
-                                    color={patientTheme.colors.primaryDark}
-                                  />
-                                ) : null}
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </ScrollView>
-                      </View>
-                    ) : null}
-                  </View>
-
-                  <Text style={styles.modalFieldLabel}>Data</Text>
-                  <TextInput
-                    style={[styles.input, styles.manualModalInput]}
-                    placeholder="Ex: dd/mm/aaaa"
-                    placeholderTextColor="#8a9095"
-                    value={mealTimingDate}
-                    onChangeText={(value) => setMealTimingDate(formatManualDateInput(value))}
-                  />
-
-                  <Text style={styles.modalFieldLabel}>Hora</Text>
-                  <TextInput
-                    style={[styles.input, styles.manualModalInput]}
-                    placeholder="Ex: 15:48"
-                    placeholderTextColor="#8a9095"
-                    value={mealTimingTime}
-                    onChangeText={(value) => setMealTimingTime(formatManualTimeInput(value))}
-                  />
-                </View>
-
-                <TouchableOpacity
-                  style={[
-                    styles.modalPrimaryButton,
-                    !canConfirmMealTiming && styles.primaryButtonDisabled,
-                  ]}
-                  onPress={handleConfirmMealTiming}
-                  disabled={!canConfirmMealTiming}
-                >
-                  <Text style={styles.primaryButtonText}>Continuar</Text>
-                </TouchableOpacity>
-              </View>
-            </KeyboardAvoidingView>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={photoOptionsVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={fecharOpcoesFoto}
-      >
-        <View style={styles.overlayLayer}>
-          <View style={styles.modalOverlay}>
-            <View style={styles.modalCard}>
-              <View style={styles.modalHeader}>
-                <Text style={styles.modalTitle}>Anexar foto</Text>
-                <TouchableOpacity
-                  style={styles.modalCloseButton}
-                  onPress={fecharOpcoesFoto}
-                >
-                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <View style={styles.photoPickerOptions}>
-                <TouchableOpacity
-                  style={styles.photoPickerOption}
-                  onPress={() => void tirarFoto({ fecharModal: true })}
-                  disabled={isBusy}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="camera-outline" size={20} color={patientTheme.colors.primary} />
-                  <Text style={styles.photoPickerOptionText}>Câmera</Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  style={styles.photoPickerOption}
-                  onPress={() => void escolherDaGaleria({ fecharModal: true })}
-                  disabled={isBusy}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="image-outline" size={20} color={patientTheme.colors.primary} />
-                  <Text style={styles.photoPickerOptionText}>Galeria</Text>
-                </TouchableOpacity>
-              </View>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
       <TouchableOpacity
         style={styles.mealTypeCard}
         onPress={abrirEdicaoHorarioRefeicao}
@@ -1911,17 +1583,342 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         </TouchableOpacity>
       </View>
 
+    </PatientScreenLayout>
+
+      <Modal
+        visible={mealTimingChoiceVisible}
+        {...modalCommonProps}
+        onRequestClose={fecharEscolhaHorarioEVoltar}
+      >
+        <View style={styles.modalRoot}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Registrar alimentação</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={fecharEscolhaHorarioEVoltar}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalText}>
+                Escolha se esta refeição é de agora ou se deseja registrar uma refeição anterior.
+              </Text>
+
+              <View style={styles.measurementChoiceList}>
+                <TouchableOpacity
+                  style={[
+                    styles.measurementChoiceButton,
+                    mealTimingMode === 'current'
+                      ? styles.measurementChoiceButtonCurrent
+                      : styles.measurementChoiceButtonPrevious,
+                  ]}
+                  onPress={() => handleSelectMealTiming('current')}
+                >
+                  <Text
+                    style={[
+                      mealTimingMode === 'current'
+                        ? styles.measurementChoiceTextCurrent
+                        : styles.measurementChoiceTextPrevious,
+                    ]}
+                  >
+                    Refeição Atual
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={[
+                    styles.measurementChoiceButton,
+                    mealTimingMode === 'previous'
+                      ? styles.measurementChoiceButtonCurrent
+                      : styles.measurementChoiceButtonPrevious,
+                  ]}
+                  onPress={() => handleSelectMealTiming('previous')}
+                >
+                  <Text
+                    style={[
+                      mealTimingMode === 'previous'
+                        ? styles.measurementChoiceTextCurrent
+                        : styles.measurementChoiceTextPrevious,
+                    ]}
+                  >
+                    Refeição Anterior
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={mealGlucoseVisible}
+        {...modalCommonProps}
+        onRequestClose={() => {
+          setMealGlucoseVisible(false);
+          setMealTimingDetailsVisible(true);
+        }}
+      >
+        <View style={styles.modalRoot}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Registrar glicose</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={() => continueAfterMealGlucose()}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalText}>
+                Antes de continuar, informe a glicose atual em mg/dL. Se preferir, você pode seguir
+                sem preencher.
+              </Text>
+
+              <View style={styles.previousMealFields}>
+                <Text style={styles.modalFieldLabel}>Glicose atual</Text>
+                <TextInput
+                  style={[styles.input, styles.manualModalInput]}
+                  placeholder="Ex: 110"
+                  placeholderTextColor="#8a9095"
+                  keyboardType="decimal-pad"
+                  value={mealGlucoseValue}
+                  onChangeText={setMealGlucoseValue}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[styles.modalPrimaryButton, savingMealGlucose && styles.primaryButtonDisabled]}
+                onPress={handleSaveMealGlucose}
+                disabled={savingMealGlucose}
+              >
+                {savingMealGlucose ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Text style={styles.primaryButtonText}>Salvar glicose</Text>
+                )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.skipInlineButton}
+                onPress={() => continueAfterMealGlucose()}
+                disabled={savingMealGlucose}
+              >
+                <Text style={styles.skipInlineButtonText}>Continuar sem glicose</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={mealTimingDetailsVisible}
+        {...modalCommonProps}
+        onRequestClose={tentarFecharDetalhesRefeicao}
+      >
+        <View style={styles.modalRoot}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>
+                  {mealTimingMode === 'current' ? 'Registro atual' : 'Registro anterior'}
+                </Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={tentarFecharDetalhesRefeicao}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.modalText}>
+                Informe o tipo, a data e a hora da refeição. O tipo é obrigatório.
+              </Text>
+
+              <View style={styles.previousMealFields}>
+                <Text style={styles.modalFieldLabel}>Tipo da Refeição</Text>
+                <View style={styles.mealTypePickerWrap}>
+                  <TouchableOpacity
+                    style={[
+                      styles.input,
+                      styles.manualModalInput,
+                      styles.dropdownButton,
+                      mealTypeMenuVisible && styles.dropdownButtonOpen,
+                      mealType && styles.dropdownButtonFilled,
+                    ]}
+                    onPress={() => setMealTypeMenuVisible((current) => !current)}
+                    activeOpacity={0.85}
+                    accessibilityRole="button"
+                    accessibilityState={{ expanded: mealTypeMenuVisible }}
+                  >
+                    <Text
+                      style={[
+                        styles.dropdownButtonText,
+                        !mealType && styles.dropdownPlaceholderText,
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {mealType || 'Selecione o tipo'}
+                    </Text>
+                    <Ionicons
+                      name={mealTypeMenuVisible ? 'chevron-up' : 'chevron-down'}
+                      size={18}
+                      color={
+                        mealTypeMenuVisible
+                          ? patientTheme.colors.primaryDark
+                          : patientTheme.colors.textMuted
+                      }
+                    />
+                  </TouchableOpacity>
+
+                  {mealTypeMenuVisible ? (
+                    <View style={styles.mealTypeMenuPanel}>
+                      <ScrollView
+                        style={styles.mealTypeMenuScroll}
+                        contentContainerStyle={styles.mealTypeMenuList}
+                        nestedScrollEnabled
+                        keyboardShouldPersistTaps="handled"
+                        showsVerticalScrollIndicator={false}
+                      >
+                        {mealTypeOptions.map((option) => {
+                          const isSelected = mealType === option;
+
+                          return (
+                            <TouchableOpacity
+                              key={option}
+                              style={[
+                                styles.mealTypeOption,
+                                isSelected && styles.mealTypeOptionSelected,
+                              ]}
+                              onPress={() => {
+                                setMealType(option);
+                                setMealTypeMenuVisible(false);
+                              }}
+                              activeOpacity={0.82}
+                            >
+                              <Text
+                                style={[
+                                  styles.mealTypeOptionText,
+                                  isSelected && styles.mealTypeOptionTextSelected,
+                                ]}
+                                numberOfLines={2}
+                              >
+                                {option}
+                              </Text>
+                              {isSelected ? (
+                                <Ionicons
+                                  name="checkmark"
+                                  size={18}
+                                  color={patientTheme.colors.primaryDark}
+                                />
+                              ) : null}
+                            </TouchableOpacity>
+                          );
+                        })}
+                      </ScrollView>
+                    </View>
+                  ) : null}
+                </View>
+
+                <Text style={styles.modalFieldLabel}>Data</Text>
+                <TextInput
+                  style={[styles.input, styles.manualModalInput]}
+                  placeholder="Ex: dd/mm/aaaa"
+                  placeholderTextColor="#8a9095"
+                  value={mealTimingDate}
+                  onChangeText={(value) => setMealTimingDate(formatManualDateInput(value))}
+                />
+
+                <Text style={styles.modalFieldLabel}>Hora</Text>
+                <TextInput
+                  style={[styles.input, styles.manualModalInput]}
+                  placeholder="Ex: 15:48"
+                  placeholderTextColor="#8a9095"
+                  value={mealTimingTime}
+                  onChangeText={(value) => setMealTimingTime(formatManualTimeInput(value))}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={[
+                  styles.modalPrimaryButton,
+                  !canConfirmMealTiming && styles.primaryButtonDisabled,
+                ]}
+                onPress={handleConfirmMealTiming}
+                disabled={!canConfirmMealTiming}
+              >
+                <Text style={styles.primaryButtonText}>Continuar</Text>
+              </TouchableOpacity>
+            </View>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={photoOptionsVisible}
+        {...modalCommonProps}
+        onRequestClose={fecharOpcoesFoto}
+      >
+        <View style={styles.modalRoot}>
+          <View style={styles.modalKeyboard}>
+            <View style={styles.modalCard}>
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Anexar foto</Text>
+                <TouchableOpacity style={styles.modalCloseButton} onPress={fecharOpcoesFoto}>
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.photoPickerOptions}>
+                <TouchableOpacity
+                  style={styles.photoPickerOption}
+                  onPress={() => void tirarFoto({ fecharModal: true })}
+                  disabled={isBusy}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="camera-outline" size={20} color={patientTheme.colors.primary} />
+                  <Text style={styles.photoPickerOptionText}>Câmera</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.photoPickerOption}
+                  onPress={() => void escolherDaGaleria({ fecharModal: true })}
+                  disabled={isBusy}
+                  activeOpacity={0.85}
+                >
+                  <Ionicons name="image-outline" size={20} color={patientTheme.colors.primary} />
+                  <Text style={styles.photoPickerOptionText}>Galeria</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
       <Modal
         visible={editingFoodIndex !== null}
-        transparent
-        animationType="fade"
+        {...modalCommonProps}
         onRequestClose={fecharModalItem}
       >
-        <KeyboardAvoidingView
-          style={styles.modalOverlay}
-          behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
-        >
-          <View style={[styles.modalCard, styles.foodEditModalCard]}>
+        <View style={styles.modalRoot}>
+          <KeyboardAvoidingView
+            style={styles.modalKeyboard}
+            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
+          >
+            <View style={[styles.modalCard, styles.foodEditModalCard]}>
             <View style={styles.modalHeader}>
               <View style={styles.foodEditTitleCol}>
                 <Text style={styles.modalTitle}>Editar item</Text>
@@ -1989,9 +1986,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
               </TouchableOpacity>
             </View>
           </View>
-        </KeyboardAvoidingView>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
-    </PatientScreenLayout>
+    </>
   );
 }
 
@@ -2612,19 +2610,32 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontSize: 14,
   },
+  modalRoot: {
+    alignItems: 'center',
+    backgroundColor: 'rgba(47, 52, 56, 0.32)',
+    flex: 1,
+    justifyContent: 'center',
+    padding: 22,
+    width: '100%',
+    ...(Platform.OS === 'web'
+      ? {
+          minHeight: '100vh',
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          zIndex: 9999,
+        }
+      : null),
+  },
   modalOverlay: {
     alignItems: 'center',
     backgroundColor: 'rgba(47, 52, 56, 0.32)',
     flex: 1,
     justifyContent: 'center',
     padding: 22,
-  },
-  overlayLayer: {
-    alignItems: 'center',
-    backgroundColor: 'rgba(47, 52, 56, 0.32)',
-    flex: 1,
-    justifyContent: 'center',
-    padding: 22,
+    width: '100%',
   },
   modalKeyboard: {
     alignItems: 'center',
