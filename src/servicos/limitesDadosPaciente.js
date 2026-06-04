@@ -79,9 +79,9 @@ export const LIMITES_DADOS_PACIENTE = {
     experienceCachePreset: 'progresso',
   },
   prontuario: {
-    glucoseLimit: 80,
-    medicationLimit: 60,
-    mealLimit: 60,
+    glucoseLimit: 500,
+    medicationLimit: 500,
+    mealLimit: 500,
     skipAlertSync: true,
   },
   relatorio: {

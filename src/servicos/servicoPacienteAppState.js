@@ -1,5 +1,5 @@
 import { supabase } from './configSupabase';
-import { enrichRpcClinicalParams } from './servicoSessaoRpc';
+import { enrichChatRpcParams } from './servicoMensagensChat';
 
 function isMissingRpc(error, name) {
   const message = String(error?.message || '').toLowerCase();
@@ -11,9 +11,10 @@ export async function fetchPacienteAppStateFromTable(pacienteId, rpcActor = null
 
   let rpcParams;
   try {
-    rpcParams = await enrichRpcClinicalParams(
+    rpcParams = await enrichChatRpcParams(
       { p_paciente_id: pacienteId },
       pacienteId,
+      rpcActor,
       rpcActor
     );
   } catch (error) {

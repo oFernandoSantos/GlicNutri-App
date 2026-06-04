@@ -68,7 +68,7 @@ function isConsultaToday(scheduledAt) {
 function getActionAppearance(route) {
   return {
     borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: '#FFFFFF',
     iconColor: patientTheme.colors.primaryDark,
     badgeColor: patientTheme.colors.primaryDark,
   };
@@ -626,7 +626,7 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     padding: 16,
     justifyContent: 'space-between',
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: '#FFFFFF',
   },
   actionTopRow: {
     flexDirection: 'row',
@@ -669,7 +669,7 @@ const styles = StyleSheet.create({
   priorityBanner: {
     minHeight: 44,
     paddingHorizontal: 16,
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderBottomWidth: 1,
     borderBottomColor: patientTheme.colors.border,
     flexDirection: 'row',
@@ -779,7 +779,7 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
   },
   riskBadgeLow: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderColor: patientTheme.colors.primary,
   },
   riskBadgeTextLow: {

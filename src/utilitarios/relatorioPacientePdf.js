@@ -1,4 +1,5 @@
 import { brand } from '../temas/designSystem';
+import { nutriGreenRgb } from '../temas/designSystemNutricionista';
 import {
   buildMealCaloriesDailySeries,
   buildMealCarbsDailySeries,
@@ -2412,7 +2413,7 @@ function addNutritionistPatientHeader(doc, bundle) {
   const pageWidth = doc.internal.pageSize.getWidth();
   const headerH = 36;
 
-  doc.setFillColor(...BRAND_RGB);
+  doc.setFillColor(...nutriGreenRgb);
   doc.rect(0, 0, pageWidth, headerH, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');

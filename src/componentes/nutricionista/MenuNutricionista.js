@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
   header: {
     margin: 16,
     padding: 18,
-    borderRadius: patientTheme.radius.xl,
+    borderRadius: patientTheme.radius.card,
     backgroundColor: patientTheme.colors.surface,
     flexDirection: 'row',
     alignItems: 'flex-start',

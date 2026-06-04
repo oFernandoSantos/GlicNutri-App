@@ -24,17 +24,25 @@ import {
   fetchPatientNutritionistChat,
   getPatientDisplayName,
   getPatientId,
+  mapRealtimeChatRowToThreadEntry,
+  mergeChatMessageIntoThread,
   savePatientNutritionistChat,
 } from '../../servicos/servicoDadosPaciente';
-import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
+import {
+  getCachedPatientChat,
+  invalidatePatientChatCache,
+} from '../../servicos/cacheExperienciaPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   markPatientChatRead,
   normalizeChatMessages,
+  bindChatEnterToSend,
   scrollChatToEnd,
 } from '../../utilitarios/chatConversa';
+import RegistroChatContextCard from '../../componentes/comum/RegistroChatContextCard';
+import { parseRegistroChatMessage } from '../../utilitarios/registrosProntuarioNutri';
 
 const READER_BAR_HEIGHT = 58;
 
@@ -238,9 +246,17 @@ export default function TelaChatNutricionistaDetalhePaciente({
         if (sendingRef.current || draftRef.current.trim()) return;
         loadRef.current({ silent: true, forceRefresh: false });
       }, 15000);
-      return () => clearInterval(intervalId);
+      return () => {
+        clearInterval(intervalId);
+        if (patientId) {
+          invalidatePatientChatCache(patientId);
+        }
+      };
     }, [load, patientId])
   );
+
+  const nutritionistName =
+    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
 
   useEffect(() => {
     if (!patientId) return undefined;
@@ -255,9 +271,28 @@ export default function TelaChatNutricionistaDetalhePaciente({
           table: 'mensagem_chat',
           filter: `paciente_id=eq.${patientId}`,
         },
-        () => {
+        (payload) => {
           if (draftRef.current.trim() || sendingRef.current) return;
-          loadRef.current({ silent: true, forceRefresh: true });
+          const row = payload?.new;
+          if (row?.texto && payload?.eventType === 'INSERT') {
+            const entry = mapRealtimeChatRowToThreadEntry(row, patientFirstName, {
+              nutritionistName,
+            });
+            if (entry) {
+              setAppState((current) => ({
+                ...current,
+                nutritionistThread: mergeChatMessageIntoThread(
+                  current?.nutritionistThread || [],
+                  entry
+                ),
+              }));
+              if (entry.role === 'nutri') {
+                markPatientChatRead(patientId);
+              }
+              return;
+            }
+          }
+          loadRef.current({ silent: true, forceRefresh: false });
         }
       )
       .subscribe();
@@ -265,10 +300,7 @@ export default function TelaChatNutricionistaDetalhePaciente({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [patientId]);
-
-  const nutritionistName =
-    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
+  }, [patientId, patientFirstName, nutritionistName]);
 
   const messages = useMemo(
     () =>
@@ -445,6 +477,26 @@ export default function TelaChatNutricionistaDetalhePaciente({
                 ) : (
                   messages.map((message) => {
                     const isMine = message.role === 'user';
+                    const registroParsed = !isMine ? parseRegistroChatMessage(message.text) : null;
+                    if (registroParsed) {
+                      return (
+                        <View
+                          key={message.id}
+                          style={[styles.messageRow, styles.messageRowNutri]}
+                        >
+                          <View style={styles.registroMessageWrap}>
+                            <Text style={styles.bubbleAuthor}>{message.author}</Text>
+                            <RegistroChatContextCard parsedMessage={registroParsed} compact />
+                            {registroParsed.comment ? (
+                              <View style={[styles.bubble, styles.bubbleNutri, styles.registroCommentBubble]}>
+                                <Text style={styles.bubbleText}>{registroParsed.comment}</Text>
+                              </View>
+                            ) : null}
+                            <Text style={styles.registroMessageTime}>{message.time}</Text>
+                          </View>
+                        </View>
+                      );
+                    }
                     return (
                       <View
                         key={message.id}
@@ -481,6 +533,7 @@ export default function TelaChatNutricionistaDetalhePaciente({
                     multiline
                     maxLength={500}
                     editable={!sending}
+                    {...bindChatEnterToSend(handleSend)}
                   />
                 </View>
                 <TouchableOpacity
@@ -666,6 +719,19 @@ const styles = StyleSheet.create({
   },
   bubbleTimeMine: {
     color: 'rgba(255,255,255,0.82)',
+  },
+  registroMessageWrap: {
+    maxWidth: '88%',
+    width: '100%',
+  },
+  registroCommentBubble: {
+    marginTop: 8,
+  },
+  registroMessageTime: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
   },
   inputRow: {
     alignItems: 'flex-end',

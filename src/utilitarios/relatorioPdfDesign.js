@@ -102,11 +102,20 @@ export function ensurePageSpace(doc, y, neededHeight = 58) {
   return y;
 }
 
-export function addModernHeader(doc, { brandLabel = 'GLICNUTRI', title, subtitle, metaRight = '' }) {
+export function addModernHeader(
+  doc,
+  {
+    brandLabel = 'GLICNUTRI',
+    title,
+    subtitle,
+    metaRight = '',
+    brandRgb = BRAND_RGB,
+  } = {}
+) {
   const pageWidth = doc.internal.pageSize.getWidth();
   const headerH = 36;
 
-  doc.setFillColor(...BRAND_RGB);
+  doc.setFillColor(...brandRgb);
   doc.rect(0, 0, pageWidth, headerH, 'F');
   doc.setTextColor(255, 255, 255);
   doc.setFont('helvetica', 'bold');
@@ -128,14 +137,19 @@ export function addModernHeader(doc, { brandLabel = 'GLICNUTRI', title, subtitle
   return headerH + 8;
 }
 
-export function addModernSectionTitle(doc, y, title) {
+export function addModernSectionTitle(
+  doc,
+  y,
+  title,
+  { brandDarkRgb = BRAND_DARK_RGB, brandLightRgb = BRAND_LIGHT_RGB } = {}
+) {
   y = ensurePageSpace(doc, y, 20);
   y = addSectionSpacer(y, REPORT_BLOCK_GAP);
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(REPORT_TEXT.section);
-  doc.setTextColor(...BRAND_DARK_RGB);
+  doc.setTextColor(...brandDarkRgb);
   doc.text(pdfText(title), PAGE_MARGIN, y);
-  doc.setDrawColor(...BRAND_LIGHT_RGB);
+  doc.setDrawColor(...brandLightRgb);
   doc.setLineWidth(0.5);
   doc.line(PAGE_MARGIN, y + 3, doc.internal.pageSize.getWidth() - PAGE_MARGIN, y + 3);
   doc.setFont('helvetica', 'normal');

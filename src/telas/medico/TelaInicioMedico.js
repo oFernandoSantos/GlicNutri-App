@@ -26,7 +26,7 @@ import {
   MEDICO_MAIN_TAB_ROUTES,
   navigateMedicoTab,
 } from '../../utilitarios/navegacaoAbas';
-import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { medicoTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 
 function getRiskMeta(patient) {
   const risk = String(patient?.risk || '').toLowerCase();

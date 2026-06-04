@@ -614,7 +614,7 @@ export function buildPatientClinicalReportBundle(payload) {
     periodRangeLabel: formatPeriodRangeLabel(periodBounds, payload.periodLabel),
     periodBounds,
     personalProfile: payload.personalProfile || null,
-    glycemicMetrics,
+  glycemicMetrics,
     summary: {
       meals: mealEntries.length,
       glucose: glucoseReadings.length,

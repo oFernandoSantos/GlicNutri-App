@@ -125,7 +125,7 @@ export default function GavetaConsultaProfissional({
             <View style={styles.row}>
               <BotaoAgendamento
                 label="Confirmar"
-                variant="ghost"
+                variant="primary"
                 onPress={onConfirmar}
                 style={styles.half}
               />

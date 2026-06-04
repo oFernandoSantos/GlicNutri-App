@@ -3,6 +3,7 @@ import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpac
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { nutriTheme } from '../../temas/temaVisualNutricionista';
 import { adminTheme } from '../../temas/temaVisualAdmin';
 import { StackActions } from '@react-navigation/native';
 import { stripAuthRoutesFromPatientStack } from '../../utilitarios/navegacaoPaciente';
@@ -171,11 +172,17 @@ export default function ReaderTopo({ navigation, route, options }) {
   const hideCenteredTitle = isLogin || isAuthBack;
   const isPatientHome = route?.name === 'HomePaciente';
   const isNutriHome = route?.name === 'HomeNutricionista';
+  const isNutriContext =
+    isNutriHome || NUTRITIONIST_ROUTES.has(route?.name);
   const isAdminHome = route?.name === 'AdminHome';
   const isAdminContext = isAdminLogin || isAdminHome || ADMIN_ROUTES.has(route?.name);
   const accentColor =
     readerAccentColor ||
-    (isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary);
+    (isAdminContext
+      ? adminTheme.colors.primary
+      : isNutriContext
+        ? nutriTheme.colors.primary
+        : patientTheme.colors.primary);
   const menuAction = options?.readerOnMenuPress;
   const menuDisabled = options?.readerMenuDisabled;
   const menuLoading = options?.readerMenuLoading;
@@ -319,6 +326,7 @@ export default function ReaderTopo({ navigation, route, options }) {
               style={[
                 styles.title,
                 isAdminContext && styles.titleAdmin,
+                isNutriContext && styles.titleNutri,
                 readerAccentColor ? { color: readerAccentColor } : null,
               ]}
               numberOfLines={1}
@@ -343,16 +351,9 @@ export default function ReaderTopo({ navigation, route, options }) {
               ]}
             >
               {rightActionLoading ? (
-                <ActivityIndicator
-                  size="small"
-                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
-                />
+                <ActivityIndicator size="small" color={accentColor} />
               ) : (
-                <Ionicons
-                  name={rightActionIcon}
-                  size={21}
-                  color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
-                />
+                <Ionicons name={rightActionIcon} size={21} color={accentColor} />
               )}
             </TouchableOpacity>
           ) : shouldShowNotificationButton ? (
@@ -372,11 +373,7 @@ export default function ReaderTopo({ navigation, route, options }) {
                 notificationDisabled && styles.readerButtonDisabled,
               ]}
             >
-              <Ionicons
-                name="notifications-outline"
-                size={21}
-                color={isAdminContext ? adminTheme.colors.primary : patientTheme.colors.primary}
-              />
+              <Ionicons name="notifications-outline" size={21} color={accentColor} />
               {hasNotifications ? (
                 <View style={styles.notificationBadge}>
                   <Text style={styles.notificationBadgeText}>
@@ -518,6 +515,9 @@ const styles = StyleSheet.create({
   },
   titleAdmin: {
     color: adminTheme.colors.primary,
+  },
+  titleNutri: {
+    color: nutriTheme.colors.primary,
   },
   extraContent: {
     backgroundColor: '#ffffff',

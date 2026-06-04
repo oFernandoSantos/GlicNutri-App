@@ -15,32 +15,16 @@ export const KPI_ACCENTS = {
   yellow: brand.warning,
 };
 
-function trendArrow(trend) {
-  if (trend === 'up') return '↑';
-  if (trend === 'down') return '↓';
-  return '→';
-}
-
 export function DashboardKpiCard({
   icon = 'stats-chart-outline',
   accent = KPI_ACCENTS.green,
   label,
   value,
-  trend = 'stable',
-  invertTrend = false,
   style,
 }) {
-  const trendUp = trend === 'up';
-  const trendDown = trend === 'down';
-  const positive = invertTrend ? trendDown : trendUp;
-  const negative = invertTrend ? trendUp : trendDown;
-
   return (
     <View style={[styles.card, style]}>
       <View style={styles.topRow}>
-        <Text style={[styles.trend, positive && styles.trendUp, negative && styles.trendDown]}>
-          {trendArrow(trend)}
-        </Text>
         <Ionicons name={icon} size={22} color={accent} />
       </View>
       <Text style={styles.label}>{label}</Text>
@@ -98,7 +82,7 @@ const styles = StyleSheet.create({
     minWidth: 150,
     minHeight: 92,
     padding: 14,
-    backgroundColor: brand.surface,
+    backgroundColor: brand.white,
     borderWidth: 1,
     borderColor: brand.border,
     borderRadius: radius.xl,
@@ -106,22 +90,9 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   topRow: {
-    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 6,
     marginBottom: 6,
-  },
-  trend: {
-    fontSize: 14,
-    fontWeight: '800',
-    color: brand.slateMuted,
-  },
-  trendUp: {
-    color: brand.greenDark,
-  },
-  trendDown: {
-    color: brand.danger,
   },
   label: {
     fontSize: 13,
@@ -152,7 +123,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: brand.border,
-    backgroundColor: brand.surface,
+    backgroundColor: brand.white,
   },
   miniLabel: {
     color: brand.slateMuted,

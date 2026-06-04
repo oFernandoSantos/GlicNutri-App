@@ -1,15 +1,29 @@
-import React from 'react';
-import { Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import React, { useMemo, useState } from 'react';
+import {
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 import {
   DashboardKpiCard,
   DashboardMiniKpiCard,
-  KPI_ACCENTS,
   dashboardKpiStyles,
 } from '../comum/CartaoKpiDashboard';
+import {
+  nutriClinicalStatus,
+  nutriColors,
+  nutriKpiAccents,
+} from '../../temas/designSystemNutricionista';
 
-export { DashboardKpiCard, DashboardMiniKpiCard, KPI_ACCENTS, dashboardKpiStyles } from '../comum/CartaoKpiDashboard';
+export { DashboardKpiCard, DashboardMiniKpiCard, dashboardKpiStyles };
+export const KPI_ACCENTS = nutriKpiAccents;
+export { nutriClinicalStatus };
 
 export function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -93,7 +107,7 @@ export function ActionCard({ icon, title, subtitle, helper, onPress }) {
   return (
     <TouchableOpacity style={styles.actionCard} onPress={onPress} activeOpacity={0.9}>
       <View style={styles.actionIconWrap}>
-        <Ionicons name={icon} size={22} color={patientTheme.colors.primaryDark} />
+        <Ionicons name={icon} size={22} color={patientTheme.colors.primary} />
       </View>
       <Text style={styles.actionTitle}>{title}</Text>
       <Text style={styles.actionSubtitle}>{subtitle}</Text>
@@ -102,24 +116,71 @@ export function ActionCard({ icon, title, subtitle, helper, onPress }) {
   );
 }
 
-export function FilterTabs({ items, active, onChange, compact = false }) {
-  return (
-    <View style={[styles.tabsWrap, compact && styles.tabsWrapCompact]}>
-      {items.map((item) => {
-        const selected = active === item.value;
-        return (
-          <TouchableOpacity
-            key={item.value}
-            style={[styles.tabChip, selected && styles.tabChipActive, compact && styles.tabChipCompact]}
-            onPress={() => onChange(item.value)}
-            activeOpacity={0.9}
-          >
-            <Text style={[styles.tabChipText, selected && styles.tabChipTextActive]}>{item.label}</Text>
-          </TouchableOpacity>
-        );
-      })}
-    </View>
-  );
+/** Mesmos raios do acesso paciente (histórico / seletores). */
+const TAB_RADIUS_MAIN = 18;
+const TAB_RADIUS_COMPACT = 16;
+
+export function FilterTabs({
+  items,
+  active,
+  onChange,
+  compact = false,
+  scrollable = false,
+  fill = true,
+}) {
+  const useHorizontalScroll = scrollable && !fill;
+
+  const chips = items.map((item) => {
+    const selected = active === item.value;
+    return (
+      <TouchableOpacity
+        key={item.value}
+        style={[
+          styles.tabChip,
+          compact && styles.tabChipCompact,
+          fill && !useHorizontalScroll && styles.tabChipFill,
+          useHorizontalScroll && styles.tabChipScrollable,
+          selected && styles.tabChipActive,
+        ]}
+        onPress={() => onChange(item.value)}
+        activeOpacity={0.85}
+      >
+        <Text
+          numberOfLines={1}
+          style={[
+            styles.tabChipText,
+            compact && styles.tabChipTextCompact,
+            compact && !selected && styles.tabChipTextCompactIdle,
+            selected && styles.tabChipTextActive,
+          ]}
+        >
+          {item.label}
+        </Text>
+      </TouchableOpacity>
+    );
+  });
+
+  const wrapStyle = [
+    styles.tabsWrap,
+    compact && styles.tabsWrapCompact,
+    useHorizontalScroll && styles.tabsWrapScrollable,
+  ];
+
+  if (useHorizontalScroll) {
+    return (
+      <View style={wrapStyle}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsScrollContent}
+        >
+          {chips}
+        </ScrollView>
+      </View>
+    );
+  }
+
+  return <View style={wrapStyle}>{chips}</View>;
 }
 
 export function SearchInput({ value, onChangeText, placeholder }) {
@@ -174,38 +235,217 @@ export function BarChartCard({ title, subtitle, data, tone = 'default' }) {
   );
 }
 
+const GLUCOSE_TARGET_MIN = 70;
+const GLUCOSE_TARGET_MAX = 180;
+
+function getGlucosePointColor(value) {
+  if (value < GLUCOSE_TARGET_MIN) return patientTheme.colors.info;
+  if (value <= GLUCOSE_TARGET_MAX) return patientTheme.colors.primary;
+  if (value <= 250) return patientTheme.colors.warning;
+  return patientTheme.colors.danger;
+}
+
+function normalizeTrendChartSeries(data = []) {
+  return (Array.isArray(data) ? data : [])
+    .map((item, index) => ({
+      id: item?.id || `glucose-${index}`,
+      value: Number(item?.value ?? item?.valor_glicose_mgdl) || 0,
+      label:
+        String(item?.label || '').trim() ||
+        String(item?.time || '').trim().slice(0, 5) ||
+        `${index + 1}h`,
+    }))
+    .filter((item) => item.value > 0);
+}
+
+function buildGlucoseYScale(values = []) {
+  if (!values.length) {
+    return { min: GLUCOSE_TARGET_MIN, max: 220, ticks: [70, 100, 140, 180, 220] };
+  }
+
+  const dataMin = Math.min(...values);
+  const dataMax = Math.max(...values);
+  let min = Math.min(GLUCOSE_TARGET_MIN, Math.floor(dataMin / 20) * 20 - 20);
+  let max = Math.max(220, Math.ceil(dataMax / 20) * 20 + 20);
+  if (max - min < 100) max = min + 100;
+
+  const step = max - min <= 160 ? 20 : 40;
+  const ticks = [];
+  for (let tick = min; tick <= max; tick += step) {
+    ticks.push(tick);
+  }
+  if (ticks[ticks.length - 1] !== max) ticks.push(max);
+
+  return { min, max, ticks };
+}
+
 export function TrendChartCard({ title, subtitle, data }) {
-  const values = data.map((item) => Number(item.value) || 0);
-  const max = Math.max(...values, 1);
-  const min = Math.min(...values, max);
-  const range = Math.max(max - min, 1);
+  const [chartWidth, setChartWidth] = useState(0);
+  const chartHeight = 248;
+  const paddingLeft = 44;
+  const paddingRight = 14;
+  const paddingTop = 22;
+  const paddingBottom = 36;
+
+  const series = useMemo(() => normalizeTrendChartSeries(data), [data]);
+  const values = useMemo(() => series.map((item) => item.value), [series]);
+  const scale = useMemo(() => buildGlucoseYScale(values), [values]);
+  const range = Math.max(scale.max - scale.min, 1);
+
+  const plotWidth = Math.max(chartWidth - paddingLeft - paddingRight, 1);
+  const plotHeight = chartHeight - paddingTop - paddingBottom;
+
+  const valueToTop = (value) =>
+    paddingTop + (1 - (Math.min(Math.max(value, scale.min), scale.max) - scale.min) / range) * plotHeight;
+
+  const points = useMemo(() => {
+    if (!plotWidth || !series.length) return [];
+    return series.map((item, index) => {
+      const x =
+        paddingLeft +
+        (series.length === 1 ? plotWidth / 2 : (index / (series.length - 1)) * plotWidth);
+      const y = valueToTop(item.value);
+      return { ...item, x, y, color: getGlucosePointColor(item.value) };
+    });
+  }, [plotWidth, series, scale.min, scale.max]);
+
+  const targetTop = valueToTop(GLUCOSE_TARGET_MAX);
+  const targetHeight = Math.max(valueToTop(GLUCOSE_TARGET_MIN) - targetTop, 8);
 
   return (
     <SectionCard style={styles.chartCard}>
       <Text style={styles.chartTitle}>{title}</Text>
       {subtitle ? <Text style={styles.chartSubtitle}>{subtitle}</Text> : null}
-      <View style={styles.trendArea}>
-        <View style={styles.trendBaseLine} />
-        {data.map((item) => {
-          const offset = ((Number(item.value) - min) / range) * 90;
-          return (
-            <View key={item.id} style={styles.trendPointWrap}>
-              <Text style={styles.trendValue}>{item.value}</Text>
-              <View style={styles.trendLane}>
-                <View style={[styles.trendDot, { bottom: `${offset}%` }]} />
-              </View>
-              <Text style={styles.trendLabel}>{item.label}</Text>
-            </View>
-          );
-        })}
+
+      <View style={styles.glucoseLegendRow}>
+        <View style={styles.glucoseLegendItem}>
+          <View style={[styles.glucoseLegendDot, { backgroundColor: patientTheme.colors.success }]} />
+          <Text style={styles.glucoseLegendText}>70–180 mg/dL</Text>
+        </View>
+        <View style={styles.glucoseLegendItem}>
+          <View style={[styles.glucoseLegendDot, { backgroundColor: patientTheme.colors.warning }]} />
+          <Text style={styles.glucoseLegendText}>181–250</Text>
+        </View>
+        <View style={styles.glucoseLegendItem}>
+          <View style={[styles.glucoseLegendDot, { backgroundColor: patientTheme.colors.danger }]} />
+          <Text style={styles.glucoseLegendText}>acima de 250</Text>
+        </View>
       </View>
+
+      {!series.length ? (
+        <View style={styles.trendEmpty}>
+          <Text style={styles.trendEmptyText}>Sem leituras nas últimas 12 horas.</Text>
+        </View>
+      ) : (
+        <View
+          style={[styles.trendPlot, { height: chartHeight }]}
+          onLayout={({ nativeEvent }) => setChartWidth(nativeEvent.layout.width)}
+        >
+          <View
+            style={[
+              styles.trendTargetBand,
+              { top: targetTop, height: targetHeight, left: paddingLeft, right: paddingRight },
+            ]}
+          />
+
+          {scale.ticks.map((tick) => {
+            const top = valueToTop(tick);
+            return (
+              <View key={`tick-${tick}`} style={[styles.trendGridLine, { top }]}>
+                <Text style={styles.trendYLabel}>{tick}</Text>
+                <View
+                  style={[
+                    styles.trendGridRule,
+                    { left: paddingLeft, width: Math.max(plotWidth, 0) },
+                  ]}
+                />
+              </View>
+            );
+          })}
+
+          {chartWidth > 0 && points.length > 1
+            ? points.slice(1).map((point, index) => {
+                const previous = points[index];
+                const dx = point.x - previous.x;
+                const dy = point.y - previous.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+                const angle = `${Math.atan2(dy, dx)}rad`;
+
+                return (
+                  <View
+                    key={`segment-${point.id}`}
+                    style={[
+                      styles.trendLineSegment,
+                      {
+                        backgroundColor: point.color,
+                        left: previous.x + dx / 2 - length / 2,
+                        top: previous.y + dy / 2 - 1.5,
+                        width: length,
+                        transform: [{ rotate: angle }],
+                      },
+                    ]}
+                  />
+                );
+              })
+            : null}
+
+          {chartWidth > 0
+            ? points.map((point) => (
+                <View key={point.id}>
+                  <View
+                    style={[
+                      styles.trendPointDot,
+                      {
+                        backgroundColor: point.color,
+                        borderColor: '#FFFFFF',
+                        left: point.x - 7,
+                        top: point.y - 7,
+                      },
+                    ]}
+                  />
+                  <Text
+                    style={[
+                      styles.trendPointValue,
+                      {
+                        color: point.color,
+                        left: Math.min(Math.max(point.x - 20, paddingLeft), chartWidth - 40),
+                        top: Math.max(point.y - 28, 4),
+                      },
+                    ]}
+                  >
+                    {point.value}
+                  </Text>
+                </View>
+              ))
+            : null}
+
+          {chartWidth > 0 ? (
+            <View style={[styles.trendXLabels, { left: paddingLeft, width: plotWidth }]}>
+              {points.map((point) => (
+                <Text
+                  key={`label-${point.id}`}
+                  style={[
+                    styles.trendXLabel,
+                    { left: Math.min(Math.max(point.x - paddingLeft - 18, 0), plotWidth - 36) },
+                  ]}
+                  numberOfLines={1}
+                >
+                  {point.label}
+                </Text>
+              ))}
+            </View>
+          ) : null}
+
+          <Text style={styles.trendAxisUnit}>mg/dL</Text>
+        </View>
+      )}
     </SectionCard>
   );
 }
 
 export const nutriDesktopStyles = StyleSheet.create({
   pageGap: {
-    gap: 14,
+    gap: patientTheme.spacing.lg,
   },
   desktopColumns: {
     gap: 14,
@@ -221,23 +461,23 @@ export const nutriDesktopStyles = StyleSheet.create({
     flex: 0.9,
   },
   sectionTitle: {
-    fontSize: 20,
-    fontWeight: '900',
+    fontSize: 18,
+    fontWeight: '700',
     color: patientTheme.colors.text,
   },
   sectionHelper: {
-    marginTop: 6,
+    marginTop: patientTheme.spacing.xs,
     fontSize: 13,
-    lineHeight: 20,
+    lineHeight: 18,
     color: patientTheme.colors.textMuted,
-    fontWeight: '600',
+    fontWeight: '500',
   },
 });
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: patientTheme.colors.background,
-    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.card,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     padding: patientTheme.spacing.card,
@@ -253,7 +493,7 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.surfaceBorder,
   },
   avatarSubtle: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
   },
   avatarText: {
     color: patientTheme.colors.text,
@@ -264,24 +504,24 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.primaryDark,
   },
   progressTrack: {
-    height: 9,
+    height: 8,
     borderRadius: 999,
-    backgroundColor: '#e3e7eb',
+    backgroundColor: patientTheme.colors.border,
     overflow: 'hidden',
   },
   progressFill: {
     height: '100%',
     borderRadius: 999,
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.primary,
   },
   progressDanger: {
     backgroundColor: patientTheme.colors.danger,
   },
   progressWarning: {
-    backgroundColor: '#d7a54b',
+    backgroundColor: patientTheme.colors.warning,
   },
   progressSuccess: {
-    backgroundColor: patientTheme.colors.text,
+    backgroundColor: patientTheme.colors.success,
   },
   riskBadge: {
     alignSelf: 'flex-start',
@@ -290,26 +530,32 @@ const styles = StyleSheet.create({
     borderRadius: 999,
   },
   riskBadgeHigh: {
-    backgroundColor: '#fff0f0',
+    backgroundColor: nutriClinicalStatus.critical.bg,
+    borderWidth: 1,
+    borderColor: nutriClinicalStatus.critical.border,
   },
   riskBadgeMedium: {
-    backgroundColor: '#fff8e6',
+    backgroundColor: nutriClinicalStatus.attention.bg,
+    borderWidth: 1,
+    borderColor: nutriClinicalStatus.attention.border,
   },
   riskBadgeLow: {
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    backgroundColor: nutriClinicalStatus.normal.bg,
+    borderWidth: 1,
+    borderColor: nutriClinicalStatus.normal.border,
   },
   riskBadgeText: {
     fontWeight: '800',
     fontSize: 12,
   },
   riskTextHigh: {
-    color: patientTheme.colors.danger,
+    color: nutriClinicalStatus.critical.text,
   },
   riskTextMedium: {
-    color: '#b4872e',
+    color: nutriClinicalStatus.attention.text,
   },
   riskTextLow: {
-    color: patientTheme.colors.text,
+    color: nutriClinicalStatus.normal.text,
   },
   metricCard: {
     minHeight: 140,
@@ -321,7 +567,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -349,8 +595,10 @@ const styles = StyleSheet.create({
   actionCard: {
     flex: 1,
     minHeight: 164,
-    backgroundColor: patientTheme.colors.background,
-    borderRadius: patientTheme.radius.xl,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.card,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     padding: patientTheme.spacing.card,
     ...patientShadow,
   },
@@ -358,7 +606,7 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -381,24 +629,31 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
   },
   tabsWrap: {
+    alignSelf: 'stretch',
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    padding: 6,
-    borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.backgroundSoft,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
+    flexWrap: 'nowrap',
+    gap: 10,
+    width: '100%',
   },
   tabsWrapCompact: {
-    gap: 6,
+    gap: 7,
+  },
+  tabsWrapScrollable: {
+    flexWrap: 'nowrap',
+    overflow: 'hidden',
+  },
+  tabsScrollContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 2,
   },
   tabChip: {
-    minHeight: 40,
-    borderRadius: 999,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    minHeight: 42,
+    borderRadius: TAB_RADIUS_MAIN,
+    paddingHorizontal: 6,
+    paddingVertical: 12,
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
     borderColor: patientTheme.colors.surfaceBorder,
     alignItems: 'center',
@@ -407,32 +662,50 @@ const styles = StyleSheet.create({
   },
   tabChipCompact: {
     minHeight: 36,
-    paddingHorizontal: 12,
+    borderRadius: TAB_RADIUS_COMPACT,
+    paddingHorizontal: 8,
     paddingVertical: 8,
+    borderColor: patientTheme.colors.surfaceBorder,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    elevation: 0,
+  },
+  tabChipFill: {
+    flex: 1,
+    minWidth: 0,
+  },
+  tabChipScrollable: {
+    flexShrink: 0,
   },
   tabChipActive: {
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.surfaceBorder,
-    elevation: 3,
-    shadowColor: patientTheme.colors.shadow,
-    shadowOpacity: 0.1,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 4 },
+    backgroundColor: patientTheme.colors.primary,
+    borderColor: patientTheme.colors.primary,
   },
   tabChipText: {
-    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    color: patientTheme.colors.text,
     fontWeight: '800',
+    textAlign: 'center',
+  },
+  tabChipTextCompact: {
+    fontSize: 12,
+  },
+  tabChipTextCompactIdle: {
+    color: patientTheme.colors.textMuted,
   },
   tabChipTextActive: {
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '800',
   },
   searchWrap: {
-    minHeight: 52,
-    borderRadius: 999,
-    backgroundColor: patientTheme.colors.background,
+    minHeight: 48,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.surface,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: patientTheme.spacing.lg,
     ...patientShadow,
   },
   searchInput: {
@@ -450,7 +723,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chartCard: {
-    minHeight: 260,
+    minHeight: 320,
   },
   chartTitle: {
     fontSize: 17,
@@ -493,14 +766,14 @@ const styles = StyleSheet.create({
   },
   barFill: {
     width: '100%',
-    backgroundColor: patientTheme.colors.primaryDark,
+    backgroundColor: patientTheme.colors.primary,
     borderRadius: 20,
   },
   barFillDanger: {
     backgroundColor: patientTheme.colors.danger,
   },
   barFillSuccess: {
-    backgroundColor: patientTheme.colors.text,
+    backgroundColor: patientTheme.colors.primary,
   },
   barLabel: {
     marginTop: 10,
@@ -509,50 +782,116 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontWeight: '700',
   },
-  trendArea: {
-    marginTop: 18,
-    minHeight: 176,
+  glucoseLegendRow: {
+    marginTop: 14,
     flexDirection: 'row',
-    alignItems: 'flex-end',
-    justifyContent: 'space-between',
-    gap: 10,
+    flexWrap: 'wrap',
+    gap: 12,
   },
-  trendBaseLine: {
+  glucoseLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  glucoseLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  glucoseLegendText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: patientTheme.colors.textMuted,
+  },
+  trendPlot: {
+    marginTop: 12,
+    position: 'relative',
+    overflow: 'hidden',
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+  },
+  trendTargetBand: {
     position: 'absolute',
-    right: 0,
-    bottom: 25,
-    left: 0,
-    height: 1,
-    backgroundColor: '#dce4e8',
+    backgroundColor: '#F0F4F8',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: '#E2E8F0',
   },
-  trendPointWrap: {
-    flex: 1,
+  trendGridLine: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    flexDirection: 'row',
     alignItems: 'center',
   },
-  trendValue: {
-    marginBottom: 8,
-    fontSize: 12,
-    fontWeight: '800',
-    color: patientTheme.colors.text,
+  trendYLabel: {
+    width: 38,
+    fontSize: 10,
+    fontWeight: '700',
+    color: patientTheme.colors.textMuted,
+    textAlign: 'right',
+    paddingRight: 6,
   },
-  trendLane: {
-    width: '100%',
-    minHeight: 120,
-    position: 'relative',
+  trendGridRule: {
+    height: 1,
+    backgroundColor: patientTheme.colors.border,
   },
-  trendDot: {
+  trendLineSegment: {
     position: 'absolute',
-    left: '50%',
-    marginLeft: -7,
+    height: 3,
+    borderRadius: 999,
+    opacity: 0.85,
+  },
+  trendPointDot: {
+    position: 'absolute',
     width: 14,
     height: 14,
     borderRadius: 7,
-    backgroundColor: patientTheme.colors.primaryDark,
+    borderWidth: 2,
   },
-  trendLabel: {
-    marginTop: 10,
-    fontSize: 12,
-    color: patientTheme.colors.textMuted,
+  trendPointValue: {
+    position: 'absolute',
+    fontSize: 11,
+    fontWeight: '900',
+    minWidth: 32,
+    textAlign: 'center',
+  },
+  trendXLabels: {
+    position: 'absolute',
+    bottom: 8,
+    height: 16,
+  },
+  trendXLabel: {
+    position: 'absolute',
+    width: 36,
+    fontSize: 10,
     fontWeight: '700',
+    color: patientTheme.colors.textMuted,
+    textAlign: 'center',
+  },
+  trendAxisUnit: {
+    position: 'absolute',
+    top: 8,
+    left: 6,
+    fontSize: 10,
+    fontWeight: '800',
+    color: patientTheme.colors.textMuted,
+  },
+  trendEmpty: {
+    marginTop: 16,
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+  },
+  trendEmptyText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: patientTheme.colors.textMuted,
   },
 });

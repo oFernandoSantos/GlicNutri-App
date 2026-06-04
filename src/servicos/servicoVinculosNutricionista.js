@@ -14,7 +14,6 @@ export function getNutritionistId(usuario) {
   return (
     usuario?.id_nutricionista_uuid ||
     usuario?.user_metadata?.id_nutricionista_uuid ||
-    usuario?.id ||
     null
   );
 }

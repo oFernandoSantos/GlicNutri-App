@@ -31,7 +31,7 @@ function SectionCard({ children, style }) {
 function StatusBadge({ status }) {
   const map = {
     scheduled: { label: 'Agendada',           bg: '#e8f4f8', text: '#2c7a9e' },
-    confirmed: { label: 'Confirmada',          bg: '#e8f8e8', text: '#2e7d32' },
+    confirmed: { label: 'Confirmada',          bg: patientTheme.colors.primarySoft, text: patientTheme.colors.primaryDark },
     done:      { label: 'Realizada',           bg: '#f0f8e8', text: '#558b2f' },
     cancelled: { label: 'Cancelada',           bg: '#fef0f0', text: '#c62828' },
     no_show:   { label: 'Não compareceu',      bg: '#fff8e1', text: '#e65100' },
@@ -257,7 +257,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
                   onPress={() => markStatus('done')}
                   disabled={savingAction}
                 >
-                  <Ionicons name="checkmark-done-outline" size={16} color="#2e7d32" />
+                  <Ionicons name="checkmark-done-outline" size={16} color={patientTheme.colors.primary} />
                   <Text style={styles.actionBtnSuccessText}>Finalizar</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
@@ -431,13 +431,13 @@ const styles = StyleSheet.create({
   metaText: { color: patientTheme.colors.textMuted, fontSize: 13 },
   statusActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginTop: 12 },
   actionBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingHorizontal: 14, paddingVertical: 10, borderRadius: patientTheme.radius.pill },
-  actionBtnPrimary: { backgroundColor: patientTheme.colors.surface, borderWidth: 1, borderColor: patientTheme.colors.surfaceBorder },
-  actionBtnPrimaryText: { color: patientTheme.colors.text, fontWeight: '900' },
-  actionBtnSuccess: { backgroundColor: '#e8f5e9', borderWidth: 1, borderColor: '#c8e6c9' },
-  actionBtnSuccessText: { color: '#2e7d32', fontWeight: '900' },
+  actionBtnPrimary: { backgroundColor: patientTheme.colors.primary, borderWidth: 0 },
+  actionBtnPrimaryText: { color: patientTheme.colors.onPrimary, fontWeight: '900' },
+  actionBtnSuccess: { backgroundColor: patientTheme.colors.backgroundSoft, borderWidth: 1, borderColor: patientTheme.colors.border },
+  actionBtnSuccessText: { color: patientTheme.colors.primaryDark, fontWeight: '900' },
   actionBtnDanger: { backgroundColor: '#fff4f4', borderWidth: 1, borderColor: '#f0d2d2' },
   actionBtnDangerText: { color: patientTheme.colors.danger, fontWeight: '900' },
-  actionBtnSecondary: { backgroundColor: patientTheme.colors.primarySoft },
+  actionBtnSecondary: { backgroundColor: patientTheme.colors.backgroundSoft },
   actionBtnSecondaryText: { color: patientTheme.colors.text, fontWeight: '900' },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sectionTitle: { fontSize: 17, fontWeight: '900', color: patientTheme.colors.text },

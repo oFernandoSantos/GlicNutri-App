@@ -10,7 +10,11 @@ import {
   sortGlucoseReadingsChronologically,
 } from '../utilitarios/dataLocal';
 import { supabase } from './configSupabase';
-import { enrichRpcClinicalParams, garantirSessaoRpcClinicaComPerfil } from './servicoSessaoRpc';
+import {
+  enrichRpcClinicalParams,
+  garantirSessaoRpcClinicaComPerfil,
+  normalizeRpcActorProfile,
+} from './servicoSessaoRpc';
 import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import {
@@ -26,17 +30,21 @@ import {
   fetchCachedPatientProfile,
   getCachedPatientChat,
   getCachedPatientExperience,
+  invalidatePatientChatCache,
   invalidatePatientExperienceCache,
+  replaceCachedPatientChat,
 } from './cacheExperienciaPaciente';
 
 export {
   getCachedPatientChat,
   getCachedPatientExperience,
   getCachedPatientProfile,
+  invalidatePatientChatCache,
   invalidatePatientExperienceCache,
   isPatientExperienceCacheFresh,
   isPatientProfileCacheFresh,
   PROFILE_CACHE_TTL_MS,
+  replaceCachedPatientChat,
 } from './cacheExperienciaPaciente';
 import {
   mealPlanSections,
@@ -48,10 +56,13 @@ import {
   savePacienteAppStateToTable,
 } from './servicoPacienteAppState';
 import {
+  enrichChatRpcParams,
   fetchChatThreadFromDatabase,
+  mapChatRowToThreadEntry as mapRpcChatRowToThreadEntry,
   migrateLegacyThreadToDatabase,
   resolveNutricionistaIdForPatient,
   sendChatMessage,
+  sortChatThreadByCreatedAt,
 } from './servicoMensagensChat';
 import { syncGlucoseAlertsForPatient } from './servicoAlertasClinicos';
 import { executarEmLotes } from '../utilitarios/carregamentoTela';
@@ -60,13 +71,18 @@ const META_START = '[GLICNUTRI_APP_META_START]';
 const META_END = '[GLICNUTRI_APP_META_END]';
 
 export function getPatientId(usuario) {
-  return (
-    usuario?.id_paciente_uuid ||
-    usuario?.user_metadata?.id_paciente_uuid ||
-    (isGoogleUser(usuario) ? usuario?.id : null) ||
-    usuario?.patient_id ||
-    null
-  );
+  const directId = usuario?.id_paciente_uuid || usuario?.user_metadata?.id_paciente_uuid;
+  if (directId) return directId;
+
+  if (isGoogleUser(usuario) && usuario?.id) return usuario.id;
+  if (usuario?.patient_id) return usuario.patient_id;
+
+  const cardId = usuario?.id;
+  if (typeof cardId === 'string' && /^[0-9a-f-]{36}$/i.test(cardId.trim())) {
+    return cardId.trim();
+  }
+
+  return null;
 }
 
 export function getPatientDisplayName(usuario) {
@@ -145,7 +161,20 @@ export function normalizeNutritionistThreadEntry(
     role,
     time: String(item?.time || '').trim(),
     text,
+    createdAt: item?.createdAt || item?.created_at || null,
   };
+}
+
+export function mergeChatMessageIntoThread(thread = [], message = null) {
+  return ensureThreadContainsMessage(thread, message);
+}
+
+export function mapRealtimeChatRowToThreadEntry(row, patientName, options = {}) {
+  if (!row?.texto) return null;
+  return mapRpcChatRowToThreadEntry(row, {
+    nutritionistName: options.nutritionistName || 'Nutricionista',
+    patientName: patientName || 'Paciente',
+  });
 }
 
 export function buildNutritionistThreadPreview(thread = []) {
@@ -175,6 +204,11 @@ function ensureThreadContainsMessage(thread = [], message = null) {
     return normalizedThread;
   }
 
+  if (normalizedMessage.id) {
+    const byId = normalizedThread.some((item) => item.id === normalizedMessage.id);
+    if (byId) return normalizedThread;
+  }
+
   const alreadyPresent = normalizedThread.some((item) => {
     return (
       item.role === normalizedMessage.role &&
@@ -187,7 +221,7 @@ function ensureThreadContainsMessage(thread = [], message = null) {
     return normalizedThread;
   }
 
-  return [...normalizedThread, normalizedMessage];
+  return sortChatThreadByCreatedAt([...normalizedThread, normalizedMessage]);
 }
 
 function ensureArray(value) {
@@ -322,19 +356,9 @@ function resolveRpcActorFromOptions(options = {}, patient = null) {
 
 async function buildRpcParams(params, patientId, rpcActor) {
   try {
-    return await enrichRpcClinicalParams(params, patientId, rpcActor);
+    return await enrichChatRpcParams(params, patientId, rpcActor, rpcActor);
   } catch (error) {
     console.log('Sessao RPC indisponivel:', error?.message || error);
-
-    if (rpcActor) {
-      try {
-        await garantirSessaoRpcClinicaComPerfil(rpcActor);
-        return await enrichRpcClinicalParams(params, patientId, rpcActor);
-      } catch (retryError) {
-        console.log('Falha ao restaurar sessao RPC clinica:', retryError?.message || retryError);
-      }
-    }
-
     return null;
   }
 }
@@ -1273,6 +1297,7 @@ async function resolvePatientChatThread({
       nutricionistaId,
       legacyThread: mergedLegacyState.nutritionistThread,
       patientName,
+      rpcActor: rpcActor || resolveRpcActorFromOptions(options, patient),
     });
     chatThread = migrated === null ? mergedLegacyState.nutritionistThread : migrated || [];
   }
@@ -1375,8 +1400,8 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
       ? fetchMedicationEntries(resolvedPatientId, medicationLimit, rpcActor)
       : Promise.resolve([]),
     mealLimit > 0
-      ? rpcCall('listar_refeicoes_ia_paciente', { p_limite: mealLimit })
-      : Promise.resolve({ data: [], error: null }),
+      ? fetchMealEntries(resolvedPatientId, mealLimit, rpcActor)
+      : Promise.resolve([]),
     includeMealPlan
       ? fetchActiveMealPlanForPatient(resolvedPatientId).catch(() => null)
       : Promise.resolve(null),
@@ -1392,12 +1417,7 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
     }
   }
 
-  let databaseMealEntries = [];
-  if (mealLimit > 0 && !mealsResult.error && Array.isArray(mealsResult.data)) {
-    databaseMealEntries = mealsResult.data.map((row, index) =>
-      normalizeMealEntryFromDatabase(row, index)
-    );
-  }
+  const databaseMealEntries = Array.isArray(mealsResult) ? mealsResult : [];
 
   return {
     tableAppState,
@@ -1780,10 +1800,14 @@ function groupRecentChatRows(messages = []) {
   return grouped;
 }
 
-async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
+async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = [], rpcActor = null) {
   if (!nutricionistaId || !patientIds.length) {
     return new Map();
   }
+
+  const sessionActor =
+    normalizeRpcActorProfile(rpcActor) ||
+    (nutricionistaId ? { id_nutricionista_uuid: nutricionistaId } : null);
 
   const aggregated = [];
 
@@ -1791,13 +1815,15 @@ async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
     const chunk = patientIds.slice(index, index + NUTRI_INBOX_ID_CHUNK);
     const { data, error } = await supabase.rpc(
       'listar_mensagens_chat_inbox',
-      await enrichRpcClinicalParams(
+      await enrichChatRpcParams(
         {
           p_nutricionista_id: nutricionistaId,
           p_paciente_ids: chunk,
           p_mensagens_por_paciente: NUTRI_INBOX_MESSAGES_PER_PATIENT,
         },
-        null
+        null,
+        sessionActor,
+        sessionActor
       )
     );
 
@@ -1810,7 +1836,7 @@ async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
       console.log('RPC listar_mensagens_chat_inbox:', error.message);
     }
 
-    const fallbackChunk = await fetchInboxMessagesFallback(nutricionistaId, chunk);
+    const fallbackChunk = await fetchInboxMessagesFallback(nutricionistaId, chunk, sessionActor);
     aggregated.push(...fallbackChunk);
   }
 
@@ -1821,19 +1847,24 @@ async function fetchInboxMessagesGrouped(nutricionistaId, patientIds = []) {
   return new Map();
 }
 
-async function fetchInboxMessagesFallback(nutricionistaId, patientIds = []) {
+async function fetchInboxMessagesFallback(nutricionistaId, patientIds = [], rpcActor = null) {
   const aggregated = [];
+  const sessionActor =
+    normalizeRpcActorProfile(rpcActor) ||
+    (nutricionistaId ? { id_nutricionista_uuid: nutricionistaId } : null);
 
   await executarEmLotes(patientIds, NUTRI_INBOX_FALLBACK_BATCH, async (patientId) => {
     const { data: rows, error: rowError } = await supabase.rpc(
       'listar_mensagens_chat',
-      await enrichRpcClinicalParams(
+      await enrichChatRpcParams(
         {
           p_paciente_id: patientId,
           p_nutricionista_id: nutricionistaId,
           p_limite: NUTRI_INBOX_MESSAGES_PER_PATIENT,
         },
-        patientId
+        patientId,
+        sessionActor,
+        sessionActor
       )
     );
 
@@ -1852,7 +1883,8 @@ async function fetchInboxMessagesFallback(nutricionistaId, patientIds = []) {
 export async function fetchNutritionistChatInboxForPatientIds(
   patientIds = [],
   nutricionistaId = null,
-  patientCardsById = new Map()
+  patientCardsById = new Map(),
+  rpcActor = null
 ) {
   const resolvedIds = uniqueValues(patientIds);
   if (!resolvedIds.length) return [];
@@ -1862,7 +1894,7 @@ export async function fetchNutritionistChatInboxForPatientIds(
 
   if (resolvedNutriId) {
     try {
-      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
+      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds, rpcActor);
     } catch (chatError) {
       console.log('Chat inbox parcial indisponivel:', chatError);
     }
@@ -1893,7 +1925,11 @@ export async function fetchNutritionistChatInboxForPatientIds(
 }
 
 /** Lista leve: ultima mensagem + nao lidas, sem thread completa nem app_state por paciente. */
-export async function fetchNutritionistChatInbox(patientIds = [], nutricionistaId = null) {
+export async function fetchNutritionistChatInbox(
+  patientIds = [],
+  nutricionistaId = null,
+  rpcActor = null
+) {
   const resolvedIds = uniqueValues(patientIds);
   if (!resolvedIds.length) return [];
 
@@ -1913,7 +1949,7 @@ export async function fetchNutritionistChatInbox(patientIds = [], nutricionistaI
 
   if (resolvedNutriId) {
     try {
-      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
+      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds, rpcActor);
     } catch (chatError) {
       console.log('Chat inbox indisponivel:', chatError);
     }
@@ -1949,20 +1985,39 @@ export async function fetchNutritionistChatInbox(patientIds = [], nutricionistaI
 export async function fetchNutritionistChatThreadForPatient(
   patientId,
   nutricionistaId,
-  { patientName = 'Paciente', limit = NUTRI_THREAD_RECENT_LIMIT } = {}
+  { patientName = 'Paciente', limit = NUTRI_THREAD_RECENT_LIMIT, rpcActor = null } = {}
 ) {
   if (!patientId) return [];
 
+  const resolvedNutriId =
+    nutricionistaId || (await resolveNutricionistaIdForPatient(patientId, null));
+  const sessionActor =
+    normalizeRpcActorProfile(rpcActor) ||
+    (resolvedNutriId ? { id_nutricionista_uuid: resolvedNutriId } : null);
+
+  if (!resolvedNutriId) {
+    throw new Error('Paciente sem nutricionista vinculado para abrir o chat.');
+  }
+
+  if (sessionActor) {
+    await garantirSessaoRpcClinicaComPerfil(sessionActor);
+  }
+
   const thread = await fetchChatThreadFromDatabase({
     pacienteId: patientId,
-    nutricionistaId,
+    nutricionistaId: resolvedNutriId,
     nutritionistName: 'Nutricionista',
     patientName,
     limit,
+    rpcActor: sessionActor,
   });
 
+  if (thread === null) {
+    throw new Error('Nao foi possivel carregar o historico do chat. Faca login novamente.');
+  }
+
   if (Array.isArray(thread)) {
-    return thread.filter((item) => item.text);
+    return sortChatThreadByCreatedAt(thread.filter((item) => item.text));
   }
 
   return [];
@@ -1996,7 +2051,11 @@ export async function fetchNutritionistChatSummariesByPatientIds(
 
   if (resolvedNutriId) {
     try {
-      messagesByPatient = await fetchInboxMessagesGrouped(resolvedNutriId, resolvedIds);
+      messagesByPatient = await fetchInboxMessagesGrouped(
+        resolvedNutriId,
+        resolvedIds,
+        options?.rpcActor
+      );
     } catch (chatError) {
       console.log('Chat summaries indisponivel (RPC):', chatError);
     }
@@ -2060,6 +2119,11 @@ export async function savePatientNutritionistChat({
     actor?.id_nutricionista_uuid
   );
 
+  const rpcActor = {
+    ...(normalizeRpcActorProfile(actor) || {}),
+    ...(nutricionistaId ? { id_nutricionista_uuid: nutricionistaId } : {}),
+  };
+
   if (newMessage?.text && effectivePatientId && nutricionistaId) {
     const sent = await sendChatMessage({
       pacienteId: effectivePatientId,
@@ -2068,31 +2132,33 @@ export async function savePatientNutritionistChat({
       texto: newMessage.text,
       nutritionistName: newMessage.nutritionistName || 'Nutricionista',
       patientName: newMessage.patientName || getPatientDisplayName(patientContext || actor),
+      rpcActor,
     });
 
-    if (sent) {
-      const cached =
-        getCachedPatientExperience(effectivePatientId, {
-          patientContext: patientContext || actor || null,
-        }) ||
-        getCachedPatientChat(effectivePatientId);
+    const cached =
+      getCachedPatientExperience(effectivePatientId, {
+        patientContext: patientContext || actor || null,
+      }) ||
+      getCachedPatientChat(effectivePatientId);
 
-      const baseThread = ensureArray(thread).length
-        ? thread
-        : cached?.appState?.nutritionistThread || cached?.thread || [];
-      const nextThread = ensureThreadContainsMessage(baseThread, sent);
+    const baseThread = ensureArray(thread).length
+      ? thread
+      : cached?.appState?.nutritionistThread || cached?.thread || [];
+    const nextThread = ensureThreadContainsMessage(baseThread, sent);
 
-      return {
-        patient: cached?.patient || patientContext || actor || null,
-        clinicalObjective: cached?.clinicalObjective || '',
-        appState: {
-          ...(cached?.appState || createDefaultAppState()),
-          nutritionistThread: nextThread,
-        },
-        glucoseReadings: cached?.glucoseReadings || [],
-        thread: nextThread,
-      };
-    }
+    const payload = {
+      patient: cached?.patient || patientContext || actor || null,
+      clinicalObjective: cached?.clinicalObjective || '',
+      appState: {
+        ...(cached?.appState || createDefaultAppState()),
+        nutritionistThread: nextThread,
+      },
+      glucoseReadings: cached?.glucoseReadings || [],
+      thread: nextThread,
+    };
+
+    replaceCachedPatientChat(effectivePatientId, payload);
+    return payload;
   }
 
   const experience = await fetchPatientNutritionistChat(effectivePatientId || patientId, {
@@ -2456,7 +2522,7 @@ export async function refreshPatientMealEntries(patientId, options = {}) {
   return visibleMeals;
 }
 
-async function fetchMedicationEntriesOnly(patientId, limit = 120, rpcActor = null) {
+export async function fetchMedicationEntriesOnly(patientId, limit = 120, rpcActor = null) {
   let rpcEntries = [];
   const rpcParams = await buildRpcParams(
     {
@@ -2567,38 +2633,274 @@ export async function fetchMedicationEntries(patientId, limit = 120, rpcActor = 
   return mergeMedicationEntries(medicines, insulins).slice(0, limit);
 }
 
+async function fetchMealRowsDirect(patientId, limit = 120) {
+  const safeLimit = Math.max(Number(limit) || 0, 1);
+  const { data, error } = await supabase
+    .from('refeicao_ia')
+    .select('*')
+    .eq('paciente_id', patientId)
+    .order('created_at', { ascending: false })
+    .limit(safeLimit);
+
+  if (error || !Array.isArray(data)) {
+    if (error) {
+      console.log('Erro ao buscar refeicoes direto:', error.message);
+    }
+    return [];
+  }
+
+  return data.map((row, index) => normalizeMealEntryFromDatabase(row, index));
+}
+
 export async function fetchMealEntries(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
     return [];
   }
 
+  const safeLimit = Math.max(Number(limit) || 0, 1);
   const rpcParams = await buildRpcParams(
     {
       p_paciente_id: patientId,
-      p_limite: limit,
+      p_limite: safeLimit,
     },
     patientId,
     rpcActor
   );
 
-  if (!rpcParams) {
-    return [];
+  let rpcEntries = [];
+
+  if (rpcParams) {
+    const { data: rpcData, error: rpcError } = await supabase.rpc(
+      'listar_refeicoes_ia_paciente',
+      rpcParams
+    );
+
+    if (!rpcError && Array.isArray(rpcData)) {
+      rpcEntries = rpcData.map((row, index) => normalizeMealEntryFromDatabase(row, index));
+    } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_refeicoes_ia_paciente')) {
+      console.log('Erro ao buscar refeicoes IA por RPC:', rpcError.message);
+    }
+  } else {
+    console.log('Sessao RPC indisponivel ao buscar refeicoes; tentando leitura direta.');
   }
 
-  const { data: rpcData, error: rpcError } = await supabase.rpc(
-    'listar_refeicoes_ia_paciente',
-    rpcParams
+  if (rpcEntries.length) {
+    return rpcEntries.slice(0, safeLimit);
+  }
+
+  return fetchMealRowsDirect(patientId, safeLimit);
+}
+
+function pickFirstRpcErrorMessage(errors = []) {
+  const first = (errors || []).find((item) => String(item || '').trim());
+  return first ? String(first).trim() : '';
+}
+
+/**
+ * Carrega todos os registros clinicos do paciente para o prontuario da nutricionista.
+ */
+export async function fetchPatientRegistrosForNutri(
+  patientId,
+  { rpcActor = null, limits = {}, experience = null, currentPatient = null } = {}
+) {
+  const empty = {
+    glicemias: [],
+    medicacoes: [],
+    insulinas: [],
+    refeicoes: [],
+    error: null,
+  };
+
+  if (!patientId) {
+    return { ...empty, error: 'Paciente sem identificador.' };
+  }
+
+  const nutriProfile = normalizeRpcActorProfile(rpcActor);
+  const nutriId = nutriProfile?.id_nutricionista_uuid;
+  if (!nutriId) {
+    return { ...empty, error: 'Nutricionista sem identificador para consultar registros.' };
+  }
+
+  const glucoseLimit = Math.max(Number(limits.glucoseLimit) || 500, 1);
+  const medicationLimit = Math.max(Number(limits.medicationLimit) || 500, 1);
+  const mealLimit = Math.max(Number(limits.mealLimit) || 500, 1);
+  const includeHidden = limits.includeHidden !== false;
+  const rpcErrors = [];
+
+  const pushRpcError = (error) => {
+    const message = String(error?.message || error || '').trim();
+    if (!message) return;
+    rpcErrors.push(message);
+  };
+
+  try {
+    await garantirSessaoRpcClinicaComPerfil(nutriProfile);
+  } catch (error) {
+    return {
+      ...empty,
+      error: error?.message || 'Sessao clinica ausente. Saia e entre novamente.',
+    };
+  }
+
+  const patientSeed =
+    currentPatient?.id_paciente_uuid
+      ? currentPatient
+      : currentPatient?.raw?.id_paciente_uuid
+        ? currentPatient.raw
+        : { id_paciente_uuid: patientId };
+
+  let patientRow = patientSeed;
+  try {
+    const fetchedPatient = await fetchPatientById(patientId, {
+      patientContext: nutriProfile,
+      currentPatient: patientSeed,
+    });
+    if (fetchedPatient?.id_paciente_uuid) {
+      patientRow = fetchedPatient;
+    }
+  } catch (error) {
+    console.log('Perfil paciente prontuario nutri:', error?.message || error);
+  }
+
+  const objectiveParsed = extractObjectiveAndAppState(patientRow?.objetivo_principal_consulta);
+  const objectiveAppState = normalizeAppState(objectiveParsed.appState || {});
+
+  const experienceOptions = {
+    skipChat: true,
+    skipAlertSync: true,
+    includeHidden,
+    patientContext: nutriProfile,
+    currentPatient: patientRow,
+    glucoseLimit,
+    medicationLimit,
+    mealLimit,
+  };
+
+  let exp = experience;
+  const hasExperienceData =
+    ensureArray(experience?.glucoseReadings).length > 0 ||
+    ensureArray(experience?.appState?.mealEntries).length > 0 ||
+    ensureArray(experience?.appState?.medicationEntries).length > 0;
+
+  if (!hasExperienceData) {
+    try {
+      const fetched = await fetchPatientExperience(patientId, {
+        ...experienceOptions,
+        forceRefresh: true,
+      });
+      if (fetched) {
+        exp = fetched;
+      }
+    } catch (error) {
+      pushRpcError(error);
+      console.log('Experiencia do paciente indisponivel no prontuario:', error?.message || error);
+    }
+  }
+
+  const [
+    clinicalBundle,
+    meds,
+    insulinasData,
+    tableAppStateDirect,
+    mealsFromDb,
+    glucoseFromDb,
+  ] = await Promise.all([
+    fetchHomeClinicalBundle(
+      patientId,
+      {
+        glucoseLimit,
+        mealLimit,
+        medicationLimit: 0,
+        includeMealPlan: false,
+        includeAppState: true,
+        includeHidden,
+      },
+      nutriProfile
+    ),
+    fetchMedicationEntriesOnly(patientId, medicationLimit, nutriProfile).catch((error) => {
+      pushRpcError(error);
+      console.log('Medicacoes prontuario nutri:', error?.message || error);
+      return [];
+    }),
+    fetchInsulinEntries(patientId, medicationLimit, nutriProfile).catch((error) => {
+      pushRpcError(error);
+      console.log('Insulina prontuario nutri:', error?.message || error);
+      return [];
+    }),
+    fetchPacienteAppStateFromTable(patientId, nutriProfile).catch((error) => {
+      pushRpcError(error);
+      return null;
+    }),
+    fetchMealEntries(patientId, mealLimit, nutriProfile).catch((error) => {
+      pushRpcError(error);
+      console.log('Refeicoes prontuario nutri:', error?.message || error);
+      return [];
+    }),
+    fetchGlucoseReadings(patientId, glucoseLimit, nutriProfile).catch((error) => {
+      pushRpcError(error);
+      console.log('Glicemia prontuario nutri:', error?.message || error);
+      return [];
+    }),
+  ]);
+
+  const tableAppState = clinicalBundle?.tableAppState
+    ? normalizeAppState(clinicalBundle.tableAppState)
+    : tableAppStateDirect
+      ? normalizeAppState(tableAppStateDirect)
+      : null;
+
+  const expAppState = normalizeAppState(exp?.appState || {});
+  const mergedAppState = normalizeAppState({
+    ...objectiveAppState,
+    ...expAppState,
+    ...(tableAppState || {}),
+  });
+
+  const hiddenMealIds = includeHidden ? [] : ensureArray(mergedAppState.hiddenMealEntryIds);
+  const hiddenMedIds = includeHidden ? [] : ensureArray(mergedAppState.hiddenMedicationEntryIds);
+  const hiddenGlucoseIds = includeHidden ? [] : ensureArray(mergedAppState.hiddenGlucoseReadingIds);
+
+  const legacyMeals = ensureArray(mergedAppState.mealEntries).filter(
+    (entry) => !hiddenMealIds.includes(entry?.id)
   );
+  const legacyMeds = ensureArray(mergedAppState.medicationEntries)
+    .filter((item) => !isInsulinMedicationEntry(item))
+    .filter(
+      (entry) =>
+        !hiddenMedIds.includes(entry?.databaseId || entry?.legacyId || entry?.id)
+    );
+  const legacyInsulin = ensureArray(mergedAppState.medicationEntries)
+    .filter((item) => isInsulinMedicationEntry(item))
+    .filter(
+      (entry) =>
+        !hiddenMedIds.includes(entry?.databaseId || entry?.legacyId || entry?.id)
+    );
 
-  if (!rpcError && Array.isArray(rpcData)) {
-    return rpcData.map((row, index) => normalizeMealEntryFromDatabase(row, index));
-  }
+  const refeicoes = mergeMealEntries(
+    mergeMealEntries(ensureArray(clinicalBundle?.databaseMealEntries), mealsFromDb),
+    legacyMeals
+  );
+  const medicacoes = mergeMedicationEntries(meds, legacyMeds);
+  const insulinas = mergeInsulinEntries(insulinasData, legacyInsulin);
+  const glicemias = mergeCachedGlucoseReadings(
+    ensureArray(clinicalBundle?.glucoseReadings),
+    mergeCachedGlucoseReadings(glucoseFromDb, ensureArray(exp?.glucoseReadings))
+  ).filter((entry) => !hiddenGlucoseIds.includes(entry?.id));
 
-  if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_refeicoes_ia_paciente')) {
-    console.log('Erro ao buscar refeicoes IA por RPC:', rpcError.message);
-  }
+  const rpcHint = pickFirstRpcErrorMessage(rpcErrors);
+  const authHint =
+    rpcHint &&
+    /sessao|vinculo|autoriz|login|expirad/i.test(rpcHint)
+      ? rpcHint
+      : '';
 
-  return [];
+  return {
+    glicemias: glicemias.slice(0, glucoseLimit),
+    medicacoes: medicacoes.slice(0, medicationLimit),
+    insulinas: insulinas.slice(0, medicationLimit),
+    refeicoes: refeicoes.slice(0, mealLimit),
+    error: authHint || null,
+  };
 }
 
 export async function clearCgmGlucoseReadingsBySource(
