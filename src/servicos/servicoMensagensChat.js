@@ -1,5 +1,26 @@
 import { supabase } from './configSupabase';
-import { enrichRpcClinicalParams } from './servicoSessaoRpc';
+import {
+  enrichRpcClinicalParams,
+  garantirSessaoRpcClinicaComPerfil,
+  normalizeRpcActorProfile,
+} from './servicoSessaoRpc';
+
+/** Garante token RPC antes de listar/enviar chat (nutri ou paciente). */
+export async function enrichChatRpcParams(
+  params = {},
+  pacienteId = null,
+  sessionProfile = null,
+  rpcActor = null
+) {
+  const actor = normalizeRpcActorProfile(rpcActor) || sessionProfile;
+  try {
+    return await enrichRpcClinicalParams(params, pacienteId, sessionProfile);
+  } catch (firstError) {
+    if (!actor) throw firstError;
+    await garantirSessaoRpcClinicaComPerfil(actor);
+    return await enrichRpcClinicalParams(params, pacienteId, sessionProfile);
+  }
+}
 
 function normalizeThreadEntry(
   item,
@@ -14,6 +35,7 @@ function normalizeThreadEntry(
     role,
     time: String(item?.time || '').trim(),
     text: String(item?.text || '').trim(),
+    createdAt: item?.createdAt || item?.created_at || null,
   };
 }
 
@@ -33,10 +55,18 @@ function formatMessageTime(value) {
   if (sameDay) {
     return date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
   }
-  return date.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+  return date.toLocaleString('pt-BR', {
+    day: '2-digit',
+    month: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
-function mapRowToThreadEntry(row, { nutritionistName, patientName }) {
+export function mapChatRowToThreadEntry(
+  row,
+  { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
+) {
   const role = row?.autor_role === 'nutricionista' ? 'nutri' : 'user';
   return normalizeThreadEntry(
     {
@@ -45,9 +75,38 @@ function mapRowToThreadEntry(row, { nutritionistName, patientName }) {
       author: role === 'nutri' ? nutritionistName : patientName,
       time: formatMessageTime(row?.created_at),
       text: row?.texto,
+      createdAt: row?.created_at,
     },
     { nutritionistName, patientName }
   );
+}
+
+export function sortChatThreadByCreatedAt(thread = []) {
+  return [...(thread || [])].sort((left, right) => {
+    const leftTime = new Date(left?.createdAt || left?.time || 0).getTime();
+    const rightTime = new Date(right?.createdAt || right?.time || 0).getTime();
+    if (!Number.isFinite(leftTime) && !Number.isFinite(rightTime)) return 0;
+    if (!Number.isFinite(leftTime)) return -1;
+    if (!Number.isFinite(rightTime)) return 1;
+    return leftTime - rightTime;
+  });
+}
+
+function resolveSessionProfile(rpcActor, { pacienteId, nutricionistaId, resolvedNutriId, autorRole }) {
+  const normalized = normalizeRpcActorProfile(rpcActor);
+  if (normalized?.id_nutricionista_uuid) return normalized;
+  if (normalized?.id_paciente_uuid) return normalized;
+
+  const role =
+    autorRole === 'nutri' || autorRole === 'nutricionista' ? 'nutricionista' : autorRole;
+  if (role === 'nutricionista' && (nutricionistaId || resolvedNutriId)) {
+    return { id_nutricionista_uuid: nutricionistaId || resolvedNutriId };
+  }
+  if (pacienteId) return { id_paciente_uuid: pacienteId };
+  if (nutricionistaId || resolvedNutriId) {
+    return { id_nutricionista_uuid: nutricionistaId || resolvedNutriId };
+  }
+  return normalized;
 }
 
 export async function resolveNutricionistaIdForPatient(pacienteId, fallbackNutriId = null) {
@@ -86,30 +145,42 @@ export async function fetchChatThreadFromDatabase({
   const resolvedNutriId = await resolveNutricionistaIdForPatient(pacienteId, nutricionistaId);
   if (!pacienteId || !resolvedNutriId) return [];
 
+  const sessionProfile = resolveSessionProfile(rpcActor, {
+    pacienteId,
+    nutricionistaId,
+    resolvedNutriId,
+  });
+
+  const baseRpcParams = {
+    p_paciente_id: pacienteId,
+    p_nutricionista_id: resolvedNutriId,
+    p_limite: limit,
+  };
+
   let rpcParams;
   try {
-    rpcParams = await enrichRpcClinicalParams(
-      {
-        p_paciente_id: pacienteId,
-        p_nutricionista_id: resolvedNutriId,
-        p_limite: limit,
-      },
+    rpcParams = await enrichChatRpcParams(
+      baseRpcParams,
       pacienteId,
-      rpcActor
+      sessionProfile,
+      rpcActor || sessionProfile
     );
   } catch (error) {
-    console.log('Sessao RPC ausente ao listar chat:', error?.message || error);
+    console.log('Falha ao preparar sessao RPC do chat:', error?.message || error);
     return null;
   }
 
   const { data, error } = await supabase.rpc('listar_mensagens_chat', rpcParams);
 
   if (error) {
+    console.log('RPC listar_mensagens_chat:', error.message);
     if (isMissingRpc(error, 'listar_mensagens_chat')) return null;
     throw error;
   }
 
-  return (data || []).map((row) => mapRowToThreadEntry(row, { nutritionistName, patientName }));
+  return sortChatThreadByCreatedAt(
+    (data || []).map((row) => mapChatRowToThreadEntry(row, { nutritionistName, patientName }))
+  );
 }
 
 export async function sendChatMessage({
@@ -119,6 +190,7 @@ export async function sendChatMessage({
   texto,
   nutritionistName = 'Nutricionista',
   patientName = 'Paciente',
+  rpcActor = null,
 }) {
   const resolvedNutriId = await resolveNutricionistaIdForPatient(pacienteId, nutricionistaId);
   if (!pacienteId || !resolvedNutriId) {
@@ -126,26 +198,37 @@ export async function sendChatMessage({
   }
 
   const role = autorRole === 'nutri' || autorRole === 'nutricionista' ? 'nutricionista' : 'paciente';
+  const sessionProfile = resolveSessionProfile(rpcActor, {
+    pacienteId,
+    nutricionistaId,
+    resolvedNutriId,
+    autorRole: role,
+  });
 
   const { data, error } = await supabase.rpc(
     'enviar_mensagem_chat',
-    await enrichRpcClinicalParams(
+    await enrichChatRpcParams(
       {
         p_paciente_id: pacienteId,
         p_nutricionista_id: resolvedNutriId,
         p_autor_role: role,
         p_texto: String(texto || '').trim(),
       },
-      pacienteId
+      pacienteId,
+      sessionProfile,
+      rpcActor || sessionProfile
     )
   );
 
   if (error) {
-    if (isMissingRpc(error, 'enviar_mensagem_chat')) return null;
+    console.log('RPC enviar_mensagem_chat:', error.message);
+    if (isMissingRpc(error, 'enviar_mensagem_chat')) {
+      throw new Error('Chat indisponivel no servidor.');
+    }
     throw error;
   }
 
-  return mapRowToThreadEntry(data, { nutritionistName, patientName });
+  return mapChatRowToThreadEntry(data, { nutritionistName, patientName });
 }
 
 export async function migrateLegacyThreadToDatabase({
@@ -154,6 +237,7 @@ export async function migrateLegacyThreadToDatabase({
   legacyThread = [],
   nutritionistName = 'Nutricionista',
   patientName = 'Paciente',
+  rpcActor = null,
 }) {
   const resolvedNutriId = await resolveNutricionistaIdForPatient(pacienteId, nutricionistaId);
   if (!pacienteId || !resolvedNutriId || !legacyThread?.length) return [];
@@ -164,6 +248,7 @@ export async function migrateLegacyThreadToDatabase({
     nutritionistName,
     patientName,
     limit: 5,
+    rpcActor,
   });
 
   if (existing === null) return null;
@@ -172,15 +257,16 @@ export async function migrateLegacyThreadToDatabase({
   for (const item of legacyThread) {
     const text = String(item?.text || '').trim();
     if (!text) continue;
-    const role = item?.role === 'nutri' ? 'nutricionista' : 'paciente';
+    const itemRole = item?.role === 'nutri' ? 'nutricionista' : 'paciente';
     try {
       await sendChatMessage({
         pacienteId,
         nutricionistaId: resolvedNutriId,
-        autorRole: role,
+        autorRole: itemRole,
         texto: text,
         nutritionistName,
         patientName,
+        rpcActor,
       });
     } catch (error) {
       console.log('Erro ao migrar mensagem legada:', error);
@@ -192,5 +278,6 @@ export async function migrateLegacyThreadToDatabase({
     nutricionistaId: resolvedNutriId,
     nutritionistName,
     patientName,
+    rpcActor,
   });
 }

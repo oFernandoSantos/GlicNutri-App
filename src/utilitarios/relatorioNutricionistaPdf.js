@@ -1,9 +1,12 @@
 import {
-  BRAND_RGB,
+  nutriGreenRgb,
+  nutriGreenRgbDark,
+  nutriGreenRgbLight,
+} from '../temas/designSystemNutricionista';
+import {
   CHART_BLUE,
   CHART_ORANGE,
   CHART_PURPLE,
-  GLUCOSE_OK,
   PAGE_MARGIN,
   addBulletListPanel,
   addInsightBox,
@@ -17,6 +20,13 @@ import {
   drawHorizontalBarChart,
   pdfText,
 } from './relatorioPdfDesign';
+
+const NUTRI_BRAND_RGB = nutriGreenRgb;
+const NUTRI_GLUCOSE_OK = nutriGreenRgb;
+const NUTRI_SECTION_BRAND = {
+  brandDarkRgb: nutriGreenRgbDark,
+  brandLightRgb: nutriGreenRgbLight,
+};
 
 let pdfModulesPromise = null;
 
@@ -42,6 +52,7 @@ export function buildPortfolioSummaryPdf(bundle, { jsPDF }) {
     title: 'Relatório da Carteira',
     subtitle: pdfText(bundle.nutricionista?.nome || 'Nutricionista'),
     metaRight: periodLabel,
+    brandRgb: NUTRI_BRAND_RGB,
   });
 
   y = addMetaLine(
@@ -51,16 +62,16 @@ export function buildPortfolioSummaryPdf(bundle, { jsPDF }) {
   );
   y += 4;
 
-  y = addModernSectionTitle(doc, y, '1. Visão geral da carteira');
+  y = addModernSectionTitle(doc, y, '1. Visão geral da carteira', NUTRI_SECTION_BRAND);
   y = addSummaryCardGrid(doc, y, [
-    { label: 'Pacientes', value: metrics.totalPatients ?? 0, color: BRAND_RGB },
-    { label: 'Ativos', value: analytics.activePatients ?? 0, color: GLUCOSE_OK },
+    { label: 'Pacientes', value: metrics.totalPatients ?? 0, color: NUTRI_BRAND_RGB },
+    { label: 'Ativos', value: analytics.activePatients ?? 0, color: NUTRI_GLUCOSE_OK },
     { label: 'Sem registros', value: analytics.inactivePatients ?? 0, color: CHART_ORANGE },
-    { label: 'Glicose média', value: analytics.portfolioAvgGlucose ?? '—', suffix: 'mg/dL', color: BRAND_RGB },
-    { label: 'Tempo no alvo', value: analytics.portfolioAvgTir ?? '—', suffix: '%', color: GLUCOSE_OK },
+    { label: 'Glicose média', value: analytics.portfolioAvgGlucose ?? '—', suffix: 'mg/dL', color: NUTRI_BRAND_RGB },
+    { label: 'Tempo no alvo', value: analytics.portfolioAvgTir ?? '—', suffix: '%', color: NUTRI_GLUCOSE_OK },
     { label: 'Adesão média', value: metrics.averageAdherence ?? 0, suffix: '%', color: CHART_BLUE },
     { label: 'Refeições', value: analytics.totals?.meals ?? 0, color: CHART_BLUE },
-    { label: 'Glicose', value: analytics.totals?.glucose ?? 0, color: BRAND_RGB },
+    { label: 'Glicose', value: analytics.totals?.glucose ?? 0, color: NUTRI_BRAND_RGB },
     { label: 'Insulina', value: analytics.totals?.insulin ?? 0, color: CHART_PURPLE },
     { label: 'Medicações', value: analytics.totals?.medication ?? 0, color: CHART_ORANGE },
   ]);
@@ -70,14 +81,14 @@ export function buildPortfolioSummaryPdf(bundle, { jsPDF }) {
   y = drawHorizontalBarChart(doc, y, 'Ranking · tempo no alvo', analytics.tirRanking);
   y = drawHorizontalBarChart(doc, y, 'Média glicêmica por paciente', analytics.glucoseAvgRanking);
 
-  y = addModernSectionTitle(doc, y, '2. Engajamento e evolução');
+  y = addModernSectionTitle(doc, y, '2. Engajamento e evolução', NUTRI_SECTION_BRAND);
   y = drawHorizontalBarChart(doc, y, 'Quantidade de registros por paciente', analytics.recordsRanking);
   y = drawHorizontalBarChart(doc, y, 'Adesão alimentar por paciente', analytics.adherenceRanking);
 
   const showEvolution = (analytics.evolutionTirSeries || []).some((item) => item.value > 0);
   if (showEvolution) {
     y = drawColumnChart(doc, y, 'Evolução do tempo no alvo (carteira)', analytics.evolutionTirSeries, {
-      color: GLUCOSE_OK,
+      color: NUTRI_GLUCOSE_OK,
       valueSuffix: '%',
     });
   } else {
@@ -87,8 +98,8 @@ export function buildPortfolioSummaryPdf(bundle, { jsPDF }) {
     });
   }
 
-  y = addModernSectionTitle(doc, y, '3. Pacientes em destaque');
-  y = addBulletListPanel(doc, y, 'Melhor controle glicêmico', analytics.bestControlPatients, GLUCOSE_OK);
+  y = addModernSectionTitle(doc, y, '3. Pacientes em destaque', NUTRI_SECTION_BRAND);
+  y = addBulletListPanel(doc, y, 'Melhor controle glicêmico', analytics.bestControlPatients, NUTRI_GLUCOSE_OK);
   y = addBulletListPanel(doc, y, 'Precisam de atenção', analytics.needsAttentionPatients, CHART_ORANGE);
   y = addBulletListPanel(doc, y, 'Baixa adesão alimentar', analytics.lowAdherencePatients, CHART_BLUE);
   y = addBulletListPanel(
@@ -110,7 +121,7 @@ export function buildPortfolioSummaryPdf(bundle, { jsPDF }) {
       ? `${bundle.consultas.upcoming} consulta(s) agendada(s) nos próximos dias.`
       : 'Nenhuma consulta próxima agendada.',
   ];
-  y = addModernSectionTitle(doc, y, '4. Resumo para gestão');
+  y = addModernSectionTitle(doc, y, '4. Resumo para gestão', NUTRI_SECTION_BRAND);
   y = addInsightBox(doc, y, insights);
 
   addModernFooter(doc, 'GlicNutri · Relatório da carteira');
@@ -124,10 +135,11 @@ export function buildRelatorioAdesaoPdf(bundle, { jsPDF }) {
     title: 'Adesão alimentar da carteira',
     subtitle: pdfText(bundle.nutricionista?.nome || 'Nutricionista'),
     metaRight: bundle.periodLabel || 'Período',
+    brandRgb: NUTRI_BRAND_RGB,
   });
   y = addSummaryCardGrid(doc, y, [
     { label: 'Adesão média', value: bundle.metrics?.averageAdherence ?? 0, suffix: '%', color: CHART_BLUE },
-    { label: 'Melhor dia', value: bundle.metrics?.bestDay ?? 0, suffix: '%', color: GLUCOSE_OK },
+    { label: 'Melhor dia', value: bundle.metrics?.bestDay ?? 0, suffix: '%', color: NUTRI_GLUCOSE_OK },
     { label: 'Pior dia', value: bundle.metrics?.worstDay ?? 0, suffix: '%', color: CHART_ORANGE },
   ]);
   y = drawColumnChart(doc, y, 'Evolução semanal da carteira', bundle.weeklyAdherence || [], {
@@ -156,6 +168,7 @@ export function buildRelatorioRiscoPdf(bundle, { jsPDF }) {
     title: 'Risco glicêmico da carteira',
     subtitle: pdfText(bundle.nutricionista?.nome || 'Nutricionista'),
     metaRight: bundle.periodLabel || 'Período',
+    brandRgb: NUTRI_BRAND_RGB,
   });
   y = drawDistributionPanel(doc, y, 'Distribuição por controle', analytics.controlDistribution);
   y = addBulletListPanel(doc, y, 'Pacientes que precisam de atenção', analytics.needsAttentionPatients, CHART_ORANGE);

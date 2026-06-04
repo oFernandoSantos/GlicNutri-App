@@ -1,3 +1,4 @@
+import { nutriGreenRgb } from '../temas/designSystemNutricionista';
 import { clampPercent, riskBucketLabel } from './adesaoNutricional';
 import { buildExecutiveAlerts, resolveMealTypeLabel } from './relatorioPacienteAnalytics';
 
@@ -370,7 +371,7 @@ export function buildPortfolioReportAnalytics(bundle = {}) {
   const evolutionTirSeries = evolution.map((item) => ({
     label: item.label,
     value: item.tir,
-    color: [47, 157, 120],
+    color: nutriGreenRgb,
   }));
 
   const sortByTir = [...rows]
@@ -398,7 +399,7 @@ export function buildPortfolioReportAnalytics(bundle = {}) {
 
   return {
     controlDistribution: [
-      { label: CONTROL_LABELS.bom, value: controlCounts.bom, color: [47, 157, 120] },
+      { label: CONTROL_LABELS.bom, value: controlCounts.bom, color: nutriGreenRgb },
       { label: CONTROL_LABELS.atencao, value: controlCounts.atencao, color: [237, 137, 54] },
       { label: CONTROL_LABELS.critico, value: controlCounts.critico, color: [229, 62, 62] },
     ].filter((item) => item.value > 0),
@@ -411,7 +412,7 @@ export function buildPortfolioReportAnalytics(bundle = {}) {
       label: row.name,
       value: row.glucoseTir,
       display: `${row.glucoseTir}%`,
-      color: [47, 157, 120],
+      color: nutriGreenRgb,
     })),
     glucoseAvgRanking: sortByGlucose.slice(0, 8).map((row) => ({
       label: row.name,

@@ -2,13 +2,15 @@ import React, { useEffect, useState } from 'react';
 import { Platform, View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
+import { sombraPaciente, temaPaciente } from '../../temas/temaPaciente';
 import { navigateNutriTab } from '../../utilitarios/navegacaoAbas';
 
 export const NUTRI_TAB_BAR_HEIGHT = 64;
 export const NUTRI_TAB_BAR_SPACE = 14;
-const TAB_HIGHLIGHT_COLOR = '#4fdfa3';
+/** Mesmas cores do rodapé do acesso paciente (BarraAbasPaciente). */
+const TAB_HIGHLIGHT_COLOR = temaPaciente.cores.primaria;
 const TAB_ACTIVE_BACKGROUND = '#FFFFFF';
+const TAB_BAR_FOOTER_BG = temaPaciente.cores.fundo;
 
 const abasPrincipais = [
   { rota: 'NutricionistaAgenda', rotulo: 'Agenda', icone: 'calendar-outline' },
@@ -98,7 +100,7 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: 40,
     elevation: 14,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: TAB_BAR_FOOTER_BG,
     borderTopWidth: 1,
     borderTopColor: '#FFFFFF',
   },
@@ -108,11 +110,11 @@ const styles = StyleSheet.create({
     paddingTop: 1,
     paddingBottom: 3,
     paddingHorizontal: 6,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: TAB_BAR_FOOTER_BG,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    ...patientShadow,
+    ...sombraPaciente,
     borderColor: '#FFFFFF',
     zIndex: 80,
   },

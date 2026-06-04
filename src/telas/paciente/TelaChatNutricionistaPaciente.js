@@ -18,8 +18,13 @@ import {
   fetchPatientNutritionistChat,
   getPatientDisplayName,
   getPatientId,
+  mapRealtimeChatRowToThreadEntry,
+  mergeChatMessageIntoThread,
 } from '../../servicos/servicoDadosPaciente';
-import { getCachedPatientChat } from '../../servicos/cacheExperienciaPaciente';
+import {
+  getCachedPatientChat,
+  invalidatePatientChatCache,
+} from '../../servicos/cacheExperienciaPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
@@ -216,9 +221,15 @@ export default function TelaChatNutricionistaPaciente({
       return () => {
         active = false;
         clearInterval(intervalId);
+        if (patientId) {
+          invalidatePatientChatCache(patientId);
+        }
       };
     }, [load, patientId])
   );
+
+  const nutritionistName =
+    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
 
   useEffect(() => {
     if (!patientId) return undefined;
@@ -233,8 +244,24 @@ export default function TelaChatNutricionistaPaciente({
           table: 'mensagem_chat',
           filter: `paciente_id=eq.${patientId}`,
         },
-        () => {
-          loadRef.current({ silent: true, forceRefresh: true });
+        (payload) => {
+          const row = payload?.new;
+          if (row?.texto && payload?.eventType === 'INSERT') {
+            const entry = mapRealtimeChatRowToThreadEntry(row, patientFirstName, {
+              nutritionistName,
+            });
+            if (entry) {
+              setAppState((current) => ({
+                ...current,
+                nutritionistThread: mergeChatMessageIntoThread(
+                  current?.nutritionistThread || [],
+                  entry
+                ),
+              }));
+              return;
+            }
+          }
+          loadRef.current({ silent: true, forceRefresh: false });
         }
       )
       .subscribe();
@@ -242,10 +269,7 @@ export default function TelaChatNutricionistaPaciente({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [patientId]);
-
-  const nutritionistName =
-    nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
+  }, [patientId, patientFirstName, nutritionistName]);
 
   const chatPreview = useMemo(
     () =>

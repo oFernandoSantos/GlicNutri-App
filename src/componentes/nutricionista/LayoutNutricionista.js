@@ -121,25 +121,26 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: patientTheme.spacing.screen,
-    paddingTop: 14,
-    paddingBottom: 12,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    paddingTop: patientTheme.spacing.lg,
+    paddingBottom: patientTheme.spacing.md,
+    backgroundColor: patientTheme.colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: patientTheme.colors.surfaceBorder,
+    borderBottomColor: patientTheme.colors.border,
   },
   headerText: {
     marginRight: 72,
   },
   title: {
-    fontSize: 28,
+    fontSize: 22,
     color: patientTheme.colors.text,
     fontWeight: '700',
   },
   subtitle: {
-    marginTop: 6,
+    marginTop: patientTheme.spacing.xs,
     color: patientTheme.colors.textMuted,
     fontSize: 14,
     lineHeight: 20,
+    fontWeight: '500',
   },
   rightAction: {
     position: 'absolute',

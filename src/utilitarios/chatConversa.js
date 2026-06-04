@@ -4,6 +4,7 @@ import {
   buildNutritionistThreadPreview,
   normalizeNutritionistThreadEntry,
 } from '../servicos/servicoDadosPaciente';
+import { sortChatThreadByCreatedAt } from '../servicos/servicoMensagensChat';
 
 export const CHAT_COMPACT_BREAKPOINT = 900;
 const PATIENT_CHAT_READ_PREFIX = '@glicnutri:patientChatReadAt:';
@@ -13,16 +14,40 @@ export function isChatCompactLayout(windowWidth) {
   return Number(windowWidth || 0) < CHAT_COMPACT_BREAKPOINT;
 }
 
+function getThreadLastCreatedAt(thread = []) {
+  const list = Array.isArray(thread) ? thread : [];
+  const last = list[list.length - 1];
+  const parsed = new Date(last?.createdAt || last?.created_at || 0).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+/** Evita que telas com skipChat apaguem o thread já carregado do RPC. */
+export function resolveNutritionistThreadMerge(current = [], incoming = []) {
+  const currentList = Array.isArray(current) ? current : [];
+  const incomingList = Array.isArray(incoming) ? incoming : [];
+  if (!incomingList.length) return currentList;
+  if (!currentList.length) return incomingList;
+
+  const currentTime = getThreadLastCreatedAt(currentList);
+  const incomingTime = getThreadLastCreatedAt(incomingList);
+
+  if (incomingTime > currentTime) return incomingList;
+  if (currentTime > incomingTime) return currentList;
+  return incomingList.length >= currentList.length ? incomingList : currentList;
+}
+
 export function normalizeChatMessages(
   thread = [],
   { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
 ) {
-  return (Array.isArray(thread) ? thread : [])
-    .map((item) => ({
-      ...normalizeNutritionistThreadEntry(item, { nutritionistName, patientName }),
-      createdAt: item?.createdAt || item?.created_at || null,
-    }))
-    .filter((item) => item.text);
+  return sortChatThreadByCreatedAt(
+    (Array.isArray(thread) ? thread : [])
+      .map((item) => ({
+        ...normalizeNutritionistThreadEntry(item, { nutritionistName, patientName }),
+        createdAt: item?.createdAt || item?.created_at || null,
+      }))
+      .filter((item) => item.text)
+  );
 }
 
 export function buildPatientChatPreview(thread = [], options = {}) {
@@ -88,6 +113,37 @@ export function buildNutriChatPreview(thread = [], options = {}) {
 export function getLastChatMessage(thread = [], options = {}) {
   const messages = normalizeChatMessages(thread, options);
   return messages[messages.length - 1] || null;
+}
+
+function shouldSubmitChatMessage(event) {
+  const native = event?.nativeEvent || {};
+  const key = native.key || event?.key;
+  const shiftKey = Boolean(native.shiftKey || event?.shiftKey);
+  return key === 'Enter' && !shiftKey;
+}
+
+/** Enter envia; Shift+Enter nova linha (web). */
+export function handleChatInputKeyPress(event, onSend) {
+  if (!shouldSubmitChatMessage(event)) return;
+  if (typeof event?.preventDefault === 'function') {
+    event.preventDefault();
+  }
+  onSend?.();
+}
+
+/** Props TextInput: Enter envia mensagem no chat. */
+export function bindChatEnterToSend(onSend) {
+  return {
+    blurOnSubmit: false,
+    returnKeyType: 'send',
+    onSubmitEditing: onSend,
+    onKeyPress: (event) => handleChatInputKeyPress(event, onSend),
+    ...(Platform.OS === 'web'
+      ? {
+          onKeyDown: (event) => handleChatInputKeyPress(event, onSend),
+        }
+      : null),
+  };
 }
 
 /** Garante scroll até a mensagem mais recente após layout (Android/iOS). */

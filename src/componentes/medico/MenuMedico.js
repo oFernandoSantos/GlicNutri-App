@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { nutriTheme as patientTheme, nutriShadow as patientShadow } from '../../temas/temaVisualNutricionista';
+import { medicoTheme as patientTheme, medicoShadow as patientShadow } from '../../temas/temaVisualNutricionista';
 
 const menuItems = [
   { label: 'Agenda', route: 'MedicoAgenda', icon: 'calendar-outline' },

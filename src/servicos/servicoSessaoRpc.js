@@ -297,10 +297,36 @@ export async function emitirSessaoRpcOAuthPaciente() {
   return token;
 }
 
-export function resolveRpcActorProfile(user = null, pacienteId = null) {
-  if (user && typeof user === 'object' && !Array.isArray(user)) {
-    return user;
+export function normalizeRpcActorProfile(user = null) {
+  if (!user || typeof user !== 'object' || Array.isArray(user)) {
+    return null;
   }
+
+  if (user.id_paciente_uuid) {
+    const email = String(user.email_pac || user.email || '').trim();
+    return { id_paciente_uuid: user.id_paciente_uuid, email_pac: email, email };
+  }
+
+  if (user.id_nutricionista_uuid) {
+    const email = String(user.email_acesso || user.email || '').trim();
+    return {
+      id_nutricionista_uuid: user.id_nutricionista_uuid,
+      email_acesso: email,
+      email,
+    };
+  }
+
+  if (user.id_medico_uuid) {
+    const email = String(user.email_medico || user.email || '').trim();
+    return { id_medico_uuid: user.id_medico_uuid, email_medico: email, email };
+  }
+
+  return user;
+}
+
+export function resolveRpcActorProfile(user = null, pacienteId = null) {
+  const normalized = normalizeRpcActorProfile(user);
+  if (normalized) return normalized;
 
   if (typeof pacienteId === 'string' && pacienteId.trim()) {
     return { id_paciente_uuid: pacienteId.trim() };

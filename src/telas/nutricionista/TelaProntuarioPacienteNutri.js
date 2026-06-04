@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -19,19 +19,23 @@ import {
   SectionCard,
   TrendChartCard,
 } from '../../componentes/nutricionista/NutriDesktopUI';
+import RegistrosPacienteNutriSection from '../../componentes/nutricionista/RegistrosPacienteNutriSection';
 import {
   fetchPatientById,
   fetchPatientExperience,
+  fetchPatientRegistrosForNutri,
   getLatestGlucose,
-  fetchGlucoseReadings,
-  fetchMedicationEntries,
-  fetchMealEntries,
 } from '../../servicos/servicoDadosPaciente';
+import { sortRegistrosNewestFirst } from '../../utilitarios/registrosProntuarioNutri';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   averageAdherence,
   buildWeeklyAdherenceFromMeals,
 } from '../../utilitarios/adesaoNutricional';
+import {
+  filterGlucoseReadingsLastHours,
+  sortGlucoseReadingsChronologically,
+} from '../../utilitarios/dataLocal';
 import {
   disableOtherMealPlansForPatient,
   fetchActiveMealPlanForPatient,
@@ -61,13 +65,6 @@ const detailTabs = [
   { value: 'historico', label: 'Consultas' },
   { value: 'goals',     label: 'Metas' },
   { value: 'personal',  label: 'Dados' },
-];
-
-const registrosTabs = [
-  { value: 'glicemia',   label: 'Glicemia' },
-  { value: 'medicacao',  label: 'Medicação' },
-  { value: 'insulina',   label: 'Insulina' },
-  { value: 'refeicoes',  label: 'Refeições' },
 ];
 
 function calculateAge(value) {
@@ -202,12 +199,27 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   const [evolucaoMsg, setEvolucaoMsg] = useState(null);
 
   // ── Estado registros do paciente ─────────────────────────────────
-  const [registrosTab, setRegistrosTab] = useState('glicemia');
   const [glicemias, setGlicemias] = useState([]);
   const [medicacoes, setMedicacoes] = useState([]);
   const [insulinas, setInsulinas] = useState([]);
   const [refeicoes, setRefeicoes] = useState([]);
   const [loadingRegistros, setLoadingRegistros] = useState(false);
+  const [registrosLoadError, setRegistrosLoadError] = useState('');
+  const loadRegistrosRef = useRef(null);
+
+  const nutriRpcActor = useMemo(() => {
+    const email =
+      usuarioLogado?.email_acesso ||
+      usuarioLogado?.email ||
+      usuarioLogado?.email_nutri ||
+      '';
+    return {
+      ...(usuarioLogado || {}),
+      id_nutricionista_uuid: nutricionistaId || getNutritionistId(usuarioLogado),
+      email_acesso: email,
+      email,
+    };
+  }, [nutricionistaId, usuarioLogado]);
 
   // ── Estado histórico de consultas ────────────────────────────────
   const [consultasHistorico, setConsultasHistorico] = useState([]);
@@ -260,6 +272,10 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       try {
         const exp = await fetchPatientExperience(pid, {
           skipAlertSync: true,
+          skipChat: true,
+          includeHidden: true,
+          patientContext: nutriRpcActor,
+          currentPatient: patientRecord || { id_paciente_uuid: pid },
           ...mesclarLimitesDadosPaciente('prontuario'),
         });
         if (active) setPatientExperience(exp);
@@ -269,7 +285,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     }
     load();
     return () => { active = false; };
-  }, [paciente?.id, pacienteId, patientRecord?.id_paciente_uuid]);
+  }, [nutriRpcActor, paciente?.id, pacienteId, patientRecord?.id_paciente_uuid]);
 
   const currentPatient = useMemo(() => {
     const base = normalizePatientForProntuario(paciente || patientRecord || null);
@@ -277,11 +293,20 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     const { items } = buildWeeklyAdherenceFromMeals(patientExperience.appState?.mealEntries, 3);
     const adherence = averageAdherence(items);
     const latestGlucose = getLatestGlucose(patientExperience.glucoseReadings);
+    const glucose12h = sortGlucoseReadingsChronologically(
+      filterGlucoseReadingsLastHours(patientExperience.glucoseReadings || [], 12)
+    ).map((reading, index) => ({
+      id: reading.id || `glucose-12h-${index}`,
+      value: Number(reading.value) || 0,
+      label: String(reading.time || '').trim().slice(0, 5) || `${index + 1}`,
+      time: reading.time,
+    }));
+
     return {
       ...base,
       adherence: adherence || base.adherence,
       latestGlucose: latestGlucose?.value ?? base.latestGlucose,
-      glucose12h: (patientExperience.glucoseReadings || []).slice(0, 12),
+      glucose12h,
       trendText: latestGlucose?.value ? `Última leitura: ${latestGlucose.value} mg/dL` : base.trendText,
     };
   }, [paciente, patientExperience, patientRecord]);
@@ -361,27 +386,60 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     }
   }, [effectivePacienteId]);
 
-  // Carregar registros (lazy)
+  // Carregar registros (lazy) — mesmos limites do histórico do paciente
+  const patientRecordForRpc = useMemo(() => {
+    const raw = paciente?.raw || patientRecord || null;
+    if (raw?.id_paciente_uuid) return raw;
+    if (effectivePacienteId) {
+      return { id_paciente_uuid: effectivePacienteId };
+    }
+    return null;
+  }, [effectivePacienteId, paciente, patientRecord]);
+
   const loadRegistros = useCallback(async () => {
     if (!effectivePacienteId) return;
+    if (!nutriRpcActor?.id_nutricionista_uuid) {
+      setRegistrosLoadError('Nutricionista sem identificador. Saia e entre novamente.');
+      return;
+    }
+
+    const limites = mesclarLimitesDadosPaciente('prontuario', { includeHidden: true });
     try {
       setLoadingRegistros(true);
-      const [glic, meds, ref] = await Promise.all([
-        fetchGlucoseReadings(effectivePacienteId, 40).catch(() => []),
-        fetchMedicationEntries(effectivePacienteId, 40).catch(() => []),
-        fetchMealEntries(effectivePacienteId, 40).catch(() => []),
-      ]);
-      setGlicemias(glic || []);
-      const allMeds = meds || [];
-      setMedicacoes(allMeds.filter(m => m.tipo_registro !== 'insulin' && m.medicationKind !== 'insulin'));
-      setInsulinas(allMeds.filter(m => m.tipo_registro === 'insulin' || m.medicationKind === 'insulin'));
-      setRefeicoes(ref || []);
-    } catch (_) {
+      setRegistrosLoadError('');
+
+      const resultado = await fetchPatientRegistrosForNutri(effectivePacienteId, {
+        rpcActor: nutriRpcActor,
+        limits: limites,
+        experience: patientExperience,
+        currentPatient: patientRecordForRpc,
+      });
+      setGlicemias(sortRegistrosNewestFirst(resultado.glicemias || []));
+      setMedicacoes(sortRegistrosNewestFirst(resultado.medicacoes || []));
+      setInsulinas(sortRegistrosNewestFirst(resultado.insulinas || []));
+      setRefeicoes(sortRegistrosNewestFirst(resultado.refeicoes || []));
+      setRegistrosLoadError(resultado.error || '');
+    } catch (error) {
       setGlicemias([]);
+      setMedicacoes([]);
+      setInsulinas([]);
+      setRefeicoes([]);
+      setRegistrosLoadError(
+        error?.message || 'Nao foi possivel carregar os registros deste paciente.'
+      );
     } finally {
       setLoadingRegistros(false);
     }
-  }, [effectivePacienteId]);
+  }, [
+    effectivePacienteId,
+    nutriRpcActor,
+    patientExperience,
+    patientRecordForRpc,
+  ]);
+
+  useEffect(() => {
+    loadRegistrosRef.current = loadRegistros;
+  }, [loadRegistros]);
 
   // Carregar histórico de consultas (lazy)
   const loadHistorico = useCallback(async () => {
@@ -397,14 +455,28 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     }
   }, [effectivePacienteId, nutricionistaId]);
 
+  useEffect(() => {
+    setGlicemias([]);
+    setMedicacoes([]);
+    setInsulinas([]);
+    setRefeicoes([]);
+    setRegistrosLoadError('');
+  }, [effectivePacienteId]);
+
   // Lazy load por tab
   useEffect(() => {
     if (activeTab === 'clinico' || activeTab === 'goals') loadProntuario();
     if (activeTab === 'evolucao' && !prontuarioCompleto) loadProntuario();
-    if (activeTab === 'registros' && glicemias.length === 0) loadRegistros();
+    if (activeTab === 'registros' && effectivePacienteId) {
+      loadRegistrosRef.current?.();
+    }
     if (activeTab === 'historico' && consultasHistorico.length === 0) loadHistorico();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab, effectivePacienteId]);
+  }, [activeTab, effectivePacienteId, loadHistorico, loadProntuario, prontuarioCompleto, consultasHistorico.length]);
+
+  useEffect(() => {
+    if (activeTab !== 'registros' || !effectivePacienteId || !patientExperience) return;
+    loadRegistrosRef.current?.();
+  }, [activeTab, effectivePacienteId, patientExperience]);
 
   const allMeals = useMemo(() => [...(currentPatient?.planMeals || []), ...extraMeals], [currentPatient, extraMeals]);
 
@@ -924,94 +996,19 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
 
         {/* ── TAB: REGISTROS DO PACIENTE ────────────────────────────────── */}
         {activeTab === 'registros' ? (
-          <View style={styles.pageGap}>
-            <FilterTabs items={registrosTabs} active={registrosTab} onChange={setRegistrosTab} compact />
-
-            {loadingRegistros ? (
-              <View style={styles.inlineStatus}>
-                <ActivityIndicator color={patientTheme.colors.primaryDark} />
-                <Text style={styles.inlineStatusText}>Carregando registros...</Text>
-              </View>
-            ) : null}
-
-            {/* Glicemia */}
-            {registrosTab === 'glicemia' ? (
-              <SectionCard>
-                <Text style={styles.sectionTitle}>Histórico de Glicemia</Text>
-                {glicemias.length === 0 && !loadingRegistros ? (
-                  <Text style={styles.emptyText}>Nenhum registro de glicemia encontrado.</Text>
-                ) : (
-                  glicemias.slice(0, 30).map((g, i) => (
-                    <View key={g.id || i} style={styles.registroRow}>
-                      <Text style={styles.registroData}>{formatDateTime(g.data_hora || g.registered_at || g.created_at)}</Text>
-                      <View style={[styles.glucoseBadge, getGlucoseStyle(g.valor_mgdl || g.value)]}>
-                        <Text style={styles.glucoseBadgeText}>{g.valor_mgdl || g.value} mg/dL</Text>
-                      </View>
-                      {g.contexto || g.context ? (
-                        <Text style={styles.registroMeta}>{g.contexto || g.context}</Text>
-                      ) : null}
-                    </View>
-                  ))
-                )}
-              </SectionCard>
-            ) : null}
-
-            {/* Medicação */}
-            {registrosTab === 'medicacao' ? (
-              <SectionCard>
-                <Text style={styles.sectionTitle}>Medicações</Text>
-                {medicacoes.length === 0 && !loadingRegistros ? (
-                  <Text style={styles.emptyText}>Nenhum registro de medicação encontrado.</Text>
-                ) : (
-                  medicacoes.slice(0, 30).map((m, i) => (
-                    <View key={m.id || i} style={styles.registroRow}>
-                      <Text style={styles.registroData}>{formatDateTime(m.data_hora || m.registered_at || m.created_at)}</Text>
-                      <Text style={styles.registroNome}>{m.nome_medicamento || m.medicationName || 'Medicamento'}</Text>
-                      {m.dosagem || m.dose ? <Text style={styles.registroMeta}>{m.dosagem || m.dose}</Text> : null}
-                    </View>
-                  ))
-                )}
-              </SectionCard>
-            ) : null}
-
-            {/* Insulina */}
-            {registrosTab === 'insulina' ? (
-              <SectionCard>
-                <Text style={styles.sectionTitle}>Registros de Insulina</Text>
-                {insulinas.length === 0 && !loadingRegistros ? (
-                  <Text style={styles.emptyText}>Nenhum registro de insulina encontrado.</Text>
-                ) : (
-                  insulinas.slice(0, 30).map((m, i) => (
-                    <View key={m.id || i} style={styles.registroRow}>
-                      <Text style={styles.registroData}>{formatDateTime(m.data_hora || m.registered_at || m.created_at)}</Text>
-                      <Text style={styles.registroNome}>{m.nome_medicamento || m.medicationName || 'Insulina'}</Text>
-                      {m.dosagem || m.dose ? <Text style={styles.registroMeta}>{m.dosagem || m.dose} UI</Text> : null}
-                      {m.categoria_insulina ? <Text style={styles.registroMeta}>{m.categoria_insulina}</Text> : null}
-                    </View>
-                  ))
-                )}
-              </SectionCard>
-            ) : null}
-
-            {/* Refeições */}
-            {registrosTab === 'refeicoes' ? (
-              <SectionCard>
-                <Text style={styles.sectionTitle}>Histórico Alimentar</Text>
-                {refeicoes.length === 0 && !loadingRegistros ? (
-                  <Text style={styles.emptyText}>Nenhum registro alimentar encontrado.</Text>
-                ) : (
-                  refeicoes.slice(0, 30).map((r, i) => (
-                    <View key={r.id || i} style={styles.registroRow}>
-                      <Text style={styles.registroData}>{formatDateTime(r.created_at || r.data_hora)}</Text>
-                      <Text style={styles.registroNome}>{r.nome || r.tipo_refeicao || 'Refeição'}</Text>
-                      {r.calorias_estimadas ? <Text style={styles.registroMeta}>{r.calorias_estimadas} kcal</Text> : null}
-                      {r.resumo_ia ? <Text style={[styles.registroMeta, { flex: 1 }]} numberOfLines={2}>{r.resumo_ia}</Text> : null}
-                    </View>
-                  ))
-                )}
-              </SectionCard>
-            ) : null}
-          </View>
+          <RegistrosPacienteNutriSection
+            glicemias={glicemias}
+            medicacoes={medicacoes}
+            insulinas={insulinas}
+            refeicoes={refeicoes}
+            loadingRegistros={loadingRegistros}
+            loadError={registrosLoadError}
+            pacienteId={effectivePacienteId}
+            navigation={navigation}
+            patientName={currentPatient?.name}
+            usuarioLogado={usuarioLogado}
+            onReloadRegistros={loadRegistros}
+          />
         ) : null}
 
         {/* ── TAB: PLANO ALIMENTAR ──────────────────────────────────────── */}
@@ -1297,7 +1294,7 @@ function InlineMsg({ msg }) {
 function StatusBadge({ status }) {
   const map = {
     scheduled: { label: 'Agendada', color: '#e8f4f8', text: '#2c7a9e' },
-    confirmed: { label: 'Confirmada', color: '#e8f4e8', text: '#2e7d32' },
+    confirmed: { label: 'Confirmada', color: patientTheme.colors.primarySoft, text: patientTheme.colors.primaryDark },
     done: { label: 'Realizada', color: '#f0f8e8', text: '#558b2f' },
     cancelled: { label: 'Cancelada', color: '#fef0f0', text: '#c62828' },
     no_show: { label: 'Não compareceu', color: '#fff8e1', text: '#e65100' },
@@ -1310,21 +1307,20 @@ function StatusBadge({ status }) {
   );
 }
 
-function getGlucoseStyle(val) {
-  const v = Number(val);
-  if (v >= 250) return styles.glucoseHigh;
-  if (v >= 180) return styles.glucoseModerate;
-  if (v < 70)   return styles.glucoseLow;
-  return styles.glucoseNormal;
-}
-
 // ──────────────────────────────────────────────────────────────────
 // Estilos
 // ──────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: patientTheme.colors.background },
   headerShell: { paddingHorizontal: patientTheme.spacing.screen, paddingTop: 16, paddingBottom: 8 },
-  headerCard: { backgroundColor: patientTheme.colors.background, borderRadius: patientTheme.radius.xl, padding: patientTheme.spacing.card, gap: 14, ...patientShadow },
+  headerCard: {
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: patientTheme.radius.card,
+    borderColor: patientTheme.colors.border,
+    padding: patientTheme.spacing.card,
+    gap: 14,
+    ...patientShadow,
+  },
   headerMain: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', justifyContent: 'space-between', gap: 12 },
   identityRow: { flexDirection: 'row', gap: 12, alignItems: 'center', flex: 1 },
   identityCopy: { flex: 1, minWidth: 0 },
@@ -1347,7 +1343,7 @@ const styles = StyleSheet.create({
   },
   reportChipActive: {
     backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.primaryDark,
+    borderColor: patientTheme.colors.surfaceBorder,
   },
   reportChipText: { color: patientTheme.colors.textMuted, fontSize: 12, fontWeight: '600' },
   reportChipTextActive: { color: patientTheme.colors.primaryDark },
@@ -1355,7 +1351,7 @@ const styles = StyleSheet.create({
     marginTop: 4,
     minHeight: 46,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: '#4CD197',
+    backgroundColor: patientTheme.colors.primary,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
@@ -1374,10 +1370,19 @@ const styles = StyleSheet.create({
   subLabel: { fontSize: 12, fontWeight: '800', color: patientTheme.colors.textMuted, textTransform: 'uppercase', marginBottom: 8 },
   helperText: { color: patientTheme.colors.textMuted, fontSize: 12 },
   inputLabel: { fontSize: 12, fontWeight: '700', color: patientTheme.colors.textMuted, marginBottom: 4 },
-  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: patientTheme.colors.primarySoft },
+  editBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 999, backgroundColor: patientTheme.colors.backgroundSoft },
   editBtnText: { fontSize: 12, fontWeight: '800', color: patientTheme.colors.text },
   statsRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 12, marginBottom: 8 },
-  miniStat: { flex: 1, minWidth: 70, padding: 10, backgroundColor: patientTheme.colors.backgroundSoft, borderRadius: patientTheme.radius.lg, alignItems: 'center' },
+  miniStat: {
+    flex: 1,
+    minWidth: 70,
+    padding: 10,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderRadius: patientTheme.radius.lg,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    alignItems: 'center',
+  },
   miniStatLabel: { fontSize: 11, fontWeight: '700', color: patientTheme.colors.textMuted },
   miniStatValue: { fontSize: 18, fontWeight: '900', color: patientTheme.colors.text, marginTop: 4 },
   historicoRow: { flexDirection: 'row', gap: 12, paddingVertical: 8, borderBottomWidth: 1, borderBottomColor: patientTheme.colors.border, flexWrap: 'wrap' },
@@ -1420,16 +1425,6 @@ const styles = StyleSheet.create({
   evolucaoData: { fontSize: 12, fontWeight: '800', color: patientTheme.colors.textMuted, marginBottom: 6 },
   evolLabel: { fontSize: 11, fontWeight: '800', color: patientTheme.colors.primaryDark, textTransform: 'uppercase' },
   evolText: { color: patientTheme.colors.text, lineHeight: 20, marginTop: 2 },
-  registroRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: patientTheme.colors.border, alignItems: 'center' },
-  registroData: { fontSize: 12, color: patientTheme.colors.textMuted, minWidth: 130 },
-  registroNome: { fontWeight: '700', color: patientTheme.colors.text, flex: 1 },
-  registroMeta: { fontSize: 12, color: patientTheme.colors.textMuted },
-  glucoseBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999 },
-  glucoseBadgeText: { fontWeight: '900', fontSize: 13 },
-  glucoseNormal:   { backgroundColor: '#e8f5e9' },
-  glucoseModerate: { backgroundColor: '#fff8e1' },
-  glucoseHigh:     { backgroundColor: '#fef0f0' },
-  glucoseLow:      { backgroundColor: '#e3f2fd' },
   consultaCard: { borderWidth: 1, borderColor: patientTheme.colors.border, borderRadius: patientTheme.radius.lg, padding: 14, marginTop: 12, ...patientShadow },
   consultaHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   consultaData: { fontWeight: '800', color: patientTheme.colors.text },

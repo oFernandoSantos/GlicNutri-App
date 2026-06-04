@@ -34,6 +34,8 @@ import {
   buildNutritionistThreadPreview,
   fetchNutritionistChatInboxForPatientIds,
   fetchNutritionistChatThreadForPatient,
+  mapRealtimeChatRowToThreadEntry,
+  mergeChatMessageIntoThread,
   normalizeNutritionistThreadEntry,
   savePatientNutritionistChat,
 } from '../../servicos/servicoDadosPaciente';
@@ -46,7 +48,14 @@ import {
   getNutritionistId,
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
-import { isChatCompactLayout, scrollChatToEnd } from '../../utilitarios/chatConversa';
+import { bindChatEnterToSend, isChatCompactLayout, scrollChatToEnd } from '../../utilitarios/chatConversa';
+import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
+import RegistroChatContextCard from '../../componentes/comum/RegistroChatContextCard';
+import RegistroChatReplyPreview from '../../componentes/comum/RegistroChatReplyPreview';
+import {
+  buildRegistroChatMessageFromContext,
+  parseRegistroChatMessage,
+} from '../../utilitarios/registrosProntuarioNutri';
 
 function formatTimeNow() {
   return new Date().toLocaleTimeString('pt-BR', {
@@ -70,14 +79,14 @@ function sortChatsByRecency(items = []) {
   });
 }
 
-function applyThreadPreviewToChat(chat, thread = []) {
+function applyThreadPreviewToChat(chat, thread = [], { threadLoaded = true } = {}) {
   const preview = buildNutritionistThreadPreview(thread);
   const lastEntry = thread[thread.length - 1] || null;
 
   return {
     ...chat,
     messages: thread,
-    threadLoaded: true,
+    threadLoaded,
     lastMessage: preview.lastMessage,
     lastMessageAt: preview.lastMessageAt || chat.lastMessageAt,
     lastMessageTimestamp: lastEntry?.createdAt || chat.lastMessageTimestamp || new Date().toISOString(),
@@ -168,6 +177,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const isCompact = isChatCompactLayout(windowWidth);
   const preselectedPatientId = route?.params?.pacienteId || route?.params?.patientId || null;
   const preselectedChatId = route?.params?.chatId || null;
+  const routeRegistroContext = route?.params?.registroContext || null;
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
   const scrollRef = useRef(null);
   const hasLoadedChatsRef = useRef(false);
@@ -175,6 +185,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const threadRequestRef = useRef(0);
   const patientsRef = useRef([]);
   const chatsRef = useRef([]);
+  const activeChatIdRef = useRef(null);
   const showTabBar = route?.name === 'NutricionistaMensagens';
   const chatPanelHeight = useMemo(() => {
     const readerHeader = insets.top + READER_BAR_HEIGHT;
@@ -197,6 +208,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const [activeChatId, setActiveChatId] = useState(null);
   const [visibleChatCount, setVisibleChatCount] = useState(CHAT_PAGE_SIZE);
   const [threadLoading, setThreadLoading] = useState(false);
+  const [pendingRegistro, setPendingRegistro] = useState(routeRegistroContext);
   const [inboxPreviewLoadedCount, setInboxPreviewLoadedCount] = useState(0);
   const [chatSummaryMetrics, setChatSummaryMetrics] = useState({
     total: 0,
@@ -209,6 +221,15 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const scheduleInboxRefreshRef = useRef(() => {});
 
   useEffect(() => {
+    if (routeRegistroContext) {
+      setPendingRegistro(routeRegistroContext);
+      if (preselectedPatientId) {
+        setActiveChatId(`chat-${preselectedPatientId}`);
+      }
+    }
+  }, [preselectedPatientId, routeRegistroContext]);
+
+  useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
 
@@ -219,6 +240,10 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   useEffect(() => {
     chatsRef.current = chats;
   }, [chats]);
+
+  useEffect(() => {
+    activeChatIdRef.current = activeChatId;
+  }, [activeChatId]);
 
   const mergeInboxPreviews = useCallback((patients, summaries) => {
     const summariesById = new Map(
@@ -242,7 +267,12 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       if (!patientIds.length) return;
 
       const summaries = await fetchCachedNutriChatInbox(nutricionistaId, patientIds, () =>
-        fetchNutritionistChatInboxForPatientIds(patientIds, nutricionistaId, patientsByIdRef.current)
+        fetchNutritionistChatInboxForPatientIds(
+          patientIds,
+          nutricionistaId,
+          patientsByIdRef.current,
+          usuarioLogado
+        )
       );
 
       setChats((current) => {
@@ -251,7 +281,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       });
       setInboxPreviewLoadedCount((current) => Math.max(current, fromIndex + patientIds.length));
     },
-    [mergeInboxPreviews, nutricionistaId]
+    [mergeInboxPreviews, nutricionistaId, usuarioLogado]
   );
 
   const loadInbox = useCallback(
@@ -266,6 +296,12 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
           setLoadError('Nutricionista sem identificador para abrir o chat.');
           return;
         }
+
+        const rpcActor = {
+          ...(usuarioLogado || {}),
+          id_nutricionista_uuid: nutricionistaId,
+        };
+        await garantirSessaoRpcClinicaComPerfil(rpcActor);
 
         if (bustCache) {
           invalidateNutriChatInboxCache(nutricionistaId);
@@ -327,7 +363,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         if (!silent) setLoading(false);
       }
     },
-    [isCompact, loadInboxPreviewsForPatients, nutricionistaId, preselectedChatId, preselectedPatientId]
+    [isCompact, loadInboxPreviewsForPatients, nutricionistaId, preselectedChatId, preselectedPatientId, usuarioLogado]
   );
 
   const loadActiveThread = useCallback(
@@ -340,11 +376,19 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       if (!silent) setThreadLoading(true);
 
       try {
-        const patientName =
-          chatsRef.current.find((chat) => chat.patientId === patientId)?.patientName || 'Paciente';
+        const activeSnapshot =
+          chatsRef.current.find((chat) => chat.patientId === patientId) || null;
+        const patientName = activeSnapshot?.patientName || 'Paciente';
+        const rpcActor = {
+          ...(usuarioLogado || {}),
+          id_nutricionista_uuid: nutricionistaId,
+        };
+
+        await garantirSessaoRpcClinicaComPerfil(rpcActor);
 
         const messages = await fetchNutritionistChatThreadForPatient(patientId, nutricionistaId, {
           patientName,
+          rpcActor,
         });
 
         if (threadRequestRef.current !== requestId) return;
@@ -353,19 +397,28 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
           sortChatsByRecency(
             current.map((chat) => {
               if (chat.patientId !== patientId) return chat;
-              return applyThreadPreviewToChat(chat, messages);
+              return applyThreadPreviewToChat(chat, messages, { threadLoaded: true });
             })
           )
         );
       } catch (error) {
         console.log('Erro ao carregar thread do paciente:', error);
+        if (threadRequestRef.current === requestId) {
+          setChats((current) =>
+            current.map((chat) =>
+              chat.patientId === patientId
+                ? applyThreadPreviewToChat(chat, chat.messages || [], { threadLoaded: false })
+                : chat
+            )
+          );
+        }
       } finally {
         if (threadRequestRef.current === requestId) {
           setThreadLoading(false);
         }
       }
     },
-    [nutricionistaId]
+    [nutricionistaId, usuarioLogado]
   );
 
   const scheduleInboxRefresh = useCallback(
@@ -459,7 +512,37 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         },
         (payload) => {
           if (draftRef.current.trim() || sendingRef.current) return;
-          const patientId = payload?.new?.paciente_id || payload?.old?.paciente_id || null;
+          const row = payload?.new;
+          const patientId = row?.paciente_id || payload?.old?.paciente_id || null;
+          if (row?.texto && patientId && payload?.eventType === 'INSERT') {
+            const activeChat = chatsRef.current.find(
+              (chat) => chat.id === activeChatIdRef.current
+            );
+            if (activeChat?.patientId === patientId) {
+              const entry = mapRealtimeChatRowToThreadEntry(row, activeChat.patientName, {
+                nutritionistName:
+                  usuarioLogado?.nome_completo_nutri ||
+                  usuarioLogado?.nome_nutri ||
+                  'Nutricionista',
+              });
+              if (entry) {
+                setChats((current) =>
+                  sortChatsByRecency(
+                    current.map((chat) => {
+                      if (chat.patientId !== patientId) return chat;
+                      const nextThread = mergeChatMessageIntoThread(chat.messages || [], entry);
+                      return applyThreadPreviewToChat(
+                        { ...chat, threadLoaded: true },
+                        nextThread
+                      );
+                    })
+                  )
+                );
+                scheduleInboxRefreshRef.current(patientId);
+                return;
+              }
+            }
+          }
           scheduleInboxRefreshRef.current(patientId);
         }
       )
@@ -475,13 +558,25 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     const patientId = activeChat?.patientId;
     if (!patientId) return undefined;
 
-    if (activeChat?.threadLoaded) {
-      return undefined;
+    const hasMessages = (activeChat?.messages || []).length > 0;
+    const shouldReload = !activeChat?.threadLoaded || !hasMessages;
+
+    if (shouldReload) {
+      loadActiveThread(patientId, { silent: hasMessages });
     }
 
-    loadActiveThread(patientId);
     return undefined;
   }, [activeChatId, loadActiveThread]);
+
+  useFocusEffect(
+    useCallback(() => {
+      const activeChat = chatsRef.current.find((chat) => chat.id === activeChatIdRef.current);
+      if (!activeChat?.patientId || !nutricionistaId) return undefined;
+
+      loadActiveThread(activeChat.patientId, { silent: true });
+      return undefined;
+    }, [activeChatId, loadActiveThread, nutricionistaId])
+  );
 
   const filteredChats = useMemo(() => {
     const normalized = String(search || '').toLowerCase().trim();
@@ -531,86 +626,150 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     return undefined;
   }, [activeChat?.id, activeChat?.messages?.length, scrollThreadToLatest]);
 
-  async function handleSend() {
-    const text = draft.trim();
-    if (!activeChat || !text || sending) return;
-
-    const nutritionistName =
+  const nutritionistName = useMemo(
+    () =>
       usuarioLogado?.nome_completo_nutri ||
       usuarioLogado?.nome_nutri ||
       usuarioLogado?.nome_completo ||
-      'Nutricionista';
-    const sentAt = new Date().toISOString();
-    const nextMessage = {
-      ...normalizeNutritionistThreadEntry(
-        {
-          id: `nutri-${Date.now()}`,
-          author: nutritionistName,
-          role: 'nutri',
-          time: formatTimeNow(),
-          text,
-        },
-        {
-          nutritionistName,
-          patientName: activeChat.patientName,
-        }
-      ),
-      createdAt: sentAt,
+      'Nutricionista',
+    [usuarioLogado]
+  );
+
+  const buildChatRpcActor = useCallback(() => {
+    const resolvedNutriId = nutricionistaId || getNutritionistId(usuarioLogado);
+    return {
+      ...(usuarioLogado || {}),
+      id_nutricionista_uuid: resolvedNutriId,
     };
-    const nextThread = [...(activeChat.messages || []), nextMessage];
+  }, [nutricionistaId, usuarioLogado]);
 
-    setChats((current) =>
-      sortChatsByRecency(
-        current.map((chat) => {
-          if (chat.id !== activeChat.id) return chat;
-          return applyThreadPreviewToChat(chat, nextThread);
-        })
-      )
-    );
+  const appendAndPersistMessage = useCallback(
+    async (text, chatId, threadOverride = null) => {
+      const trimmed = String(text || '').trim();
+      const chatSnapshot = chatsRef.current.find((chat) => chat.id === chatId);
+      if (!trimmed || !chatSnapshot) {
+        throw new Error('Conversa indisponivel para enviar mensagem.');
+      }
 
-    try {
-      setSending(true);
-      setDraft('');
+      const rpcActor = buildChatRpcActor();
+      if (!rpcActor.id_nutricionista_uuid) {
+        throw new Error('Nutricionista sem identificador para enviar mensagem.');
+      }
+
+      const baseThread = ensureArray(threadOverride || chatSnapshot.messages);
+      const sentAt = new Date().toISOString();
+      const nextMessage = {
+        ...normalizeNutritionistThreadEntry(
+          {
+            id: `nutri-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            author: nutritionistName,
+            role: 'nutri',
+            time: formatTimeNow(),
+            text: trimmed,
+          },
+          {
+            nutritionistName,
+            patientName: chatSnapshot.patientName,
+          }
+        ),
+        createdAt: sentAt,
+      };
+      const optimisticThread = [...baseThread, nextMessage];
+
+      await garantirSessaoRpcClinicaComPerfil(rpcActor);
 
       const saved = await savePatientNutritionistChat({
-        patientId: activeChat.patientId,
-        thread: nextThread,
-        actor: usuarioLogado,
-        patientContext: activeChat.patient,
+        patientId: chatSnapshot.patientId,
+        thread: optimisticThread,
+        actor: rpcActor,
+        patientContext: chatSnapshot.patient?.raw || chatSnapshot.patient,
         newMessage: {
           ...nextMessage,
           nutritionistName,
-          patientName: activeChat.patientName,
+          patientName: chatSnapshot.patientName,
         },
       });
 
       const savedThread = ensureArray(saved?.appState?.nutritionistThread).length
         ? saved.appState.nutritionistThread
-        : nextThread;
+        : optimisticThread;
 
       const normalizedThread = savedThread.map((item) =>
         normalizeNutritionistThreadEntry(item, {
           nutritionistName,
-          patientName: activeChat.patientName,
+          patientName: chatSnapshot.patientName,
         })
       );
 
       setChats((current) =>
         sortChatsByRecency(
           current.map((chat) => {
-            if (chat.id !== activeChat.id) return chat;
-            return applyThreadPreviewToChat(chat, normalizedThread);
+            if (chat.id !== chatSnapshot.id) return chat;
+            return applyThreadPreviewToChat(
+              { ...chat, threadLoaded: true },
+              normalizedThread
+            );
           })
         )
       );
+
+      return normalizedThread;
+    },
+    [buildChatRpcActor, nutritionistName]
+  );
+
+  async function handleSend() {
+    const text = draft.trim();
+    const registroSnapshot = pendingRegistro;
+    const hasRegistro = Boolean(registroSnapshot?.entry);
+    if (!activeChat || sending || (!text && !hasRegistro)) return;
+
+    const chatSnapshot = activeChat;
+    const rpcActor = buildChatRpcActor();
+
+    if (!rpcActor.id_nutricionista_uuid) {
+      Alert.alert(
+        'Nao foi possivel enviar',
+        'Sua conta de nutricionista nao foi identificada. Saia e entre novamente.'
+      );
+      return;
+    }
+
+    const outboundText = hasRegistro
+      ? buildRegistroChatMessageFromContext(registroSnapshot, { comment: text })
+      : text;
+
+    if (!String(outboundText || '').trim()) return;
+
+    try {
+      setSending(true);
+      await garantirSessaoRpcClinicaComPerfil(rpcActor);
+
+      await appendAndPersistMessage(outboundText, chatSnapshot.id);
+
+      setDraft('');
+      setPendingRegistro(null);
+      if (navigation?.setParams) {
+        navigation.setParams({ registroContext: undefined });
+      }
       invalidateNutriChatInboxCache(nutricionistaId);
     } catch (error) {
       console.log('Erro ao enviar resposta da nutricionista:', error);
-      setDraft(text);
-      await loadInbox({ silent: true, bustCache: true });
-      Alert.alert('Nao foi possivel enviar', 'Confira o vinculo com o paciente e tente novamente.');
+      const message = String(error?.message || '').trim();
+      Alert.alert(
+        'Nao foi possivel enviar',
+        message || 'Confira o vinculo com o paciente e tente novamente.'
+      );
+      await loadActiveThread(chatSnapshot.patientId, { silent: true });
     } finally {
       setSending(false);
+    }
+  }
+
+  function dismissPendingRegistro() {
+    setPendingRegistro(null);
+    if (navigation?.setParams) {
+      navigation.setParams({ registroContext: undefined });
     }
   }
 
@@ -820,11 +979,46 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                   </View>
                 ) : !(activeChat.messages || []).length ? (
                   <View style={styles.emptyThread}>
-                    <Text style={styles.emptyText}>Nenhuma mensagem nesta conversa ainda.</Text>
+                    <Text style={styles.emptyText}>
+                      {activeChat.threadLoaded
+                        ? 'Nenhuma mensagem nesta conversa ainda.'
+                        : 'Nao foi possivel carregar o historico. Puxe para atualizar ou tente novamente.'}
+                    </Text>
+                    {!activeChat.threadLoaded ? (
+                      <TouchableOpacity
+                        style={styles.retryThreadButton}
+                        onPress={() => loadActiveThread(activeChat.patientId)}
+                      >
+                        <Text style={styles.retryThreadButtonText}>Tentar novamente</Text>
+                      </TouchableOpacity>
+                    ) : null}
                   </View>
                 ) : (
                   (activeChat.messages || []).map((message) => {
                     const mine = message.role === 'nutri';
+                    const registroParsed = parseRegistroChatMessage(message.text);
+                    if (registroParsed) {
+                      return (
+                        <View
+                          key={message.id}
+                          style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowPatient]}
+                        >
+                          <View style={styles.registroMessageWrap}>
+                            <RegistroChatContextCard parsedMessage={registroParsed} compact />
+                            {registroParsed.comment ? (
+                              <View style={[styles.bubble, styles.bubbleMine, styles.registroCommentBubble]}>
+                                <Text style={[styles.bubbleText, styles.bubbleTextMine]}>
+                                  {registroParsed.comment}
+                                </Text>
+                              </View>
+                            ) : null}
+                            <Text style={[styles.bubbleTime, styles.registroMessageTime]}>
+                              {message.time}
+                            </Text>
+                          </View>
+                        </View>
+                      );
+                    }
                     return (
                       <View
                         key={message.id}
@@ -840,24 +1034,45 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                 )}
               </ScrollView>
 
-              <View style={[styles.inputRow, { paddingBottom: Math.max(insets.bottom, 8) }]}>
+              <View
+                style={[
+                  styles.composerPanel,
+                  { paddingBottom: Math.max(insets.bottom, 8) },
+                ]}
+              >
+                {pendingRegistro ? (
+                  <RegistroChatReplyPreview
+                    context={pendingRegistro}
+                    onDismiss={dismissPendingRegistro}
+                  />
+                ) : null}
+
+                <View style={styles.inputRow}>
                 <View style={styles.threadInputWrap}>
                   <TextInput
                     style={styles.threadInput}
                     value={draft}
                     onChangeText={setDraft}
-                    placeholder="Responder paciente"
+                    placeholder={
+                      pendingRegistro
+                        ? 'Escreva sua mensagem...'
+                        : 'Responder paciente'
+                    }
                     placeholderTextColor={patientTheme.colors.textMuted}
                     multiline
                     maxLength={500}
                     editable={!sending}
+                    {...bindChatEnterToSend(handleSend)}
                   />
                 </View>
                 <TouchableOpacity
-                  style={[styles.sendButton, (!draft.trim() || sending) && styles.sendButtonDisabled]}
+                  style={[
+                    styles.sendButton,
+                    ((!draft.trim() && !pendingRegistro?.entry) || sending) && styles.sendButtonDisabled,
+                  ]}
                   onPress={handleSend}
                   activeOpacity={0.9}
-                  disabled={!draft.trim() || sending}
+                  disabled={(!draft.trim() && !pendingRegistro?.entry) || sending}
                 >
                   {sending ? (
                     <ActivityIndicator size="small" color={patientTheme.colors.onPrimary} />
@@ -865,6 +1080,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                     <Ionicons name="send" size={18} color={patientTheme.colors.onPrimary} />
                   )}
                 </TouchableOpacity>
+                </View>
               </View>
               </View>
             </KeyboardAvoidingView>
@@ -1069,7 +1285,7 @@ const styles = StyleSheet.create({
   },
   retryButton: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     borderRadius: patientTheme.radius.pill,
     paddingHorizontal: 14,
     paddingVertical: 10,
@@ -1103,7 +1319,9 @@ const styles = StyleSheet.create({
     elevation: 0,
   },
   chatListItemActive: {
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.primaryLight,
+    borderLeftWidth: 3,
+    borderLeftColor: patientTheme.colors.primary,
   },
   chatListCopy: {
     flex: 1,
@@ -1178,7 +1396,7 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: patientTheme.colors.primarySoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1217,6 +1435,18 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     textAlign: 'center',
   },
+  retryThreadButton: {
+    backgroundColor: patientTheme.colors.primary,
+    borderRadius: 999,
+    marginTop: 4,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  retryThreadButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontSize: 13,
+    fontWeight: '700',
+  },
   messageRow: {
     flexDirection: 'row',
   },
@@ -1228,50 +1458,66 @@ const styles = StyleSheet.create({
   },
   bubble: {
     maxWidth: '78%',
-    borderRadius: 20,
+    borderRadius: 18,
     paddingHorizontal: 14,
-    paddingVertical: 12,
+    paddingVertical: 10,
   },
   bubblePatient: {
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderColor: patientTheme.colors.border,
     borderWidth: 1,
+    borderBottomLeftRadius: 4,
   },
   bubbleMine: {
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.surfaceBorder,
-    borderWidth: 1,
+    backgroundColor: patientTheme.colors.primary,
+    borderWidth: 0,
+    borderBottomRightRadius: 4,
   },
   bubbleText: {
     color: patientTheme.colors.text,
     lineHeight: 21,
+    fontSize: 15,
   },
   bubbleTextMine: {
-    color: patientTheme.colors.text,
-    fontWeight: '700',
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '500',
   },
   bubbleTime: {
-    marginTop: 8,
+    marginTop: 6,
     fontSize: 11,
     color: patientTheme.colors.textMuted,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   bubbleTimeMine: {
-    color: patientTheme.colors.textMuted,
+    color: 'rgba(255,255,255,0.85)',
+  },
+  registroMessageWrap: {
+    maxWidth: '82%',
+    width: '100%',
+  },
+  registroMessageTime: {
+    marginTop: 6,
+    textAlign: 'right',
+  },
+  composerPanel: {
+    borderTopColor: patientTheme.colors.border,
+    borderTopWidth: 1,
+    flexShrink: 0,
+    marginTop: 8,
+  },
+  registroCommentBubble: {
+    marginTop: 8,
   },
   inputRow: {
-    flexShrink: 0,
-    marginTop: 12,
-    borderTopWidth: 1,
-    borderTopColor: '#B0BEC8',
-    paddingTop: 12,
     flexDirection: 'row',
     gap: 10,
     alignItems: 'flex-end',
+    paddingHorizontal: 12,
+    paddingTop: 10,
   },
   threadInputWrap: {
     backgroundColor: patientTheme.colors.surface,
-    borderColor: '#B0BEC8',
+    borderColor: patientTheme.colors.border,
     borderRadius: 22,
     borderWidth: 1.5,
     flex: 1,
@@ -1295,14 +1541,13 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: patientTheme.colors.surface,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
+    backgroundColor: patientTheme.colors.primary,
+    borderWidth: 0,
     alignItems: 'center',
     justifyContent: 'center',
   },
   sendButtonDisabled: {
-    opacity: 0.7,
+    opacity: 0.45,
   },
   emptyState: {
     flex: 1,

@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import LayoutNutricionista from '../../componentes/nutricionista/LayoutNutricionista';
 import {
   AvatarBadge,
+  FilterTabs,
   SearchInput,
   SectionCard,
   nutriDesktopStyles,
@@ -16,6 +17,7 @@ import {
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { nutriClinicalStatus } from '../../temas/designSystemNutricionista';
 
 function getRiskMeta(patient) {
   const risk = String(patient?.risk || '').toLowerCase();
@@ -159,14 +161,6 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
       showTabBar={route?.name === 'GerenciarPacientes'}
     >
       <View style={nutriDesktopStyles.pageGap}>
-        <SectionCard style={styles.searchCard}>
-          <SearchInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Buscar paciente por nome..."
-          />
-        </SectionCard>
-
         <View style={dashboardKpiStyles.grid}>
           {summary.map((item) => (
             <View key={item.id} style={dashboardKpiStyles.cell}>
@@ -180,25 +174,17 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
           ))}
         </View>
 
-        <SectionCard style={[styles.filtersCard, styles.flatCard]}>
-          <View style={styles.filtersRow}>
-            {filterItems.map((item) => {
-              const selected = item.value === activeFilter;
-              return (
-                <TouchableOpacity
-                  key={item.value}
-                  style={[styles.filterChip, selected && styles.filterChipActive]}
-                  onPress={() => setActiveFilter(item.value)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>
-                    {item.fullLabel}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </SectionCard>
+        <SearchInput
+          value={search}
+          onChangeText={setSearch}
+          placeholder="Buscar paciente por nome..."
+        />
+
+        <FilterTabs
+          items={filterItems.map((item) => ({ value: item.value, label: item.fullLabel }))}
+          active={activeFilter}
+          onChange={setActiveFilter}
+        />
 
         {loading ? (
           <SectionCard style={[styles.emptyCard, styles.flatCard]}>
@@ -289,17 +275,10 @@ export default function GerenciarPacientesStyled({ navigation, route }) {
 
 const styles = StyleSheet.create({
   flatCard: {
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.xl,
-    shadowColor: 'transparent',
-    elevation: 0,
-  },
-  searchCard: {
-    backgroundColor: patientTheme.colors.background,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.card,
     shadowColor: 'transparent',
     elevation: 0,
   },
@@ -339,38 +318,6 @@ const styles = StyleSheet.create({
   },
   metricValueAlerts: {
     color: patientTheme.colors.warning,
-  },
-  filtersCard: {
-    paddingVertical: 6,
-    paddingHorizontal: 0,
-  },
-  filtersRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 6,
-    paddingHorizontal: 4,
-  },
-  filterChip: {
-    minHeight: 24,
-    paddingHorizontal: 14,
-    borderRadius: patientTheme.radius.pill,
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  filterChipActive: {
-    backgroundColor: patientTheme.colors.surface,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
-  },
-  filterChipText: {
-    color: patientTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filterChipTextActive: {
-    fontWeight: '700',
   },
   patientList: {
     gap: 10,
@@ -453,25 +400,25 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   riskBadgeHigh: {
-    backgroundColor: patientTheme.colors.dangerSoft,
-    borderColor: patientTheme.colors.danger,
+    backgroundColor: nutriClinicalStatus.critical.bg,
+    borderColor: nutriClinicalStatus.critical.border,
   },
   riskBadgeTextHigh: {
-    color: patientTheme.colors.text,
+    color: nutriClinicalStatus.critical.text,
   },
   riskBadgeMedium: {
-    backgroundColor: patientTheme.colors.warningSoft,
-    borderColor: patientTheme.colors.warning,
+    backgroundColor: nutriClinicalStatus.attention.bg,
+    borderColor: nutriClinicalStatus.attention.border,
   },
   riskBadgeTextMedium: {
-    color: patientTheme.colors.text,
+    color: nutriClinicalStatus.attention.text,
   },
   riskBadgeLow: {
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: patientTheme.colors.primary,
+    backgroundColor: nutriClinicalStatus.normal.bg,
+    borderColor: nutriClinicalStatus.normal.border,
   },
   riskBadgeTextLow: {
-    color: patientTheme.colors.primaryDark,
+    color: nutriClinicalStatus.normal.text,
   },
   emptyCard: {
     alignItems: 'flex-start',

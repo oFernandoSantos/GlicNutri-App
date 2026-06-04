@@ -1,19 +1,19 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import { brand } from '../../temas/designSystem';
+import { nutriColors } from '../../temas/designSystemNutricionista';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 
 export const CHART_PALETTE = {
-  green: brand.green,
-  greenDark: brand.greenDark,
-  greenSoft: brand.greenSoft,
-  yellow: brand.warning,
+  green: nutriColors.primary,
+  greenDark: nutriColors.primaryDark,
+  greenSoft: nutriColors.primaryLight,
+  yellow: nutriColors.warning,
   orange: '#F97316',
   medOrange: '#FB923C',
-  red: brand.danger,
-  pink: '#F472B6',
-  blue: brand.info,
-  blueSoft: brand.infoSoft,
+  red: nutriColors.danger,
+  pink: '#EC4899',
+  blue: nutriColors.info,
+  blueSoft: '#E0F2FE',
   purple: '#8B5CF6',
   purpleSoft: '#EDE9FE',
   gray: '#94A3B8',
@@ -74,9 +74,9 @@ export const MEAL_TYPE_COLORS = [
 ];
 
 export const TREND_COLORS = {
-  adherence: brand.greenDark,
+  adherence: nutriColors.primary,
   glucose: CHART_PALETTE.orange,
-  tir: brand.info,
+  tir: nutriColors.info,
 };
 
 export function sumChartValues(items = []) {
@@ -828,7 +828,7 @@ const styles = StyleSheet.create({
     borderRadius: 10,
   },
   legendRowActive: {
-    backgroundColor: CHART_PALETTE.greenSoft,
+    backgroundColor: patientTheme.colors.backgroundSoft,
   },
   legendLeft: {
     flexDirection: 'row',

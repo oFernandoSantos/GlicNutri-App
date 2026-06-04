@@ -30,7 +30,7 @@ import {
   chartPercent,
   sumChartValues,
 } from '../../componentes/nutricionista/RelatoriosNutriCharts';
-import { DashboardKpiCard } from '../../componentes/comum/CartaoKpiDashboard';
+import { DashboardKpiCard } from '../../componentes/nutricionista/NutriDesktopUI';
 import { SectionCard, nutriDesktopStyles } from '../../componentes/nutricionista/NutriDesktopUI';
 import { ScreenLoading } from '../../componentes/comum/ui';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
@@ -223,7 +223,7 @@ function CompactRankingList({
         {visible.map((item, index) => (
           <View key={item.id} style={styles.rankingRow}>
             <View style={styles.rankingLeft}>
-              <View style={[styles.rankingIndex, index === 0 && { backgroundColor: CHART_PALETTE.greenSoft }]}>
+              <View style={[styles.rankingIndex, index === 0 && { backgroundColor: patientTheme.colors.backgroundSoft }]}>
                 <Text style={styles.rankingIndexText}>{index + 1}</Text>
               </View>
               <View style={styles.rankingCopy}>
@@ -1068,32 +1068,39 @@ const styles = StyleSheet.create({
   },
   reportPeriodRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
+    flexWrap: 'nowrap',
+    gap: 7,
+    width: '100%',
   },
   reportPeriodChip: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 36,
     borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.surfaceBorder,
+    borderRadius: 16,
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+    backgroundColor: patientTheme.colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   reportPeriodChipText: {
-    color: patientTheme.colors.textMuted,
+    color: patientTheme.colors.text,
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '800',
+    textAlign: 'center',
   },
   reportPeriodChipActiveBrand: {
-    backgroundColor: CHART_PALETTE.greenSoft,
-    borderColor: CHART_PALETTE.greenDark,
+    backgroundColor: patientTheme.colors.primary,
+    borderColor: patientTheme.colors.primary,
   },
   reportPeriodChipTextActiveBrand: {
-    color: CHART_PALETTE.greenDark,
+    color: patientTheme.colors.onPrimary,
     fontWeight: '800',
   },
   primaryPdfButton: {
-    backgroundColor: '#4CD197',
+    backgroundColor: patientTheme.colors.primary,
     borderRadius: patientTheme.radius.lg,
     paddingVertical: 13,
     paddingHorizontal: 16,
@@ -1257,8 +1264,8 @@ const styles = StyleSheet.create({
   insightPanel: {
     gap: 10,
     padding: 16,
-    backgroundColor: CHART_PALETTE.greenSoft,
-    borderColor: `${CHART_PALETTE.greenDark}44`,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderColor: patientTheme.colors.border,
   },
   insightHeader: {
     flexDirection: 'row',

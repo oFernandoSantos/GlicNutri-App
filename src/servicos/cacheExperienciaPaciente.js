@@ -124,6 +124,24 @@ export function getCachedPatientChat(patientId, ttlMs = CHAT_CACHE_TTL_MS) {
   return getFreshEntry(chatCache, `${patientId}:chat`, ttlMs);
 }
 
+export function invalidatePatientChatCache(patientId) {
+  if (!patientId) {
+    chatCache.clear();
+    chatInFlight.clear();
+    return;
+  }
+  chatCache.delete(`${patientId}:chat`);
+  chatInFlight.delete(`${patientId}:chat`);
+}
+
+export function replaceCachedPatientChat(patientId, data) {
+  if (!patientId || !data) return;
+  chatCache.set(`${patientId}:chat`, {
+    data,
+    fetchedAt: Date.now(),
+  });
+}
+
 export async function fetchCachedPatientChat(patientId, options, loader) {
   if (!patientId) {
     return loader();
