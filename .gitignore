@@ -6,6 +6,11 @@ node_modules/
 # Expo
 .expo/
 .expo-export-test/
+.expo-web-check/
+.expo-web-check*/
+.expo-web-report*/
+.expo-web-simple-report/
+.expo-web-test-build*/
 dist/
 dist-local/
 dist-local-menu/
