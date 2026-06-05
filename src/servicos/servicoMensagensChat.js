@@ -1,8 +1,10 @@
 import { supabase } from './configSupabase';
+import { stripRegistroMetaFromChatText } from '../utilitarios/registrosProntuarioNutri';
 import {
   enrichRpcClinicalParams,
   garantirSessaoRpcClinicaComPerfil,
   normalizeRpcActorProfile,
+  supabaseRpcClinica,
 } from './servicoSessaoRpc';
 
 /** Garante token RPC antes de listar/enviar chat (nutri ou paciente). */
@@ -12,13 +14,14 @@ export async function enrichChatRpcParams(
   sessionProfile = null,
   rpcActor = null
 ) {
-  const actor = normalizeRpcActorProfile(rpcActor) || sessionProfile;
+  const actor = normalizeRpcActorProfile(rpcActor) || normalizeRpcActorProfile(sessionProfile);
+  const profile = actor || sessionProfile;
   try {
-    return await enrichRpcClinicalParams(params, pacienteId, sessionProfile);
+    return await enrichRpcClinicalParams(params, pacienteId, profile);
   } catch (firstError) {
     if (!actor) throw firstError;
     await garantirSessaoRpcClinicaComPerfil(actor);
-    return await enrichRpcClinicalParams(params, pacienteId, sessionProfile);
+    return await enrichRpcClinicalParams(params, pacienteId, actor);
   }
 }
 
@@ -27,6 +30,11 @@ function normalizeThreadEntry(
   { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
 ) {
   const role = item?.role === 'nutri' ? 'nutri' : 'user';
+  const textRaw = String(
+    item?.textRaw ?? item?.texto_bruto ?? item?.text ?? item?.texto ?? ''
+  ).trim();
+  const text = stripRegistroMetaFromChatText(textRaw).trim() || textRaw;
+
   return {
     id: item?.id || `thread-${role}-${Date.now()}`,
     author:
@@ -34,7 +42,9 @@ function normalizeThreadEntry(
       (role === 'nutri' ? nutritionistName : patientName),
     role,
     time: String(item?.time || '').trim(),
-    text: String(item?.text || '').trim(),
+    text,
+    textRaw: textRaw || text,
+    registroContext: item?.registroContext || item?.registroPayload || null,
     createdAt: item?.createdAt || item?.created_at || null,
   };
 }
@@ -68,17 +78,22 @@ export function mapChatRowToThreadEntry(
   { nutritionistName = 'Nutricionista', patientName = 'Paciente' } = {}
 ) {
   const role = row?.autor_role === 'nutricionista' ? 'nutri' : 'user';
-  return normalizeThreadEntry(
-    {
-      id: row?.id,
-      role,
-      author: role === 'nutri' ? nutritionistName : patientName,
-      time: formatMessageTime(row?.created_at),
-      text: row?.texto,
-      createdAt: row?.created_at,
-    },
-    { nutritionistName, patientName }
-  );
+  const texto = String(row?.texto || '').trim();
+
+  return {
+    ...normalizeThreadEntry(
+      {
+        id: row?.id,
+        role,
+        author: role === 'nutri' ? nutritionistName : patientName,
+        time: formatMessageTime(row?.created_at),
+        text: texto,
+        texto_bruto: texto,
+      },
+      { nutritionistName, patientName }
+    ),
+    createdAt: row?.created_at || null,
+  };
 }
 
 export function sortChatThreadByCreatedAt(thread = []) {
@@ -94,17 +109,37 @@ export function sortChatThreadByCreatedAt(thread = []) {
 
 function resolveSessionProfile(rpcActor, { pacienteId, nutricionistaId, resolvedNutriId, autorRole }) {
   const normalized = normalizeRpcActorProfile(rpcActor);
-  if (normalized?.id_nutricionista_uuid) return normalized;
-  if (normalized?.id_paciente_uuid) return normalized;
+  if (normalized?.id_nutricionista_uuid || normalized?.id_paciente_uuid) {
+    return normalized;
+  }
 
   const role =
     autorRole === 'nutri' || autorRole === 'nutricionista' ? 'nutricionista' : autorRole;
-  if (role === 'nutricionista' && (nutricionistaId || resolvedNutriId)) {
-    return { id_nutricionista_uuid: nutricionistaId || resolvedNutriId };
+  const nutriId = nutricionistaId || resolvedNutriId;
+  const email =
+    rpcActor?.email_acesso ||
+    rpcActor?.email ||
+    rpcActor?.email_nutri ||
+    '';
+
+  if (role === 'nutricionista' && nutriId) {
+    return {
+      tipo_perfil: 'nutricionista',
+      id_nutricionista_uuid: nutriId,
+      email_acesso: email,
+      email,
+    };
   }
-  if (pacienteId) return { id_paciente_uuid: pacienteId };
-  if (nutricionistaId || resolvedNutriId) {
-    return { id_nutricionista_uuid: nutricionistaId || resolvedNutriId };
+  if (pacienteId) {
+    return { id_paciente_uuid: pacienteId };
+  }
+  if (nutriId) {
+    return {
+      tipo_perfil: 'nutricionista',
+      id_nutricionista_uuid: nutriId,
+      email_acesso: email,
+      email,
+    };
   }
   return normalized;
 }
@@ -167,10 +202,28 @@ export async function fetchChatThreadFromDatabase({
     );
   } catch (error) {
     console.log('Falha ao preparar sessao RPC do chat:', error?.message || error);
-    return null;
+    try {
+      const actor = rpcActor || sessionProfile;
+      if (actor) {
+        await garantirSessaoRpcClinicaComPerfil(actor);
+      }
+      rpcParams = await enrichChatRpcParams(
+        baseRpcParams,
+        pacienteId,
+        sessionProfile,
+        rpcActor || sessionProfile
+      );
+    } catch (retryError) {
+      console.log('Retry sessao RPC do chat:', retryError?.message || retryError);
+      return null;
+    }
   }
 
-  const { data, error } = await supabase.rpc('listar_mensagens_chat', rpcParams);
+  const { data, error } = await supabaseRpcClinica(
+    'listar_mensagens_chat',
+    baseRpcParams,
+    { pacienteId, user: rpcActor || sessionProfile }
+  );
 
   if (error) {
     console.log('RPC listar_mensagens_chat:', error.message);
@@ -205,19 +258,15 @@ export async function sendChatMessage({
     autorRole: role,
   });
 
-  const { data, error } = await supabase.rpc(
+  const { data, error } = await supabaseRpcClinica(
     'enviar_mensagem_chat',
-    await enrichChatRpcParams(
-      {
-        p_paciente_id: pacienteId,
-        p_nutricionista_id: resolvedNutriId,
-        p_autor_role: role,
-        p_texto: String(texto || '').trim(),
-      },
-      pacienteId,
-      sessionProfile,
-      rpcActor || sessionProfile
-    )
+    {
+      p_paciente_id: pacienteId,
+      p_nutricionista_id: resolvedNutriId,
+      p_autor_role: role,
+      p_texto: String(texto || '').trim(),
+    },
+    { pacienteId, user: rpcActor || sessionProfile }
   );
 
   if (error) {
@@ -255,15 +304,17 @@ export async function migrateLegacyThreadToDatabase({
   if (existing?.length) return existing;
 
   for (const item of legacyThread) {
-    const text = String(item?.text || '').trim();
-    if (!text) continue;
+    const textRaw = String(
+      item?.textRaw ?? item?.texto_bruto ?? item?.text ?? item?.texto ?? ''
+    ).trim();
+    if (!textRaw) continue;
     const itemRole = item?.role === 'nutri' ? 'nutricionista' : 'paciente';
     try {
       await sendChatMessage({
         pacienteId,
         nutricionistaId: resolvedNutriId,
         autorRole: itemRole,
-        texto: text,
+        texto: textRaw,
         nutritionistName,
         patientName,
         rpcActor,

@@ -15,6 +15,7 @@ import {
   Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { EnvoltorioModalPacienteTeclado } from '../../componentes/paciente/ModalPacienteComTeclado';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
 import {
@@ -1344,16 +1345,17 @@ export default function TelaCadastroFixed({ navigation, route }) {
           </TouchableWithoutFeedback>
         </Modal>
 
-        <Modal visible={modalCodigoAcessoVisible} transparent animationType="fade">
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-          >
-            <TouchableWithoutFeedback onPress={() => setModalCodigoAcessoVisible(false)}>
-              <View style={styles.modalOverlay}>
-                <TouchableWithoutFeedback onPress={() => {}}>
-                  <View style={styles.modalContent}>
+        <Modal
+          visible={modalCodigoAcessoVisible}
+          transparent
+          animationType="fade"
+          onRequestClose={() => setModalCodigoAcessoVisible(false)}
+        >
+          <TouchableWithoutFeedback onPress={() => setModalCodigoAcessoVisible(false)}>
+            <EnvoltorioModalPacienteTeclado>
+            <View style={styles.modalOverlay}>
+              <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.modalContent}>
                     <Text style={styles.modalTitle}>Codigo de Acesso da Empresa</Text>
                     <Text style={styles.modalDescription}>
                       Digite o codigo fornecido pela empresa para liberar o cadastro da
@@ -1413,11 +1415,11 @@ export default function TelaCadastroFixed({ navigation, route }) {
                         <Text style={styles.modalActionPrimaryText}>Confirmar</Text>
                       </TouchableOpacity>
                     </View>
-                  </View>
-                </TouchableWithoutFeedback>
-              </View>
-            </TouchableWithoutFeedback>
-          </KeyboardAvoidingView>
+                </View>
+              </TouchableWithoutFeedback>
+            </View>
+            </EnvoltorioModalPacienteTeclado>
+          </TouchableWithoutFeedback>
         </Modal>
 
         <Modal
@@ -1426,13 +1428,11 @@ export default function TelaCadastroFixed({ navigation, route }) {
           animationType="fade"
           onRequestClose={handleCancelarValidacaoEmailCadastro}
         >
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
-            keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-          >
+          <TouchableWithoutFeedback onPress={handleCancelarValidacaoEmailCadastro}>
+            <EnvoltorioModalPacienteTeclado>
             <View style={styles.modalOverlay}>
-              <View style={styles.emailModalCard}>
+              <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.emailModalCard}>
               <Text style={styles.emailModalTitle}>Codigo enviado</Text>
               <Text style={styles.emailModalText}>
                 Digite o codigo de 6 digitos enviado para{' '}
@@ -1504,9 +1504,11 @@ export default function TelaCadastroFixed({ navigation, route }) {
               >
                 <Text style={styles.emailModalCancelButtonText}>Cancelar</Text>
               </TouchableOpacity>
-              </View>
+                </View>
+              </TouchableWithoutFeedback>
             </View>
-          </KeyboardAvoidingView>
+            </EnvoltorioModalPacienteTeclado>
+          </TouchableWithoutFeedback>
         </Modal>
 
         <Modal visible={modalCadastroSucessoVisible} transparent animationType="fade">
@@ -1848,6 +1850,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     backgroundColor: '#f4f4f4',
+    flexShrink: 0,
     width: '100%',
     maxWidth: 420,
     borderRadius: 15,
@@ -1859,6 +1862,7 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     backgroundColor: '#ffffff',
     borderRadius: 8,
+    flexShrink: 0,
     padding: 22,
   },
   emailModalTitle: {

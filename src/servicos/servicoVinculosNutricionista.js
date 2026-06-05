@@ -301,7 +301,13 @@ export async function listPatientsByNutritionist(
   });
 
   const missingIds = [...patientMeta.keys()].filter((patientId) => !byId.has(patientId));
-  const fetchedPatients = await fetchPatientsByIds(missingIds);
+  let fetchedPatients = [];
+
+  try {
+    fetchedPatients = await fetchPatientsByIds(missingIds);
+  } catch (fetchError) {
+    console.log('Erro ao buscar pacientes da carteira:', fetchError?.message || fetchError);
+  }
 
   fetchedPatients.forEach((patient) => {
     if (patient?.id_paciente_uuid) byId.set(patient.id_paciente_uuid, patient);

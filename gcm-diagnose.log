@@ -1,0 +1,330 @@
+﻿Diagnose log at 2026-05-29T16:36:37Z
+
+AppPath: C:\Program Files\Git\mingw64\bin\git-credential-manager.exe
+InstallDir: C:\Program Files\Git\mingw64\bin\
+Version: 2.6.1+786ab03440ddc82e807a97c0e540f5247e44cec6
+
+------------
+Diagnostic: Environment
+Skipped: False
+Success: True
+Exception: None
+Log:
+OSType: Windows
+OSVersion: 10.0 (build 26200)
+Reading environment variables... OK
+ Variables:
+HOMEPATH=\Users\flima
+GIT_PAGER=more.com
+COMPUTERNAME=FERNANDO_SANTOS
+DriverData=C:\Windows\System32\Drivers\DriverData
+GIT_TRACE2_PARENT_SID=722cc693-86a6-4a32-a43c-1a6a1d53547c
+CommonProgramFiles(x86)=C:\Program Files (x86)\Common Files
+OneDrive=C:\Users\flima\OneDrive
+CODEX_THREAD_ID=019e7455-8bab-7e63-8185-d6b86cc6ada0
+EFC_36632_2283032206=1
+GIT_CONFIG_KEY_0=safe.directory
+SHIM_MCCOMPAT=0x810000001
+EFC_36632_4126798990=1
+NVIDIAWHITELISTED=0x01
+VSCODE_CLI=1
+PROCESSOR_REVISION=9702
+USERDOMAIN=FERNANDO_SANTOS
+PATHEXT=.COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.CPL
+EFC_36632_2775293581=1
+VSCODE_IPC_HOOK=\\.\pipe\b04a1886-1.122.0-main-sock
+SystemDrive=C:
+TMP=C:\Users\flima\AppData\Local\Temp
+TEMP=C:\Users\flima\AppData\Local\Temp
+LOCALAPPDATA=C:\Users\flima\AppData\Local
+PUBLIC=C:\Users\Public
+PROCESSOR_IDENTIFIER=Intel64 Family 6 Model 151 Stepping 2, GenuineIntel
+M2_HOME=C:\Program Files\Maven\apache-maven-3.9.11
+ProgramW6432=C:\Program Files
+windir=C:\Windows
+JAVA_HOME=C:\Program Files\Java\jdk-24
+LESS=
+GIT_CONFIG_VALUE_0=C:\Users\flima\OneDrive\Área de Trabalho\GlicNutri-App\GlicNutri
+PROCESSOR_LEVEL=6
+NUMBER_OF_PROCESSORS=12
+PATH=C:\Users\flima\.codex\tmp\arg0\codex-arg0SvjWcJ;C:\Python314\Scripts\;C:\Python314\;C:\Program Files\Common Files\Oracle\Java\javapath;C:\Windows\system32;C:\Windows;C:\Windows\System32\Wbem;C:\Windows\System32\WindowsPowerShell\v1.0\;C:\Windows\System32\OpenSSH\;C:\Program Files\NVIDIA Corporation\NVIDIA App\NvDLISR;C:\Program Files (x86)\NVIDIA Corporation\PhysX\Common;C:\Program Files\dotnet\;C:\Program Files\Microsoft SQL Server\Client SDK\ODBC\170\Tools\Binn\;C:\Program Files (x86)\Windows Kits\10\Windows Performance Toolkit\;C:\Program Files\Microsoft SQL Server\170\DTS\Binn\;C:\Program Files (x86)\Microsoft SQL Server\160\Tools\Binn\;C:\Program Files\Microsoft SQL Server\160\Tools\Binn\;C:\Program Files\Microsoft SQL Server\160\DTS\Binn\;C:\Program Files\Git\cmd;C:\Program Files\Maven\apache-maven-3.9.11\bin;C:\Program Files\Java\jdk-24\bin;C:\Program Files\nodejs\;C:\ProgramData\chocolatey\bin;C:\Program Files\Pandoc\;C:\Users\flima\AppData\Local\Programs\Python\Python311\Scripts\;C:\Users\flima\AppData\Local\Programs\Python\Python311\;C:\Users\flima\AppData\Local\Microsoft\WindowsApps;C:\Users\flima\AppData\Local\Programs\Microsoft VS Code\bin;C:\flutter\bin;C:\Users\flima\.dotnet\tools;C:\Users\flima\AppData\Local\GitHubDesktop\bin;C:\Users\flima\AppData\Roaming\npm;C:\Users\flima\AppData\Local\Programs\cursor\resources\app\bin;C:\Users\flima\AppData\Local\PowerToys\DSCModules\;C:\Users\flima\AppData\Local\Programs\MiKTeX\miktex\bin\x64\;c:\Users\flima\.vscode\extensions\openai.chatgpt-26.5519.32039-win32-x64\bin\windows-x86_64
+PROMPT=$P$G
+GIT_CONFIG_COUNT=1
+ZES_ENABLE_SYSMAN=1
+ProgramFiles(x86)=C:\Program Files (x86)
+VSCODE_NLS_CONFIG={"userLocale":"en","osLocale":"pt-br","resolvedLanguage":"en","defaultMessagesFile":"C:\\Users\\flima\\AppData\\Local\\Programs\\Microsoft VS Code\\6a49527b96\\resources\\app\\out\\nls.messages.json","locale":"en","availableLanguages":{}}
+FPS_BROWSER_USER_PROFILE_STRING=Default
+CommonProgramFiles=C:\Program Files (x86)\Common Files
+VSCODE_ESM_ENTRYPOINT=vs/workbench/api/node/extensionHostProcess
+CHROME_CRASHPAD_PIPE_NAME=\\.\pipe\crashpad_22264_BDVOXUSHVPYUVXXF
+CODEX_SANDBOX_NETWORK_DISABLED=1
+ProgramData=C:\ProgramData
+ProgramFiles=C:\Program Files (x86)
+ELECTRON_NO_ATTACH_CONSOLE=1
+ChocolateyInstall=C:\ProgramData\chocolatey
+DEBUG=release
+VSCODE_L10N_BUNDLE_LOCATION=
+VSCODE_CODE_CACHE_PATH=C:\Users\flima\AppData\Roaming\Code\CachedData\6a49527b96e326fe62fbdb56f60e16877c9aa724
+SystemRoot=C:\Windows
+EFC_36632_1592913036=1
+SESSIONNAME=Console
+VSCODE_HANDLES_UNCAUGHT_ERRORS=true
+CODEX_INTERNAL_ORIGINATOR_OVERRIDE=codex_vscode
+EFC_36632_3789132940=1
+APPLICATION_INSIGHTS_NO_STATSBEAT=true
+LOGONSERVER=\\FERNANDO_SANTOS
+VSCODE_CWD=C:\Users\flima\OneDrive\Área de Trabalho\GlicNutri-App\GlicNutri
+USERPROFILE=C:\Users\flima
+CommonProgramW6432=C:\Program Files\Common Files
+EFC_36632_2946480783=1
+USERDOMAIN_ROAMINGPROFILE=FERNANDO_SANTOS
+APPDATA=C:\Users\flima\AppData\Roaming
+HOMEDRIVE=C:
+RUST_LOG=warn
+VSCODE_PID=22264
+EFC_36632_1262719628=1
+PSModulePath=C:\Users\flima\Documents\WindowsPowerShell\Modules;C:\Program Files\WindowsPowerShell\Modules;C:\Windows\system32\WindowsPowerShell\v1.0\Modules;C:\Program Files (x86)\Microsoft SQL Server\160\Tools\PowerShell\Modules\
+ELECTRON_RUN_AS_NODE=1
+USERNAME=flima
+PROCESSOR_ARCHITEW6432=AMD64
+FPS_BROWSER_APP_PROFILE_STRING=Internet Explorer
+PROCESSOR_ARCHITECTURE=x86
+OS=Windows_NT
+ComSpec=C:\Windows\system32\cmd.exe
+ChocolateyLastPathUpdate=134172256448013589
+PAGER=more.com
+VSCODE_CRASH_REPORTER_PROCESS_TYPE=extensionHost
+OneDriveConsumer=C:\Users\flima\OneDrive
+ALLUSERSPROFILE=C:\ProgramData
+
+
+------------
+Diagnostic: File system
+Skipped: False
+Success: True
+Exception: None
+Log:
+Temporary directory is 'C:\Users\flima\AppData\Local\Temp\'...
+Checking basic file I/O...
+Writing to temporary file 'C:\Users\flima\AppData\Local\Temp\5f30453e8518f4d338ba761d'... OK
+Reading from temporary file 'C:\Users\flima\AppData\Local\Temp\5f30453e8518f4d338ba761d'... OK
+Deleting temporary file 'C:\Users\flima\AppData\Local\Temp\5f30453e8518f4d338ba761d'... OK
+Testing IFileSystem instance...
+UserHomePath: C:\Users\CodexSandboxOffline
+UserDataDirectoryPath: C:\Users\CodexSandboxOffline\.gcm
+GetCurrentDirectory(): C:\Users\flima\OneDrive\Área de Trabalho\GlicNutri-App\GlicNutri
+
+------------
+Diagnostic: Networking
+Skipped: False
+Success: False
+Exception:
+System.Net.Http.HttpRequestException: Ocorreu um erro ao enviar a solicitação. ---> System.Net.WebException: A conexão subjacente estava fechada: Erro inesperado em um recebimento. ---> System.ComponentModel.Win32Exception: Credenciais não disponíveis no pacote de segurança
+   em System.Net.SSPIWrapper.AcquireCredentialsHandle(SSPIInterface SecModule, String package, CredentialUse intent, SecureCredential2 scc)
+   em System.Net.Security.SecureChannel.AcquireCredentialsHandle(CredentialUse credUsage, SecureCredential2& secureCredential)
+   em System.Net.Security.SecureChannel.AcquireCredentialsHandle(CredentialUse credUsage, X509Certificate2 selectedCert, Flags flags)
+   em System.Net.Security.SecureChannel.AcquireClientCredentials(Byte[]& thumbPrint)
+   em System.Net.Security.SecureChannel.GenerateToken(Byte[] input, Int32 offset, Int32 count, Byte[]& output)
+   em System.Net.Security.SecureChannel.NextMessage(Byte[] incoming, Int32 offset, Int32 count)
+   em System.Net.Security.SslState.StartSendBlob(Byte[] incoming, Int32 count, AsyncProtocolRequest asyncRequest, Boolean renegotiation)
+   em System.Net.Security.SslState.ForceAuthentication(Boolean receiveFirst, Byte[] buffer, AsyncProtocolRequest asyncRequest, Boolean renegotiation)
+   em System.Net.Security.SslState.ProcessAuthentication(LazyAsyncResult lazyResult)
+   em System.Net.TlsStream.CallProcessAuthentication(Object state)
+   em System.Threading.ExecutionContext.RunInternal(ExecutionContext executionContext, ContextCallback callback, Object state, Boolean preserveSyncCtx)
+   em System.Threading.ExecutionContext.Run(ExecutionContext executionContext, ContextCallback callback, Object state, Boolean preserveSyncCtx)
+   em System.Threading.ExecutionContext.Run(ExecutionContext executionContext, ContextCallback callback, Object state)
+   em System.Net.TlsStream.ProcessAuthentication(LazyAsyncResult result)
+   em System.Net.TlsStream.BeginWrite(Byte[] buffer, Int32 offset, Int32 size, AsyncCallback asyncCallback, Object asyncState)
+   em System.Net.TlsStream.UnsafeBeginWrite(Byte[] buffer, Int32 offset, Int32 size, AsyncCallback asyncCallback, Object asyncState)
+   em System.Net.PooledStream.UnsafeBeginWrite(Byte[] buffer, Int32 offset, Int32 size, AsyncCallback callback, Object state)
+   em System.Net.ConnectStream.WriteHeaders(Boolean async)
+   --- Fim do rastreamento de pilha de exceções internas ---
+   em System.Net.HttpWebRequest.EndGetResponse(IAsyncResult asyncResult)
+   em System.Net.Http.HttpClientHandler.GetResponseCallback(IAsyncResult ar)
+   --- Fim do rastreamento de pilha de exceções internas ---
+   em System.Runtime.CompilerServices.TaskAwaiter.ThrowForNonSuccess(Task task)
+   em System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   em System.Runtime.CompilerServices.TaskAwaiter`1.GetResult()
+   em GitCredentialManager.Diagnostics.NetworkingDiagnostic.<RunInternalAsync>d__4.MoveNext()
+--- Fim do rastreamento de pilha do local anterior onde a exceção foi gerada ---
+   em System.Runtime.CompilerServices.TaskAwaiter.ThrowForNonSuccess(Task task)
+   em System.Runtime.CompilerServices.TaskAwaiter.HandleNonSuccessAndDebuggerNotification(Task task)
+   em System.Runtime.CompilerServices.TaskAwaiter`1.GetResult()
+   em GitCredentialManager.Diagnostics.Diagnostic.<RunAsync>d__6.MoveNext()
+Log:
+Checking networking and HTTP stack...
+Creating HTTP client... OK
+IsNetworkAvailable: True
+Sending HEAD request to http://example.com...Sending HEAD request to https://example.com... OK
+
+------------
+Diagnostic: Git
+Skipped: False
+Success: True
+Exception: None
+Log:
+Getting Git version... OK
+Git version is '2.51.2.windows.1'
+Locating current repository...Git repository at 'C:/Users/flima/OneDrive/Área de Trabalho/GlicNutri-App/GlicNutri/.git'
+ OK
+Listing all Git configuration... OK
+Git configuration:
+file:C:/Program Files/Git/etc/gitconfig	diff.astextplain.textconv=astextplain
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.clean=git-lfs clean -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.smudge=git-lfs smudge -- %f
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.process=git-lfs filter-process
+file:C:/Program Files/Git/etc/gitconfig	filter.lfs.required=true
+file:C:/Program Files/Git/etc/gitconfig	http.sslbackend=schannel
+file:C:/Program Files/Git/etc/gitconfig	core.autocrlf=true
+file:C:/Program Files/Git/etc/gitconfig	core.fscache=true
+file:C:/Program Files/Git/etc/gitconfig	core.symlinks=false
+file:C:/Program Files/Git/etc/gitconfig	pull.rebase=false
+file:C:/Program Files/Git/etc/gitconfig	credential.helper=manager
+file:C:/Program Files/Git/etc/gitconfig	credential.https://dev.azure.com.usehttppath=true
+file:C:/Program Files/Git/etc/gitconfig	init.defaultbranch=master
+file:C:/Users/flima/.gitconfig	filter.lfs.clean=git-lfs clean -- %f
+file:C:/Users/flima/.gitconfig	filter.lfs.smudge=git-lfs smudge -- %f
+file:C:/Users/flima/.gitconfig	filter.lfs.process=git-lfs filter-process
+file:C:/Users/flima/.gitconfig	filter.lfs.required=true
+file:C:/Users/flima/.gitconfig	user.name=oFernandoSantos
+file:C:/Users/flima/.gitconfig	user.email=f.limadossantos04@gmail.com
+file:C:/Users/flima/.gitconfig	credential.helper=
+file:C:/Users/flima/.gitconfig	credential.helper=C:/Program\ Files/Git/mingw64/bin/git-credential-manager.exe
+file:C:/Users/flima/.gitconfig	http.sslbackend=openssl
+file:.git/config	core.repositoryformatversion=0
+file:.git/config	core.filemode=false
+file:.git/config	core.bare=false
+file:.git/config	core.logallrefupdates=true
+file:.git/config	core.symlinks=false
+file:.git/config	core.ignorecase=true
+file:.git/config	branch.main.vscode-merge-base=origin/main
+file:.git/config	remote.origin.url=https://github.com/oFernandoSantos/GlicNutri-App.git
+file:.git/config	remote.origin.fetch=+refs/heads/*:refs/remotes/origin/*
+file:.git/config	branch.entrega-cruid.remote=origin
+file:.git/config	branch.entrega-cruid.merge=refs/heads/entrega-cruid
+file:.git/config	branch.validacao-por-campo.vscode-merge-base=origin/entrega-cruid
+file:.git/config	branch.validacao-por-campo.remote=origin
+file:.git/config	branch.validacao-por-campo.merge=refs/heads/validacao-por-campo
+file:.git/config	branch.validacao-email-senha.vscode-merge-base=origin/validacao-por-campo
+file:.git/config	branch.validacao-email-senha.remote=origin
+file:.git/config	branch.validacao-email-senha.merge=refs/heads/validacao-email-senha
+file:.git/config	branch.feature/email-resend-dominio.remote=origin
+file:.git/config	branch.feature/email-resend-dominio.merge=refs/heads/feature/email-resend-dominio
+file:.git/config	branch.feature/email-resend-dominio.vscode-merge-base=origin/validacao-email-senha
+file:.git/config	branch.feature/ajustes-intro-login-2026-04-13.vscode-merge-base=origin/feature/email-resend-dominio
+file:.git/config	branch.feature/ajustes-intro-login-2026-04-13.remote=origin
+file:.git/config	branch.feature/ajustes-intro-login-2026-04-13.merge=refs/heads/feature/ajustes-intro-login-2026-04-13
+file:.git/config	branch.feature/cadastro-paciente-google.vscode-merge-base=origin/feature/ajustes-intro-login-2026-04-13
+file:.git/config	branch.feature/cadastro-paciente-google.remote=origin
+file:.git/config	branch.feature/cadastro-paciente-google.merge=refs/heads/feature/cadastro-paciente-google
+file:.git/config	branch.ajuste-botao-google-cadastro.vscode-merge-base=origin/feature/cadastro-paciente-google
+file:.git/config	branch.ajuste-botao-google-cadastro.remote=origin
+file:.git/config	branch.ajuste-botao-google-cadastro.merge=refs/heads/ajuste-botao-google-cadastro
+file:.git/config	branch.ajustes-interface-app-2026-04-15.vscode-merge-base=origin/ajuste-botao-google-cadastro
+file:.git/config	branch.ajustes-interface-app-2026-04-15.remote=origin
+file:.git/config	branch.ajustes-interface-app-2026-04-15.merge=refs/heads/ajustes-interface-app-2026-04-15
+file:.git/config	branch.ajustes-popups-glicose-20260420.vscode-merge-base=origin/ajustes-interface-app-2026-04-15
+file:.git/config	branch.ajustes-popups-glicose-20260420.remote=origin
+file:.git/config	branch.ajustes-popups-glicose-20260420.merge=refs/heads/ajustes-popups-glicose-20260420
+file:.git/config	branch.ajustes-popups-glicose-confirmacao-20260420.vscode-merge-base=origin/ajustes-popups-glicose-20260420
+file:.git/config	branch.ajustes-popups-glicose-confirmacao-20260420.remote=origin
+file:.git/config	branch.ajustes-popups-glicose-confirmacao-20260420.merge=refs/heads/ajustes-popups-glicose-confirmacao-20260420
+file:.git/config	branch.ajustes-historico-monitoramento-20260420.vscode-merge-base=origin/ajustes-popups-glicose-confirmacao-20260420
+file:.git/config	branch.ajustes-historico-monitoramento-20260420.remote=origin
+file:.git/config	branch.ajustes-historico-monitoramento-20260420.merge=refs/heads/ajustes-historico-monitoramento-20260420
+file:.git/config	branch.ajuste-historico-registros-abas-20260420.vscode-merge-base=origin/ajustes-historico-monitoramento-20260420
+file:.git/config	branch.ajuste-historico-registros-abas-20260420.remote=origin
+file:.git/config	branch.ajuste-historico-registros-abas-20260420.merge=refs/heads/ajuste-historico-registros-abas-20260420
+file:.git/config	branch.ajustes-paciente-menu-rapido-medicacoes-20260421.vscode-merge-base=origin/ajuste-historico-registros-abas-20260420
+file:.git/config	branch.ajustes-paciente-menu-rapido-medicacoes-20260421.remote=origin
+file:.git/config	branch.ajustes-paciente-menu-rapido-medicacoes-20260421.merge=refs/heads/ajustes-paciente-menu-rapido-medicacoes-20260421
+file:.git/config	branch.entrega1-validacoes-seguranca-20260423.vscode-merge-base=origin/ajustes-paciente-menu-rapido-medicacoes-20260421
+file:.git/config	branch.entrega1-validacoes-seguranca-20260423.remote=origin
+file:.git/config	branch.entrega1-validacoes-seguranca-20260423.merge=refs/heads/entrega1-validacoes-seguranca-20260423
+file:.git/config	branch.feature/admin-ajustes-pendentes-20260424.vscode-merge-base=origin/entrega1-validacoes-seguranca-20260423
+file:.git/config	branch.feature/admin-ajustes-pendentes-20260424.remote=origin
+file:.git/config	branch.feature/admin-ajustes-pendentes-20260424.merge=refs/heads/feature/admin-ajustes-pendentes-20260424
+file:.git/config	branch.feature/ajustes-hoje-20260424.vscode-merge-base=origin/feature/admin-ajustes-pendentes-20260424
+file:.git/config	branch.feature/ajustes-hoje-20260424.remote=origin
+file:.git/config	branch.feature/ajustes-hoje-20260424.merge=refs/heads/feature/ajustes-hoje-20260424
+file:.git/config	branch.ajustes-hoje-20260426.vscode-merge-base=origin/feature/ajustes-hoje-20260424
+file:.git/config	branch.ajustes-hoje-20260426.remote=origin
+file:.git/config	branch.ajustes-hoje-20260426.merge=refs/heads/ajustes-hoje-20260426
+file:.git/config	branch.busca-pacientes-nutricionista.remote=origin
+file:.git/config	branch.busca-pacientes-nutricionista.merge=refs/heads/busca-pacientes-nutricionista
+file:.git/config	branch.busca-pacientes-nutricionista.vscode-merge-base=origin/busca-pacientes-nutricionista
+file:.git/config	branch.upload-arquivos-novos-2026-05-02.vscode-merge-base=origin/busca-pacientes-nutricionista
+file:.git/config	branch.upload-arquivos-novos-2026-05-02.remote=origin
+file:.git/config	branch.upload-arquivos-novos-2026-05-02.merge=refs/heads/upload-arquivos-novos-2026-05-02
+file:.git/config	branch.subir-pastas-faltantes-2026-05-02.remote=origin
+file:.git/config	branch.subir-pastas-faltantes-2026-05-02.vscode-merge-base=origin/main
+file:.git/config	branch.subir-pastas-faltantes-2026-05-02.merge=refs/heads/subir-pastas-faltantes-2026-05-02
+file:.git/config	branch.feature/auditoria-ajustes-20260504.vscode-merge-base=origin/subir-pastas-faltantes-2026-05-02
+file:.git/config	branch.feature/auditoria-ajustes-20260504.remote=origin
+file:.git/config	branch.feature/auditoria-ajustes-20260504.merge=refs/heads/feature/auditoria-ajustes-20260504
+file:.git/config	branch.feature/restante-ajustes-20260504.vscode-merge-base=origin/feature/auditoria-ajustes-20260504
+file:.git/config	branch.feature/restante-ajustes-20260504.remote=origin
+file:.git/config	branch.feature/restante-ajustes-20260504.merge=refs/heads/feature/restante-ajustes-20260504
+file:.git/config	branch.feature/ajustes-pendentes-20260506.remote=origin
+file:.git/config	branch.feature/ajustes-pendentes-20260506.vscode-merge-base=origin/main
+file:.git/config	branch.feature/ajustes-pendentes-20260506.merge=refs/heads/feature/ajustes-pendentes-20260506
+file:.git/config	branch.feature/subir-ajustes-pendentes-20260514.vscode-merge-base=origin/feature/ajustes-pendentes-20260506
+file:.git/config	branch.feature/subir-ajustes-pendentes-20260514.remote=origin
+file:.git/config	branch.feature/subir-ajustes-pendentes-20260514.merge=refs/heads/feature/subir-ajustes-pendentes-20260514
+file:.git/config	branch.feature/corrige-admin-logs-20260514.vscode-merge-base=origin/feature/subir-ajustes-pendentes-20260514
+file:.git/config	branch.feature/corrige-admin-logs-20260514.remote=origin
+file:.git/config	branch.feature/corrige-admin-logs-20260514.merge=refs/heads/feature/corrige-admin-logs-20260514
+file:.git/config	branch.admin-cadastros-operacoes-20260514.remote=origin
+file:.git/config	branch.admin-cadastros-operacoes-20260514.merge=refs/heads/admin-cadastros-operacoes-20260514
+file:.git/config	branch.admin-cadastros-operacoes-20260514.vscode-merge-base=origin/admin-cadastros-operacoes-20260514
+file:.git/config	branch.admin-auditoria-ui-ajustes-20260516.vscode-merge-base=origin/admin-cadastros-operacoes-20260514
+file:.git/config	branch.admin-auditoria-ui-ajustes-20260516.remote=origin
+file:.git/config	branch.admin-auditoria-ui-ajustes-20260516.merge=refs/heads/admin-auditoria-ui-ajustes-20260516
+file:.git/config	branch.feature/admin-home-refactor-20260517.vscode-merge-base=origin/admin-auditoria-ui-ajustes-20260516
+file:.git/config	branch.feature/admin-home-refactor-20260517.remote=origin
+file:.git/config	branch.feature/admin-home-refactor-20260517.merge=refs/heads/feature/admin-home-refactor-20260517
+file:.git/config	branch.feature/patient-agendamentos-ui-20260517.vscode-merge-base=origin/feature/admin-home-refactor-20260517
+file:.git/config	branch.feature/patient-agendamentos-ui-20260517.remote=origin
+file:.git/config	branch.feature/patient-agendamentos-ui-20260517.merge=refs/heads/feature/patient-agendamentos-ui-20260517
+file:.git/config	branch.feature/subir-tudo-validacao-email-20260520.vscode-merge-base=origin/feature/patient-agendamentos-ui-20260517
+file:.git/config	branch.feature/subir-tudo-validacao-email-20260520.remote=origin
+file:.git/config	branch.feature/subir-tudo-validacao-email-20260520.merge=refs/heads/feature/subir-tudo-validacao-email-20260520
+file:.git/config	branch.nova-branch.remote=origin
+file:.git/config	branch.nova-branch.merge=refs/heads/nova-branch
+file:.git/config	branch.nova-branch.vscode-merge-base=origin/nova-branch
+file:.git/config	branch.feature/tudo-pendente-20260523.vscode-merge-base=origin/nova-branch
+file:.git/config	branch.feature/tudo-pendente-20260523.remote=origin
+file:.git/config	branch.feature/tudo-pendente-20260523.merge=refs/heads/feature/tudo-pendente-20260523
+file:.git/config	branch.feature/subir-restante-20260523.vscode-merge-base=origin/feature/tudo-pendente-20260523
+file:.git/config	branch.feature/subir-restante-20260523.remote=origin
+file:.git/config	branch.feature/subir-restante-20260523.merge=refs/heads/feature/subir-restante-20260523
+file:.git/config	branch.feature/chat-sync-ajustes-20260525.vscode-merge-base=origin/feature/subir-restante-20260523
+file:.git/config	branch.feature/chat-sync-ajustes-20260525.remote=origin
+file:.git/config	branch.feature/chat-sync-ajustes-20260525.merge=refs/heads/feature/chat-sync-ajustes-20260525
+file:.git/config	branch.feature/subir-restante-20260526.vscode-merge-base=origin/feature/chat-sync-ajustes-20260525
+file:.git/config	branch.feature/subir-restante-20260526.remote=origin
+file:.git/config	branch.feature/subir-restante-20260526.merge=refs/heads/feature/subir-restante-20260526
+file:.git/config	branch.feature/paciente-refeicao-ux-20260526.vscode-merge-base=origin/feature/subir-restante-20260526
+file:.git/config	branch.feature/paciente-refeicao-ux-20260526.remote=origin
+file:.git/config	branch.feature/paciente-refeicao-ux-20260526.merge=refs/heads/feature/paciente-refeicao-ux-20260526
+file:.git/config	branch.feature/libre-integracao-paciente-20260526.vscode-merge-base=origin/feature/paciente-refeicao-ux-20260526
+file:.git/config	branch.feature/libre-integracao-paciente-20260526.remote=origin
+file:.git/config	branch.feature/libre-integracao-paciente-20260526.merge=refs/heads/feature/libre-integracao-paciente-20260526
+file:.git/config	branch.feature/medico-migrations-20260528.vscode-merge-base=origin/feature/libre-integracao-paciente-20260526
+file:.git/config	branch.feature/medico-migrations-20260528.remote=origin
+file:.git/config	branch.feature/medico-migrations-20260528.merge=refs/heads/feature/medico-migrations-20260528
+file:.git/config	branch.feature/auth-nutri-ui-ajustes-20260529.vscode-merge-base=origin/feature/medico-migrations-20260528
+command line:	safe.directory=C:\Users\flima\OneDrive\Área de Trabalho\GlicNutri-App\GlicNutri
+
+
+------------
+Diagnostic: Credential storage
+Skipped: False
+Success: True
+Exception: None
+Log:
+ICredentialStore instance is of type: CredentialStore
+Writing test credential... OK
+Reading test credential... OK
+Deleting test credential... OK
+

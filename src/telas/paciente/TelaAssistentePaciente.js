@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -14,6 +13,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import { useKeyboardHeight } from '../../componentes/comum/RolagemComTeclado';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   assistantQuickQuestions,
@@ -256,6 +256,7 @@ export default function PacienteAssistenteScreen({
   usuarioLogado: usuarioProp,
 }) {
   const insets = useSafeAreaInsets();
+  const chatModalKeyboardHeight = useKeyboardHeight();
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const canResolvePatient = useMemo(
@@ -565,10 +566,12 @@ export default function PacienteAssistenteScreen({
         visible={assistantChatVisible}
         onRequestClose={() => setAssistantChatVisible(false)}
       >
-        <KeyboardAvoidingView
-          style={[styles.chatModalOverlay, { paddingTop: modalTopOffset }]}
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 10 : 0}
+        <View
+          style={[
+            styles.chatModalOverlay,
+            { paddingTop: modalTopOffset },
+            chatModalKeyboardHeight > 0 ? { paddingBottom: chatModalKeyboardHeight } : null,
+          ]}
         >
           <SafeAreaView style={styles.chatModalCard} edges={['bottom']}>
             <View style={styles.chatModalHeader}>
@@ -617,7 +620,10 @@ export default function PacienteAssistenteScreen({
             <ScrollView
               ref={chatScrollRef}
               style={styles.chatModalBody}
-              contentContainerStyle={styles.chatModalBodyContent}
+              contentContainerStyle={[
+                styles.chatModalBodyContent,
+                chatModalKeyboardHeight > 0 ? { paddingBottom: 12 } : null,
+              ]}
               showsVerticalScrollIndicator={false}
               keyboardShouldPersistTaps="handled"
               onContentSizeChange={() => scrollChatToBottom()}
@@ -648,6 +654,7 @@ export default function PacienteAssistenteScreen({
                 placeholderTextColor="#8a9095"
                 value={input}
                 onChangeText={setInput}
+                onFocus={() => scrollChatToBottom()}
                 editable={!saving}
               />
               <TouchableOpacity style={styles.sendButton} onPress={() => sendQuestion(input)}>
@@ -659,7 +666,7 @@ export default function PacienteAssistenteScreen({
               </TouchableOpacity>
             </View>
           </SafeAreaView>
-        </KeyboardAvoidingView>
+        </View>
       </Modal>
     </>
   );

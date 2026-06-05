@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <title>Relatório de Andamento — GlicNutri</title>
+  <style>
+    @page { margin: 12mm 11mm; size: A4; }
+    * { box-sizing: border-box; }
+    body { font-family: "Segoe UI", Calibri, Arial, sans-serif; font-size: 9.5pt; line-height: 1.38; color: #1a202c; margin: 0; }
+    .cover { min-height: 255mm; display: flex; flex-direction: column; justify-content: center; page-break-after: always; }
+    .cover h1 { font-size: 20pt; margin: 0 0 6px; color: #1a365d; border: none; }
+    .cover .sub { font-size: 11pt; color: #4a5568; margin-bottom: 16px; }
+    .cover .meta { font-size: 9pt; color: #4a5568; line-height: 1.75; }
+    h1 { font-size: 14pt; border-bottom: 2px solid #2b6cb0; padding-bottom: 4px; margin: 0 0 8px; color: #1a365d; page-break-after: avoid; }
+    h1.section { page-break-before: always; margin-top: 0; padding-top: 4px; }
+    h2 { font-size: 10pt; color: #2b6cb0; margin: 10px 0 5px; page-break-after: avoid; }
+    p { margin: 4px 0; }
+    .summary-box { background: #ebf8ff; border-left: 4px solid #3182ce; padding: 8px 10px; margin: 8px 0; font-size: 9pt; }
+    table { width: 100%; border-collapse: collapse; font-size: 8pt; margin: 6px 0 10px; }
+    th, td { border: 1px solid #cbd5e0; padding: 4px 6px; text-align: left; vertical-align: top; }
+    th { background: #edf2f7; font-weight: 600; }
+    .badge { display: inline-block; padding: 1px 6px; border-radius: 3px; font-size: 7pt; font-weight: 600; }
+    .badge-done { background: #c6f6d5; color: #22543d; }
+    .badge-partial { background: #feebc8; color: #7b341e; }
+    .badge-open { background: #fed7d7; color: #742a2a; }
+    .bar-chart { display: flex; flex-direction: column; gap: 5px; }
+    .bar-row { display: grid; grid-template-columns: 105px 1fr 34px; gap: 5px; align-items: center; font-size: 8pt; }
+    .bar-track { height: 14px; background: #edf2f7; border-radius: 3px; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 3px; }
+    .c-green { background: #48bb78; } .c-blue { background: #4299e1; } .c-purple { background: #9f7aea; }
+    .c-orange { background: #ed8936; } .c-teal { background: #38b2ac; } .c-navy { background: #2b6cb0; }
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .three-col { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
+    .kpi { background: #f7fafc; border: 1px solid #e2e8f0; border-radius: 5px; padding: 8px; text-align: center; }
+    .kpi .num { font-size: 17pt; font-weight: 700; color: #2b6cb0; line-height: 1.1; }
+    .kpi .lbl { font-size: 7.5pt; color: #718096; margin-top: 3px; }
+    .gantt-row { display: grid; grid-template-columns: 88px 1fr; gap: 5px; align-items: center; margin-bottom: 4px; font-size: 7.5pt; }
+    .gantt-label { font-weight: 600; font-size: 7pt; }
+    .gantt-track { position: relative; height: 16px; background: #edf2f7; border-radius: 3px; }
+    .gantt-bar { position: absolute; top: 1px; height: 14px; border-radius: 3px; font-size: 6pt; font-weight: 600; color: #fff; display: flex; align-items: center; justify-content: center; }
+    .g-done { background: #38a169; } .g-wip { background: #dd6b20; }
+    .donut-wrap { display: flex; align-items: center; gap: 12px; justify-content: center; }
+    .donut { width: 88px; height: 88px; border-radius: 50%; background: conic-gradient(#48bb78 0 91%, #ed8936 91% 100%); position: relative; flex-shrink: 0; }
+    .donut::after { content: "91%"; position: absolute; inset: 16px; background: #fff; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 12pt; font-weight: 700; color: #2b6cb0; }
+    .dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 5px; vertical-align: middle; }
+    .risk-grid { display: grid; grid-template-columns: 70px repeat(3, 1fr); gap: 2px; font-size: 7pt; margin: 6px 0; }
+    .risk-cell { padding: 6px 3px; text-align: center; border-radius: 3px; min-height: 30px; display: flex; align-items: center; justify-content: center; }
+    .risk-head { background: #edf2f7; font-weight: 600; }
+    .r-low { background: #c6f6d5; } .r-med { background: #feebc8; } .r-high { background: #fed7d7; }
+    .pipeline { display: grid; grid-template-columns: repeat(5, 1fr); gap: 3px; margin: 8px 0; }
+    .phase { text-align: center; padding: 6px 3px; border-radius: 4px; font-size: 7pt; font-weight: 600; color: #fff; }
+    .phase-done { background: #38a169; } .phase-wip { background: #dd6b20; }
+    .highlight { background: #f0fff4; }
+    .footer-note { font-size: 7.5pt; color: #718096; margin-top: 14px; border-top: 1px solid #e2e8f0; padding-top: 6px; }
+    .compact ul { margin: 4px 0; padding-left: 14px; font-size: 8.5pt; }
+    .compact li { margin: 1px 0; }
+  </style>
+</head>
+<body>
+
+  <div class="cover">
+    <h1>Relatório de Andamento do Projeto</h1>
+    <div class="sub">GlicNutri — ADS5 Projeto de Sistemas · Entrega gestão 01/06/2026</div>
+    <div class="meta">
+      <strong>Equipe:</strong> 5 integrantes &nbsp;|&nbsp;
+      <strong>Período de desenvolvimento:</strong> fev–jun/2026 (cronograma oficial ADS5)<br />
+      <strong>Esforço estimado (grupo):</strong> ~520–640 h &nbsp;|&nbsp;
+      <strong>Stack:</strong> Expo · Supabase · Python/FastAPI · ML<br />
+      <strong>Apresentação:</strong> Studeo ADS5A — 01/06/2026 (10 min)
+    </div>
+    <div class="compact" style="margin-top:20px;font-size:8.5pt;color:#2d3748">
+      <strong>Gráficos de gestão neste documento:</strong>
+      <ul>
+        <li>Cronograma ADS5 e marcos de entrega</li>
+        <li>Atividades concluídas e pendentes</li>
+        <li>Divisão de esforço da equipe (visão geral)</li>
+        <li>Progresso do projeto</li>
+        <li>Riscos e problemas</li>
+        <li>Tempo gasto e etapas do desenvolvimento</li>
+        <li>Resumo de telas (paciente, nutri, médico espelhado)</li>
+      </ul>
+    </div>
+  </div>
+
+  <h1>1. Resumo executivo</h1>
+  <div class="three-col">
+    <div class="kpi"><div class="num">91%</div><div class="lbl">Progresso geral</div></div>
+    <div class="kpi"><div class="num">15/17</div><div class="lbl">Marcos ADS5 até 25/05</div></div>
+    <div class="kpi"><div class="num">51</div><div class="lbl">Telas mapeadas</div></div>
+  </div>
+  <div class="summary-box">
+    <strong>Situação:</strong> sistema funcional (paciente, nutricionista, médico, admin), BD, auditoria/LGPD, ML e LibreLinkUp concluídos.
+    Pendência principal: artefatos de fechamento (ZIP, vídeo, slides) e esta entrega de gestão (01/06).
+  </div>
+
+  <h1 class="section">2. Cronograma ADS5</h1>
+  <p>Desenvolvimento alinhado ao <em>Cronograma ADS5 — Projeto de Sistemas 2026</em>. Verde = entregue; laranja = em curso.</p>
+
+  <div style="font-size:7pt;color:#718096;margin-bottom:4px;display:grid;grid-template-columns:88px 1fr;gap:5px">
+    <span></span>
+    <span style="display:grid;grid-template-columns:repeat(5,1fr);text-align:center">Fev &nbsp; Mar &nbsp; Abr &nbsp; Mai &nbsp; Jun</span>
+  </div>
+  <div class="gantt-row"><div class="gantt-label">Planejamento</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:0;width:12%">13/02</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">DOC + BD</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:8%;width:18%">09/03</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">Login / Auth</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:18%;width:12%">23/03</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">CRUD + valid.</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:32%;width:14%">06/04</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">Parcial + UX</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:42%;width:18%">27/04</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">Auditoria LGPD</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:58%;width:16%">18/05</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">DOC atualizado</div><div class="gantt-track"><div class="gantt-bar g-done" style="left:72%;width:10%">29/05</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">Gestão (este)</div><div class="gantt-track"><div class="gantt-bar g-wip" style="left:82%;width:10%">01/06</div></div></div>
+  <div class="gantt-row"><div class="gantt-label">Pré-qualif.</div><div class="gantt-track"><div class="gantt-bar g-wip" style="left:88%;width:12%">08/06</div></div></div>
+
+  <table>
+    <thead><tr><th>Data início</th><th>Marco ADS5</th><th>Entrega</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>09/02</td><td>Cronograma do projeto</td><td>13/02</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>23/02</td><td>DOC Word (tecnologias e requisitos)</td><td>27/02</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>09/03</td><td>Banco de dados e tabelas</td><td>09/03 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>23/03</td><td>Login + esqueci senha</td><td>23/03 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>06/04</td><td>CRUD com validações (CPF, CEP…)</td><td>06/04 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>13/04</td><td>Avaliação parcial (etapas até aqui)</td><td>13/04 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>27/04</td><td>Movimentação, validação e usabilidade</td><td>27/04 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>04/05</td><td>Organização + auditoria de código</td><td>04/05 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>18/05</td><td>Logs de auditoria + LGPD</td><td>18/05 ADS5A</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>25/05</td><td>DOC Word atualizado</td><td>29/05</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr class="highlight"><td>01/06</td><td><strong>Relatório de gestão + gráficos</strong></td><td>01/06 ADS5A</td><td><span class="badge badge-partial">Este doc</span></td></tr>
+      <tr><td>08/06</td><td>Sistema funcional (pré-qualificação)</td><td>08/06 ADS5A</td><td><span class="badge badge-partial">Próximo</span></td></tr>
+      <tr><td>22/06</td><td>ZIP + slides + vídeo 5 min</td><td>22/06 ADS5A</td><td><span class="badge badge-open">Aberto</span></td></tr>
+    </tbody>
+  </table>
+
+  <h1 class="section">3. Progresso do projeto</h1>
+  <div class="two-col">
+    <div>
+      <h2>Progresso geral</h2>
+      <div class="donut-wrap">
+        <div class="donut"></div>
+        <div style="font-size:8pt">
+          <div><span class="dot" style="background:#48bb78"></span> Concluído 91%</div>
+          <div><span class="dot" style="background:#ed8936"></span> Pendente 9%</div>
+        </div>
+      </div>
+    </div>
+    <div>
+      <h2>Por área</h2>
+      <div class="bar-chart">
+        <div class="bar-row"><span>App + telas</span><div class="bar-track"><div class="bar-fill c-green" style="width:95%"></div></div><span>95%</span></div>
+        <div class="bar-row"><span>BD + Supabase</span><div class="bar-track"><div class="bar-fill c-blue" style="width:100%"></div></div><span>100%</span></div>
+        <div class="bar-row"><span>ML + API</span><div class="bar-track"><div class="bar-fill c-purple" style="width:100%"></div></div><span>100%</span></div>
+        <div class="bar-row"><span>Libre CGM</span><div class="bar-track"><div class="bar-fill c-green" style="width:100%"></div></div><span>100%</span></div>
+        <div class="bar-row"><span>Pacote final</span><div class="bar-track"><div class="bar-fill c-orange" style="width:40%"></div></div><span>40%</span></div>
+      </div>
+    </div>
+  </div>
+  <h2>Etapas do desenvolvimento</h2>
+  <div class="pipeline">
+    <div class="phase phase-done">Planejamento<br/>fev ✓</div>
+    <div class="phase phase-done">Modelagem<br/>mar ✓</div>
+    <div class="phase phase-done">Implementação<br/>abr–mai ✓</div>
+    <div class="phase phase-wip">Gestão<br/>jun …</div>
+    <div class="phase phase-wip">Entrega<br/>jun …</div>
+  </div>
+
+  <h1 class="section">4. Atividades concluídas e pendentes</h1>
+  <div class="two-col">
+    <div>
+      <h2>Gráfico resumo</h2>
+      <div class="bar-chart">
+        <div class="bar-row"><span>Concluídas</span><div class="bar-track"><div class="bar-fill c-green" style="width:91%"></div></div><span>34</span></div>
+        <div class="bar-row"><span>Pendentes</span><div class="bar-track"><div class="bar-fill c-orange" style="width:9%"></div></div><span>3</span></div>
+      </div>
+    </div>
+    <div>
+      <h2>Marcos técnicos principais</h2>
+      <div class="bar-chart">
+        <div class="bar-row"><span>Requisitos ADS5</span><div class="bar-track"><div class="bar-fill c-blue" style="width:88%"></div></div><span>15/17</span></div>
+        <div class="bar-row"><span>Telas implementadas</span><div class="bar-track"><div class="bar-fill c-green" style="width:100%"></div></div><span>51/51</span></div>
+      </div>
+    </div>
+  </div>
+  <table>
+    <thead><tr><th>Status</th><th>Atividade</th></tr></thead>
+    <tbody>
+      <tr><td><span class="badge badge-done">OK</span></td><td>App completo: paciente (23 telas), nutri (7), admin (7), auth (4)</td></tr>
+      <tr><td><span class="badge badge-done">OK</span></td><td>Nutri: agenda, pacientes, chat com paciente, relatórios PDF, prontuário, consulta</td></tr>
+      <tr><td><span class="badge badge-done">OK</span></td><td>ML (/predict), LibreLinkUp, auditoria, LGPD, migrations Supabase</td></tr>
+      <tr><td><span class="badge badge-done">OK</span></td><td>Médico: 7 telas espelhadas (diabetes/exames; alimentação fica no nutri)</td></tr>
+      <tr><td><span class="badge badge-open">Aberto</span></td><td>ZIP final, vídeo 5 min, upload Studeo pré-qualificação (08/06)</td></tr>
+    </tbody>
+  </table>
+
+  <h1 class="section">5. Divisão de esforço — equipe (5 integrantes)</h1>
+  <p>Visão geral do grupo (sem nomes individuais). Distribuição equilibrada conforme competências.</p>
+  <div class="bar-chart">
+    <div class="bar-row"><span>Frontend / App</span><div class="bar-track"><div class="bar-fill c-green" style="width:30%"></div></div><span>30%</span></div>
+    <div class="bar-row"><span>Backend / BD</span><div class="bar-track"><div class="bar-fill c-blue" style="width:24%"></div></div><span>24%</span></div>
+    <div class="bar-row"><span>ML + API Python</span><div class="bar-track"><div class="bar-fill c-purple" style="width:20%"></div></div><span>20%</span></div>
+    <div class="bar-row"><span>Documentação ADS5</span><div class="bar-track"><div class="bar-fill c-teal" style="width:16%"></div></div><span>16%</span></div>
+    <div class="bar-row"><span>Gestão + QA</span><div class="bar-track"><div class="bar-fill c-orange" style="width:10%"></div></div><span>10%</span></div>
+  </div>
+  <table>
+    <thead><tr><th>Área</th><th>Principais entregas</th><th>Período</th></tr></thead>
+    <tbody>
+      <tr><td>Frontend</td><td>Telas paciente/nutri/médico, UX, chat, agendamentos</td><td>mar–mai</td></tr>
+      <tr><td>Backend</td><td>Supabase, RPC, Edge Functions, Libre sync</td><td>mar–mai</td></tr>
+      <tr><td>ML</td><td>CSV, notebook, 4 modelos, FastAPI /predict</td><td>abr–mai</td></tr>
+      <tr><td>Documentação</td><td>DOC Word, resumo expandido, evidências Bento</td><td>fev–jun</td></tr>
+      <tr><td>Gestão/QA</td><td>Cronograma, testes, pacote ZIP, apresentações</td><td>fev–jun</td></tr>
+    </tbody>
+  </table>
+
+  <h1 class="section">6. Tempo gasto e etapas</h1>
+  <p><strong>Esforço total estimado:</strong> ~520–640 h (5 integrantes × ~18 sem × 6–7 h/semana).</p>
+  <div class="bar-chart">
+    <div class="bar-row"><span>Fev (plan.)</span><div class="bar-track"><div class="bar-fill c-navy" style="width:45%"></div></div><span>~50 h</span></div>
+    <div class="bar-row"><span>Mar (base)</span><div class="bar-track"><div class="bar-fill c-navy" style="width:70%"></div></div><span>~90 h</span></div>
+    <div class="bar-row"><span>Abr (CRUD)</span><div class="bar-track"><div class="bar-fill c-blue" style="width:85%"></div></div><span>~110 h</span></div>
+    <div class="bar-row"><span>Mai (integr.)</span><div class="bar-track"><div class="bar-fill c-purple" style="width:100%"></div></div><span>~130 h</span></div>
+    <div class="bar-row"><span>Jun (fecho)</span><div class="bar-track"><div class="bar-fill c-orange" style="width:55%"></div></div><span>~70 h</span></div>
+  </div>
+  <table>
+    <thead><tr><th>Fase</th><th>Período ADS5</th><th>Entregável</th></tr></thead>
+    <tbody>
+      <tr><td>1. Planejamento</td><td>Fev/26</td><td>Cronograma + DOC inicial</td></tr>
+      <tr><td>2. Fundação</td><td>Mar/26</td><td>BD, login, cadastro</td></tr>
+      <tr><td>3. Desenvolvimento</td><td>Abr/26</td><td>CRUD, telas, parcial</td></tr>
+      <tr><td>4. Integração</td><td>Mai/26</td><td>Auditoria, ML, Libre, LGPD</td></tr>
+      <tr><td>5. Encerramento</td><td>Jun/26</td><td>Gestão, pré-qualif., ZIP final</td></tr>
+    </tbody>
+  </table>
+
+  <h1 class="section">7. Riscos e problemas</h1>
+  <div class="risk-grid">
+    <div class="risk-cell risk-head"></div><div class="risk-cell risk-head">Baixa</div><div class="risk-cell risk-head">Média</div><div class="risk-cell risk-head">Alta</div>
+    <div class="risk-cell risk-head">Alto</div><div class="risk-cell r-low">—</div><div class="risk-cell r-med">Prazo jun</div><div class="risk-cell r-high">ZIP/vídeo</div>
+    <div class="risk-cell risk-head">Médio</div><div class="risk-cell r-low">ML ✓ Libre ✓</div><div class="risk-cell r-med">Médico espelho</div><div class="risk-cell r-med">—</div>
+    <div class="risk-cell risk-head">Baixo</div><div class="risk-cell r-low">API ✓</div><div class="risk-cell r-low">—</div><div class="risk-cell r-low">—</div>
+  </div>
+  <table>
+    <thead><tr><th>Risco</th><th>Mitigação</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Atraso pacote final (ZIP, vídeo)</td><td>Scripts prontos; deadline 22/06</td><td><span class="badge badge-open">Aberto</span></td></tr>
+      <tr><td>Médico sem paridade total com nutri</td><td>7 telas implementadas; escopo clínico distinto</td><td><span class="badge badge-done">Mitigado</span></td></tr>
+      <tr><td>LibreLinkUp / ML</td><td>Sync LA + API local testada</td><td><span class="badge badge-done">Mitigado</span></td></tr>
+    </tbody>
+  </table>
+
+  <h1 class="section">8. Telas do sistema (resumo)</h1>
+
+  <h2>Paciente — abas principais (5 telas)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Tela</th><th>Função</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Início</td><td>Dashboard, resumo glicêmico e atalhos</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>2</td><td>Alimentação</td><td>Diário alimentar e registro de refeições</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>3</td><td>Glicose</td><td>Glicemia manual, insulina e medicação</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>4</td><td>Agendamentos</td><td>Busca de nutricionista e marcação de consultas</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>5</td><td>Plano</td><td>Plano alimentar prescrito</td><td><span class="badge badge-done">OK</span></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Paciente — telas complementares (18 telas)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Tela</th><th>Função</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>6</td><td>Onboarding</td><td>Primeiro acesso e configuração inicial</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>7</td><td>Registrar Refeição (IA)</td><td>Foto + estimativa nutricional por IA</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>8</td><td>Histórico de Registros</td><td>Glicose, refeições, insulina e meds</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>9</td><td>Previsão (IA) / ML</td><td>Previsão glicêmica via /predict</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>10</td><td>Integração do sensor (Libre)</td><td>LibreLinkUp, sync CGM</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>11</td><td>Progresso</td><td>Metas e evolução clínica</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>12</td><td>Bem-estar</td><td>Humor, sono e bem-estar</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>13</td><td>Assistente</td><td>Assistente virtual orientativo</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>14</td><td>Suporte</td><td>FAQ e ajuda</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>15</td><td>Mensagens</td><td>Lista de chats com nutricionista</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>16</td><td>Conversa (chat)</td><td>Chat em tempo real com profissional</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>17</td><td>Perfil do nutricionista</td><td>Dados do profissional antes do agendamento</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>18</td><td>Perfil</td><td>Visão geral da conta</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>19</td><td>Identificação e contato</td><td>Dados pessoais</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>20</td><td>Saúde, metas e rotina</td><td>Metas glicêmicas e rotina</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>21</td><td>Insulinas em uso</td><td>Esquemas de insulina</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>22</td><td>Notificações</td><td>Preferências de alertas</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>23</td><td>Privacidade e segurança</td><td>LGPD, senha e consentimentos</td><td><span class="badge badge-done">OK</span></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Nutricionista (7 telas — referência)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Tela</th><th>Função</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Início</td><td>Dashboard e alertas</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>2</td><td>Agenda</td><td>Consultas presencial/vídeo</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>3</td><td>Pacientes</td><td>Carteira clínica</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>4</td><td><strong>Mensagens (chat)</strong></td><td>Chat em tempo real com paciente</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>5</td><td>Relatórios</td><td>PDF e indicadores</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>6</td><td>Prontuário</td><td>Plano e evolução</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>7</td><td>Consulta</td><td>Sessão com anotações</td><td><span class="badge badge-done">OK</span></td></tr>
+    </tbody>
+  </table>
+
+  <h2>Médico — espelho do nutricionista (7 telas)</h2>
+  <table>
+    <thead><tr><th>#</th><th>Tela médico</th><th>Foco clínico</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>1</td><td>Início</td><td>Dashboard diabetes/exames</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>2</td><td>Agenda</td><td>Consultas clínicas</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>3</td><td>Pacientes</td><td>Carteira vinculada</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>4</td><td>Mensagens (chat)</td><td>Orientações clínicas via evolução</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>5</td><td>Relatórios</td><td>Glicose, risco, CSV clínico</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>6</td><td>Prontuário</td><td>Diabetes, meds, insulina, exames</td><td><span class="badge badge-done">OK</span></td></tr>
+      <tr><td>7</td><td>Consulta</td><td>Sessão + conduta clínica</td><td><span class="badge badge-done">OK</span></td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:8pt;color:#4a5568">Nutri mantém foco alimentar/plano; médico foco glicemia, medicação e exames.</p>
+
+  <h1 class="section">9. Conclusão</h1>
+  <p>O GlicNutri cumpre os marcos ADS5 até auditoria/LGPD (18/05). Este relatório atende a entrega de <strong>01/06</strong>.
+  Próximos passos: completar paridade médico↔nutri, pré-qualificação (08/06) e pacote final (22/06).</p>
+
+  <div class="footer-note">
+    GlicNutri ADS5 · 31/05/2026 · Regenerar: <code>python scripts/doc-export/gestao_projeto_to_pdf.py</code>
+  </div>
+
+</body>
+</html>

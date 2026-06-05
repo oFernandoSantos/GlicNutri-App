@@ -7,7 +7,9 @@ import {
 import { sortChatThreadByCreatedAt } from '../servicos/servicoMensagensChat';
 
 export const CHAT_COMPACT_BREAKPOINT = 900;
+export const CHAT_ACTIVE_POLL_MS = 4000;
 const PATIENT_CHAT_READ_PREFIX = '@glicnutri:patientChatReadAt:';
+const NUTRI_CHAT_READ_PREFIX = '@glicnutri:nutriChatReadAt:';
 
 export function isChatCompactLayout(windowWidth) {
   if (Platform.OS !== 'web') return true;
@@ -106,8 +108,59 @@ export async function markPatientChatRead(patientId, readAt = new Date().toISOSt
   }
 }
 
+function getNutriChatReadKey(nutricionistaId, patientId) {
+  return nutricionistaId && patientId
+    ? `${NUTRI_CHAT_READ_PREFIX}${nutricionistaId}:${patientId}`
+    : '';
+}
+
+export async function getNutriChatLastReadAt(nutricionistaId, patientId) {
+  const key = getNutriChatReadKey(nutricionistaId, patientId);
+  if (!key) return null;
+
+  try {
+    return (await AsyncStorage.getItem(key)) || null;
+  } catch (error) {
+    console.log('Erro ao carregar leitura do chat (nutri):', error);
+    return null;
+  }
+}
+
+export async function markNutriChatRead(
+  nutricionistaId,
+  patientId,
+  readAt = new Date().toISOString()
+) {
+  const key = getNutriChatReadKey(nutricionistaId, patientId);
+  if (!key) return null;
+
+  try {
+    await AsyncStorage.setItem(key, readAt);
+    return readAt;
+  } catch (error) {
+    console.log('Erro ao salvar leitura do chat (nutri):', error);
+    return null;
+  }
+}
+
+export async function loadNutriChatReadAtForPatients(nutricionistaId, patientIds = []) {
+  const map = {};
+  if (!nutricionistaId || !patientIds.length) return map;
+
+  await Promise.all(
+    patientIds.map(async (patientId) => {
+      const readAt = await getNutriChatLastReadAt(nutricionistaId, patientId);
+      if (readAt) map[patientId] = readAt;
+    })
+  );
+
+  return map;
+}
+
 export function buildNutriChatPreview(thread = [], options = {}) {
-  return buildNutritionistThreadPreview(normalizeChatMessages(thread, options));
+  return buildNutritionistThreadPreview(normalizeChatMessages(thread, options), {
+    lastReadAt: options.lastReadAt,
+  });
 }
 
 export function getLastChatMessage(thread = [], options = {}) {

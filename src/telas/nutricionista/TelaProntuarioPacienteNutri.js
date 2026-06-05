@@ -25,6 +25,7 @@ import {
   fetchPatientExperience,
   fetchPatientRegistrosForNutri,
   getLatestGlucose,
+  resolveCanonicalPatientId,
 } from '../../servicos/servicoDadosPaciente';
 import { sortRegistrosNewestFirst } from '../../utilitarios/registrosProntuarioNutri';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
@@ -32,10 +33,11 @@ import {
   averageAdherence,
   buildWeeklyAdherenceFromMeals,
 } from '../../utilitarios/adesaoNutricional';
-import {
-  filterGlucoseReadingsLastHours,
-  sortGlucoseReadingsChronologically,
-} from '../../utilitarios/dataLocal';
+import { pickGlucoseReadingsForRecentChart } from '../../utilitarios/dataLocal';
+import { mergeCachedGlucoseReadings } from '../../servicos/centralGlicose';
+import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
+import { carregarSessaoNutricionista } from '../../servicos/servicoSessaoNutricionista';
+import { invalidatePatientExperienceCache } from '../../servicos/cacheExperienciaPaciente';
 import {
   disableOtherMealPlansForPatient,
   fetchActiveMealPlanForPatient,
@@ -165,10 +167,14 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   const [mealSummary, setMealSummary] = useState('');
   const [extraMeals, setExtraMeals] = useState([]);
   const [patientExperience, setPatientExperience] = useState(null);
+  const [experienceLoadError, setExperienceLoadError] = useState('');
 
   // ── Estado prontuário completo ───────────────────────────────────
   const [prontuarioCompleto, setProntuarioCompleto] = useState(null);
   const [loadingProntuario, setLoadingProntuario] = useState(false);
+  const prontuarioLoadSeqRef = useRef(0);
+  const prontuarioLoadedPatientRef = useRef(null);
+  const experienceLoadedPatientRef = useRef(null);
   const [savingProntuario, setSavingProntuario] = useState(false);
   const [prontuarioMsg, setProntuarioMsg] = useState(null);
 
@@ -206,20 +212,43 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   const [loadingRegistros, setLoadingRegistros] = useState(false);
   const [registrosLoadError, setRegistrosLoadError] = useState('');
   const loadRegistrosRef = useRef(null);
+  const [nutriSessaoPersistida, setNutriSessaoPersistida] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    carregarSessaoNutricionista()
+      .then((sessao) => {
+        if (active) setNutriSessaoPersistida(sessao || null);
+      })
+      .catch(() => {
+        if (active) setNutriSessaoPersistida(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   const nutriRpcActor = useMemo(() => {
+    const base = nutriSessaoPersistida || usuarioLogado || {};
+    const resolvedNutriId =
+      nutricionistaId || getNutritionistId(base) || getNutritionistId(usuarioLogado);
     const email =
+      base?.email_acesso ||
       usuarioLogado?.email_acesso ||
+      base?.email ||
       usuarioLogado?.email ||
+      base?.email_nutri ||
       usuarioLogado?.email_nutri ||
       '';
     return {
-      ...(usuarioLogado || {}),
-      id_nutricionista_uuid: nutricionistaId || getNutritionistId(usuarioLogado),
+      tipo_perfil: 'nutricionista',
+      id_nutricionista_uuid: resolvedNutriId,
       email_acesso: email,
       email,
+      nome_completo_nutri:
+        base?.nome_completo_nutri || usuarioLogado?.nome_completo_nutri || null,
     };
-  }, [nutricionistaId, usuarioLogado]);
+  }, [nutriSessaoPersistida, nutricionistaId, usuarioLogado]);
 
   // ── Estado histórico de consultas ────────────────────────────────
   const [consultasHistorico, setConsultasHistorico] = useState([]);
@@ -263,39 +292,82 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     return () => { active = false; };
   }, [paciente, pacienteId]);
 
-  // Carregar experiência do paciente (glicemia última 12h, adesão)
+  const [resolvedPatientId, setResolvedPatientId] = useState(
+    () => pacienteId || paciente?.id || paciente?.raw?.id_paciente_uuid || null
+  );
+
   useEffect(() => {
     let active = true;
-    const pid = pacienteId || paciente?.id || patientRecord?.id_paciente_uuid;
-    if (!pid) return;
+    const seed = paciente?.raw || patientRecord || paciente;
+    const candidate = pacienteId || paciente?.id || patientRecord?.id_paciente_uuid;
+    if (!candidate) return;
+
+    resolveCanonicalPatientId(candidate, {
+      patientContext: nutriRpcActor,
+      currentPatient: seed,
+    })
+      .then((canonical) => {
+        if (active) setResolvedPatientId(canonical || candidate);
+      })
+      .catch(() => {
+        if (active) setResolvedPatientId(candidate);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [nutriRpcActor, paciente, pacienteId, patientRecord]);
+
+  // Carregar experiência do paciente (glicemia, medicação, refeições para visão geral e registros)
+  useEffect(() => {
+    let active = true;
+    if (!resolvedPatientId) return;
+
+    const limites = mesclarLimitesDadosPaciente('prontuario', { includeHidden: true });
+    const forceRefresh = experienceLoadedPatientRef.current !== resolvedPatientId;
+
     async function load() {
       try {
-        const exp = await fetchPatientExperience(pid, {
-          skipAlertSync: true,
+        setExperienceLoadError('');
+        if (nutriRpcActor?.id_nutricionista_uuid) {
+          await garantirSessaoRpcClinicaComPerfil(nutriRpcActor);
+        }
+        const exp = await fetchPatientExperience(resolvedPatientId, {
+          ...limites,
           skipChat: true,
-          includeHidden: true,
           patientContext: nutriRpcActor,
-          currentPatient: patientRecord || { id_paciente_uuid: pid },
-          ...mesclarLimitesDadosPaciente('prontuario'),
+          currentPatient:
+            patientRecord ||
+            paciente?.raw ||
+            (paciente?.id ? { id_paciente_uuid: paciente.id } : { id_paciente_uuid: resolvedPatientId }),
+          forceRefresh,
         });
-        if (active) setPatientExperience(exp);
-      } catch (_) {
-        if (active) setPatientExperience(null);
+        if (!active) return;
+        experienceLoadedPatientRef.current = resolvedPatientId;
+        setPatientExperience(exp);
+      } catch (error) {
+        if (!active) return;
+        experienceLoadedPatientRef.current = null;
+        setPatientExperience(null);
+        setExperienceLoadError(
+          error?.message || 'Nao foi possivel carregar os dados clinicos deste paciente.'
+        );
       }
     }
     load();
-    return () => { active = false; };
-  }, [nutriRpcActor, paciente?.id, pacienteId, patientRecord?.id_paciente_uuid]);
+    return () => {
+      active = false;
+    };
+  }, [nutriRpcActor, paciente, paciente?.id, paciente?.raw, patientRecord, resolvedPatientId]);
 
   const currentPatient = useMemo(() => {
     const base = normalizePatientForProntuario(paciente || patientRecord || null);
     if (!base || !patientExperience) return base;
     const { items } = buildWeeklyAdherenceFromMeals(patientExperience.appState?.mealEntries, 3);
     const adherence = averageAdherence(items);
-    const latestGlucose = getLatestGlucose(patientExperience.glucoseReadings);
-    const glucose12h = sortGlucoseReadingsChronologically(
-      filterGlucoseReadingsLastHours(patientExperience.glucoseReadings || [], 12)
-    ).map((reading, index) => ({
+    const mergedGlucose = mergeCachedGlucoseReadings(patientExperience.glucoseReadings || []);
+    const latestGlucose = getLatestGlucose(mergedGlucose);
+    const glucose12h = pickGlucoseReadingsForRecentChart(mergedGlucose, 12).map((reading, index) => ({
       id: reading.id || `glucose-12h-${index}`,
       value: Number(reading.value) || 0,
       label: String(reading.time || '').trim().slice(0, 5) || `${index + 1}`,
@@ -312,8 +384,8 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   }, [paciente, patientExperience, patientRecord]);
 
   const effectivePacienteId = useMemo(
-    () => pacienteId || currentPatient?.id || null,
-    [pacienteId, currentPatient]
+    () => resolvedPatientId || pacienteId || currentPatient?.id || null,
+    [resolvedPatientId, pacienteId, currentPatient]
   );
 
   // Carregar plano alimentar
@@ -346,11 +418,15 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   }, [effectivePacienteId, nutricionistaId]);
 
   // Carregar prontuário completo (lazy — só quando tab clinico/evolucao/goals for aberto)
-  const loadProntuario = useCallback(async () => {
+  const loadProntuario = useCallback(async ({ force = false } = {}) => {
     if (!effectivePacienteId) return;
+    const seq = ++prontuarioLoadSeqRef.current;
+    const showLoader = force ? false : prontuarioLoadedPatientRef.current !== effectivePacienteId;
     try {
-      setLoadingProntuario(true);
+      if (showLoader) setLoadingProntuario(true);
       const resultado = await fetchProntuarioCompleto(effectivePacienteId);
+      if (seq !== prontuarioLoadSeqRef.current) return;
+      prontuarioLoadedPatientRef.current = effectivePacienteId;
       setProntuarioCompleto(resultado);
       // Preenche formulário com dados existentes
       if (resultado?.prontuario) {
@@ -380,10 +456,25 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         setMetaObs(m.observacao || '');
       }
     } catch (_) {
+      if (seq !== prontuarioLoadSeqRef.current) return;
+      prontuarioLoadedPatientRef.current = null;
       setProntuarioCompleto(null);
     } finally {
-      setLoadingProntuario(false);
+      if (seq === prontuarioLoadSeqRef.current) setLoadingProntuario(false);
     }
+  }, [effectivePacienteId]);
+
+  useEffect(() => {
+    prontuarioLoadSeqRef.current += 1;
+    prontuarioLoadedPatientRef.current = null;
+    experienceLoadedPatientRef.current = null;
+    if (effectivePacienteId) {
+      invalidatePatientExperienceCache(effectivePacienteId);
+    }
+    setPatientExperience(null);
+    setExperienceLoadError('');
+    setProntuarioCompleto(null);
+    setLoadingProntuario(false);
   }, [effectivePacienteId]);
 
   // Carregar registros (lazy) — mesmos limites do histórico do paciente
@@ -396,10 +487,46 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     return null;
   }, [effectivePacienteId, paciente, patientRecord]);
 
+  const reloadPatientExperience = useCallback(async () => {
+    if (!resolvedPatientId) return;
+    const limites = mesclarLimitesDadosPaciente('prontuario', { includeHidden: true });
+    try {
+      setExperienceLoadError('');
+      if (nutriRpcActor?.id_nutricionista_uuid) {
+        await garantirSessaoRpcClinicaComPerfil(nutriRpcActor);
+      }
+      invalidatePatientExperienceCache(resolvedPatientId);
+      const exp = await fetchPatientExperience(resolvedPatientId, {
+        ...limites,
+        skipChat: true,
+        patientContext: nutriRpcActor,
+        currentPatient:
+          patientRecord ||
+          paciente?.raw ||
+          (paciente?.id ? { id_paciente_uuid: paciente.id } : { id_paciente_uuid: resolvedPatientId }),
+        forceRefresh: true,
+      });
+      experienceLoadedPatientRef.current = resolvedPatientId;
+      setPatientExperience(exp);
+    } catch (error) {
+      experienceLoadedPatientRef.current = null;
+      setPatientExperience(null);
+      setExperienceLoadError(
+        error?.message || 'Nao foi possivel carregar os dados clinicos deste paciente.'
+      );
+    }
+  }, [nutriRpcActor, paciente, paciente?.id, paciente?.raw, patientRecord, resolvedPatientId]);
+
   const loadRegistros = useCallback(async () => {
     if (!effectivePacienteId) return;
     if (!nutriRpcActor?.id_nutricionista_uuid) {
       setRegistrosLoadError('Nutricionista sem identificador. Saia e entre novamente.');
+      return;
+    }
+    if (!nutriRpcActor?.email_acesso && !nutriRpcActor?.email) {
+      setRegistrosLoadError(
+        'E-mail da nutricionista nao encontrado na sessao. Saia e entre novamente.'
+      );
       return;
     }
 
@@ -408,11 +535,16 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       setLoadingRegistros(true);
       setRegistrosLoadError('');
 
+      if (nutriRpcActor?.id_nutricionista_uuid) {
+        await garantirSessaoRpcClinicaComPerfil(nutriRpcActor);
+      }
+
       const resultado = await fetchPatientRegistrosForNutri(effectivePacienteId, {
         rpcActor: nutriRpcActor,
         limits: limites,
         experience: patientExperience,
         currentPatient: patientRecordForRpc,
+        forceRefresh: !patientExperience,
       });
       setGlicemias(sortRegistrosNewestFirst(resultado.glicemias || []));
       setMedicacoes(sortRegistrosNewestFirst(resultado.medicacoes || []));
@@ -465,18 +597,29 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
 
   // Lazy load por tab
   useEffect(() => {
-    if (activeTab === 'clinico' || activeTab === 'goals') loadProntuario();
-    if (activeTab === 'evolucao' && !prontuarioCompleto) loadProntuario();
+    const tabPrecisaProntuario =
+      activeTab === 'clinico' || activeTab === 'goals' || activeTab === 'evolucao';
+    if (tabPrecisaProntuario && effectivePacienteId) {
+      const jaCarregouPaciente = prontuarioLoadedPatientRef.current === effectivePacienteId;
+      if (!jaCarregouPaciente) loadProntuario();
+    }
     if (activeTab === 'registros' && effectivePacienteId) {
       loadRegistrosRef.current?.();
     }
     if (activeTab === 'historico' && consultasHistorico.length === 0) loadHistorico();
-  }, [activeTab, effectivePacienteId, loadHistorico, loadProntuario, prontuarioCompleto, consultasHistorico.length]);
+  }, [activeTab, effectivePacienteId, loadHistorico, loadProntuario, consultasHistorico.length]);
 
   useEffect(() => {
-    if (activeTab !== 'registros' || !effectivePacienteId || !patientExperience) return;
+    if (
+      activeTab !== 'registros' ||
+      !effectivePacienteId ||
+      !patientExperience ||
+      !nutriRpcActor?.id_nutricionista_uuid
+    ) {
+      return;
+    }
     loadRegistrosRef.current?.();
-  }, [activeTab, effectivePacienteId, patientExperience]);
+  }, [activeTab, effectivePacienteId, nutriRpcActor?.id_nutricionista_uuid, patientExperience]);
 
   const allMeals = useMemo(() => [...(currentPatient?.planMeals || []), ...extraMeals], [currentPatient, extraMeals]);
 
@@ -573,7 +716,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       });
       setProntuarioMsg({ tipo: 'sucesso', texto: 'Prontuário salvo.' });
       setEditProntuario(false);
-      await loadProntuario();
+      await loadProntuario({ force: true });
     } catch (error) {
       setProntuarioMsg({ tipo: 'erro', texto: error?.message || 'Erro ao salvar prontuário.' });
     } finally {
@@ -595,7 +738,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         actor: usuarioLogado,
       });
       setAntMsg({ tipo: 'sucesso', texto: 'Aferição salva.' });
-      await loadProntuario();
+      await loadProntuario({ force: true });
     } catch (error) {
       setAntMsg({ tipo: 'erro', texto: error?.message || 'Erro ao salvar aferição.' });
     } finally {
@@ -625,7 +768,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       setEvolucaoSubjetivo(''); setEvolucaoAvaliacao('');
       setEvolucaoPlano(''); setEvolucaoOrientacoes('');
       setEvolucaoMsg({ tipo: 'sucesso', texto: 'Evolução registrada.' });
-      await loadProntuario();
+      await loadProntuario({ force: true });
     } catch (error) {
       setEvolucaoMsg({ tipo: 'erro', texto: error?.message || 'Erro ao registrar evolução.' });
     } finally {
@@ -654,7 +797,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       });
       setMetaMsg({ tipo: 'sucesso', texto: 'Metas salvas.' });
       setEditMeta(false);
-      await loadProntuario();
+      await loadProntuario({ force: true });
     } catch (error) {
       setMetaMsg({ tipo: 'erro', texto: error?.message || 'Erro ao salvar metas.' });
     } finally {
@@ -757,6 +900,17 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         {/* ── TAB: VISÃO GERAL ──────────────────────────────────────────── */}
         {activeTab === 'overview' ? (
           <View style={styles.pageGap}>
+            {experienceLoadError ? (
+              <SectionCard style={styles.experienceErrorCard}>
+                <Text style={styles.experienceErrorText}>{experienceLoadError}</Text>
+                <TouchableOpacity
+                  style={styles.reloadExperienceButton}
+                  onPress={reloadPatientExperience}
+                >
+                  <Text style={styles.reloadExperienceButtonText}>Tentar carregar novamente</Text>
+                </TouchableOpacity>
+              </SectionCard>
+            ) : null}
             <TrendChartCard
               title="Glicemia nas últimas 12h"
               subtitle="Leituras resumidas para detectar subida, estabilidade e pontos de atenção."
@@ -854,7 +1008,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         {/* ── TAB: CLÍNICO ─────────────────────────────────────────────── */}
         {activeTab === 'clinico' ? (
           <View style={styles.pageGap}>
-            {loadingProntuario ? (
+            {loadingProntuario && !prontuarioCompleto ? (
               <View style={styles.inlineStatus}>
                 <ActivityIndicator color={patientTheme.colors.primaryDark} />
                 <Text style={styles.inlineStatusText}>Carregando prontuário...</Text>
@@ -975,7 +1129,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
             {/* Histórico de evoluções */}
             <SectionCard>
               <Text style={styles.sectionTitle}>Histórico de Evoluções</Text>
-              {loadingProntuario ? (
+              {loadingProntuario && !prontuarioCompleto ? (
                 <ActivityIndicator color={patientTheme.colors.primaryDark} style={{ marginTop: 12 }} />
               ) : (prontuarioCompleto?.evolucao || []).length === 0 ? (
                 <Text style={styles.emptyText}>Nenhuma evolução registrada ainda.</Text>
@@ -1331,6 +1485,28 @@ const styles = StyleSheet.create({
   pageGap: { gap: 14 },
   overviewStats: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: 12 },
   reportCard: { gap: 10 },
+  experienceErrorCard: {
+    borderColor: patientTheme.colors.dangerBorder || '#f5c2c7',
+    backgroundColor: patientTheme.colors.dangerBg || '#fff5f5',
+  },
+  experienceErrorText: {
+    color: patientTheme.colors.danger || '#b42318',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  reloadExperienceButton: {
+    marginTop: 10,
+    alignSelf: 'flex-start',
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primary,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+  },
+  reloadExperienceButtonText: {
+    color: patientTheme.colors.onPrimary || '#fff',
+    fontSize: 13,
+    fontWeight: '600',
+  },
   reportHelper: { color: patientTheme.colors.textMuted, fontSize: 13, lineHeight: 18 },
   reportChipRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   reportChip: {

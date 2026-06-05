@@ -2,7 +2,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Platform } from 'react-native';
 import { invalidatePatientExperienceCache } from './cacheExperienciaPaciente';
 import { supabase, supabaseAnonKey, supabaseUrl } from './configSupabase';
-import { enrichRpcClinicalParams } from './servicoSessaoRpc';
+import { supabaseRpcClinica } from './servicoSessaoRpc';
 import {
   buscarAlimentosBrasil,
   materializarAlimentoDaBusca,
@@ -548,12 +548,65 @@ export async function uploadImagemRefeicaoIA({ asset, patientId }) {
 
 const DISPLAYABLE_URI_PATTERN = /^(https?:|file:|data:|blob:)/i;
 const MEAL_PHOTO_SIGNED_URL_TTL_SECONDS = 60 * 60;
+const MEAL_PHOTO_SIGNED_URL_CACHE_MS = (MEAL_PHOTO_SIGNED_URL_TTL_SECONDS - 120) * 1000;
+const mealPhotoSignedUrlCache = new Map();
+const MEAL_STORAGE_UUID_SEGMENT =
+  '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+const MEAL_STORAGE_OBJECT_PATH_PATTERN = new RegExp(
+  `^${MEAL_STORAGE_UUID_SEGMENT}\\/\\d{4}-\\d{2}-\\d{2}\\/[^/\\s?#]+\\.(?:jpe?g|png|webp)$`,
+  'i'
+);
+const SUPABASE_MEAL_STORAGE_URL_PATTERN =
+  /\/storage\/v1\/object\/(?:public|sign|authenticated)\/refeicoes-ia\/([^?#\s]+)/i;
 
-function parseMealPhotoStorageRef(photoRef) {
+function stripMealStorageBucketPrefix(path) {
+  return String(path || '')
+    .trim()
+    .replace(/^\/+/, '')
+    .replace(/^refeicoes-ia\//i, '');
+}
+
+function extractMealStoragePathFromSupabaseUrl(url) {
+  const raw = String(url || '').trim();
+  const match = raw.match(SUPABASE_MEAL_STORAGE_URL_PATTERN);
+  if (!match?.[1]) return null;
+  try {
+    return stripMealStorageBucketPrefix(decodeURIComponent(match[1]));
+  } catch (_error) {
+    return stripMealStorageBucketPrefix(match[1]);
+  }
+}
+
+/** Caminho de objeto no bucket refeicoes-ia (paciente/data/arquivo.ext). */
+export function isValidMealStorageObjectPath(path) {
+  const normalized = stripMealStorageBucketPrefix(path);
+  if (!normalized) return false;
+  if (/^(anexada|sem foto|seed:)/i.test(normalized)) return false;
+  if (normalized.includes('..') || normalized.includes('://')) return false;
+  return MEAL_STORAGE_OBJECT_PATH_PATTERN.test(normalized);
+}
+
+function logMealPhotoStorageDebug(phase, details) {
+  if (!__DEV__) return;
+  console.log(`[refeicao-ia:storage:${phase}]`, details);
+}
+
+export function parseMealPhotoStorageRef(photoRef) {
   const raw = String(photoRef || '').trim();
 
-  if (!raw || DISPLAYABLE_URI_PATTERN.test(raw)) {
+  if (!raw) {
     return null;
+  }
+
+  if (DISPLAYABLE_URI_PATTERN.test(raw)) {
+    const fromSupabaseUrl = extractMealStoragePathFromSupabaseUrl(raw);
+    if (!fromSupabaseUrl) {
+      return null;
+    }
+    return {
+      bucket: REFEICAO_IA_BUCKET,
+      path: fromSupabaseUrl,
+    };
   }
 
   if (raw.startsWith('storage://')) {
@@ -564,20 +617,45 @@ function parseMealPhotoStorageRef(photoRef) {
       return null;
     }
 
-    return {
-      bucket: withoutScheme.slice(0, slashIndex),
-      path: withoutScheme.slice(slashIndex + 1),
-    };
+    const bucket = withoutScheme.slice(0, slashIndex);
+    const path = stripMealStorageBucketPrefix(withoutScheme.slice(slashIndex + 1));
+
+    if (bucket !== REFEICAO_IA_BUCKET || !path) {
+      return null;
+    }
+
+    return { bucket, path };
   }
 
   if (!raw.includes('://')) {
+    const path = stripMealStorageBucketPrefix(raw);
+    if (!path) {
+      return null;
+    }
     return {
       bucket: REFEICAO_IA_BUCKET,
-      path: raw.replace(/^\/+/, ''),
+      path,
     };
   }
 
   return null;
+}
+
+/** Evita POST 400 no Storage quando o ref não é caminho válido (ex.: "anexada"). */
+export function isMealPhotoRefResolvable(photoRef) {
+  const raw = String(photoRef || '').trim();
+  if (!raw) return false;
+  if (DISPLAYABLE_URI_PATTERN.test(raw)) {
+    const fromSupabaseUrl = extractMealStoragePathFromSupabaseUrl(raw);
+    if (fromSupabaseUrl) {
+      return isValidMealStorageObjectPath(fromSupabaseUrl);
+    }
+    return true;
+  }
+  const storageRef = parseMealPhotoStorageRef(raw);
+  if (!storageRef?.bucket || !storageRef?.path) return false;
+  if (storageRef.bucket !== REFEICAO_IA_BUCKET) return false;
+  return isValidMealStorageObjectPath(storageRef.path);
 }
 
 export function getMealEntryPhotoRef(entry) {
@@ -597,7 +675,7 @@ export function getMealEntryPhotoRef(entry) {
   for (const value of candidates) {
     const ref = String(value || '').trim();
 
-    if (ref) {
+    if (ref && isMealPhotoRefResolvable(ref)) {
       return ref;
     }
   }
@@ -612,25 +690,71 @@ export async function resolveMealPhotoDisplayUri(photoRef) {
     return null;
   }
 
-  if (DISPLAYABLE_URI_PATTERN.test(raw)) {
+  if (!isMealPhotoRefResolvable(raw)) {
+    logMealPhotoStorageDebug('skip', { photoRef: raw, reason: 'ref_not_resolvable' });
+    return null;
+  }
+
+  if (DISPLAYABLE_URI_PATTERN.test(raw) && !extractMealStoragePathFromSupabaseUrl(raw)) {
     return raw;
   }
 
   const storageRef = parseMealPhotoStorageRef(raw);
 
-  if (!storageRef?.bucket || !storageRef?.path) {
+  if (!storageRef?.bucket || !storageRef?.path || !isValidMealStorageObjectPath(storageRef.path)) {
+    logMealPhotoStorageDebug('skip', {
+      photoRef: raw,
+      bucket: storageRef?.bucket,
+      path: storageRef?.path,
+      reason: 'invalid_storage_object_path',
+    });
     return null;
   }
+
+  const cacheKey = `${storageRef.bucket}/${storageRef.path}`;
+  const cached = mealPhotoSignedUrlCache.get(cacheKey);
+  if (cached?.uri && cached.expiresAt > Date.now()) {
+    return cached.uri;
+  }
+
+  logMealPhotoStorageDebug('request', {
+    method: 'POST',
+    url: `${supabaseUrl}/storage/v1/object/sign/${storageRef.bucket}/${storageRef.path}`,
+    bucket: storageRef.bucket,
+    path: storageRef.path,
+    expiresIn: MEAL_PHOTO_SIGNED_URL_TTL_SECONDS,
+  });
 
   const { data, error } = await supabase.storage
     .from(storageRef.bucket)
     .createSignedUrl(storageRef.path, MEAL_PHOTO_SIGNED_URL_TTL_SECONDS);
 
   if (error) {
-    throw new Error(normalizeErrorMessage(error));
+    logMealPhotoStorageDebug('error', {
+      photoRef: raw,
+      bucket: storageRef.bucket,
+      path: storageRef.path,
+      message: error?.message,
+      status: error?.status || error?.statusCode,
+    });
+    console.log('Foto refeicao signed URL:', normalizeErrorMessage(error));
+    return null;
   }
 
-  return data?.signedUrl || null;
+  logMealPhotoStorageDebug('response', {
+    bucket: storageRef.bucket,
+    path: storageRef.path,
+    signedUrl: Boolean(data?.signedUrl),
+  });
+
+  const signedUrl = data?.signedUrl || null;
+  if (signedUrl) {
+    mealPhotoSignedUrlCache.set(cacheKey, {
+      uri: signedUrl,
+      expiresAt: Date.now() + MEAL_PHOTO_SIGNED_URL_CACHE_MS,
+    });
+  }
+  return signedUrl;
 }
 
 function normalizarRespostaFuncaoIA(data) {
@@ -1214,10 +1338,9 @@ export async function salvarRefeicaoIA({
   let data = null;
   let error = null;
 
-  const rpcResult = await supabase.rpc(
-    'registrar_refeicao_ia_paciente',
-    await enrichRpcClinicalParams(rpcParams, patientId)
-  );
+  const rpcResult = await supabaseRpcClinica('registrar_refeicao_ia_paciente', rpcParams, {
+    pacienteId: patientId,
+  });
   if (!rpcResult.error) {
     data = Array.isArray(rpcResult.data) ? rpcResult.data[0] : rpcResult.data;
   } else {

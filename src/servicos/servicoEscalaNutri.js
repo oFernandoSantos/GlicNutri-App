@@ -15,11 +15,12 @@ export async function fetchNutritionistChatSummary(nutricionistaId) {
     p_nutricionista_id: nutricionistaId,
   });
 
-  if (!error && Array.isArray(data) && data[0]) {
+  const row = Array.isArray(data) ? data[0] : data;
+  if (!error && row) {
     return {
-      totalConversas: Number(data[0].total_conversas || 0),
-      naoLidas: Number(data[0].nao_lidas || 0),
-      atualizadasHoje: Number(data[0].atualizadas_hoje || 0),
+      totalConversas: Number(row.total_conversas || 0),
+      naoLidas: Number(row.nao_lidas || 0),
+      atualizadasHoje: Number(row.atualizadas_hoje || 0),
     };
   }
 

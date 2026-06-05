@@ -25,8 +25,8 @@ export const LIMITES_DADOS_PACIENTE = {
     skipChat: true,
     skipAlertSync: true,
     glucoseLimit: 60,
-    medicationLimit: 40,
-    mealLimit: 30,
+    medicationLimit: 24,
+    mealLimit: 16,
     experienceCachePreset: 'monitoramento',
   },
   historico: {
@@ -83,6 +83,7 @@ export const LIMITES_DADOS_PACIENTE = {
     medicationLimit: 500,
     mealLimit: 500,
     skipAlertSync: true,
+    experienceCachePreset: 'prontuario',
   },
   relatorio: {
     glucoseLimit: 500,

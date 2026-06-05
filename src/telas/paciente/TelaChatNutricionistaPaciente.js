@@ -30,6 +30,7 @@ import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
   buildPatientChatPreview,
+  CHAT_ACTIVE_POLL_MS,
   getPatientChatLastReadAt,
   markPatientChatRead,
 } from '../../utilitarios/chatConversa';
@@ -217,7 +218,10 @@ export default function TelaChatNutricionistaPaciente({
       });
       load({ silent: hasLoadedRef.current, forceRefresh: false });
       hasLoadedRef.current = true;
-      const intervalId = setInterval(() => load({ silent: true, forceRefresh: false }), 15000);
+      const intervalId = setInterval(
+        () => load({ silent: true, forceRefresh: true }),
+        CHAT_ACTIVE_POLL_MS
+      );
       return () => {
         active = false;
         clearInterval(intervalId);

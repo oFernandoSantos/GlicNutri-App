@@ -88,6 +88,7 @@ import {
   resolveNutritionistThreadMerge,
 } from '../../utilitarios/chatConversa';
 import { limparSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
+import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
 
 const HOME_CHAT_BUTTON_SIZE = 54;
 const HOME_CHAT_BUTTON_EDGE_GAP = patientTheme.spacing.screen;
@@ -850,19 +851,35 @@ export default function PacienteHomeScreen({
       );
       const patientUuid = experience.patient?.id_paciente_uuid || idPaciente;
 
+      let nextAppStateForCache = null;
       setAppState((current) => {
         const merged = mergeAppStateMealEntries(experience.appState, patientUuid);
-        const nextAppState = {
+        nextAppStateForCache = {
           ...merged,
           nutritionistThread: resolveNutritionistThreadMerge(
             current?.nutritionistThread,
             merged?.nutritionistThread
           ),
         };
-        replaceCachedPatientAppState(patientUuid, nextAppState);
-        return nextAppState;
+        return nextAppStateForCache;
       });
+      if (patientUuid && nextAppStateForCache) {
+        replaceCachedPatientAppState(patientUuid, nextAppStateForCache);
+      }
       setClinicalObjective(experience.clinicalObjective);
+
+      const glucoseFromExperience = Array.isArray(experience.glucoseReadings)
+        ? experience.glucoseReadings
+        : [];
+      if (patientUuid && glucoseFromExperience.length) {
+        replaceCachedGlucoseReadings(
+          patientUuid,
+          mergeCachedGlucoseReadings(
+            glucoseFromExperience,
+            getCachedGlucoseReadings(patientUuid)
+          )
+        );
+      }
     },
     [idPaciente, nomeBaseUsuario, usuarioLogado]
   );
@@ -948,6 +965,8 @@ export default function PacienteHomeScreen({
           setMetricsLoading(false);
           return;
         }
+
+        await garantirSessaoRpcClinicaComPerfil(usuarioLogado).catch(() => null);
 
         const cacheOptions = homeFetchOptions;
         const cachedExperience = !forceRefresh
@@ -1157,10 +1176,6 @@ export default function PacienteHomeScreen({
         }).catch((error) => {
           console.log('Refresh refeicoes na home:', error);
         });
-      }
-
-      if (cacheFresco) {
-        return undefined;
       }
 
       const refreshGlucose = async () => {
@@ -1379,17 +1394,20 @@ export default function PacienteHomeScreen({
       if (!forceRefresh) {
         const cachedChat = getCachedPatientChat(activeGlucosePatientId);
         if (cachedChat?.appState?.nutritionistThread?.length) {
+          let nextAppStateForCache = null;
           setAppState((current) => {
-            const nextAppState = {
+            nextAppStateForCache = {
               ...current,
               nutritionistThread: resolveNutritionistThreadMerge(
                 current?.nutritionistThread,
                 cachedChat.appState.nutritionistThread
               ),
             };
-            replaceCachedPatientAppState(activeGlucosePatientId, nextAppState);
-            return nextAppState;
+            return nextAppStateForCache;
           });
+          if (nextAppStateForCache) {
+            replaceCachedPatientAppState(activeGlucosePatientId, nextAppStateForCache);
+          }
         }
       }
 
@@ -1399,21 +1417,24 @@ export default function PacienteHomeScreen({
           patientContext: usuarioLogado,
           forceRefresh: true,
         });
+        let nextAppStateForCache = null;
         setAppState((current) => {
-          const nextAppState = {
+          nextAppStateForCache = {
             ...current,
             nutritionistThread: resolveNutritionistThreadMerge(
               current?.nutritionistThread,
               experience?.appState?.nutritionistThread || []
             ),
           };
-          replaceCachedPatientAppState(activeGlucosePatientId, nextAppState);
+          return nextAppStateForCache;
+        });
+        if (nextAppStateForCache) {
+          replaceCachedPatientAppState(activeGlucosePatientId, nextAppStateForCache);
           replaceCachedPatientChat(activeGlucosePatientId, {
             ...experience,
-            appState: nextAppState,
+            appState: nextAppStateForCache,
           });
-          return nextAppState;
-        });
+        }
       } catch (error) {
         console.log('Erro ao atualizar contador do chat:', error);
       }
@@ -1428,8 +1449,11 @@ export default function PacienteHomeScreen({
       getPatientChatLastReadAt(activeGlucosePatientId).then((readAt) => {
         if (active) setChatLastReadAt(readAt);
       });
-      invalidatePatientChatCache(activeGlucosePatientId);
-      atualizarPreviewChat({ forceRefresh: true });
+      const cachedChat = getCachedPatientChat(activeGlucosePatientId);
+      if (!cachedChat?.appState?.nutritionistThread?.length) {
+        invalidatePatientChatCache(activeGlucosePatientId);
+      }
+      atualizarPreviewChat({ forceRefresh: !cachedChat?.appState?.nutritionistThread?.length });
 
       return () => {
         active = false;

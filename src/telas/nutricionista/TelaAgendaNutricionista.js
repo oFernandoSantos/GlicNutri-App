@@ -564,7 +564,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     return (
       <TouchableOpacity
         key={consulta.id}
-        style={[styles.consultaCard, styles.flatCard]}
+        style={[styles.flatCard, styles.consultaCard]}
         activeOpacity={0.92}
         onPress={() =>
           navigation.navigate('NutriConsultaNutri', {
@@ -659,8 +659,23 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
                 onPress={() => setSelectedDay('hoje')}
                 activeOpacity={0.9}
               >
-                <Ionicons name="calendar-outline" size={14} color={patientTheme.colors.text} />
-                <Text style={styles.dateButtonText}>Hoje</Text>
+                <Ionicons
+                  name="calendar-outline"
+                  size={14}
+                  color={
+                    selectedDay === 'hoje'
+                      ? patientTheme.colors.onPrimary
+                      : patientTheme.colors.primaryDark
+                  }
+                />
+                <Text
+                  style={[
+                    styles.dateButtonText,
+                    selectedDay === 'hoje' && styles.dateButtonTextActive,
+                  ]}
+                >
+                  Hoje
+                </Text>
               </TouchableOpacity>
 
               <TouchableOpacity
@@ -668,8 +683,23 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
                 onPress={() => setSelectedDay('amanha')}
                 activeOpacity={0.9}
               >
-                <Ionicons name="calendar-outline" size={14} color={patientTheme.colors.text} />
-                <Text style={styles.dateButtonText}>Amanhã</Text>
+                <Ionicons
+                  name="calendar-outline"
+                  size={14}
+                  color={
+                    selectedDay === 'amanha'
+                      ? patientTheme.colors.onPrimary
+                      : patientTheme.colors.primaryDark
+                  }
+                />
+                <Text
+                  style={[
+                    styles.dateButtonText,
+                    selectedDay === 'amanha' && styles.dateButtonTextActive,
+                  ]}
+                >
+                  Amanhã
+                </Text>
               </TouchableOpacity>
             </View>
 
@@ -725,7 +755,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
               activeOpacity={0.9}
               onPress={() => setShowCreateForm(true)}
             >
-              <Ionicons name="add" size={14} color="#ffffff" />
+              <Ionicons name="add" size={14} color={patientTheme.colors.onPrimary} />
               <Text style={styles.primaryHeaderButtonText}>Nova Consulta</Text>
             </TouchableOpacity>
           </View>
@@ -774,7 +804,7 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
                 const responding = respondingRequestId === request.id;
 
                 return (
-                  <View key={request.id} style={[styles.requestCard, styles.flatCard]}>
+                  <View key={request.id} style={[styles.flatCard, styles.requestCard]}>
                     <View style={styles.requestLeft}>
                       <AvatarBadge name={pacienteNome} size={40} subtle />
                       <View style={styles.requestCopy}>
@@ -1105,21 +1135,26 @@ const styles = StyleSheet.create({
   dateButton: {
     minHeight: 34,
     borderWidth: 1,
-    borderColor: patientTheme.colors.border,
+    borderColor: patientTheme.colors.primary,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.primarySoft,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
   },
   dateButtonActive: {
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.primary,
+    borderColor: patientTheme.colors.primary,
   },
   dateButtonText: {
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.primaryDark,
     fontSize: 12,
-    fontWeight: '500',
+    fontWeight: '600',
+  },
+  dateButtonTextActive: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '700',
   },
   selectedDateBlock: {
     marginTop: 18,
@@ -1164,6 +1199,7 @@ const styles = StyleSheet.create({
     gap: 10,
   },
   consultaCard: {
+    backgroundColor: patientTheme.colors.surface,
     minHeight: 66,
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -1251,18 +1287,18 @@ const styles = StyleSheet.create({
     fontWeight: '900',
   },
   primaryHeaderButton: {
-    minHeight: 30,
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.surface,
+    minHeight: 34,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.info,
     borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
+    borderColor: patientTheme.colors.info,
     paddingHorizontal: 12,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
   },
   primaryHeaderButtonText: {
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.onPrimary,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -1311,6 +1347,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   requestCard: {
+    backgroundColor: patientTheme.colors.surface,
     minHeight: 70,
     flexDirection: Platform.OS === 'web' ? 'row' : 'column',
     justifyContent: 'space-between',

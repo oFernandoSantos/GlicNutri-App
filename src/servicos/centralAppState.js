@@ -1,13 +1,18 @@
 const appStateCache = new Map();
 const appStateListeners = new Map();
 
-function notify(patientId) {
+function runAppStateListeners(patientId) {
   if (!patientId) return;
 
   const listeners = appStateListeners.get(patientId) || new Set();
   const nextAppState = appStateCache.get(patientId) || null;
 
   listeners.forEach((listener) => listener(nextAppState));
+}
+
+function notify(patientId) {
+  if (!patientId) return;
+  queueMicrotask(() => runAppStateListeners(patientId));
 }
 
 export function getCachedPatientAppState(patientId) {
@@ -31,7 +36,8 @@ export function subscribeToPatientAppState(patientId, listener) {
 
   const listeners = appStateListeners.get(patientId);
   listeners.add(listener);
-  listener(getCachedPatientAppState(patientId));
+
+  queueMicrotask(() => listener(getCachedPatientAppState(patientId)));
 
   return () => {
     listeners.delete(listener);

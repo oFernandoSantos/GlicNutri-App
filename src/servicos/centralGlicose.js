@@ -1,7 +1,9 @@
 import { resolveCanonicalReadingTimeUtc, sortGlucoseReadingsNewestFirst } from '../utilitarios/dataLocal';
 
 const glucoseCache = new Map();
+const glucoseCacheFetchedAt = new Map();
 const glucoseListeners = new Map();
+const DEFAULT_GLUCOSE_CACHE_TTL_MS = 90 * 1000;
 
 function sortReadings(readings) {
   return sortGlucoseReadingsNewestFirst(readings);
@@ -50,7 +52,7 @@ export function mergeCachedGlucoseReadings(primaryReadings, fallbackReadings = [
   return sortReadings(Array.from(mergedMap.values()));
 }
 
-function notify(patientId) {
+function runGlucoseListeners(patientId) {
   if (!patientId) return;
 
   const listeners = glucoseListeners.get(patientId) || new Set();
@@ -59,8 +61,26 @@ function notify(patientId) {
   listeners.forEach((listener) => listener(nextReadings));
 }
 
+function notify(patientId) {
+  if (!patientId) return;
+  queueMicrotask(() => runGlucoseListeners(patientId));
+}
+
 export function getCachedGlucoseReadings(patientId) {
   return glucoseCache.get(patientId) || [];
+}
+
+export function isGlucoseCacheFresh(patientId, ttlMs = DEFAULT_GLUCOSE_CACHE_TTL_MS) {
+  if (!patientId) return false;
+  const fetchedAt = glucoseCacheFetchedAt.get(patientId);
+  if (!fetchedAt || Date.now() - fetchedAt > ttlMs) return false;
+  return (glucoseCache.get(patientId) || []).length > 0;
+}
+
+function touchGlucoseCacheFetchedAt(patientId) {
+  if (patientId) {
+    glucoseCacheFetchedAt.set(patientId, Date.now());
+  }
 }
 
 export function mergeIntoCachedGlucoseReadings(patientId, readings = []) {
@@ -68,6 +88,7 @@ export function mergeIntoCachedGlucoseReadings(patientId, readings = []) {
 
   const next = mergeCachedGlucoseReadings(readings, getCachedGlucoseReadings(patientId));
   glucoseCache.set(patientId, next);
+  touchGlucoseCacheFetchedAt(patientId);
   notify(patientId);
   return next;
 }
@@ -75,6 +96,7 @@ export function mergeIntoCachedGlucoseReadings(patientId, readings = []) {
 export function replaceCachedGlucoseReadings(patientId, readings) {
   if (!patientId) return;
   glucoseCache.set(patientId, mergeCachedGlucoseReadings(readings));
+  touchGlucoseCacheFetchedAt(patientId);
   notify(patientId);
 }
 
@@ -111,7 +133,7 @@ export function subscribeToGlucoseReadings(patientId, listener) {
   const listeners = glucoseListeners.get(patientId);
   listeners.add(listener);
 
-  listener(getCachedGlucoseReadings(patientId));
+  queueMicrotask(() => listener(getCachedGlucoseReadings(patientId)));
 
   return () => {
     listeners.delete(listener);

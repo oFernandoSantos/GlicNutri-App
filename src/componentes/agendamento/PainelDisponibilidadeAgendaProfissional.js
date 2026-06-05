@@ -314,7 +314,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
                 disabled={saving}
                 onPress={handleSaveRow}
               >
-                <Ionicons name="save-outline" size={15} color="#ffffff" />
+                <Ionicons name="save-outline" size={15} color={theme.colors.onPrimary} />
                 <Text style={styles.primaryButtonText}>
                   {saving ? 'Salvando...' : editingId ? 'Atualizar horário' : 'Adicionar horário'}
                 </Text>
@@ -550,11 +550,14 @@ function createStyles(theme) {
     gap: 8,
     paddingHorizontal: 14,
     paddingVertical: 11,
-    borderRadius: 10,
-    backgroundColor: theme.colors.primaryDark,
+    minHeight: 48,
+    borderRadius: theme.radius?.lg ?? 16,
+    borderWidth: 1,
+    borderColor: theme.colors.primaryBorder || theme.colors.primary,
+    backgroundColor: theme.colors.primary,
   },
   primaryButtonText: {
-    color: '#ffffff',
+    color: theme.colors.onPrimary,
     fontSize: 13,
     fontWeight: '700',
   },

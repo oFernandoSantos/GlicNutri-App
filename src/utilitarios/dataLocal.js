@@ -353,6 +353,18 @@ export function filterGlucoseReadingsLastHours(readings = [], hours = 24) {
   });
 }
 
+/** Gráfico do prontuário: 12h, depois 24h, depois últimas leituras disponíveis. */
+export function pickGlucoseReadingsForRecentChart(readings = [], hours = 12, minPoints = 2) {
+  const ordered = sortGlucoseReadingsChronologically(readings);
+  let picked = filterGlucoseReadingsLastHours(ordered, hours);
+  if (picked.length >= minPoints) return picked;
+
+  picked = filterGlucoseReadingsLastHours(ordered, 24);
+  if (picked.length >= minPoints) return picked;
+
+  return ordered.slice(Math.max(0, ordered.length - 12));
+}
+
 function dateTimePartsToEpochMs(parts) {
   if (!parts?.date || !parts?.time) {
     return NaN;
