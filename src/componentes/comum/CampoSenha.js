@@ -8,7 +8,11 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { brand } from '../../temas/designSystem';
-import { inputFocusBorder, inputWebFocusReset } from '../../temas/temaFocoCampo';
+import {
+  authFieldWrapperBase,
+  authPasswordInputBase,
+  inputFocusBorder,
+} from '../../temas/temaFocoCampo';
 import { shouldDisableIOSPasswordAutofill } from '../../utilitarios/preenchimentoAutomaticoPlataforma';
 
 let webPasswordStyleInjected = false;
@@ -65,11 +69,11 @@ export default function CampoSenha({
   autoCorrect = false,
   textContentType = 'password',
   secureTextEntry: _secureTextEntry,
+  focused = false,
   focusedStyle,
   ...textInputProps
 }) {
   const [visivel, setVisivel] = useState(false);
-  const [focado, setFocado] = useState(false);
   const editable = textInputProps.editable !== false;
   const desativarAutofillIOS = shouldDisableIOSPasswordAutofill();
 
@@ -84,12 +88,10 @@ export default function CampoSenha({
   }, [value]);
 
   function handleFocus(event) {
-    setFocado(true);
     textInputProps.onFocus?.(event);
   }
 
   function handleBlur(event) {
-    setFocado(false);
     textInputProps.onBlur?.(event);
   }
 
@@ -99,7 +101,7 @@ export default function CampoSenha({
         styles.wrapper,
         wrapperStyle,
         invalid ? [styles.invalid, invalidStyle] : null,
-        focado ? [styles.focused, focusedStyle] : null,
+        focused ? [styles.focused, focusedStyle] : null,
       ]}
     >
       <TextInput
@@ -119,7 +121,6 @@ export default function CampoSenha({
         style={[
           styles.input,
           inputStyle,
-          inputWebFocusReset,
           Platform.OS === 'web' && !visivel ? styles.webHiddenPassword : null,
         ]}
       />
@@ -144,24 +145,20 @@ export default function CampoSenha({
 
 const styles = StyleSheet.create({
   wrapper: {
-    backgroundColor: '#ffffff',
-    borderColor: '#DDD',
-    borderRadius: 10,
-    borderWidth: 1,
     marginBottom: 15,
     position: 'relative',
+    ...authFieldWrapperBase,
   },
   invalid: {
     borderColor: brand.danger,
   },
   focused: {
     ...inputFocusBorder,
+    borderRadius: 15,
   },
   input: {
-    color: '#333',
-    paddingHorizontal: 14,
-    paddingRight: 48,
-    paddingVertical: 12,
+    borderRadius: 15,
+    ...authPasswordInputBase,
   },
   webHiddenPassword: {
     WebkitTextSecurity: 'disc',

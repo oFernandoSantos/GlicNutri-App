@@ -12,12 +12,18 @@ import {
   Platform,
   StyleSheet,
   TouchableWithoutFeedback,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
-import { inputFocusBorder } from '../../temas/temaFocoCampo';
+import {
+  authFieldBase,
+  authFieldWrapperBase,
+  authPasswordInputBase,
+  inputFocusBorder,
+} from '../../temas/temaFocoCampo';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import { EnvoltorioModalPacienteTeclado } from '../../componentes/paciente/ModalPacienteComTeclado';
 import {
@@ -31,11 +37,12 @@ import {
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 
 const softGreenBorder = {
-  borderWidth: 1.5,
+  borderWidth: 1,
   borderColor: '#f4f4f4',
 };
 
 const AUTH_WEB_MAX_WIDTH = 440;
+const ROLE_PROFISSIONAL = 'Profissional da Saúde';
 
 const camposIniciaisErro = {
   email: '',
@@ -44,7 +51,9 @@ const camposIniciaisErro = {
 };
 
 export default function ForgotPassword({ navigation, route }) {
-  const [role, setRole] = useState(route?.params?.roleInicial === 'Admin' ? 'Admin' : 'Paciente');
+  const [role, setRole] = useState(
+    route?.params?.roleInicial === ROLE_PROFISSIONAL ? ROLE_PROFISSIONAL : 'Paciente'
+  );
   const [email, setEmail] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
@@ -80,8 +89,7 @@ export default function ForgotPassword({ navigation, route }) {
   }
 
   function tipoPerfilAuditoria(perfil) {
-    if (perfil === 'Admin') return 'admin';
-    return perfil === 'Nutricionista' ? 'nutricionista' : 'paciente';
+    return perfil === ROLE_PROFISSIONAL ? 'nutricionista' : 'paciente';
   }
 
   function focarCampoRecuperacao(campo) {
@@ -212,11 +220,12 @@ export default function ForgotPassword({ navigation, route }) {
   function irParaLogin() {
     navigation.reset({
       index: 0,
-      routes: [{ name: 'Login', params: role === 'Admin' ? { roleInicial: 'Admin' } : undefined }],
+      routes: [{ name: 'Login', params: role === ROLE_PROFISSIONAL ? { roleInicial: ROLE_PROFISSIONAL } : undefined }],
     });
   }
 
   async function handleEnviarCodigo({ reenviar = false } = {}) {
+    Keyboard.dismiss();
     setFeedbackSucesso('');
     setCodigoErro('');
     const emailLimpo = validarFormularioSenha();
@@ -281,6 +290,7 @@ export default function ForgotPassword({ navigation, route }) {
   }
 
   async function handleConfirmarCodigo() {
+    Keyboard.dismiss();
     const emailLimpo = validarFormularioSenha();
     const codigoLimpo = codigo.replace(/\D/g, '');
 
@@ -377,12 +387,24 @@ export default function ForgotPassword({ navigation, route }) {
               Platform.OS === 'web' && styles.webAuthContentBox,
             ]}
           >
-            <View style={styles.card} onLayout={registerScrollContainer}>
+            <View nativeID="auth-form" style={styles.card} onLayout={registerScrollContainer}>
               <Text style={styles.title}>Recuperar senha</Text>
 
               <SeletorPerfil
                 role={role}
-                opcoes={['Paciente', 'Nutricionista', 'Admin']}
+                opcoes={[
+                  {
+                    value: 'Paciente',
+                    label: 'Paciente',
+                    labelStyle: { fontSize: 11.5 },
+                  },
+                  {
+                    value: ROLE_PROFISSIONAL,
+                    label: ROLE_PROFISSIONAL,
+                    labelStyle: { fontSize: 11.5 },
+                  },
+                ]}
+                textStyle={{ textAlign: 'center' }}
                 onChangeRole={(perfil) => {
                   setRole(perfil);
                   setEmail('');
@@ -413,6 +435,7 @@ export default function ForgotPassword({ navigation, route }) {
                 autoCapitalize="none"
                 autoCorrect={false}
                 autoComplete="email"
+                returnKeyType="next"
               />
               {fieldErrors.email ? (
                 <Text style={styles.fieldErrorText}>{fieldErrors.email}</Text>
@@ -426,6 +449,7 @@ export default function ForgotPassword({ navigation, route }) {
                 <CampoSenha
                   wrapperStyle={styles.passwordInputWrapper}
                   inputStyle={styles.passwordInput}
+                  focused={focusedField === 'novaSenha'}
                   invalid={!!fieldErrors.novaSenha}
                   invalidStyle={styles.inputError}
                   value={novaSenha}
@@ -434,6 +458,7 @@ export default function ForgotPassword({ navigation, route }) {
                   placeholderTextColor="#999"
                   autoComplete="new-password"
                   textContentType="newPassword"
+                  returnKeyType="next"
                   onFocus={() => {
                     setNovaSenhaFocada(true);
                     focarCampoRecuperacao('novaSenha');
@@ -454,6 +479,7 @@ export default function ForgotPassword({ navigation, route }) {
                 <CampoSenha
                   wrapperStyle={styles.passwordInputWrapper}
                   inputStyle={styles.passwordInput}
+                  focused={focusedField === 'confirmarSenha'}
                   invalid={!!fieldErrors.confirmarSenha}
                   invalidStyle={styles.inputError}
                   value={confirmarSenha}
@@ -462,6 +488,12 @@ export default function ForgotPassword({ navigation, route }) {
                   placeholderTextColor="#999"
                   autoComplete="new-password"
                   textContentType="newPassword"
+                  returnKeyType="send"
+                  onSubmitEditing={() => {
+                    if (podeEnviarCodigo) {
+                      handleEnviarCodigo();
+                    }
+                  }}
                   onFocus={() => focarCampoRecuperacao('confirmarSenha')}
                   onBlur={() => desfocarCampoRecuperacao('confirmarSenha')}
                 />
@@ -541,6 +573,8 @@ export default function ForgotPassword({ navigation, route }) {
                   placeholderTextColor="#999"
                   keyboardType="numeric"
                   maxLength={6}
+                  returnKeyType="done"
+                  onSubmitEditing={handleConfirmarCodigo}
                 />
                 {codigoErro ? (
                   <Text style={styles.codeErrorText}>{codigoErro}</Text>
@@ -635,14 +669,9 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 15,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
     marginBottom: 16,
-    backgroundColor: '#ffffff',
     color: '#333',
+    ...authFieldBase,
     ...softGreenBorder,
   },
   inputError: {
@@ -652,19 +681,13 @@ const styles = StyleSheet.create({
     ...inputFocusBorder,
   },
   passwordInputWrapper: {
-    borderWidth: 1,
-    borderColor: '#E5E7EB',
-    borderRadius: 15,
     marginBottom: 16,
-    backgroundColor: '#ffffff',
     position: 'relative',
+    ...authFieldWrapperBase,
     ...softGreenBorder,
   },
   passwordInput: {
-    color: '#333',
-    paddingHorizontal: 14,
-    paddingRight: 48,
-    paddingVertical: 14,
+    ...authPasswordInputBase,
   },
   fieldErrorText: {
     color: '#B91C1C',
@@ -708,9 +731,6 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
   codeInput: {
-    borderColor: '#4fdfa3',
-    borderRadius: 20,
-    borderWidth: 1,
     fontSize: 22,
     fontWeight: '700',
     letterSpacing: 4,

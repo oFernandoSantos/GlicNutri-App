@@ -177,6 +177,13 @@ function useWebDocumentScroll() {
         outline: 2px solid #4fdfa3 !important;
         outline-offset: 2px !important;
       }
+
+      #auth-form input:focus-visible,
+      #auth-form textarea:focus-visible,
+      #auth-form select:focus-visible {
+        outline: none !important;
+        outline-offset: 0 !important;
+      }
     `;
 
     document.documentElement.style.height = 'auto';

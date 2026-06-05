@@ -10,6 +10,7 @@ import {
   Platform,
   Image,
   Linking,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../servicos/configSupabase';
@@ -54,13 +55,18 @@ import { patientAppAlreadyActive } from '../../utilitarios/navegacaoPaciente';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
-import { inputFocusBorder } from '../../temas/temaFocoCampo';
+import {
+  authFieldBase,
+  authFieldWrapperBase,
+  authPasswordInputBase,
+  inputFocusBorder,
+} from '../../temas/temaFocoCampo';
 import { brand } from '../../temas/designSystem';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import { getPrivacyPolicyUrl } from '../../constantes/configPublicaApp';
 
 const softGreenBorder = {
-  borderWidth: 1.5,
+  borderWidth: 1,
   borderColor: '#f4f4f4',
 };
 
@@ -366,6 +372,7 @@ export default function TelaLogin({ navigation, route, session }) {
   }, []);
 
   async function handleLogin() {
+    Keyboard.dismiss();
     const errosFormulario = validarCamposLogin();
     setFieldErrors(errosFormulario);
 
@@ -425,15 +432,17 @@ export default function TelaLogin({ navigation, route, session }) {
         return;
       }
 
-      await limparSessaoAdmin();
-      await limparSessaoNutricionista();
-      await limparSessaoMedico();
-      await limparRpcSessionToken();
+      await Promise.all([
+        limparSessaoAdmin(),
+        limparSessaoNutricionista(),
+        limparSessaoMedico(),
+        limparRpcSessionToken(),
+      ]);
 
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
 
-        await registrarLogAuditoria({
+        registrarLogAuditoria({
           actor: adminUser,
           actorType: 'admin',
           action: 'login_sucesso_admin',
@@ -442,7 +451,7 @@ export default function TelaLogin({ navigation, route, session }) {
           origin: 'login',
           status: 'sucesso',
           details: { metodo: 'email_senha' },
-        });
+        }).catch(() => null);
 
         if (route?.params?.onAdminLogin) {
           route.params.onAdminLogin(adminUser);
@@ -505,7 +514,7 @@ export default function TelaLogin({ navigation, route, session }) {
             ? usuario?.id_medico_uuid || null
             : usuario?.id_nutricionista_uuid || null;
 
-      await registrarLogAuditoria({
+      registrarLogAuditoria({
         actor: usuario,
         actorType: actorTipo,
         action: loginOkAction,
@@ -514,7 +523,7 @@ export default function TelaLogin({ navigation, route, session }) {
         origin: 'login',
         status: 'sucesso',
         details: { metodo: 'email_senha' },
-      });
+      }).catch(() => null);
 
       let usuarioSessao = usuario;
 
@@ -815,14 +824,9 @@ export default function TelaLogin({ navigation, route, session }) {
   };
 
   const inputStyle = {
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: '#686d71',
-    borderRadius: 15,
-    paddingHorizontal: 15,
-    height: 45,
-    marginBottom: 15,
+    marginBottom: 16,
     color: '#333',
+    ...authFieldBase,
     ...softGreenBorder,
   };
 
@@ -831,17 +835,14 @@ export default function TelaLogin({ navigation, route, session }) {
   };
 
   const passwordInputWrapperStyle = {
-    ...inputStyle,
-    paddingHorizontal: 0,
-    paddingVertical: 0,
+    marginBottom: 16,
     position: 'relative',
+    ...authFieldWrapperBase,
+    ...softGreenBorder,
   };
 
   const passwordInputStyle = {
-    color: '#333',
-    height: '100%',
-    paddingHorizontal: 15,
-    paddingRight: 48,
+    ...authPasswordInputBase,
   };
 
   const errorBoxStyle = {
@@ -1006,6 +1007,7 @@ export default function TelaLogin({ navigation, route, session }) {
           nestedScrollEnabled
         >
       <View
+        nativeID="auth-form"
         onLayout={registerScrollContainer}
         style={[
           cardStyle,
@@ -1018,7 +1020,19 @@ export default function TelaLogin({ navigation, route, session }) {
 
         <SeletorPerfil
           role={role}
-          opcoes={['Paciente', { value: ROLE_PROFISSIONAL, label: 'Profissional da Saúde' }]}
+          opcoes={[
+            {
+              value: 'Paciente',
+              label: 'Paciente',
+              labelStyle: { fontSize: 11.5 },
+            },
+            {
+              value: ROLE_PROFISSIONAL,
+              label: 'Profissional da Saúde',
+              labelStyle: { fontSize: 11.5 },
+            },
+          ]}
+          textStyle={{ textAlign: 'center' }}
           onChangeRole={(perfil) => {
             setRole(perfil);
             setIdentificador('');
@@ -1046,6 +1060,7 @@ export default function TelaLogin({ navigation, route, session }) {
           autoCapitalize="none"
           autoCorrect={false}
           autoComplete="email"
+          returnKeyType="next"
         />
         {fieldErrors.identificador ? (
           <Text style={fieldErrorTextStyle}>{fieldErrors.identificador}</Text>
@@ -1056,6 +1071,7 @@ export default function TelaLogin({ navigation, route, session }) {
           <CampoSenha
             wrapperStyle={passwordInputWrapperStyle}
             inputStyle={passwordInputStyle}
+            focused={focusedField === 'senha'}
             invalid={!!fieldErrors.senha}
             invalidStyle={inputErrorStyle}
             placeholder="********"
@@ -1075,6 +1091,8 @@ export default function TelaLogin({ navigation, route, session }) {
             autoCapitalize="none"
             autoComplete="password"
             textContentType="password"
+            returnKeyType="go"
+            onSubmitEditing={handleLogin}
             onFocus={() => focarCampoLogin('senha')}
             onBlur={() => desfocarCampoLogin('senha')}
           />
