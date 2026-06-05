@@ -10,11 +10,17 @@ export default function SeletorPerfil({
   role,
   onChangeRole,
   opcoes = ['Paciente', 'Nutricionista'],
+  textStyle,
 }) {
   const opcoesNormalizadas = opcoes.map((opcao) =>
     typeof opcao === 'string'
       ? { value: opcao, label: opcao }
-      : { value: opcao.value, label: opcao.label || opcao.value }
+      : {
+        value: opcao.value,
+        label: opcao.label || opcao.value,
+        buttonStyle: opcao.buttonStyle,
+        labelStyle: opcao.labelStyle,
+      }
   );
 
   const containerStyle = {
@@ -24,22 +30,25 @@ export default function SeletorPerfil({
     gap: 10,
   };
 
-  const getButtonStyle = (perfil) => ({
+  const getButtonStyle = (perfilOpcao) => ({
     flex: 1,
     height: 48,
     borderRadius: 18,
     borderWidth: 1,
-    borderColor: role === perfil ? '#4fdfa3' : '#d7dde2',
-    backgroundColor: role === perfil ? '#4fdfa3' : '#FFFFFF',
-    ...(role === perfil ? {} : softGreenBorder),
+    borderColor: role === perfilOpcao.value ? '#4fdfa3' : '#d7dde2',
+    backgroundColor: role === perfilOpcao.value ? '#4fdfa3' : '#FFFFFF',
+    ...(role === perfilOpcao.value ? {} : softGreenBorder),
     alignItems: 'center',
     justifyContent: 'center',
+    ...(perfilOpcao.buttonStyle || {}),
   });
 
-  const getTextStyle = (perfil) => ({
-    color: role === perfil ? '#FFFFFF' : '#686d71',
+  const getTextStyle = (perfilOpcao) => ({
+    color: role === perfilOpcao.value ? '#FFFFFF' : '#686d71',
     fontWeight: '700',
     fontSize: 14,
+    ...(textStyle || {}),
+    ...(perfilOpcao.labelStyle || {}),
   });
 
   return (
@@ -47,10 +56,10 @@ export default function SeletorPerfil({
       {opcoesNormalizadas.map((perfil) => (
         <TouchableOpacity
           key={perfil.value}
-          style={getButtonStyle(perfil.value)}
+          style={getButtonStyle(perfil)}
           onPress={() => onChangeRole(perfil.value)}
         >
-          <Text style={getTextStyle(perfil.value)}>{perfil.label}</Text>
+          <Text numberOfLines={1} style={getTextStyle(perfil)}>{perfil.label}</Text>
         </TouchableOpacity>
       ))}
     </View>

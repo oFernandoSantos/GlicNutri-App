@@ -13,6 +13,7 @@ import {
   Platform,
   StyleSheet,
   Image,
+  Keyboard,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EnvoltorioModalPacienteTeclado } from '../../componentes/paciente/ModalPacienteComTeclado';
@@ -29,7 +30,12 @@ import {
 import { hasPatientOnboardingSeen } from '../../servicos/servicoOnboardingPaciente';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
-import { inputFocusBorder } from '../../temas/temaFocoCampo';
+import {
+  authFieldBase,
+  authFieldWrapperBase,
+  authPasswordInputBase,
+  inputFocusBorder,
+} from '../../temas/temaFocoCampo';
 import { brand } from '../../temas/designSystem';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import {
@@ -48,7 +54,7 @@ import {
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 
 const softGreenBorder = {
-  borderWidth: 1.5,
+  borderWidth: 1,
   borderColor: '#f4f4f4',
 };
 
@@ -570,6 +576,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
     codigoAcessoInformado = codigoAcessoNutricionista,
     { reenviar = false } = {}
   ) => {
+    Keyboard.dismiss();
     const emailLimpo = email.trim().toLowerCase();
     const documentoFormatado = normalizarDocumento();
     const codigoAcessoNormalizado = normalizeNutritionistAccessCode(codigoAcessoInformado);
@@ -618,6 +625,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
     codigoAcessoInformado = codigoAcessoNutricionista,
     { emailValidado = false } = {}
   ) => {
+    Keyboard.dismiss();
     const nomeLimpo = nome.trim();
     const emailLimpo = email.trim().toLowerCase();
     const documentoFormatado = normalizarDocumento();
@@ -684,7 +692,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
           throw new Error('O paciente nao foi confirmado no banco de dados.');
         }
 
-        await registrarLogAuditoria({
+        registrarLogAuditoria({
           actor: data,
           targetPatientId: data.id_paciente_uuid,
           action: 'paciente_cadastrado',
@@ -695,7 +703,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
             metodo: 'email_senha',
             email: data.email_pac,
           },
-        });
+        }).catch(() => null);
 
         console.log('Paciente salvo com sucesso:', data);
       } else {
@@ -720,7 +728,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
           throw new Error('O profissional da saúde nao foi confirmado no banco de dados.');
         }
 
-        await registrarLogAuditoria({
+        registrarLogAuditoria({
           actor: data,
           actorType: 'nutricionista',
           action: 'nutricionista_cadastrado',
@@ -731,7 +739,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
             metodo: 'email_senha',
             email: data.email_acesso,
           },
-        });
+        }).catch(() => null);
 
         console.log('Nutricionista salvo com sucesso:', data);
       }
@@ -801,6 +809,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
   };
 
   const handleConfirmarValidacaoEmailCadastro = async () => {
+    Keyboard.dismiss();
     const codigoLimpo = codigoValidacaoEmail.replace(/\D/g, '');
     const emailLimpo = email.trim().toLowerCase();
     const emailValidado = emailPendenteCadastro || emailLimpo;
@@ -999,15 +1008,24 @@ export default function TelaCadastroFixed({ navigation, route }) {
               Platform.OS === 'web' && styles.webAuthContentBox,
             ]}
           >
-            <View style={styles.card} onLayout={registerScrollContainer}>
+            <View nativeID="auth-form" style={styles.card} onLayout={registerScrollContainer}>
             <Text style={styles.title}>Crie sua conta</Text>
 
             <SeletorPerfil
               role={role}
               opcoes={[
-                'Paciente',
-                { value: 'Nutricionista', label: LABEL_PROFISSIONAL },
+                {
+                  value: 'Paciente',
+                  label: 'Paciente',
+                  labelStyle: { fontSize: 11.5 },
+                },
+                {
+                  value: 'Nutricionista',
+                  label: LABEL_PROFISSIONAL,
+                  labelStyle: { fontSize: 11.5 },
+                },
               ]}
+              textStyle={{ textAlign: 'center' }}
               onChangeRole={trocarPerfil}
             />
 
@@ -1029,6 +1047,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
               placeholder="Ex: Joao Silva"
               placeholderTextColor="#999"
               autoCapitalize="words"
+              returnKeyType="next"
             />
             {renderFieldError('nome')}
 
@@ -1053,6 +1072,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
               keyboardType={isPaciente ? 'numeric' : 'default'}
               autoCapitalize="characters"
               maxLength={isPaciente ? 14 : 8}
+              returnKeyType="next"
               onFocus={() => focarCampo('documento')}
               onBlur={() => desfocarCampo('documento')}
             />
@@ -1108,6 +1128,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
               placeholderTextColor="#999"
               keyboardType="numeric"
               maxLength={10}
+              returnKeyType="next"
             />
             {renderFieldError('dataNascimento')}
 
@@ -1152,6 +1173,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
               keyboardType={Platform.OS === 'web' ? 'default' : 'email-address'}
               placeholderTextColor="#999"
               textContentType={desativarAutofillIOS ? 'oneTimeCode' : 'emailAddress'}
+              returnKeyType="next"
             />
             {renderFieldError('email')}
             <Text style={styles.helperText}>
@@ -1163,6 +1185,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
               <CampoSenha
                 wrapperStyle={styles.passwordInputWrapper}
                 inputStyle={styles.passwordInput}
+                focused={focusedField === 'senha'}
                 invalid={!!fieldErrors.senha}
                 invalidStyle={styles.inputError}
                 value={senha}
@@ -1180,6 +1203,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
                 autoComplete={desativarAutofillIOS ? 'one-time-code' : 'new-password'}
                 importantForAutofill="no"
                 textContentType={desativarAutofillIOS ? 'oneTimeCode' : 'newPassword'}
+                returnKeyType="next"
                 onFocus={() => {
                   setSenhaFocada(true);
                   focarCampo('senha');
@@ -1198,6 +1222,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
               <CampoSenha
                 wrapperStyle={styles.passwordInputWrapper}
                 inputStyle={styles.passwordInput}
+                focused={focusedField === 'confirmarSenha'}
                 invalid={!!fieldErrors.confirmarSenha}
                 invalidStyle={styles.inputError}
                 value={confirmarSenha}
@@ -1212,6 +1237,12 @@ export default function TelaCadastroFixed({ navigation, route }) {
                 autoComplete={desativarAutofillIOS ? 'one-time-code' : 'new-password'}
                 importantForAutofill="no"
                 textContentType={desativarAutofillIOS ? 'oneTimeCode' : 'newPassword'}
+                returnKeyType="send"
+                onSubmitEditing={() => {
+                  if (formularioValido && !googleLoading) {
+                    handlePressCadastrar();
+                  }
+                }}
                 onFocus={() => focarCampo('confirmarSenha')}
                 onBlur={() => desfocarCampo('confirmarSenha')}
               />
@@ -1383,6 +1414,8 @@ export default function TelaCadastroFixed({ navigation, route }) {
                       placeholderTextColor="#999"
                       autoCapitalize="characters"
                       autoCorrect={false}
+                      returnKeyType="done"
+                      onSubmitEditing={handleConfirmarCodigoAcesso}
                       onFocus={() => focarCampo('codigoAcessoNutricionista')}
                       onBlur={() => desfocarCampo('codigoAcessoNutricionista')}
                     />
@@ -1462,6 +1495,8 @@ export default function TelaCadastroFixed({ navigation, route }) {
                 keyboardType="number-pad"
                 maxLength={6}
                 editable={!loading && !validandoEmailCadastro}
+                returnKeyType="done"
+                onSubmitEditing={handleConfirmarValidacaoEmailCadastro}
               />
 
               {erroCodigoValidacaoEmail ? (
@@ -1591,19 +1626,12 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   input: {
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 15,
-    padding: 12,
-    marginBottom: 15,
+    marginBottom: 16,
     color: '#333',
-    backgroundColor: '#ffffff',
+    ...authFieldBase,
     ...softGreenBorder,
   },
   codeInput: {
-    borderColor: '#4fdfa3',
-    borderRadius: 20,
-    borderWidth: 1,
     fontSize: 20,
     fontWeight: '700',
     letterSpacing: 4,
@@ -1617,19 +1645,13 @@ const styles = StyleSheet.create({
     ...inputFocusBorder,
   },
   passwordInputWrapper: {
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 15,
-    marginBottom: 15,
-    backgroundColor: '#ffffff',
+    marginBottom: 16,
     position: 'relative',
+    ...authFieldWrapperBase,
     ...softGreenBorder,
   },
   passwordInput: {
-    color: '#333',
-    paddingHorizontal: 12,
-    paddingRight: 48,
-    paddingVertical: 12,
+    ...authPasswordInputBase,
   },
   fieldErrorText: {
     marginTop: -8,
@@ -1699,12 +1721,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#DDD',
-    borderRadius: 15,
-    padding: 12,
-    marginBottom: 15,
-    backgroundColor: '#ffffff',
+    marginBottom: 16,
+    ...authFieldBase,
     ...softGreenBorder,
   },
   inputPickerError: {
