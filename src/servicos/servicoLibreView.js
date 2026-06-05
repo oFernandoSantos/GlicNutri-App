@@ -8,12 +8,11 @@ import {
   normalizeLocalTimeString,
   parseLibreReadingTimeUtc,
 } from '../utilitarios/dataLocal';
-import { supabaseAnonKey } from './configSupabase';
+import { supabaseAnonKey, supabaseUrl } from './configSupabase';
 
-const supabaseProjectUrl = globalThis?.process?.env?.EXPO_PUBLIC_SUPABASE_URL || '';
 const libreViewSyncUrl =
-  globalThis?.process?.env?.EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL ||
-  (supabaseProjectUrl ? `${supabaseProjectUrl}/functions/v1/libreview-sync` : '');
+  String(process.env.EXPO_PUBLIC_LIBRE_VIEW_SYNC_URL || '').trim() ||
+  (supabaseUrl ? `${supabaseUrl}/functions/v1/libreview-sync` : '');
 
 const LIBRE_LINKUP_STORAGE_PREFIX = '@glicnutri:libreLinkUp:';
 export const DEFAULT_LIBRE_API_REGION = 'la';

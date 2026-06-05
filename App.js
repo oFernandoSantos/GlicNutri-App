@@ -606,9 +606,9 @@ export default function App() {
                 Configuracao incompleta
               </Text>
               <Text style={{ fontSize: 15, lineHeight: 22, color: '#444', textAlign: 'center' }}>
-                Crie um ficheiro .env na raiz do projeto com EXPO_PUBLIC_SUPABASE_URL e
-                EXPO_PUBLIC_SUPABASE_ANON_KEY (copie de .env.example e preencha). Reinicie o Expo
-                (npm start).
+                Defina EXPO_PUBLIC_SUPABASE_URL e EXPO_PUBLIC_SUPABASE_ANON_KEY no ambiente de
+                deploy ou no ficheiro .env local (desenvolvimento). Reinicie o servidor apos
+                alterar as variaveis.
               </Text>
             </View>
           </View>
