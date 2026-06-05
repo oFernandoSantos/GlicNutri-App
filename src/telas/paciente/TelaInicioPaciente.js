@@ -796,6 +796,7 @@ export default function PacienteHomeScreen({
   const [metricsLoading, setMetricsLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [saindo, setSaindo] = useState(false);
+  const [menuRapidoAberto, setMenuRapidoAberto] = useState(false);
   const [mensagemHome, setMensagemHome] = useState(null);
   const [activeMetricIndex, setActiveMetricIndex] = useState(0);
 
@@ -2048,36 +2049,39 @@ export default function PacienteHomeScreen({
         <View style={styles.listFooter} />
       </ScrollView>
 
-      <Animated.View
-        accessibilityLabel="Abrir conversa com nutricionista"
-        accessibilityRole="button"
-        style={[
-          styles.homeChatFloatingButton,
-          {
-            left: chatLeftAnim,
-            bottom: chatBottomAnim,
-          },
-        ]}
-        {...chatButtonPanResponder.panHandlers}
-      >
-        <Ionicons
-          name="chatbubble-ellipses-outline"
-          size={24}
-          color={patientTheme.colors.onPrimary}
-        />
-        {unreadChatCount > 0 ? (
-          <View style={styles.homeChatBadge}>
-            <Text style={styles.homeChatBadgeText}>
-              {unreadChatCount > 9 ? '9+' : unreadChatCount}
-            </Text>
-          </View>
-        ) : null}
-      </Animated.View>
+      {!menuRapidoAberto ? (
+        <Animated.View
+          accessibilityLabel="Abrir conversa com nutricionista"
+          accessibilityRole="button"
+          style={[
+            styles.homeChatFloatingButton,
+            {
+              left: chatLeftAnim,
+              bottom: chatBottomAnim,
+            },
+          ]}
+          {...chatButtonPanResponder.panHandlers}
+        >
+          <Ionicons
+            name="chatbubble-ellipses-outline"
+            size={24}
+            color={patientTheme.colors.onPrimary}
+          />
+          {unreadChatCount > 0 ? (
+            <View style={styles.homeChatBadge}>
+              <Text style={styles.homeChatBadgeText}>
+                {unreadChatCount > 9 ? '9+' : unreadChatCount}
+              </Text>
+            </View>
+          ) : null}
+        </Animated.View>
+      ) : null}
 
       <BarraAbasPaciente
         navigation={navigation}
         rotaAtual={route?.name || 'HomePaciente'}
         usuarioLogado={usuarioLogado}
+        onQuickMenuVisibilityChange={setMenuRapidoAberto}
       />
 
       {saindo ? (
