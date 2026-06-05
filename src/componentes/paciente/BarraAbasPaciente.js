@@ -80,7 +80,12 @@ function IconeAba({ aba, ativo }) {
   return <Ionicons name={aba.icone} size={tamanho} color={cor} />;
 }
 
-export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado }) {
+export default function BarraAbasPaciente({
+  navigation,
+  rotaAtual,
+  usuarioLogado,
+  onQuickMenuVisibilityChange,
+}) {
   const insets = useSafeAreaInsets();
   const { height: alturaTela, width: larguraTela } = useWindowDimensions();
   const [rotaVisual, setRotaVisual] = useState(rotaAtual);
@@ -96,10 +101,22 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
   const menuRapidoAbertoNoInicioRef = useRef(false);
   const ultimoToqueInicioRef = useRef(0);
   const [coachOverlayVisible, setCoachOverlayVisible] = useState(false);
+  const quickMenuCompacto = larguraTela <= 520 || alturaTela <= 760;
+  const quickMenuBottom = quickMenuCompacto ? 188 : QUICK_MENU_BOTTOM;
+  const quickActionGap = quickMenuCompacto ? 12 : QUICK_ACTION_GAP;
+  const quickActionItemHeight = quickMenuCompacto ? 72 : QUICK_ACTION_ITEM_HEIGHT;
+  const quickActionCircleSize = quickMenuCompacto ? 50 : QUICK_ACTION_CIRCLE_SIZE;
+  const quickActionLabelSize = quickMenuCompacto ? 13 : 15;
+  const quickActionLabelFocusSize = quickMenuCompacto ? 14 : 16;
+  const quickActionItemMinWidth = quickMenuCompacto ? 150 : 170;
 
   useEffect(() => {
     setRotaVisual(rotaAtual);
   }, [rotaAtual]);
+
+  useEffect(() => {
+    onQuickMenuVisibilityChange?.(menuRapidoVisivel && rotaVisual === 'HomePaciente');
+  }, [menuRapidoVisivel, onQuickMenuVisibilityChange, rotaVisual]);
 
   useEffect(() => {
     let cancelled = false;
@@ -364,17 +381,17 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
 
   function obterAcaoRapidaPeloCirculo(posicaoX, posicaoY) {
     const totalMenu =
-      acoesRapidas.length * QUICK_ACTION_ITEM_HEIGHT +
-      (acoesRapidas.length - 1) * QUICK_ACTION_GAP;
-    const topoMenu = alturaTela - QUICK_MENU_BOTTOM - totalMenu;
+      acoesRapidas.length * quickActionItemHeight +
+      (acoesRapidas.length - 1) * quickActionGap;
+    const topoMenu = alturaTela - quickMenuBottom - totalMenu;
     const centroX = larguraBarraRef.current / 2;
-    const raioFoco = QUICK_ACTION_CIRCLE_SIZE / 2 + 14;
+    const raioFoco = quickActionCircleSize / 2 + 14;
 
     for (let indice = 0; indice < acoesRapidas.length; indice += 1) {
       const centroY =
         topoMenu +
-        indice * (QUICK_ACTION_ITEM_HEIGHT + QUICK_ACTION_GAP) +
-        QUICK_ACTION_CIRCLE_SIZE / 2;
+        indice * (quickActionItemHeight + quickActionGap) +
+        quickActionCircleSize / 2;
       const distanciaX = Math.abs(posicaoX - centroX);
       const distanciaY = Math.abs(posicaoY - centroY);
 
@@ -418,6 +435,10 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                 key={acao.id}
                 style={[
                   styles.menuRapidoItem,
+                  {
+                    minWidth: quickActionItemMinWidth,
+                    minHeight: quickActionItemHeight,
+                  },
                   acaoRapidaEmFoco === acao.id && styles.menuRapidoItemFocado,
                   { transform: [{ translateY: index * -2 }] },
                 ]}
@@ -429,19 +450,24 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                 <View
                   style={[
                     styles.menuRapidoIcone,
+                    {
+                      width: quickActionCircleSize,
+                      height: quickActionCircleSize,
+                      borderRadius: quickActionCircleSize / 2,
+                    },
                     acaoRapidaEmFoco === acao.id && styles.menuRapidoIconeFocado,
                   ]}
                 >
                   {acao.library === 'material' ? (
                     <MaterialCommunityIcons
                       name={acao.icon}
-                      size={acaoRapidaEmFoco === acao.id ? 26 : 22}
+                      size={acaoRapidaEmFoco === acao.id ? (quickMenuCompacto ? 24 : 26) : (quickMenuCompacto ? 20 : 22)}
                       color={acaoRapidaEmFoco === acao.id ? TAB_HIGHLIGHT_COLOR : '#98A2A7'}
                     />
                   ) : (
                     <Ionicons
                       name={acao.icon}
-                      size={acaoRapidaEmFoco === acao.id ? 26 : 22}
+                      size={acaoRapidaEmFoco === acao.id ? (quickMenuCompacto ? 24 : 26) : (quickMenuCompacto ? 20 : 22)}
                       color={acaoRapidaEmFoco === acao.id ? TAB_HIGHLIGHT_COLOR : '#98A2A7'}
                     />
                   )}
@@ -449,7 +475,9 @@ export default function BarraAbasPaciente({ navigation, rotaAtual, usuarioLogado
                 <Text
                   style={[
                     styles.menuRapidoTexto,
+                    { fontSize: quickActionLabelSize },
                     acaoRapidaEmFoco === acao.id && styles.menuRapidoTextoFocado,
+                    acaoRapidaEmFoco === acao.id ? { fontSize: quickActionLabelFocusSize } : null,
                   ]}
                 >
                   {acao.label}
@@ -733,6 +761,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 15,
     fontWeight: '700',
+    textAlign: 'center',
   },
   menuRapidoTextoFocado: {
     color: TAB_HIGHLIGHT_COLOR,
