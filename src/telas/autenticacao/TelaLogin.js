@@ -537,6 +537,8 @@ export default function TelaLogin({ navigation, route, session }) {
           role: perfilLogin,
           identificador,
           senha,
+          actorId: sessaoEntityId,
+          email: identificador,
         });
         if (!rpcToken) {
           setErrorMessage(

@@ -247,7 +247,24 @@ async function executeLinkedLibreViewSync({
     return emptyResult;
   }
 
-  await garantirSessaoRpcClinicaComPerfil(rpcActor);
+  try {
+    await garantirSessaoRpcClinicaComPerfil(rpcActor);
+  } catch (error) {
+    console.log('Sessao RPC ausente ao sincronizar LibreView:', error?.message || error);
+    if (!silent) {
+      throw error;
+    }
+    return {
+      linked: true,
+      imported: 0,
+      fetched: fetchedCount,
+      pending: normalizedLibreReadings.length,
+      ignored: 0,
+      readings: getCachedGlucoseReadings(patientId),
+      connection: result.connection || null,
+      silent,
+    };
+  }
 
   let importedCount = 0;
   let ignoredCount = 0;

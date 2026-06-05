@@ -1,8 +1,9 @@
-﻿import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Image,
   KeyboardAvoidingView,
+  Dimensions,
   Modal,
   Platform,
   ScrollView,
@@ -39,6 +40,11 @@ import {
 } from '../../utilitarios/camposPerfilPaciente';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
 import {
+  CampoFocoModal,
+  ScrollModalPacienteTeclado,
+  usePadraoTecladoModalPaciente,
+} from '../../componentes/paciente/ModalPacienteComTeclado';
+import {
   IntroHealthOverviewCard,
   ProfileDataSectionCard,
   TherapyQuickStrip,
@@ -65,6 +71,7 @@ import { getNutritionistById } from '../../servicos/servicoNutricionistas';
 import HostToastPaciente from '../../componentes/comum/HostToastPaciente';
 import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
 import CabecalhoModalPaciente from '../../componentes/paciente/CabecalhoModalPaciente';
+import DrilldownOpcoesPortal from '../../componentes/comum/DrilldownOpcoesPortal';
 
 const EMPTY_PROFILE_FORM = {
   nome_completo: '',
@@ -2502,6 +2509,33 @@ export default function PacientePerfilScreen({
   const [loggingOut, setLoggingOut] = useState(false);
   const lastFetchedCepRef = useRef(onlyDigits(usuarioLogado?.cep || '', 8));
   const latestPatientRef = useRef(usuarioLogado || null);
+  const therapyModalScrollRef = useRef(null);
+  const {
+    keyboardHeight: therapyModalKeyboardHeight,
+    foco: therapyModalFoco,
+    focarCampo: focarCampoTerapia,
+    estiloOverlayTeclado: therapyModalOverlayTeclado,
+    estiloConteudoScrollTeclado: therapyModalScrollTeclado,
+  } = usePadraoTecladoModalPaciente(therapyModalScrollRef, { topOffset: 72 });
+  const focoTerapiaComBotoes = (fieldId, onFocus) =>
+    focarCampoTerapia(fieldId, onFocus, {
+      scrollToEnd: false,
+      keyboardInset: 0,
+      revealActions: true,
+      delay: 280,
+    });
+  const therapyModalCardComTeclado = useMemo(() => {
+    if (!therapyModalKeyboardHeight) {
+      return null;
+    }
+    const alturaJanela = Dimensions.get('window').height;
+    const alturaCard = Math.max(260, alturaJanela - therapyModalKeyboardHeight - 36);
+    return { height: alturaCard, maxHeight: alturaCard };
+  }, [therapyModalKeyboardHeight]);
+  const insulinConfigScrollRef = useRef(null);
+  const insulinConfigTeclado = usePadraoTecladoModalPaciente(insulinConfigScrollRef, { topOffset: 72 });
+  const emailModalScrollRef = useRef(null);
+  const emailModalTeclado = usePadraoTecladoModalPaciente(emailModalScrollRef, { topOffset: 72 });
   const [profileBolusAppType, setProfileBolusAppType] = useState('refeicao_correcao');
   const [profileBolusMeal, setProfileBolusMeal] = useState('almoco');
   const [profileBolusGlucose, setProfileBolusGlucose] = useState('');
@@ -3186,9 +3220,7 @@ export default function PacientePerfilScreen({
     setTherapyDraft(createEmptyTherapyPlan());
     setFocusedTherapyField('');
     setBolusTechnicalExpanded(false);
-    setTherapyOptionField('');
-    setTherapyOptionScheduleIndex(null);
-    setTherapyOptionModalVisible(false);
+    closeTherapyOptionDrilldown();
     setProfileBolusAppType('refeicao_correcao');
     setProfileBolusMeal('almoco');
     setProfileBolusGlucose('');
@@ -3216,11 +3248,24 @@ export default function PacientePerfilScreen({
     setTherapyFeedback(null);
   }
 
+  function closeTherapyOptionDrilldown() {
+    setTherapyOptionModalVisible(false);
+    setTherapyOptionField('');
+    setTherapyOptionScheduleIndex(null);
+  }
+
   function openTherapyOptionModal(field, scheduleIndex = null) {
     setFocusedTherapyField(field);
     setTherapyOptionField(field);
     setTherapyOptionScheduleIndex(scheduleIndex);
     setTherapyOptionModalVisible(true);
+  }
+
+  function closeInsulinProfilePicker() {
+    setInsulinCategoryModalVisible(false);
+    setInsulinTypeModalVisible(false);
+    setInsulinDeviceModalVisible(false);
+    setInsulinUsageModalVisible(false);
   }
 
   function handleTherapyDraftChange(fieldKey, value) {
@@ -3659,9 +3704,7 @@ export default function PacientePerfilScreen({
       return current;
     });
 
-    setTherapyOptionModalVisible(false);
-    setTherapyOptionField('');
-    setTherapyOptionScheduleIndex(null);
+    closeTherapyOptionDrilldown();
     setFocusedTherapyField('');
   }
 
@@ -5234,15 +5277,39 @@ export default function PacientePerfilScreen({
         animationType="fade"
         onRequestClose={closeTherapyEditor}
       >
-        <TouchableWithoutFeedback onPress={closeTherapyEditor}>
-          <View style={styles.modalOverlay}>
+        <TouchableWithoutFeedback
+          onPress={() => {
+            if (therapyOptionModalVisible) {
+              closeTherapyOptionDrilldown();
+              return;
+            }
+            closeTherapyEditor();
+          }}
+        >
+          <View style={[styles.modalOverlay, therapyModalOverlayTeclado]}>
             <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.therapyModalCard}>
-                <ScrollView
-                  style={styles.therapyModalScroll}
-                  contentContainerStyle={styles.therapyModalScrollContent}
-                  showsVerticalScrollIndicator={false}
+              <View
+                style={[
+                  styles.therapyModalCard,
+                  styles.modalHostRelative,
+                  therapyModalCardComTeclado,
+                ]}
+              >
+                <ScrollModalPacienteTeclado
+                  ref={therapyModalScrollRef}
+                  foco={therapyModalFoco}
+                  keyboardPaddingBase={0}
+                  style={[
+                    styles.therapyModalScroll,
+                    therapyModalKeyboardHeight > 0 ? styles.therapyModalScrollComTeclado : null,
+                  ]}
+                  contentContainerStyle={[
+                    styles.therapyModalScrollContent,
+                    therapyModalScrollTeclado,
+                    therapyModalKeyboardHeight > 0 ? { paddingBottom: 140 } : null,
+                  ]}
                   keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
                 >
                   <CabecalhoModalPaciente
                     title={
@@ -5393,22 +5460,24 @@ export default function PacientePerfilScreen({
                           </Text>
                         </View>
 
-                        <View style={styles.editField}>
+                        <CampoFocoModal fieldId="bolus-glucose" style={styles.editField}>
                           <Text style={styles.infoLabel}>Glicemia atual (mg/dL)</Text>
                           <TextInput
                             value={profileBolusGlucose}
+                            onFocus={focarCampoTerapia('bolus-glucose')}
                             onChangeText={(v) => setProfileBolusGlucose(formatGlucoseInputProfile(v))}
                             placeholder="Ex: 120"
                             placeholderTextColor={patientTheme.colors.textMuted}
                             keyboardType="numeric"
                             style={styles.profileInput}
                           />
-                        </View>
+                        </CampoFocoModal>
 
-                        <View style={styles.editField}>
+                        <CampoFocoModal fieldId="bolus-carbs" style={styles.editField}>
                           <Text style={styles.infoLabel}>Carboidratos (g)</Text>
                           <TextInput
                             value={profileBolusCarbs}
+                            onFocus={focarCampoTerapia('bolus-carbs')}
                             onChangeText={(v) =>
                               setProfileBolusCarbs(formatSingleDecimalDoseInput(v))
                             }
@@ -5417,9 +5486,9 @@ export default function PacientePerfilScreen({
                             keyboardType={Platform.OS === 'ios' ? 'decimal-pad' : 'numeric'}
                             style={styles.profileInput}
                           />
-                        </View>
+                        </CampoFocoModal>
 
-                        <View style={styles.editField}>
+                        <CampoFocoModal fieldId="bolus-target" style={styles.editField}>
                           <Text style={styles.infoLabel}>Meta glicêmica (mg/dL)</Text>
                           <Text style={styles.therapyBolusHelperText}>
                             {profileBolusSuggestion?.target != null
@@ -5428,13 +5497,14 @@ export default function PacientePerfilScreen({
                           </Text>
                           <TextInput
                             value={profileBolusTargetManual}
+                            onFocus={focarCampoTerapia('bolus-target')}
                             onChangeText={(v) => setProfileBolusTargetManual(formatGlucoseInputProfile(v))}
                             placeholder="Ex: 100"
                             placeholderTextColor={patientTheme.colors.textMuted}
                             keyboardType="numeric"
                             style={styles.profileInput}
                           />
-                        </View>
+                        </CampoFocoModal>
 
                         <View style={styles.editField}>
                           <Text style={styles.infoLabel}>Relação insulina/carboidrato</Text>
@@ -5466,20 +5536,21 @@ export default function PacientePerfilScreen({
                           </Text>
                         </View>
 
-                        <View style={styles.editField}>
+                        <CampoFocoModal fieldId="bolus-dose" style={styles.editField}>
                           <Text style={styles.infoLabel}>Dose aplicada (UI)</Text>
                           <TextInput
                             value={profileBolusDoseApplied}
+                            onFocus={focoTerapiaComBotoes('bolus-dose')}
                             onChangeText={(v) => {
                               setProfileBolusDoseEdited(true);
                               setProfileBolusDoseApplied(formatSingleDecimalDoseInput(v));
                             }}
-                            placeholder="Ex: 4,5"
+                            placeholder="Ex: 1"
                             placeholderTextColor={patientTheme.colors.textMuted}
                             keyboardType="decimal-pad"
-                            style={[styles.profileInput, { fontSize: 20, fontWeight: '800' }]}
+                            style={styles.profileInput}
                           />
-                        </View>
+                        </CampoFocoModal>
 
                         <View style={styles.editField}>
                           <Text style={styles.infoLabel}>Refeição vinculada</Text>
@@ -5519,10 +5590,11 @@ export default function PacientePerfilScreen({
                           </View>
                         </View>
 
-                        <View style={styles.editField}>
+                        <CampoFocoModal fieldId="bolus-time" style={styles.editField}>
                           <Text style={styles.infoLabel}>Horário da aplicação</Text>
                           <TextInput
                             value={profileBolusTime}
+                            onFocus={focoTerapiaComBotoes('bolus-time')}
                             onChangeText={(v) => setProfileBolusTime(formatTimeInput(v))}
                             placeholder="HH:mm"
                             placeholderTextColor={patientTheme.colors.textMuted}
@@ -5530,19 +5602,20 @@ export default function PacientePerfilScreen({
                             maxLength={5}
                             style={styles.profileInput}
                           />
-                        </View>
+                        </CampoFocoModal>
 
-                        <View style={styles.editField}>
+                        <CampoFocoModal fieldId="bolus-notes" style={styles.editField}>
                           <Text style={styles.infoLabel}>Observações</Text>
                           <TextInput
                             value={therapyDraft.observacoes || ''}
+                            onFocus={focoTerapiaComBotoes('bolus-notes')}
                             onChangeText={(value) => handleTherapyDraftChange('observacoes', value)}
                             placeholder="Ex: aplicar conforme glicemia e refeição"
                             placeholderTextColor={patientTheme.colors.textMuted}
                             multiline
                             style={[styles.profileInput, styles.profileTextArea]}
                           />
-                        </View>
+                        </CampoFocoModal>
 
                         {profileBolusAlerts.length ? (
                           <View style={styles.editField}>
@@ -5657,10 +5730,14 @@ export default function PacientePerfilScreen({
                                 ) : null}
 
                                 <View style={styles.dualFieldRow}>
-                                  <View style={[styles.editField, styles.dualFieldItem]}>
+                                  <CampoFocoModal
+                                    fieldId={`basal-schedule-time-${index}`}
+                                    style={[styles.editField, styles.dualFieldItem]}
+                                  >
                                     <Text style={styles.scheduleFieldLabel}>Horário</Text>
                                     <TextInput
                                       value={schedule.horario}
+                                      onFocus={focoTerapiaComBotoes(`basal-schedule-time-${index}`)}
                                       onChangeText={(value) =>
                                         handleTherapyScheduleChange(index, 'horario', formatTimeInput(value))
                                       }
@@ -5670,12 +5747,16 @@ export default function PacientePerfilScreen({
                                       maxLength={5}
                                       style={styles.profileInput}
                                     />
-                                  </View>
+                                  </CampoFocoModal>
 
-                                  <View style={[styles.editField, styles.dualFieldItem]}>
+                                  <CampoFocoModal
+                                    fieldId={`basal-schedule-dose-${index}`}
+                                    style={[styles.editField, styles.dualFieldItem]}
+                                  >
                                     <Text style={styles.scheduleFieldLabel}>Dose (UI)</Text>
                                     <TextInput
                                       value={schedule.dose}
+                                      onFocus={focoTerapiaComBotoes(`basal-schedule-dose-${index}`)}
                                       onChangeText={(value) =>
                                         handleTherapyScheduleChange(index, 'dose', formatSingleDecimalDoseInput(value))
                                       }
@@ -5691,7 +5772,7 @@ export default function PacientePerfilScreen({
                                       keyboardType="decimal-pad"
                                       style={styles.profileInput}
                                     />
-                                  </View>
+                                  </CampoFocoModal>
                                 </View>
                               </View>
                             );
@@ -5700,12 +5781,12 @@ export default function PacientePerfilScreen({
                       </>
                     ) : therapyDraft.categoria_funcional !== 'bolus' ? (
                       <View style={styles.dualFieldRow}>
-                        <View style={[styles.editField, styles.dualFieldItem]}>
+                        <CampoFocoModal fieldId="therapy-dose" style={[styles.editField, styles.dualFieldItem]}>
                           <Text style={styles.infoLabel}>Dose</Text>
                           <TextInput
                             value={therapyDraft.dose}
                             onChangeText={(value) => handleTherapyDraftChange('dose', formatDecimalInput(value))}
-                            onFocus={() => setFocusedTherapyField('dose')}
+                            onFocus={focoTerapiaComBotoes('therapy-dose', () => setFocusedTherapyField('dose'))}
                             onBlur={() => setFocusedTherapyField('')}
                             placeholder="Ex: 10"
                             placeholderTextColor={patientTheme.colors.textMuted}
@@ -5715,7 +5796,7 @@ export default function PacientePerfilScreen({
                               focusedTherapyField === 'dose' ? styles.profileInputFocused : null,
                             ]}
                           />
-                        </View>
+                        </CampoFocoModal>
 
                         <View style={[styles.editField, styles.dualFieldItem]}>
                           <Text style={styles.infoLabel}>Unidade da dose</Text>
@@ -5739,10 +5820,14 @@ export default function PacientePerfilScreen({
                         {(therapyDraft.tabela_horarios || []).map((schedule, index) => (
                           <View key={`${therapyDraft.id}-schedule-${index}`} style={styles.scheduleCard}>
                             <View style={styles.dualFieldRow}>
-                              <View style={[styles.editField, styles.dualFieldItem]}>
+                              <CampoFocoModal
+                                fieldId={`therapy-schedule-time-${index}`}
+                                style={[styles.editField, styles.dualFieldItem]}
+                              >
                                 <Text style={styles.scheduleFieldLabel}>Horário</Text>
                                 <TextInput
                                   value={schedule.horario}
+                                  onFocus={focoTerapiaComBotoes(`therapy-schedule-time-${index}`)}
                                   onChangeText={(value) =>
                                     handleTherapyScheduleChange(index, 'horario', formatTimeInput(value))
                                   }
@@ -5752,12 +5837,16 @@ export default function PacientePerfilScreen({
                                   maxLength={5}
                                   style={styles.profileInput}
                                 />
-                              </View>
+                              </CampoFocoModal>
 
-                              <View style={[styles.editField, styles.dualFieldItem]}>
+                              <CampoFocoModal
+                                fieldId={`therapy-schedule-dose-${index}`}
+                                style={[styles.editField, styles.dualFieldItem]}
+                              >
                                 <Text style={styles.scheduleFieldLabel}>Dose</Text>
                                 <TextInput
                                   value={schedule.dose}
+                                  onFocus={focoTerapiaComBotoes(`therapy-schedule-dose-${index}`)}
                                   onChangeText={(value) =>
                                     handleTherapyScheduleChange(index, 'dose', formatSingleDecimalDoseInput(value))
                                   }
@@ -5773,20 +5862,24 @@ export default function PacientePerfilScreen({
                                   keyboardType="decimal-pad"
                                   style={styles.profileInput}
                                 />
-                              </View>
+                              </CampoFocoModal>
                             </View>
 
-                            <View style={styles.editField}>
+                            <CampoFocoModal
+                              fieldId={`therapy-schedule-note-${index}`}
+                              style={styles.editField}
+                            >
                               <Text style={styles.scheduleFieldLabel}>Observação</Text>
                               <TextInput
                                 value={schedule.observacao}
+                                onFocus={focoTerapiaComBotoes(`therapy-schedule-note-${index}`)}
                                 onChangeText={(value) => handleTherapyScheduleChange(index, 'observacao', value)}
                                 placeholder="Ex: Antes do café da manhã"
                                 placeholderTextColor={patientTheme.colors.textMuted}
                                 multiline
                                 style={[styles.profileInput, styles.profileTextArea]}
                               />
-                            </View>
+                            </CampoFocoModal>
 
                             <TouchableOpacity
                               activeOpacity={0.78}
@@ -5851,113 +5944,96 @@ export default function PacientePerfilScreen({
                       </View>
                     ) : null}
 
-                    <TouchableOpacity
-                      activeOpacity={0.82}
-                      onPress={saveTherapyDraftLocally}
-                      style={styles.emailModalPrimaryButton}
-                    >
-                      <Text style={styles.emailModalPrimaryButtonText}>
-                        {therapyDraft.categoria_funcional === 'bolus'
-                          ? 'Salvar Insulina Bolus'
-                          : 'Salvar este plano'}
-                      </Text>
-                    </TouchableOpacity>
-
-                    {editingTherapyId ? (
+                    <CampoFocoModal fieldId="therapy-modal-actions" style={styles.therapyModalActions}>
                       <TouchableOpacity
                         activeOpacity={0.82}
-                        onPress={() => removeTherapyPlan(editingTherapyId)}
-                        style={styles.therapyModalDangerButton}
+                        onPress={saveTherapyDraftLocally}
+                        style={styles.emailModalPrimaryButton}
                       >
-                        <Text style={styles.therapyModalDangerButtonText}>Excluir plano</Text>
+                        <Text style={styles.emailModalPrimaryButtonText}>
+                          {therapyDraft.categoria_funcional === 'bolus'
+                            ? 'Salvar Insulina Bolus'
+                            : 'Salvar este plano'}
+                        </Text>
                       </TouchableOpacity>
-                    ) : null}
-                  </View>
-                </ScrollView>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
 
-      <Modal
-        visible={therapyOptionModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          setTherapyOptionModalVisible(false);
-          setTherapyOptionField('');
-        }}
-      >
-        <TouchableWithoutFeedback
-          onPress={() => {
-            setTherapyOptionModalVisible(false);
-            setTherapyOptionField('');
-          }}
-        >
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.selectionModalCard}>
-                <CabecalhoModalPaciente
-                  title="Selecionar opção"
-                  onClose={() => {
-                    setTherapyOptionModalVisible(false);
-                    setTherapyOptionField('');
-                  }}
-                />
-
-                <Text style={styles.emailModalText}>
-                  {therapyOptionField === 'marca'
-                    ? 'As opções são filtradas pela categoria funcional escolhida.'
-                    : 'Selecione a opção desejada para esse campo.'}
-                </Text>
-
-                {getTherapyOptionsForField(therapyOptionField).length ? (
-                  <ScrollView
-                    style={styles.selectionOptionScroll}
-                    contentContainerStyle={styles.selectionOptionList}
-                    showsVerticalScrollIndicator={false}
-                  >
-                    {getTherapyOptionsForField(therapyOptionField).map((option) => {
-                      const optionValue = option.value || option.marca;
-                      const selectedValue = therapyDraft[therapyOptionField];
-                      const description = getTherapyOptionDescription(option);
-
-                      return (
+                      {editingTherapyId ? (
                         <TouchableOpacity
-                          key={`${therapyOptionField}-${optionValue}`}
                           activeOpacity={0.82}
-                          onPress={() => selectTherapyOption(option)}
-                          style={[
-                            styles.selectionOptionButton,
-                            selectedValue === optionValue ? styles.selectionOptionButtonSelected : null,
-                          ]}
+                          onPress={() => removeTherapyPlan(editingTherapyId)}
+                          style={styles.therapyModalDangerButton}
                         >
-                          <View style={styles.therapyOptionCopy}>
-                            <Text
-                              style={[
-                                styles.selectionOptionText,
-                                selectedValue === optionValue ? styles.selectionOptionTextSelected : null,
-                              ]}
-                            >
-                              {getTherapyOptionLabel(option)}
-                            </Text>
-                            {description ? (
-                              <Text style={styles.therapyOptionDescription}>{description}</Text>
-                            ) : null}
-                          </View>
-                          {selectedValue === optionValue ? (
-                            <Ionicons name="checkmark" size={18} color={patientTheme.colors.primaryDark} />
-                          ) : null}
+                          <Text style={styles.therapyModalDangerButtonText}>Excluir plano</Text>
                         </TouchableOpacity>
-                        );
-                    })}
-                  </ScrollView>
-                ) : (
-                  <Text style={styles.therapyEmptyText}>
-                    Escolha a categoria funcional primeiro para liberar as opções.
+                      ) : null}
+                    </CampoFocoModal>
+                  </View>
+                </ScrollModalPacienteTeclado>
+                <DrilldownOpcoesPortal
+                  embedded
+                  visible={therapyOptionModalVisible}
+                  onClose={closeTherapyOptionDrilldown}
+                  cardStyle={styles.selectionModalCard}
+                >
+                  <CabecalhoModalPaciente
+                    title="Selecionar opção"
+                    onClose={closeTherapyOptionDrilldown}
+                  />
+
+                  <Text style={styles.emailModalText}>
+                    {therapyOptionField === 'marca'
+                      ? 'As opções são filtradas pela categoria funcional escolhida.'
+                      : 'Selecione a opção desejada para esse campo.'}
                   </Text>
-                )}
+
+                  {getTherapyOptionsForField(therapyOptionField).length ? (
+                    <ScrollView
+                      style={styles.selectionOptionScroll}
+                      contentContainerStyle={styles.selectionOptionList}
+                      showsVerticalScrollIndicator={false}
+                      keyboardShouldPersistTaps="handled"
+                    >
+                      {getTherapyOptionsForField(therapyOptionField).map((option) => {
+                        const optionValue = option.value || option.marca;
+                        const selectedValue = therapyDraft[therapyOptionField];
+                        const description = getTherapyOptionDescription(option);
+
+                        return (
+                          <TouchableOpacity
+                            key={`${therapyOptionField}-${optionValue}`}
+                            activeOpacity={0.82}
+                            onPress={() => selectTherapyOption(option)}
+                            style={[
+                              styles.selectionOptionButton,
+                              selectedValue === optionValue ? styles.selectionOptionButtonSelected : null,
+                            ]}
+                          >
+                            <View style={styles.therapyOptionCopy}>
+                              <Text
+                                style={[
+                                  styles.selectionOptionText,
+                                  selectedValue === optionValue ? styles.selectionOptionTextSelected : null,
+                                ]}
+                              >
+                                {getTherapyOptionLabel(option)}
+                              </Text>
+                              {description ? (
+                                <Text style={styles.therapyOptionDescription}>{description}</Text>
+                              ) : null}
+                            </View>
+                            {selectedValue === optionValue ? (
+                              <Ionicons name="checkmark" size={18} color={patientTheme.colors.primaryDark} />
+                            ) : null}
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </ScrollView>
+                  ) : (
+                    <Text style={styles.therapyEmptyText}>
+                      Escolha a categoria funcional primeiro para liberar as opções.
+                    </Text>
+                  )}
+                </DrilldownOpcoesPortal>
               </View>
             </TouchableWithoutFeedback>
           </View>
@@ -5968,26 +6044,54 @@ export default function PacientePerfilScreen({
         visible={insulinConfigModalVisible}
         transparent
         animationType="fade"
-        onRequestClose={() => setInsulinConfigModalVisible(false)}
+        onRequestClose={() => {
+          closeInsulinProfilePicker();
+          setInsulinConfigModalVisible(false);
+        }}
       >
-        <TouchableWithoutFeedback onPress={() => setInsulinConfigModalVisible(false)}>
-          <View style={styles.modalOverlay}>
+        <TouchableWithoutFeedback
+          onPress={() => {
+            closeInsulinProfilePicker();
+            setInsulinConfigModalVisible(false);
+          }}
+        >
+          <View style={[styles.modalOverlay, insulinConfigTeclado.estiloOverlayTeclado]}>
             <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.emailModalCard}>
+              <View style={[styles.emailModalCard, styles.modalHostRelative]}>
+                <ScrollModalPacienteTeclado
+                  ref={insulinConfigScrollRef}
+                  foco={insulinConfigTeclado.foco}
+                  keyboardPaddingBase={0}
+                  style={styles.therapyModalScroll}
+                  contentContainerStyle={[
+                    styles.therapyModalScrollContent,
+                    insulinConfigTeclado.estiloConteudoScrollTeclado,
+                    insulinConfigTeclado.keyboardHeight > 0
+                      ? { paddingBottom: 72 }
+                      : null,
+                  ]}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
                 <CabecalhoModalPaciente
                   title="Configuração de insulina"
                   subtitle="Preencha aqui os dados padrão da insulinoterapia. A configuração salva no perfil será usada para pré-preencher o registro de insulina no app."
-                  onClose={() => setInsulinConfigModalVisible(false)}
+                  onClose={() => {
+                    closeInsulinProfilePicker();
+                    setInsulinConfigModalVisible(false);
+                  }}
                 />
 
                 <View style={styles.editForm}>
-                  <View style={styles.editField}>
+                  <CampoFocoModal fieldId="insulin-config-usage" style={styles.editField}>
                     <Text style={styles.infoLabel}>Uso de insulina</Text>
                     <TextInput
                       value={clinicalForm.insulinoterapia_atual}
                       onBlur={() => blurClinicalField('insulinoterapia_atual')}
                       onChangeText={(value) => handleClinicalFieldChange('insulinoterapia_atual', value)}
-                      onFocus={() => focusClinicalField('insulinoterapia_atual')}
+                      onFocus={insulinConfigTeclado.focarCampo('insulin-config-usage', () =>
+                        focusClinicalField('insulinoterapia_atual')
+                      )}
                       placeholder="Ex: Basal e ultrarrápida, bomba, não usa"
                       placeholderTextColor={patientTheme.colors.textMuted}
                       multiline
@@ -5997,7 +6101,7 @@ export default function PacientePerfilScreen({
                         focusedClinicalField === 'insulinoterapia_atual' ? styles.profileInputFocused : null,
                       ]}
                     />
-                  </View>
+                  </CampoFocoModal>
 
                   <View style={styles.editField}>
                     <Text style={styles.infoLabel}>Horários e doses fixas</Text>
@@ -6009,9 +6113,14 @@ export default function PacientePerfilScreen({
                       ? clinicalForm.basal_insulin_schedules
                       : clinicalForm.bolus_insulin_schedules
                     ).map((row, index) => (
-                      <View key={`${activeInsulinProfileKey}-schedule-${index}`} style={styles.inlineScheduleRow}>
+                      <CampoFocoModal
+                        key={`${activeInsulinProfileKey}-schedule-${index}`}
+                        fieldId={`insulin-schedule-${index}`}
+                        style={styles.inlineScheduleRow}
+                      >
                         <TextInput
                           value={String(row?.horario || '')}
+                          onFocus={insulinConfigTeclado.focarCampo(`insulin-schedule-${index}`)}
                           onChangeText={(value) => {
                             const normalized = String(value || '').replace(/[^\d:]/g, '').slice(0, 5);
                             const key =
@@ -6031,6 +6140,7 @@ export default function PacientePerfilScreen({
                         />
                         <TextInput
                           value={String(row?.dose ?? '')}
+                          onFocus={insulinConfigTeclado.focarCampo(`insulin-schedule-dose-${index}`)}
                           onChangeText={(value) => {
                             const normalized = String(value || '').replace(/\D/g, '').slice(0, 4);
                             const key =
@@ -6048,7 +6158,7 @@ export default function PacientePerfilScreen({
                           keyboardType="numeric"
                           style={[styles.profileInput, styles.inlineScheduleField]}
                         />
-                        <TouchableOpacity
+                                                <TouchableOpacity
                           activeOpacity={0.78}
                           onPress={() => {
                             const key =
@@ -6066,7 +6176,7 @@ export default function PacientePerfilScreen({
                         >
                           <Ionicons name="trash-outline" size={18} color="#b75c5c" />
                         </TouchableOpacity>
-                      </View>
+                      </CampoFocoModal>
                     ))}
 
                     <TouchableOpacity
@@ -6254,7 +6364,7 @@ export default function PacientePerfilScreen({
                     </View>
                   )}
 
-                  <View style={styles.editField}>
+                  <CampoFocoModal fieldId="insulin-config-dose" style={styles.editField}>
                     <Text style={styles.infoLabel}>Dose padrão (UI)</Text>
                     <TextInput
                       value={activeInsulinDoseValue}
@@ -6265,7 +6375,14 @@ export default function PacientePerfilScreen({
                           String(value || '').replace(/\D/g, '').slice(0, 4)
                         )
                       }
-                      onFocus={() => focusClinicalField(activeInsulinDoseFieldKey)}
+                      onFocus={insulinConfigTeclado.focarCampo(
+                        'insulin-config-dose',
+                        () => focusClinicalField(activeInsulinDoseFieldKey),
+                        {
+                          scrollToEnd: false,
+                          bottomGap: 96,
+                        }
+                      )}
                       placeholder="Ex: 12"
                       placeholderTextColor={patientTheme.colors.textMuted}
                       keyboardType="numeric"
@@ -6274,16 +6391,23 @@ export default function PacientePerfilScreen({
                         focusedClinicalField === activeInsulinDoseFieldKey ? styles.profileInputFocused : null,
                       ]}
                     />
-                  </View>
+                  </CampoFocoModal>
 
                   {activeInsulinProfileKey !== 'basal' ? (
-                    <View style={styles.editField}>
+                    <CampoFocoModal fieldId="insulin-config-notes" style={styles.editField}>
                       <Text style={styles.infoLabel}>Observações padrão da insulina</Text>
                       <TextInput
                         value={activeInsulinNotesValue}
                         onBlur={() => blurClinicalField(activeInsulinNotesFieldKey)}
                         onChangeText={(value) => handleClinicalFieldChange(activeInsulinNotesFieldKey, value)}
-                        onFocus={() => focusClinicalField(activeInsulinNotesFieldKey)}
+                        onFocus={insulinConfigTeclado.focarCampo(
+                          'insulin-config-notes',
+                          () => focusClinicalField(activeInsulinNotesFieldKey),
+                          {
+                            scrollToEnd: false,
+                            bottomGap: 96,
+                          }
+                        )}
                         placeholder="Ex: Aplicar no jantar ou conforme prescricao"
                         placeholderTextColor={patientTheme.colors.textMuted}
                         multiline
@@ -6293,172 +6417,268 @@ export default function PacientePerfilScreen({
                           focusedClinicalField === activeInsulinNotesFieldKey ? styles.profileInputFocused : null,
                         ]}
                       />
-                    </View>
+                    </CampoFocoModal>
                   ) : null}
 
                   <TouchableOpacity
                     style={styles.emailModalSecondaryButton}
-                    onPress={() => setInsulinConfigModalVisible(false)}
+                    onPress={() => {
+                      closeInsulinProfilePicker();
+                      setInsulinConfigModalVisible(false);
+                    }}
                   >
                     <Text style={styles.emailModalSecondaryButtonText}>Concluir</Text>
                   </TouchableOpacity>
                 </View>
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
-
-      <Modal
-        visible={insulinCategoryModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setInsulinCategoryModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setInsulinCategoryModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.genderModalCard}>
-                <CabecalhoModalPaciente
-                  title="Perfil de insulina"
-                  subtitle="Escolha se você quer editar a basal ou a bolus."
+                </ScrollModalPacienteTeclado>
+                <DrilldownOpcoesPortal
+                  embedded
+                  visible={insulinCategoryModalVisible}
                   onClose={() => setInsulinCategoryModalVisible(false)}
-                />
+                  cardStyle={styles.genderModalCard}
+                >
+                  <CabecalhoModalPaciente
+                    title="Perfil de insulina"
+                    subtitle="Escolha se você quer editar a basal ou a bolus."
+                    onClose={() => setInsulinCategoryModalVisible(false)}
+                  />
 
-                {INSULIN_CATEGORY_OPTIONS.map((option) => (
-                  <TouchableOpacity
-                    key={option.id}
-                    activeOpacity={0.78}
-                    onPress={() => selectInsulinCategory(option.id)}
-                    style={styles.genderOptionItem}
-                  >
-                    <Text style={styles.genderOptionText}>{option.label}</Text>
-                    {((option.id === 'basal' && activeInsulinProfileKey === 'basal') ||
-                      (option.id === 'prandial' && activeInsulinProfileKey === 'bolus')) ? (
-                      <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
-                    ) : null}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+                  {INSULIN_CATEGORY_OPTIONS.map((option) => (
+                    <TouchableOpacity
+                      key={option.id}
+                      activeOpacity={0.78}
+                      onPress={() => selectInsulinCategory(option.id)}
+                      style={styles.genderOptionItem}
+                    >
+                      <Text style={styles.genderOptionText}>{option.label}</Text>
+                      {((option.id === 'basal' && activeInsulinProfileKey === 'basal') ||
+                        (option.id === 'prandial' && activeInsulinProfileKey === 'bolus')) ? (
+                        <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </DrilldownOpcoesPortal>
 
-      <Modal
-        visible={insulinTypeModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setInsulinTypeModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setInsulinTypeModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.genderModalCard}>
-                <CabecalhoModalPaciente
-                  title={
-                    activeInsulinProfileKey === 'basal'
-                      ? 'Marca/Tipo da Basal'
-                      : 'Tipo da insulina bolus'
-                  }
-                  subtitle={
-                    activeInsulinProfileKey === 'basal'
-                      ? 'Selecione a basal configurada para uso diário.'
-                      : 'Selecione o tipo usado com mais frequência nesse perfil.'
-                  }
+                <DrilldownOpcoesPortal
+                  embedded
+                  visible={insulinTypeModalVisible}
                   onClose={() => setInsulinTypeModalVisible(false)}
-                />
+                  cardStyle={styles.genderModalCard}
+                >
+                  <CabecalhoModalPaciente
+                    title={
+                      activeInsulinProfileKey === 'basal'
+                        ? 'Marca/Tipo da Basal'
+                        : 'Tipo da insulina bolus'
+                    }
+                    subtitle={
+                      activeInsulinProfileKey === 'basal'
+                        ? 'Selecione a basal configurada para uso diário.'
+                        : 'Selecione o tipo usado com mais frequência nesse perfil.'
+                    }
+                    onClose={() => setInsulinTypeModalVisible(false)}
+                  />
 
-                {selectedInsulinTypeOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    activeOpacity={0.78}
-                    onPress={() => selectInsulinType(option)}
-                    style={styles.genderOptionItem}
+                  <ScrollView
+                    style={styles.selectionOptionScroll}
+                    contentContainerStyle={styles.selectionOptionList}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
                   >
-                    <Text style={styles.genderOptionText}>{option}</Text>
-                    {activeInsulinTypeValue === option ? (
-                      <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
-                    ) : null}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+                    {selectedInsulinTypeOptions.map((option) => (
+                      <TouchableOpacity
+                        key={option}
+                        activeOpacity={0.78}
+                        onPress={() => selectInsulinType(option)}
+                        style={styles.genderOptionItem}
+                      >
+                        <Text style={styles.genderOptionText}>{option}</Text>
+                        {activeInsulinTypeValue === option ? (
+                          <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+                        ) : null}
+                      </TouchableOpacity>
+                    ))}
+                  </ScrollView>
+                </DrilldownOpcoesPortal>
 
-      <Modal
-        visible={insulinDeviceModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setInsulinDeviceModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setInsulinDeviceModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.genderModalCard}>
-                <CabecalhoModalPaciente
-                  title="Dispositivo da basal"
-                  subtitle="Selecione o dispositivo compatível com a basal configurada."
+                <DrilldownOpcoesPortal
+                  embedded
+                  visible={insulinDeviceModalVisible}
                   onClose={() => setInsulinDeviceModalVisible(false)}
-                />
+                  cardStyle={styles.genderModalCard}
+                >
+                  <CabecalhoModalPaciente
+                    title="Dispositivo da basal"
+                    subtitle="Selecione o dispositivo compatível com a basal configurada."
+                    onClose={() => setInsulinDeviceModalVisible(false)}
+                  />
 
-                {activeBasalDeviceOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    activeOpacity={0.78}
-                    onPress={() => selectBasalInsulinDevice(option)}
-                    style={styles.genderOptionItem}
-                  >
-                    <Text style={styles.genderOptionText}>{option}</Text>
-                    {activeInsulinDeviceValue === option ? (
-                      <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
-                    ) : null}
-                  </TouchableOpacity>
-                ))}
-              </View>
-            </TouchableWithoutFeedback>
-          </View>
-        </TouchableWithoutFeedback>
-      </Modal>
+                  {activeBasalDeviceOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      activeOpacity={0.78}
+                      onPress={() => selectBasalInsulinDevice(option)}
+                      style={styles.genderOptionItem}
+                    >
+                      <Text style={styles.genderOptionText}>{option}</Text>
+                      {activeInsulinDeviceValue === option ? (
+                        <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </DrilldownOpcoesPortal>
 
-      <Modal
-        visible={insulinUsageModalVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setInsulinUsageModalVisible(false)}
-      >
-        <TouchableWithoutFeedback onPress={() => setInsulinUsageModalVisible(false)}>
-          <View style={styles.modalOverlay}>
-            <TouchableWithoutFeedback onPress={() => {}}>
-              <View style={styles.genderModalCard}>
-                <CabecalhoModalPaciente
-                  title={
-                    activeInsulinProfileKey === 'basal' ? 'Objetivo da basal' : 'Objetivo da bolus'
-                  }
-                  subtitle="Selecione como essa insulina costuma ser usada."
+                <DrilldownOpcoesPortal
+                  embedded
+                  visible={insulinUsageModalVisible}
                   onClose={() => setInsulinUsageModalVisible(false)}
-                />
+                  cardStyle={styles.genderModalCard}
+                >
+                  <CabecalhoModalPaciente
+                    title={
+                      activeInsulinProfileKey === 'basal' ? 'Objetivo da basal' : 'Objetivo da bolus'
+                    }
+                    subtitle="Selecione como essa insulina costuma ser usada."
+                    onClose={() => setInsulinUsageModalVisible(false)}
+                  />
 
-                {selectedInsulinUsageOptions.map((option) => (
-                  <TouchableOpacity
-                    key={option}
-                    activeOpacity={0.78}
-                    onPress={() => selectInsulinUsage(option)}
-                    style={styles.genderOptionItem}
-                  >
-                    <Text style={styles.genderOptionText}>{option}</Text>
-                    {activeInsulinUsageValue === option ? (
-                      <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
-                    ) : null}
-                  </TouchableOpacity>
-                ))}
+                  {selectedInsulinUsageOptions.map((option) => (
+                    <TouchableOpacity
+                      key={option}
+                      activeOpacity={0.78}
+                      onPress={() => selectInsulinUsage(option)}
+                      style={styles.genderOptionItem}
+                    >
+                      <Text style={styles.genderOptionText}>{option}</Text>
+                      {activeInsulinUsageValue === option ? (
+                        <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+                      ) : null}
+                    </TouchableOpacity>
+                  ))}
+                </DrilldownOpcoesPortal>
               </View>
             </TouchableWithoutFeedback>
           </View>
         </TouchableWithoutFeedback>
       </Modal>
+
+      <DrilldownOpcoesPortal
+        visible={insulinCategoryModalVisible && !insulinConfigModalVisible}
+        onClose={() => setInsulinCategoryModalVisible(false)}
+        cardStyle={styles.genderModalCard}
+      >
+        <CabecalhoModalPaciente
+          title="Perfil de insulina"
+          subtitle="Escolha se você quer editar a basal ou a bolus."
+          onClose={() => setInsulinCategoryModalVisible(false)}
+        />
+
+        {INSULIN_CATEGORY_OPTIONS.map((option) => (
+          <TouchableOpacity
+            key={option.id}
+            activeOpacity={0.78}
+            onPress={() => selectInsulinCategory(option.id)}
+            style={styles.genderOptionItem}
+          >
+            <Text style={styles.genderOptionText}>{option.label}</Text>
+            {((option.id === 'basal' && activeInsulinProfileKey === 'basal') ||
+              (option.id === 'prandial' && activeInsulinProfileKey === 'bolus')) ? (
+              <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+            ) : null}
+          </TouchableOpacity>
+        ))}
+      </DrilldownOpcoesPortal>
+
+      <DrilldownOpcoesPortal
+        visible={insulinTypeModalVisible && !insulinConfigModalVisible}
+        onClose={() => setInsulinTypeModalVisible(false)}
+        cardStyle={styles.genderModalCard}
+      >
+        <CabecalhoModalPaciente
+          title={
+            activeInsulinProfileKey === 'basal' ? 'Marca/Tipo da Basal' : 'Tipo da insulina bolus'
+          }
+          subtitle={
+            activeInsulinProfileKey === 'basal'
+              ? 'Selecione a basal configurada para uso diário.'
+              : 'Selecione o tipo usado com mais frequência nesse perfil.'
+          }
+          onClose={() => setInsulinTypeModalVisible(false)}
+        />
+
+        <ScrollView
+          style={styles.selectionOptionScroll}
+          contentContainerStyle={styles.selectionOptionList}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {selectedInsulinTypeOptions.map((option) => (
+            <TouchableOpacity
+              key={option}
+              activeOpacity={0.78}
+              onPress={() => selectInsulinType(option)}
+              style={styles.genderOptionItem}
+            >
+              <Text style={styles.genderOptionText}>{option}</Text>
+              {activeInsulinTypeValue === option ? (
+                <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+              ) : null}
+            </TouchableOpacity>
+          ))}
+        </ScrollView>
+      </DrilldownOpcoesPortal>
+
+      <DrilldownOpcoesPortal
+        visible={insulinDeviceModalVisible && !insulinConfigModalVisible}
+        onClose={() => setInsulinDeviceModalVisible(false)}
+        cardStyle={styles.genderModalCard}
+      >
+        <CabecalhoModalPaciente
+          title="Dispositivo da basal"
+          subtitle="Selecione o dispositivo compatível com a basal configurada."
+          onClose={() => setInsulinDeviceModalVisible(false)}
+        />
+
+        {activeBasalDeviceOptions.map((option) => (
+          <TouchableOpacity
+            key={option}
+            activeOpacity={0.78}
+            onPress={() => selectBasalInsulinDevice(option)}
+            style={styles.genderOptionItem}
+          >
+            <Text style={styles.genderOptionText}>{option}</Text>
+            {activeInsulinDeviceValue === option ? (
+              <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+            ) : null}
+          </TouchableOpacity>
+        ))}
+      </DrilldownOpcoesPortal>
+
+      <DrilldownOpcoesPortal
+        visible={insulinUsageModalVisible && !insulinConfigModalVisible}
+        onClose={() => setInsulinUsageModalVisible(false)}
+        cardStyle={styles.genderModalCard}
+      >
+        <CabecalhoModalPaciente
+          title={activeInsulinProfileKey === 'basal' ? 'Objetivo da basal' : 'Objetivo da bolus'}
+          subtitle="Selecione como essa insulina costuma ser usada."
+          onClose={() => setInsulinUsageModalVisible(false)}
+        />
+
+        {selectedInsulinUsageOptions.map((option) => (
+          <TouchableOpacity
+            key={option}
+            activeOpacity={0.78}
+            onPress={() => selectInsulinUsage(option)}
+            style={styles.genderOptionItem}
+          >
+            <Text style={styles.genderOptionText}>{option}</Text>
+            {activeInsulinUsageValue === option ? (
+              <Ionicons name="checkmark" size={21} color={patientTheme.colors.primaryDark} />
+            ) : null}
+          </TouchableOpacity>
+        ))}
+      </DrilldownOpcoesPortal>
 
       <Modal
         visible={objectiveModalVisible}
@@ -6638,21 +6858,28 @@ export default function PacientePerfilScreen({
         animationType="fade"
         onRequestClose={cancelEmailVerification}
       >
-        <KeyboardAvoidingView
-          style={styles.modalKeyboard}
-          behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
-        >
-          <TouchableWithoutFeedback onPress={() => {}}>
-            <View style={styles.modalOverlay}>
-              <TouchableWithoutFeedback onPress={() => {}}>
-                <View style={styles.emailModalCard}>
-                  <CabecalhoModalPaciente
-                    title="Código enviado"
-                    subtitle={`Digite o código de 6 dígitos enviado para ${emailPendingVerification || getNormalizedProfileEmail()}.`}
-                    onClose={cancelEmailVerification}
-                  />
-
+        <TouchableWithoutFeedback onPress={cancelEmailVerification}>
+          <View style={[styles.modalOverlay, emailModalTeclado.estiloOverlayTeclado]}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={[styles.emailModalCard, styles.modalHostRelative]}>
+                <ScrollModalPacienteTeclado
+                  ref={emailModalScrollRef}
+                  foco={emailModalTeclado.foco}
+                  keyboardPaddingBase={0}
+                  style={styles.therapyModalScroll}
+                  contentContainerStyle={[
+                    styles.therapyModalScrollContent,
+                    emailModalTeclado.estiloConteudoScrollTeclado,
+                  ]}
+                  keyboardShouldPersistTaps="handled"
+                  showsVerticalScrollIndicator={false}
+                >
+                <CabecalhoModalPaciente
+                  title="Código enviado"
+                  subtitle={`Digite o código de 6 dígitos enviado para ${emailPendingVerification || getNormalizedProfileEmail()}.`}
+                  onClose={cancelEmailVerification}
+                />
+                  <CampoFocoModal fieldId="email-verification-code">
                   <TextInput
                     style={[
                       styles.profileInput,
@@ -6660,6 +6887,7 @@ export default function PacientePerfilScreen({
                       emailVerificationError ? styles.profileInputError : null,
                     ]}
                     value={emailVerificationCode}
+                    onFocus={emailModalTeclado.focarCampo('email-verification-code')}
                     onChangeText={(value) => {
                       const code = value.replace(/\D/g, '').slice(0, 6);
                       setEmailVerificationCode(code);
@@ -6673,6 +6901,7 @@ export default function PacientePerfilScreen({
                     maxLength={6}
                     editable={!emailVerificationLoading && !savingProfile}
                   />
+                  </CampoFocoModal>
 
                   {emailVerificationError ? (
                     <Text style={styles.codeErrorText}>{emailVerificationError}</Text>
@@ -6712,11 +6941,11 @@ export default function PacientePerfilScreen({
                   >
                     <Text style={styles.emailModalCancelButtonText}>Cancelar</Text>
                   </TouchableOpacity>
-                </View>
-              </TouchableWithoutFeedback>
-            </View>
-          </TouchableWithoutFeedback>
-        </KeyboardAvoidingView>
+                </ScrollModalPacienteTeclado>
+              </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       <HostToastPaciente posicao="top" />
@@ -7572,11 +7801,18 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  modalHostRelative: {
+    overflow: 'hidden',
+    position: 'relative',
+  },
   therapyModalCard: {
     backgroundColor: '#ffffff',
     borderRadius: 12,
+    flexShrink: 0,
     maxHeight: '88%',
     maxWidth: 520,
+    overflow: 'hidden',
+    position: 'relative',
     width: '100%',
   },
   selectionModalCard: {
@@ -7623,10 +7859,19 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.text,
   },
   therapyModalScroll: {
-    maxHeight: '100%',
+    flexGrow: 0,
+  },
+  therapyModalScrollComTeclado: {
+    flex: 1,
+    flexShrink: 1,
+    minHeight: 0,
   },
   therapyModalScrollContent: {
     padding: 22,
+  },
+  therapyModalActions: {
+    gap: 10,
+    marginTop: 4,
   },
   dualFieldRow: {
     flexDirection: 'row',
@@ -7739,6 +7984,8 @@ const styles = StyleSheet.create({
   emailModalCard: {
     backgroundColor: '#ffffff',
     borderRadius: 8,
+    flexShrink: 0,
+    maxHeight: '88%',
     maxWidth: 420,
     padding: 22,
     width: '100%',

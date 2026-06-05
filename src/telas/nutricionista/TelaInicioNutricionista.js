@@ -66,11 +66,12 @@ function isConsultaToday(scheduledAt) {
 }
 
 function getActionAppearance(route) {
+  const isMessages = route === 'NutricionistaMensagens';
   return {
     borderColor: patientTheme.colors.border,
     backgroundColor: '#FFFFFF',
     iconColor: patientTheme.colors.primaryDark,
-    badgeColor: patientTheme.colors.primaryDark,
+    badgeColor: isMessages ? patientTheme.colors.danger : patientTheme.colors.primaryDark,
   };
 }
 
@@ -804,14 +805,14 @@ const styles = StyleSheet.create({
   },
   viewAllButton: {
     borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.primary,
+    borderRadius: patientTheme.radius.lg,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    backgroundColor: patientTheme.colors.primary,
   },
   viewAllText: {
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.onPrimary,
     fontSize: 12,
     fontWeight: '700',
   },

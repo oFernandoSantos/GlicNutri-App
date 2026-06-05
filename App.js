@@ -82,7 +82,10 @@ import {
   limparSessaoPaciente,
   salvarSessaoPaciente,
 } from './src/servicos/servicoSessaoPaciente';
-import { garantirSessaoRpcClinicaComPerfil } from './src/servicos/servicoSessaoRpc';
+import {
+  emitirSessaoRpcOAuthPaciente,
+  garantirSessaoRpcClinicaComPerfil,
+} from './src/servicos/servicoSessaoRpc';
 import { resolveInitialRouteName, isPatientUser } from './src/utilitarios/perfisApp';
 import {
   getPatientId,
@@ -217,7 +220,10 @@ export default function App() {
     async function carregarPacienteLocal() {
       const paciente = await carregarSessaoPaciente();
       if (paciente) {
-        await garantirSessaoRpcClinicaComPerfil(paciente);
+        let rpcToken = await garantirSessaoRpcClinicaComPerfil(paciente);
+        if (!rpcToken) {
+          rpcToken = await emitirSessaoRpcOAuthPaciente(paciente);
+        }
       }
       if (isMounted) {
         setPatientLocalSession(paciente);
@@ -239,7 +245,10 @@ export default function App() {
     }
 
     const sanitized = await salvarSessaoPaciente(user);
-    await garantirSessaoRpcClinicaComPerfil(sanitized);
+    let rpcToken = await garantirSessaoRpcClinicaComPerfil(sanitized);
+    if (!rpcToken) {
+      rpcToken = await emitirSessaoRpcOAuthPaciente(sanitized);
+    }
     setPatientLocalSession(sanitized);
     return sanitized;
   }

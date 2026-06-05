@@ -67,6 +67,9 @@ function resolveExperienceTtlMs(options = {}) {
   if (options.experienceCachePreset === 'monitoramento') {
     return options.cacheTtlMs ?? MONITORAMENTO_EXPERIENCE_TTL_MS;
   }
+  if (options.experienceCachePreset === 'prontuario') {
+    return options.cacheTtlMs ?? HISTORICO_EXPERIENCE_TTL_MS;
+  }
   return options.cacheTtlMs ?? DEFAULT_TTL_MS;
 }
 
@@ -89,6 +92,21 @@ export function getCachedPatientExperience(patientId, options = {}, ttlMs) {
   if (!patientId) return null;
   const effectiveTtl = ttlMs ?? resolveExperienceTtlMs(options);
   return getFreshEntry(experienceCache, buildExperienceCacheKey(patientId, options), effectiveTtl);
+}
+
+export function patchCachedPatientExperienceGlucose(patientId, glucoseReadings = []) {
+  if (!patientId) return;
+
+  for (const [key, entry] of experienceCache.entries()) {
+    if (!key.startsWith(`${patientId}:`) || !entry?.data) continue;
+    experienceCache.set(key, {
+      fetchedAt: entry.fetchedAt,
+      data: {
+        ...entry.data,
+        glucoseReadings: Array.isArray(glucoseReadings) ? glucoseReadings : [],
+      },
+    });
+  }
 }
 
 export function invalidatePatientExperienceCache(patientId) {

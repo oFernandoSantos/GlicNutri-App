@@ -1,9 +1,8 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   ActivityIndicator,
   Image,
-  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
@@ -11,10 +10,17 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  TouchableWithoutFeedback,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
+import {
+  CampoFocoModal,
+  ScrollModalPacienteTeclado,
+  useFocoCampoModalPaciente,
+} from '../../componentes/paciente/ModalPacienteComTeclado';
+import { useKeyboardHeight } from '../../componentes/comum/RolagemComTeclado';
 import ToastPaciente from '../../componentes/comum/ToastPaciente';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { invalidatePatientExperienceCache } from '../../servicos/cacheExperienciaPaciente';
@@ -722,6 +728,17 @@ function ModalAvisoRefeicao({
 
 export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: usuarioProp }) {
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
+  const mealTimingScrollRef = useRef(null);
+  const mealTimingFoco = useFocoCampoModalPaciente(mealTimingScrollRef);
+  const mealGlucoseScrollRef = useRef(null);
+  const mealGlucoseFoco = useFocoCampoModalPaciente(mealGlucoseScrollRef);
+  const foodEditScrollRef = useRef(null);
+  const foodEditFoco = useFocoCampoModalPaciente(foodEditScrollRef);
+  const modalTecladoAltura = useKeyboardHeight();
+  const estiloOverlayModalTeclado =
+    modalTecladoAltura > 0 ? { paddingBottom: modalTecladoAltura } : null;
+  const estiloConteudoScrollModalTeclado =
+    modalTecladoAltura > 0 ? { paddingBottom: 24 } : null;
   const patientId = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const [mealTimingChoiceVisible, setMealTimingChoiceVisible] = useState(false);
   const [boasVindasVisible, setBoasVindasVisible] = useState(false);
@@ -2120,11 +2137,7 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         {...modalCommonProps}
         onRequestClose={fecharEscolhaHorarioEVoltar}
       >
-        <View style={styles.modalRoot}>
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
+        <View style={[styles.modalRoot, estiloOverlayModalTeclado]}>
             <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Registrar alimentação</Text>
@@ -2182,7 +2195,6 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 </TouchableOpacity>
               </View>
             </View>
-          </KeyboardAvoidingView>
         </View>
       </Modal>
 
@@ -2194,12 +2206,15 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           setMealTimingDetailsVisible(true);
         }}
       >
-        <View style={styles.modalRoot}>
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.modalCard}>
+        <TouchableWithoutFeedback
+          onPress={() => {
+            setMealGlucoseVisible(false);
+            setMealTimingDetailsVisible(true);
+          }}
+        >
+          <View style={[styles.modalRoot, estiloOverlayModalTeclado]}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>Registrar glicose</Text>
                 <TouchableOpacity
@@ -2209,13 +2224,20 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
                 </TouchableOpacity>
               </View>
-
               <Text style={styles.modalText}>
                 Antes de continuar, informe a glicose atual em mg/dL. Se preferir, você pode seguir
                 sem preencher.
               </Text>
 
-              <View style={styles.previousMealFields}>
+              <ScrollModalPacienteTeclado
+                ref={mealGlucoseScrollRef}
+                foco={mealGlucoseFoco}
+                keyboardPaddingBase={0}
+                contentContainerStyle={estiloConteudoScrollModalTeclado}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
+              <CampoFocoModal fieldId="meal-glucose" style={styles.previousMealFields}>
                 <Text style={styles.modalFieldLabel}>Glicose atual</Text>
                 <TextInput
                   style={[styles.input, styles.manualModalInput]}
@@ -2223,9 +2245,11 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   placeholderTextColor="#8a9095"
                   keyboardType="decimal-pad"
                   value={mealGlucoseValue}
+                  onFocus={mealGlucoseFoco.criarOnFocus('meal-glucose')}
                   onChangeText={setMealGlucoseValue}
                 />
-              </View>
+              </CampoFocoModal>
+              </ScrollModalPacienteTeclado>
 
               <TouchableOpacity
                 style={[styles.modalPrimaryButton, savingMealGlucose && styles.primaryButtonDisabled]}
@@ -2246,9 +2270,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
               >
                 <Text style={styles.skipInlineButtonText}>Continuar sem glicose</Text>
               </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
+                </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       <Modal
@@ -2256,12 +2281,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         {...modalCommonProps}
         onRequestClose={tentarFecharDetalhesRefeicao}
       >
-        <View style={styles.modalRoot}>
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-          >
-            <View style={styles.modalCard}>
+        <TouchableWithoutFeedback onPress={tentarFecharDetalhesRefeicao}>
+          <View style={[styles.modalRoot, estiloOverlayModalTeclado]}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={styles.modalCard}>
               <View style={styles.modalHeader}>
                 <Text style={styles.modalTitle}>
                   {mealTimingMode === 'current' ? 'Registro atual' : 'Registro anterior'}
@@ -2274,6 +2297,15 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 </TouchableOpacity>
               </View>
 
+              <ScrollModalPacienteTeclado
+                ref={mealTimingScrollRef}
+                foco={mealTimingFoco}
+                keyboardPaddingBase={0}
+                contentContainerStyle={estiloConteudoScrollModalTeclado}
+                nestedScrollEnabled
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
               <Text style={styles.modalText}>
                 Informe o tipo, a data e a hora da refeição. O tipo é obrigatório.
               </Text>
@@ -2363,23 +2395,29 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                   ) : null}
                 </View>
 
+                <CampoFocoModal fieldId="meal-date">
                 <Text style={styles.modalFieldLabel}>Data</Text>
                 <TextInput
                   style={[styles.input, styles.manualModalInput]}
                   placeholder="Ex: dd/mm/aaaa"
                   placeholderTextColor="#8a9095"
                   value={mealTimingDate}
+                  onFocus={mealTimingFoco.criarOnFocus('meal-date')}
                   onChangeText={(value) => setMealTimingDate(formatManualDateInput(value))}
                 />
+                </CampoFocoModal>
 
+                <CampoFocoModal fieldId="meal-time">
                 <Text style={styles.modalFieldLabel}>Hora</Text>
                 <TextInput
                   style={[styles.input, styles.manualModalInput]}
                   placeholder="Ex: 15:48"
                   placeholderTextColor="#8a9095"
                   value={mealTimingTime}
+                  onFocus={mealTimingFoco.criarOnFocus('meal-time')}
                   onChangeText={(value) => setMealTimingTime(formatManualTimeInput(value))}
                 />
+                </CampoFocoModal>
               </View>
 
               <TouchableOpacity
@@ -2392,9 +2430,11 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
               >
                 <Text style={styles.primaryButtonText}>Continuar</Text>
               </TouchableOpacity>
-            </View>
-          </KeyboardAvoidingView>
-        </View>
+              </ScrollModalPacienteTeclado>
+                </View>
+            </TouchableWithoutFeedback>
+          </View>
+        </TouchableWithoutFeedback>
       </Modal>
 
       <ModalAvisoRefeicao
@@ -2487,12 +2527,22 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         {...modalCommonProps}
         onRequestClose={fecharModalItem}
       >
-        <View style={styles.modalRoot}>
-          <KeyboardAvoidingView
-            style={styles.modalKeyboard}
-            behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
-          >
-            <View style={[styles.modalCard, styles.foodEditModalCard]}>
+        <TouchableWithoutFeedback onPress={fecharModalItem}>
+          <View style={[styles.modalRoot, estiloOverlayModalTeclado]}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+                <View style={[styles.modalCard, styles.foodEditModalCard]}>
+              <ScrollModalPacienteTeclado
+                ref={foodEditScrollRef}
+                foco={foodEditFoco}
+                keyboardPaddingBase={0}
+                style={styles.foodEditModalScroll}
+                contentContainerStyle={[
+                  styles.foodEditModalContent,
+                  estiloConteudoScrollModalTeclado,
+                ]}
+                keyboardShouldPersistTaps="handled"
+                showsVerticalScrollIndicator={false}
+              >
             <View style={styles.modalHeader}>
               <View style={styles.foodEditTitleCol}>
                 <Text style={styles.modalTitle}>Editar item</Text>
@@ -2505,51 +2555,49 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 <Ionicons name="close" size={18} color={patientTheme.colors.text} />
               </TouchableOpacity>
             </View>
-
-            <ScrollView
-              style={styles.foodEditModalScroll}
-              contentContainerStyle={styles.foodEditModalContent}
-              keyboardShouldPersistTaps="handled"
-            >
+              <CampoFocoModal fieldId="food-edit-name">
               <Text style={[styles.modalFieldLabel, styles.foodEditLabel]}>Nome do item</Text>
               <TextInput
                 style={[styles.input, styles.foodEditNameInput]}
                 value={editingFoodDraft?.nome || ''}
+                onFocus={foodEditFoco.criarOnFocus('food-edit-name')}
                 onChangeText={(value) => atualizarDraftItem('nome', value)}
                 placeholder="Nome do alimento"
                 placeholderTextColor="#8a9095"
               />
+              </CampoFocoModal>
 
               <View style={styles.foodEditGrid}>
-                <View style={styles.foodEditField}>
+                <CampoFocoModal fieldId="food-edit-qty" style={styles.foodEditField}>
                   <Text style={[styles.modalFieldLabel, styles.foodEditLabel]}>
                     Quantidade ({getFoodQuantityUnit(alimentos[editingFoodIndex] || {})})
                   </Text>
                   <TextInput
                     style={[styles.input, styles.foodEditInput]}
                     value={editingFoodDraft?.quantidade_gramas || ''}
+                    onFocus={foodEditFoco.criarOnFocus('food-edit-qty')}
                     onChangeText={(value) => atualizarDraftItem('quantidade_gramas', value)}
                     keyboardType="decimal-pad"
                     selectTextOnFocus
                   />
-                </View>
+                </CampoFocoModal>
 
                 {EDITABLE_ITEM_FIELDS.map((field) => (
-                  <View key={field.itemKey} style={styles.foodEditField}>
+                  <CampoFocoModal key={field.itemKey} fieldId={`food-edit-${field.itemKey}`} style={styles.foodEditField}>
                     <Text style={[styles.modalFieldLabel, styles.foodEditLabel]}>
                       {field.label}{field.unit ? ` (${field.unit})` : ''}
                     </Text>
                     <TextInput
                       style={[styles.input, styles.foodEditInput]}
                       value={editingFoodDraft?.[field.itemKey] || ''}
+                      onFocus={foodEditFoco.criarOnFocus(`food-edit-${field.itemKey}`)}
                       onChangeText={(value) => atualizarDraftItem(field.itemKey, value)}
                       keyboardType="decimal-pad"
                       selectTextOnFocus
                     />
-                  </View>
+                  </CampoFocoModal>
                 ))}
               </View>
-            </ScrollView>
 
             <View style={styles.foodEditActions}>
               <TouchableOpacity style={styles.foodEditCancelButton} onPress={fecharModalItem}>
@@ -2559,9 +2607,11 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
                 <Text style={styles.foodEditSaveText}>Salvar item</Text>
               </TouchableOpacity>
             </View>
+              </ScrollModalPacienteTeclado>
+                </View>
+            </TouchableWithoutFeedback>
           </View>
-          </KeyboardAvoidingView>
-        </View>
+        </TouchableWithoutFeedback>
       </Modal>
     </>
   );
@@ -3225,6 +3275,7 @@ const styles = StyleSheet.create({
   modalCard: {
     backgroundColor: '#ffffff',
     borderRadius: patientTheme.radius.xl,
+    flexShrink: 0,
     maxWidth: 420,
     padding: 18,
     width: '100%',
@@ -3589,6 +3640,7 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
   },
   foodEditModalCard: {
+    flexShrink: 0,
     maxHeight: '78%',
     maxWidth: 360,
     padding: 14,

@@ -11,6 +11,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   StyleSheet,
+  TouchableWithoutFeedback,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,6 +19,7 @@ import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import { inputFocusBorder } from '../../temas/temaFocoCampo';
 import { useKeyboardAwareScroll } from '../../utilitarios/rolagemComTeclado';
+import { EnvoltorioModalPacienteTeclado } from '../../componentes/paciente/ModalPacienteComTeclado';
 import {
   confirmarCodigoRecuperacaoSenha,
   solicitarCodigoRecuperacaoSenha,
@@ -493,13 +495,13 @@ export default function ForgotPassword({ navigation, route }) {
         animationType="fade"
         onRequestClose={feedbackSucesso ? irParaLogin : () => setModalCodigoVisible(false)}
       >
-        <KeyboardAvoidingView
-          style={styles.modalKeyboard}
-          behavior={Platform.OS === 'ios' ? 'padding' : Platform.OS === 'android' ? 'height' : undefined}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 12 : 0}
+        <TouchableWithoutFeedback
+          onPress={feedbackSucesso ? irParaLogin : () => setModalCodigoVisible(false)}
         >
+          <EnvoltorioModalPacienteTeclado>
           <View style={styles.modalOverlay}>
-          <View style={styles.modalCard}>
+            <TouchableWithoutFeedback onPress={() => {}}>
+              <View style={styles.modalCard}>
             {feedbackSucesso ? (
               <>
                 <Text style={styles.modalTitle}>Validado com sucesso</Text>
@@ -580,9 +582,11 @@ export default function ForgotPassword({ navigation, route }) {
                 </TouchableOpacity>
               </>
             )}
+              </View>
+            </TouchableWithoutFeedback>
           </View>
-          </View>
-        </KeyboardAvoidingView>
+          </EnvoltorioModalPacienteTeclado>
+        </TouchableWithoutFeedback>
       </Modal>
     </SafeAreaView>
   );
@@ -746,6 +750,7 @@ const styles = StyleSheet.create({
     maxWidth: 420,
     backgroundColor: '#ffffff',
     borderRadius: 8,
+    flexShrink: 0,
     padding: 22,
   },
   modalTitle: {

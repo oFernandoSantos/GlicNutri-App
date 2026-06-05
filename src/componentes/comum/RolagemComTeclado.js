@@ -1,10 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import {
+  Dimensions,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   ScrollView,
   StyleSheet,
+  View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -28,27 +30,56 @@ export function getKeyboardVerticalOffset(insets = {}) {
   return (insets.top || 0) + READER_HEADER_HEIGHT;
 }
 
+function subscribeKeyboardHeight(onHeight) {
+  const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+  const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+
+  const showSub = Keyboard.addListener(showEvent, (event) => {
+    onHeight(Number(event?.endCoordinates?.height || 0));
+  });
+
+  const hideSub = Keyboard.addListener(hideEvent, () => {
+    onHeight(0);
+  });
+
+  return () => {
+    showSub.remove();
+    hideSub.remove();
+  };
+}
+
+/** Altura atual do teclado (0 quando fechado). */
+export function useKeyboardHeight() {
+  const [height, setHeight] = useState(0);
+
+  useEffect(() => subscribeKeyboardHeight(setHeight), []);
+
+  return height;
+}
+
+function getAlturaUtilModal(keyboardHeight, insets, extraReserva = 100) {
+  const windowHeight = Dimensions.get('window').height;
+  const top = insets.top || 0;
+  const bottom = insets.bottom || 0;
+
+  if (!keyboardHeight) {
+    return null;
+  }
+
+  return Math.max(
+    200,
+    windowHeight - keyboardHeight - top - bottom - extraReserva
+  );
+}
+
 /** Espaço extra no fim do scroll enquanto o teclado está aberto. */
 export function useKeyboardBottomInset(basePadding = 32) {
   const [paddingBottom, setPaddingBottom] = useState(basePadding);
 
   useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-
-    const showSub = Keyboard.addListener(showEvent, (event) => {
-      const height = Number(event?.endCoordinates?.height || 0);
-      setPaddingBottom(Math.max(basePadding, height + basePadding));
+    return subscribeKeyboardHeight((height) => {
+      setPaddingBottom(height ? Math.max(basePadding, height + basePadding) : basePadding);
     });
-
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setPaddingBottom(basePadding);
-    });
-
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
   }, [basePadding]);
 
   return paddingBottom;
@@ -74,9 +105,7 @@ export function WrapperTeclado({
   return (
     <KeyboardAvoidingView
       style={[styles.flex, style]}
-      behavior={
-        behavior ?? (Platform.OS === 'ios' ? 'padding' : 'height')
-      }
+      behavior={behavior ?? (Platform.OS === 'ios' ? 'padding' : 'padding')}
       keyboardVerticalOffset={offset}
     >
       {children}
@@ -84,42 +113,39 @@ export function WrapperTeclado({
   );
 }
 
-/**
- * ScrollView com ajuste para teclado (Android + iOS).
- * Use em telas que não passam pelo LayoutPaciente/LayoutNutricionista.
- */
 /** ScrollView para modais com campos de texto (cadastros, formulários). */
 export function RolagemModalTeclado({
   children,
   style,
   contentContainerStyle,
-  keyboardBottomBase = 24,
+  keyboardBottomBase = 40,
   ...scrollProps
 }) {
   const keyboardPadding = useKeyboardBottomInset(keyboardBottomBase);
+  const keyboardHeight = useKeyboardHeight();
+  const insets = useSafeAreaInsets();
+  const alturaScroll = getAlturaUtilModal(keyboardHeight, insets, 160);
 
   return (
-    <WrapperTeclado
-      enabled={Platform.OS !== 'web'}
-      style={styles.modalWrap}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-      keyboardVerticalOffset={0}
+    <ScrollView
+      style={[
+        styles.modalScroll,
+        style,
+        alturaScroll ? { maxHeight: alturaScroll } : null,
+      ]}
+      contentContainerStyle={[
+        styles.modalScrollContent,
+        keyboardHeight ? { paddingBottom: keyboardPadding } : null,
+        contentContainerStyle,
+      ]}
+      keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="on-drag"
+      automaticallyAdjustKeyboardInsets
+      nestedScrollEnabled
+      {...scrollProps}
     >
-      <ScrollView
-        style={style}
-        contentContainerStyle={[
-          { paddingBottom: keyboardPadding },
-          contentContainerStyle,
-        ]}
-        keyboardShouldPersistTaps="handled"
-        keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
-        nestedScrollEnabled
-        {...scrollProps}
-      >
-        {children}
-      </ScrollView>
-    </WrapperTeclado>
+      {children}
+    </ScrollView>
   );
 }
 
@@ -151,7 +177,7 @@ export function RolagemComTeclado({
         ]}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
-        automaticallyAdjustKeyboardInsets={Platform.OS === 'ios'}
+        automaticallyAdjustKeyboardInsets
         nestedScrollEnabled
         {...scrollProps}
       >
@@ -166,10 +192,13 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
-  modalWrap: {
+  modalScroll: {
     flexGrow: 0,
-    maxHeight: '100%',
+    flexShrink: 0,
     width: '100%',
+  },
+  modalScrollContent: {
+    flexGrow: 0,
   },
   scrollContent: {
     flexGrow: 1,

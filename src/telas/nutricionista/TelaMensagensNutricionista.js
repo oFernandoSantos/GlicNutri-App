@@ -43,18 +43,31 @@ import { fetchNutritionistChatSummary } from '../../servicos/servicoEscalaNutri'
 import {
   fetchCachedNutriChatInbox,
   invalidateNutriChatInboxCache,
+  replaceCachedPatientChat,
 } from '../../servicos/cacheExperienciaPaciente';
 import {
   getNutritionistId,
   listPatientsByNutritionist,
 } from '../../servicos/servicoVinculosNutricionista';
-import { bindChatEnterToSend, isChatCompactLayout, scrollChatToEnd } from '../../utilitarios/chatConversa';
+import {
+  bindChatEnterToSend,
+  CHAT_ACTIVE_POLL_MS,
+  isChatCompactLayout,
+  loadNutriChatReadAtForPatients,
+  markNutriChatRead,
+  scrollChatToEnd,
+} from '../../utilitarios/chatConversa';
 import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
+import { carregarSessaoNutricionista } from '../../servicos/servicoSessaoNutricionista';
 import RegistroChatContextCard from '../../componentes/comum/RegistroChatContextCard';
 import RegistroChatReplyPreview from '../../componentes/comum/RegistroChatReplyPreview';
 import {
+  attachRegistroContextToThreadMessages,
   buildRegistroChatMessageFromContext,
-  parseRegistroChatMessage,
+  buildRegistroPresentationFromSnapshot,
+  registroContextForChatMessage,
+  resolveRegistroChatPresentation,
+  stripRegistroMetaFromChatText,
 } from '../../utilitarios/registrosProntuarioNutri';
 
 function formatTimeNow() {
@@ -62,6 +75,19 @@ function formatTimeNow() {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+function ensureArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function countUnreadInChatList(chatList = []) {
+  return (chatList || []).reduce((sum, chat) => sum + Number(chat.unread || 0), 0);
+}
+
+function formatUnreadBadgeCount(value = 0) {
+  const total = Math.max(0, Number(value) || 0);
+  return total > 99 ? '99+' : String(total);
 }
 
 function sortChatsByRecency(items = []) {
@@ -79,8 +105,12 @@ function sortChatsByRecency(items = []) {
   });
 }
 
-function applyThreadPreviewToChat(chat, thread = [], { threadLoaded = true } = {}) {
-  const preview = buildNutritionistThreadPreview(thread);
+function applyThreadPreviewToChat(
+  chat,
+  thread = [],
+  { threadLoaded = true, lastReadAt = null } = {}
+) {
+  const preview = buildNutritionistThreadPreview(thread, { lastReadAt });
   const lastEntry = thread[thread.length - 1] || null;
 
   return {
@@ -94,12 +124,24 @@ function applyThreadPreviewToChat(chat, thread = [], { threadLoaded = true } = {
   };
 }
 
-function buildChatItems(patients, summariesById, { preserveMessagesById } = {}) {
+function buildChatItems(
+  patients,
+  summariesById,
+  { preserveMessagesById, nutriReadAtByPatientId = {} } = {}
+) {
   const items = (patients || []).map((patient) => {
     const summary = summariesById.get(patient.id) || {};
-    const preview = summary.preview || buildNutritionistThreadPreview(summary.thread || []);
+    const inboxThread = ensureArray(summary.thread);
+    const preview =
+      summary.preview ||
+      buildNutritionistThreadPreview(inboxThread, {
+        lastReadAt: nutriReadAtByPatientId[patient.id],
+      });
     const lastMessageTimestamp = summary.lastMessageCreatedAt || null;
     const preserved = preserveMessagesById?.get(patient.id);
+    const seedMessages =
+      preserved?.messages?.length > 0 ? preserved.messages : inboxThread;
+    const hasCachedThread = seedMessages.length > 0;
 
     return {
       id: `chat-${patient.id}`,
@@ -112,8 +154,9 @@ function buildChatItems(patients, summariesById, { preserveMessagesById } = {}) 
       lastMessageAt: preview.lastMessageAt || patient.updatedAt || '',
       lastMessageTimestamp,
       lastMessage: preview.lastMessage,
-      messages: preserved?.messages || [],
-      threadLoaded: Boolean(preserved?.threadLoaded),
+      messages: seedMessages,
+      threadLoaded: Boolean(preserved?.threadLoaded) || hasCachedThread,
+      lastReadAt: nutriReadAtByPatientId[patient.id] || null,
       patient,
     };
   });
@@ -146,7 +189,8 @@ function mergeChatsWithLocalState(currentChats, nextChats) {
           messages: currentMessages,
           threadLoaded: true,
         },
-        currentMessages
+        currentMessages,
+        { lastReadAt: current.lastReadAt || chat.lastReadAt }
       );
     }
 
@@ -179,6 +223,22 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const preselectedChatId = route?.params?.chatId || null;
   const routeRegistroContext = route?.params?.registroContext || null;
   const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+  const [nutriSessaoPersistida, setNutriSessaoPersistida] = useState(null);
+
+  useEffect(() => {
+    let active = true;
+    carregarSessaoNutricionista()
+      .then((sessao) => {
+        if (active) setNutriSessaoPersistida(sessao || null);
+      })
+      .catch(() => {
+        if (active) setNutriSessaoPersistida(null);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const scrollRef = useRef(null);
   const hasLoadedChatsRef = useRef(false);
   const refreshTimerRef = useRef(null);
@@ -186,6 +246,8 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const patientsRef = useRef([]);
   const chatsRef = useRef([]);
   const activeChatIdRef = useRef(null);
+  const nutriReadAtRef = useRef({});
+  const [nutriReadAtByPatientId, setNutriReadAtByPatientId] = useState({});
   const showTabBar = route?.name === 'NutricionistaMensagens';
   const chatPanelHeight = useMemo(() => {
     const readerHeader = insets.top + READER_BAR_HEIGHT;
@@ -245,7 +307,11 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     activeChatIdRef.current = activeChatId;
   }, [activeChatId]);
 
-  const mergeInboxPreviews = useCallback((patients, summaries) => {
+  useEffect(() => {
+    nutriReadAtRef.current = nutriReadAtByPatientId;
+  }, [nutriReadAtByPatientId]);
+
+  const mergeInboxPreviews = useCallback((patients, summaries, readAtOverride = null) => {
     const summariesById = new Map(
       (summaries || []).map((item) => [item?.patient?.id_paciente_uuid, item])
     );
@@ -254,38 +320,101 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         .filter((chat) => chat.threadLoaded && (chat.messages || []).length)
         .map((chat) => [chat.patientId, { messages: chat.messages, threadLoaded: true }])
     );
+    const readAtMap = readAtOverride || nutriReadAtRef.current;
 
-    return sortChatsByRecency(buildChatItems(patients, summariesById, { preserveMessagesById }));
+    return sortChatsByRecency(
+      buildChatItems(patients, summariesById, {
+        preserveMessagesById,
+        nutriReadAtByPatientId: readAtMap,
+      })
+    );
   }, []);
 
+  const buildChatRpcActor = useCallback(() => {
+    const base = nutriSessaoPersistida || usuarioLogado || {};
+    const resolvedNutriId =
+      nutricionistaId || getNutritionistId(base) || getNutritionistId(usuarioLogado);
+    const email =
+      base?.email_acesso ||
+      usuarioLogado?.email_acesso ||
+      base?.email ||
+      usuarioLogado?.email ||
+      base?.email_nutri ||
+      usuarioLogado?.email_nutri ||
+      '';
+    return {
+      tipo_perfil: 'nutricionista',
+      id_nutricionista_uuid: resolvedNutriId,
+      email_acesso: email,
+      email,
+    };
+  }, [nutriSessaoPersistida, nutricionistaId, usuarioLogado]);
+
+  const ensureChatRpcSession = useCallback(async () => {
+    const rpcActor = buildChatRpcActor();
+    if (!rpcActor.id_nutricionista_uuid) {
+      throw new Error('Nutricionista sem identificador para abrir o chat.');
+    }
+
+    const token = await garantirSessaoRpcClinicaComPerfil(rpcActor);
+    if (!token) {
+      throw new Error(
+        'Sessao clinica ausente. Saia do app e faca login novamente para usar o chat.'
+      );
+    }
+
+    return rpcActor;
+  }, [buildChatRpcActor]);
+
   const loadInboxPreviewsForPatients = useCallback(
-    async (patients, { fromIndex = 0, count = INBOX_PREVIEW_BATCH } = {}) => {
+    async (patients, { fromIndex = 0, count = INBOX_PREVIEW_BATCH, rpcActor = null } = {}) => {
       if (!nutricionistaId || !patients?.length) return;
 
       const slice = patients.slice(fromIndex, fromIndex + count);
       const patientIds = slice.map((patient) => patient.id);
       if (!patientIds.length) return;
 
-      const summaries = await fetchCachedNutriChatInbox(nutricionistaId, patientIds, () =>
-        fetchNutritionistChatInboxForPatientIds(
-          patientIds,
-          nutricionistaId,
-          patientsByIdRef.current,
-          usuarioLogado
-        )
-      );
+      const sessionActor = rpcActor || buildChatRpcActor();
+
+      const [summaries, readMap] = await Promise.all([
+        fetchCachedNutriChatInbox(nutricionistaId, patientIds, () =>
+          fetchNutritionistChatInboxForPatientIds(
+            patientIds,
+            nutricionistaId,
+            patientsByIdRef.current,
+            sessionActor
+          )
+        ),
+        loadNutriChatReadAtForPatients(nutricionistaId, patientIds),
+      ]);
+
+      if (Object.keys(readMap).length) {
+        setNutriReadAtByPatientId((current) => ({ ...current, ...readMap }));
+      }
 
       setChats((current) => {
         const mergedPatients = patientsRef.current || patients;
-        return mergeChatsWithLocalState(current, mergeInboxPreviews(mergedPatients, summaries));
+        const mergedReadAt = { ...nutriReadAtRef.current, ...readMap };
+        const merged = mergeChatsWithLocalState(
+          current,
+          mergeInboxPreviews(mergedPatients, summaries, mergedReadAt)
+        );
+        const unreadFromChats = countUnreadInChatList(merged);
+        setChatSummaryMetrics((prev) => ({
+          ...prev,
+          unread: Math.max(Number(prev.unread || 0), unreadFromChats),
+        }));
+        return merged;
       });
       setInboxPreviewLoadedCount((current) => Math.max(current, fromIndex + patientIds.length));
     },
-    [mergeInboxPreviews, nutricionistaId, usuarioLogado]
+    [buildChatRpcActor, mergeInboxPreviews, nutricionistaId]
   );
 
   const loadInbox = useCallback(
     async ({ silent = false, bustCache = false } = {}) => {
+      let shellChats = [];
+
       try {
         if (!silent) setLoading(true);
         setLoadError('');
@@ -297,21 +426,32 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
           return;
         }
 
-        const rpcActor = {
-          ...(usuarioLogado || {}),
-          id_nutricionista_uuid: nutricionistaId,
-        };
-        await garantirSessaoRpcClinicaComPerfil(rpcActor);
+        let rpcActor = null;
+        let sessionLoadError = '';
+
+        try {
+          rpcActor = await ensureChatRpcSession();
+        } catch (sessionError) {
+          sessionLoadError =
+            sessionError?.message ||
+            'Sessao clinica ausente. Saia do app e faca login novamente.';
+          console.log('Sessao RPC do chat (nutri):', sessionLoadError);
+        }
 
         if (bustCache) {
           invalidateNutriChatInboxCache(nutricionistaId);
           setInboxPreviewLoadedCount(0);
         }
 
-        const [patients, summary] = await Promise.all([
-          listPatientsByNutritionist(nutricionistaId),
-          fetchNutritionistChatSummary(nutricionistaId),
-        ]);
+        let patients = [];
+
+        try {
+          patients = await listPatientsByNutritionist(nutricionistaId);
+        } catch (patientError) {
+          console.log('Erro ao listar pacientes do chat:', patientError);
+        }
+
+        const summary = await fetchNutritionistChatSummary(nutricionistaId);
 
         patientsRef.current = patients;
         patientsByIdRef.current = new Map((patients || []).map((patient) => [patient.id, patient]));
@@ -327,7 +467,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
             .map((chat) => [chat.patientId, { messages: chat.messages, threadLoaded: true }])
         );
 
-        const shellChats = sortChatsByRecency(
+        shellChats = sortChatsByRecency(
           buildChatItems(patients, new Map(), { preserveMessagesById })
         );
         const preferredChatId =
@@ -336,13 +476,36 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 
         setChats((current) => mergeChatsWithLocalState(current, shellChats));
 
+        if (sessionLoadError) {
+          setLoadError(sessionLoadError);
+        } else if (!patients.length) {
+          setLoadError('Nenhum paciente vinculado para exibir conversas.');
+        } else {
+          setLoadError('');
+        }
+
         if (!silent) {
           setVisibleChatCount(CHAT_PAGE_SIZE);
           setLoading(false);
         }
 
-        const initialPreviewCount = Math.min(patients.length, INBOX_PREVIEW_BATCH);
-        await loadInboxPreviewsForPatients(patients, { fromIndex: 0, count: initialPreviewCount });
+        if (patients.length && rpcActor) {
+          try {
+            const initialPreviewCount = Math.min(patients.length, INBOX_PREVIEW_BATCH);
+            await loadInboxPreviewsForPatients(patients, {
+              fromIndex: 0,
+              count: initialPreviewCount,
+              rpcActor,
+            });
+          } catch (previewError) {
+            console.log('Erro ao carregar preview do chat:', previewError);
+            if (!sessionLoadError) {
+              setLoadError(
+                'Lista de pacientes carregada, mas o historico do chat falhou. Toque em Tentar novamente.'
+              );
+            }
+          }
+        }
 
         setActiveChatId((current) => {
           if (preferredChatId && shellChats.some((item) => item.id === preferredChatId)) {
@@ -356,14 +519,26 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         });
       } catch (error) {
         console.log('Erro ao carregar conversas da nutricionista:', error);
-        setLoadError('Nao foi possivel carregar as conversas agora.');
-        setChats([]);
-        setActiveChatId(null);
+        setLoadError(
+          String(error?.message || '').trim() ||
+            'Nao foi possivel carregar as conversas agora.'
+        );
+        if (!shellChats.length) {
+          setChats([]);
+          setActiveChatId(null);
+        }
       } finally {
         if (!silent) setLoading(false);
       }
     },
-    [isCompact, loadInboxPreviewsForPatients, nutricionistaId, preselectedChatId, preselectedPatientId, usuarioLogado]
+    [
+      ensureChatRpcSession,
+      isCompact,
+      loadInboxPreviewsForPatients,
+      nutricionistaId,
+      preselectedChatId,
+      preselectedPatientId,
+    ]
   );
 
   const loadActiveThread = useCallback(
@@ -379,25 +554,46 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         const activeSnapshot =
           chatsRef.current.find((chat) => chat.patientId === patientId) || null;
         const patientName = activeSnapshot?.patientName || 'Paciente';
-        const rpcActor = {
-          ...(usuarioLogado || {}),
-          id_nutricionista_uuid: nutricionistaId,
-        };
+        const rpcActor = buildChatRpcActor();
 
-        await garantirSessaoRpcClinicaComPerfil(rpcActor);
+        await ensureChatRpcSession();
 
-        const messages = await fetchNutritionistChatThreadForPatient(patientId, nutricionistaId, {
+        const fetched = await fetchNutritionistChatThreadForPatient(patientId, nutricionistaId, {
           patientName,
           rpcActor,
+          limit: 200,
         });
+        const messages =
+          Array.isArray(fetched) && fetched.some((item) => item?.registroContext?.type)
+            ? fetched
+            : attachRegistroContextToThreadMessages(
+                fetched,
+                activeSnapshot?.messages || []
+              );
 
         if (threadRequestRef.current !== requestId) return;
+
+        const viewingActive =
+          activeChatIdRef.current &&
+          chatsRef.current.find((chat) => chat.id === activeChatIdRef.current)?.patientId ===
+            patientId;
+        let readAt = nutriReadAtRef.current[patientId] || null;
+
+        if (viewingActive && nutricionistaId) {
+          readAt = (await markNutriChatRead(nutricionistaId, patientId)) || readAt;
+          if (readAt) {
+            setNutriReadAtByPatientId((current) => ({ ...current, [patientId]: readAt }));
+          }
+        }
 
         setChats((current) =>
           sortChatsByRecency(
             current.map((chat) => {
               if (chat.patientId !== patientId) return chat;
-              return applyThreadPreviewToChat(chat, messages, { threadLoaded: true });
+              return applyThreadPreviewToChat(chat, messages, {
+                threadLoaded: true,
+                lastReadAt: viewingActive ? readAt : chat.lastReadAt,
+              });
             })
           )
         );
@@ -405,11 +601,14 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         console.log('Erro ao carregar thread do paciente:', error);
         if (threadRequestRef.current === requestId) {
           setChats((current) =>
-            current.map((chat) =>
-              chat.patientId === patientId
-                ? applyThreadPreviewToChat(chat, chat.messages || [], { threadLoaded: false })
-                : chat
-            )
+            current.map((chat) => {
+              if (chat.patientId !== patientId) return chat;
+              const existing = ensureArray(chat.messages);
+              if (existing.length) {
+                return { ...chat, threadLoaded: true };
+              }
+              return applyThreadPreviewToChat(chat, existing, { threadLoaded: false });
+            })
           );
         }
       } finally {
@@ -418,7 +617,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         }
       }
     },
-    [nutricionistaId, usuarioLogado]
+    [buildChatRpcActor, ensureChatRpcSession, nutricionistaId]
   );
 
   const scheduleInboxRefresh = useCallback(
@@ -511,39 +710,64 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
           filter: `nutricionista_id=eq.${nutricionistaId}`,
         },
         (payload) => {
-          if (draftRef.current.trim() || sendingRef.current) return;
           const row = payload?.new;
           const patientId = row?.paciente_id || payload?.old?.paciente_id || null;
           if (row?.texto && patientId && payload?.eventType === 'INSERT') {
             const activeChat = chatsRef.current.find(
               (chat) => chat.id === activeChatIdRef.current
             );
-            if (activeChat?.patientId === patientId) {
-              const entry = mapRealtimeChatRowToThreadEntry(row, activeChat.patientName, {
+            const listChat =
+              chatsRef.current.find((chat) => chat.patientId === patientId) || activeChat;
+            const entry = mapRealtimeChatRowToThreadEntry(
+              row,
+              listChat?.patientName || 'Paciente',
+              {
                 nutritionistName:
                   usuarioLogado?.nome_completo_nutri ||
                   usuarioLogado?.nome_nutri ||
                   'Nutricionista',
-              });
-              if (entry) {
-                setChats((current) =>
-                  sortChatsByRecency(
-                    current.map((chat) => {
-                      if (chat.patientId !== patientId) return chat;
-                      const nextThread = mergeChatMessageIntoThread(chat.messages || [], entry);
-                      return applyThreadPreviewToChat(
-                        { ...chat, threadLoaded: true },
-                        nextThread
-                      );
-                    })
-                  )
-                );
-                scheduleInboxRefreshRef.current(patientId);
-                return;
               }
+            );
+
+            if (entry) {
+              const viewingThread = activeChat?.patientId === patientId;
+              if (viewingThread && entry.role === 'user' && nutricionistaId) {
+                markNutriChatRead(nutricionistaId, patientId).then((readAt) => {
+                  if (!readAt) return;
+                  setNutriReadAtByPatientId((current) => ({ ...current, [patientId]: readAt }));
+                });
+              }
+
+              setChats((current) =>
+                sortChatsByRecency(
+                  current.map((chat) => {
+                    if (chat.patientId !== patientId) return chat;
+                    const nextThread = mergeChatMessageIntoThread(chat.messages || [], entry);
+                    const lastReadAt =
+                      viewingThread && entry.role === 'user'
+                        ? new Date().toISOString()
+                        : chat.lastReadAt;
+                    return applyThreadPreviewToChat(
+                      { ...chat, threadLoaded: true, lastReadAt },
+                      nextThread,
+                      { lastReadAt }
+                    );
+                  })
+                )
+              );
+
+              if (!sendingRef.current) {
+                scheduleInboxRefreshRef.current(patientId);
+              }
+              return;
             }
           }
-          scheduleInboxRefreshRef.current(patientId);
+
+          if (!sendingRef.current && !draftRef.current.trim()) {
+            scheduleInboxRefreshRef.current(patientId);
+          } else if (patientId) {
+            loadActiveThread(patientId, { silent: true });
+          }
         }
       )
       .subscribe();
@@ -551,19 +775,15 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [nutricionistaId]);
+  }, [loadActiveThread, nutricionistaId, usuarioLogado]);
 
   useEffect(() => {
     const activeChat = chatsRef.current.find((chat) => chat.id === activeChatId);
     const patientId = activeChat?.patientId;
     if (!patientId) return undefined;
 
-    const hasMessages = (activeChat?.messages || []).length > 0;
-    const shouldReload = !activeChat?.threadLoaded || !hasMessages;
-
-    if (shouldReload) {
-      loadActiveThread(patientId, { silent: hasMessages });
-    }
+    const hasCachedMessages = (activeChat?.messages || []).length > 0;
+    loadActiveThread(patientId, { silent: hasCachedMessages });
 
     return undefined;
   }, [activeChatId, loadActiveThread]);
@@ -577,6 +797,18 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       return undefined;
     }, [activeChatId, loadActiveThread, nutricionistaId])
   );
+
+  useEffect(() => {
+    const activeChat = chatsRef.current.find((chat) => chat.id === activeChatId);
+    const patientId = activeChat?.patientId;
+    if (!patientId || !nutricionistaId) return undefined;
+
+    const intervalId = setInterval(() => {
+      loadActiveThread(patientId, { silent: true });
+    }, CHAT_ACTIVE_POLL_MS);
+
+    return () => clearInterval(intervalId);
+  }, [activeChatId, loadActiveThread, nutricionistaId]);
 
   const filteredChats = useMemo(() => {
     const normalized = String(search || '').toLowerCase().trim();
@@ -599,19 +831,62 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
   const showListColumn = !isCompact || !activeChatId;
   const showThreadColumn = !isCompact || Boolean(activeChatId);
 
+  const listUnreadCount = useMemo(
+    () => Math.max(Number(chatSummaryMetrics.unread || 0), countUnreadInChatList(chats)),
+    [chatSummaryMetrics.unread, chats]
+  );
+
   const metrics = useMemo(() => {
     const total = chatSummaryMetrics.total || chats.length;
-    const unread = chatSummaryMetrics.unread;
+    const unread = listUnreadCount;
     const read = Math.max(0, total - unread);
     const today = chatSummaryMetrics.today;
 
     return [
       { id: 'total', icon: 'chatbubbles-outline', label: 'Total Conversas', value: String(total), accent: KPI_ACCENTS.blue },
-      { id: 'unread', icon: 'mail-unread-outline', label: 'Nao Lidas', value: String(unread), accent: KPI_ACCENTS.red },
+      { id: 'unread', icon: 'mail-unread-outline', label: 'Nao Lidas', value: formatUnreadBadgeCount(unread), accent: KPI_ACCENTS.red },
       { id: 'read', icon: 'checkmark-done-outline', label: 'Lidas', value: String(read), accent: KPI_ACCENTS.green },
       { id: 'today', icon: 'today-outline', label: 'Hoje', value: String(today), accent: KPI_ACCENTS.orange },
     ];
-  }, [chatSummaryMetrics, chats.length]);
+  }, [chatSummaryMetrics, chats.length, listUnreadCount]);
+
+  const handleSelectChat = useCallback(
+    async (chatId) => {
+      setActiveChatId(chatId);
+      const selected = chatsRef.current.find((chat) => chat.id === chatId);
+      let readAt = selected?.lastReadAt || null;
+
+      if (selected?.patientId && nutricionistaId) {
+        readAt = (await markNutriChatRead(nutricionistaId, selected.patientId)) || readAt;
+        if (readAt) {
+          setNutriReadAtByPatientId((current) => ({
+            ...current,
+            [selected.patientId]: readAt,
+          }));
+        }
+      }
+
+      setChats((current) => {
+        const next = sortChatsByRecency(
+          current.map((chat) => {
+            if (chat.id !== chatId) return chat;
+            return applyThreadPreviewToChat(
+              { ...chat, lastReadAt: readAt },
+              chat.messages || [],
+              { lastReadAt: readAt }
+            );
+          })
+        );
+        const unreadFromChats = countUnreadInChatList(next);
+        setChatSummaryMetrics((prev) => ({
+          ...prev,
+          unread: unreadFromChats,
+        }));
+        return next;
+      });
+    },
+    [nutricionistaId]
+  );
 
   const scrollThreadToLatest = useCallback((animated = false) => {
     scrollChatToEnd(scrollRef, {
@@ -635,16 +910,8 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     [usuarioLogado]
   );
 
-  const buildChatRpcActor = useCallback(() => {
-    const resolvedNutriId = nutricionistaId || getNutritionistId(usuarioLogado);
-    return {
-      ...(usuarioLogado || {}),
-      id_nutricionista_uuid: resolvedNutriId,
-    };
-  }, [nutricionistaId, usuarioLogado]);
-
   const appendAndPersistMessage = useCallback(
-    async (text, chatId, threadOverride = null) => {
+    async (text, chatId, threadOverride = null, { registroContext = null } = {}) => {
       const trimmed = String(text || '').trim();
       const chatSnapshot = chatsRef.current.find((chat) => chat.id === chatId);
       if (!trimmed || !chatSnapshot) {
@@ -658,6 +925,18 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 
       const baseThread = ensureArray(threadOverride || chatSnapshot.messages);
       const sentAt = new Date().toISOString();
+      const parsedForContext = resolveRegistroChatPresentation({ text: trimmed });
+      const snapshotPresentation = registroContext
+        ? buildRegistroPresentationFromSnapshot(registroContext)
+        : null;
+      const registroPayload = snapshotPresentation
+        ? registroContextForChatMessage(
+            snapshotPresentation,
+            parsedForContext?.comment || snapshotPresentation.comment || ''
+          )
+        : parsedForContext
+          ? registroContextForChatMessage(parsedForContext, parsedForContext.comment)
+          : null;
       const nextMessage = {
         ...normalizeNutritionistThreadEntry(
           {
@@ -666,6 +945,8 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
             role: 'nutri',
             time: formatTimeNow(),
             text: trimmed,
+            texto_bruto: trimmed,
+            registroContext: registroPayload,
           },
           {
             nutritionistName,
@@ -676,12 +957,27 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       };
       const optimisticThread = [...baseThread, nextMessage];
 
-      await garantirSessaoRpcClinicaComPerfil(rpcActor);
+      setChats((current) =>
+        sortChatsByRecency(
+          current.map((chat) => {
+            if (chat.id !== chatSnapshot.id) return chat;
+            return applyThreadPreviewToChat(
+              { ...chat, threadLoaded: true },
+              optimisticThread
+            );
+          })
+        )
+      );
+
+      await ensureChatRpcSession();
 
       const saved = await savePatientNutritionistChat({
         patientId: chatSnapshot.patientId,
         thread: optimisticThread,
-        actor: rpcActor,
+        actor: {
+          ...rpcActor,
+          id_nutricionista_uuid: nutricionistaId || rpcActor.id_nutricionista_uuid,
+        },
         patientContext: chatSnapshot.patient?.raw || chatSnapshot.patient,
         newMessage: {
           ...nextMessage,
@@ -694,11 +990,14 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         ? saved.appState.nutritionistThread
         : optimisticThread;
 
-      const normalizedThread = savedThread.map((item) =>
-        normalizeNutritionistThreadEntry(item, {
-          nutritionistName,
-          patientName: chatSnapshot.patientName,
-        })
+      const normalizedThread = attachRegistroContextToThreadMessages(
+        savedThread.map((item) =>
+          normalizeNutritionistThreadEntry(item, {
+            nutritionistName,
+            patientName: chatSnapshot.patientName,
+          })
+        ),
+        optimisticThread
       );
 
       setChats((current) =>
@@ -713,9 +1012,17 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         )
       );
 
+      replaceCachedPatientChat(chatSnapshot.patientId, {
+        patient: chatSnapshot.patient?.raw || chatSnapshot.patient,
+        clinicalObjective: '',
+        appState: { nutritionistThread: normalizedThread },
+        thread: normalizedThread,
+      });
+      invalidateNutriChatInboxCache(rpcActor.id_nutricionista_uuid);
+
       return normalizedThread;
     },
-    [buildChatRpcActor, nutritionistName]
+    [buildChatRpcActor, ensureChatRpcSession, nutritionistName, nutricionistaId]
   );
 
   async function handleSend() {
@@ -743,9 +1050,10 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 
     try {
       setSending(true);
-      await garantirSessaoRpcClinicaComPerfil(rpcActor);
 
-      await appendAndPersistMessage(outboundText, chatSnapshot.id);
+      await appendAndPersistMessage(outboundText, chatSnapshot.id, null, {
+        registroContext: hasRegistro ? registroSnapshot : null,
+      });
 
       setDraft('');
       setPendingRegistro(null);
@@ -771,10 +1079,6 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
     if (navigation?.setParams) {
       navigation.setParams({ registroContext: undefined });
     }
-  }
-
-  function ensureArray(value) {
-    return Array.isArray(value) ? value : [];
   }
 
   function handleLoadMoreChats() {
@@ -823,11 +1127,11 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
         <SectionCard style={[styles.listColumn, { height: chatPanelHeight }]}>
           <View style={styles.listHeader}>
             <Text style={styles.columnTitle}>Mensagens</Text>
-            {metrics[1]?.value ? (
-              <View style={styles.listUnreadBadge}>
-                <Text style={styles.listUnreadBadgeText}>{metrics[1].value}</Text>
-              </View>
-            ) : null}
+            <View style={styles.listUnreadBadge}>
+              <Text style={styles.listUnreadBadgeText}>
+                {formatUnreadBadgeCount(listUnreadCount)}
+              </Text>
+            </View>
           </View>
           <View style={styles.listSearch}>
             <SearchInput value={search} onChangeText={setSearch} placeholder="Buscar conversa..." />
@@ -841,7 +1145,11 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
           ) : loadError ? (
             <View style={styles.feedbackCard}>
               <Text style={styles.feedbackTitle}>{loadError}</Text>
-              <TouchableOpacity style={styles.retryButton} onPress={loadInbox} activeOpacity={0.9}>
+              <TouchableOpacity
+                style={styles.retryButton}
+                onPress={() => loadInbox({ bustCache: true })}
+                activeOpacity={0.9}
+              >
                 <Text style={styles.retryButtonText}>Tentar novamente</Text>
               </TouchableOpacity>
             </View>
@@ -871,7 +1179,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                   <TouchableOpacity
                     key={chat.id}
                     style={[styles.chatListItem, selected && styles.chatListItemActive]}
-                    onPress={() => setActiveChatId(chat.id)}
+                    onPress={() => handleSelectChat(chat.id)}
                     activeOpacity={0.9}
                   >
                     <AvatarBadge name={chat.patientName} size={42} subtle />
@@ -942,7 +1250,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                     })
                   }
                 >
-                  <Ionicons name="document-text-outline" size={18} color={patientTheme.colors.primaryDark} />
+                  <Ionicons name="document-text-outline" size={18} color={patientTheme.colors.primary} />
                   <Text style={styles.chartShortcutText}>Abrir prontuario</Text>
                 </TouchableOpacity>
               </View>
@@ -996,15 +1304,20 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                 ) : (
                   (activeChat.messages || []).map((message) => {
                     const mine = message.role === 'nutri';
-                    const registroParsed = parseRegistroChatMessage(message.text);
+                    const registroParsed = resolveRegistroChatPresentation(message);
                     if (registroParsed) {
                       return (
                         <View
                           key={message.id}
                           style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowPatient]}
                         >
-                          <View style={styles.registroMessageWrap}>
-                            <RegistroChatContextCard parsedMessage={registroParsed} compact />
+                          <View
+                            style={[
+                              styles.registroMessageWrap,
+                              mine ? styles.registroMessageWrapMine : styles.registroMessageWrapPatient,
+                            ]}
+                          >
+                            <RegistroChatContextCard parsedMessage={registroParsed} variant="chat" />
                             {registroParsed.comment ? (
                               <View style={[styles.bubble, styles.bubbleMine, styles.registroCommentBubble]}>
                                 <Text style={[styles.bubbleText, styles.bubbleTextMine]}>
@@ -1012,7 +1325,12 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                                 </Text>
                               </View>
                             ) : null}
-                            <Text style={[styles.bubbleTime, styles.registroMessageTime]}>
+                            <Text
+                              style={[
+                                styles.registroMessageTime,
+                                mine && styles.registroMessageTimeMine,
+                              ]}
+                            >
                               {message.time}
                             </Text>
                           </View>
@@ -1025,7 +1343,9 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                         style={[styles.messageRow, mine ? styles.messageRowMine : styles.messageRowPatient]}
                       >
                         <View style={[styles.bubble, mine ? styles.bubbleMine : styles.bubblePatient]}>
-                          <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>{message.text}</Text>
+                          <Text style={[styles.bubbleText, mine && styles.bubbleTextMine]}>
+                            {stripRegistroMetaFromChatText(message.text)}
+                          </Text>
                           <Text style={[styles.bubbleTime, mine && styles.bubbleTimeMine]}>{message.time}</Text>
                         </View>
                       </View>
@@ -1256,7 +1576,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: patientTheme.colors.warning,
+    backgroundColor: patientTheme.colors.danger,
     paddingHorizontal: 6,
   },
   listUnreadBadgeText: {
@@ -1352,7 +1672,7 @@ const styles = StyleSheet.create({
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: patientTheme.colors.warning,
+    backgroundColor: patientTheme.colors.danger,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
@@ -1396,11 +1716,12 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    backgroundColor: patientTheme.colors.primaryLight,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.primary,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    ...patientShadow,
   },
   chartShortcutText: {
     color: patientTheme.colors.primaryDark,
@@ -1492,11 +1813,24 @@ const styles = StyleSheet.create({
     color: 'rgba(255,255,255,0.85)',
   },
   registroMessageWrap: {
-    maxWidth: '82%',
-    width: '100%',
+    maxWidth: '88%',
+  },
+  registroMessageWrapMine: {
+    alignItems: 'flex-end',
+    alignSelf: 'flex-end',
+  },
+  registroMessageWrapPatient: {
+    alignItems: 'flex-start',
+    alignSelf: 'flex-start',
   },
   registroMessageTime: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
     marginTop: 6,
+    textAlign: 'left',
+  },
+  registroMessageTimeMine: {
     textAlign: 'right',
   },
   composerPanel: {

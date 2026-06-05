@@ -1,7 +1,10 @@
 import React, { useEffect } from 'react';
 import { isAdminUser } from '../../servicos/servicoAdmin';
 import { isNutriUser } from '../../servicos/servicoSessaoNutricionista';
-import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
+import {
+  emitirSessaoRpcOAuthPaciente,
+  garantirSessaoRpcClinicaComPerfil,
+} from '../../servicos/servicoSessaoRpc';
 import {
   hasLibreLinkUpLinked,
   startLibreViewAutoSync,
@@ -33,9 +36,15 @@ export default function GuardiaoSessaoPaciente({ navigation, usuarioLogado, chil
       return;
     }
 
-    garantirSessaoRpcClinicaComPerfil(usuarioLogado).catch((error) => {
-      console.log('Falha ao garantir sessao RPC paciente:', error?.message || error);
-    });
+    (async () => {
+      let token = await garantirSessaoRpcClinicaComPerfil(usuarioLogado);
+      if (!token) {
+        token = await emitirSessaoRpcOAuthPaciente(usuarioLogado);
+      }
+      if (!token && __DEV__) {
+        console.log('Sessao RPC clinica indisponivel para o paciente.');
+      }
+    })();
 
     const patientId = getPatientId(usuarioLogado);
     if (!patientId) {

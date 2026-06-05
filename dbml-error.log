@@ -1,0 +1,7 @@
+2026-05-28T23:04:00.708Z
+Error: PostgreSQL connection error: Error: getaddrinfo ENOTFOUND base
+    at vi (C:\Users\flima\AppData\Roaming\npm\node_modules\@dbml\cli\node_modules\@dbml\connector\dist\index.js:3484:2977)
+    at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+    at async Di (C:\Users\flima\AppData\Roaming\npm\node_modules\@dbml\cli\node_modules\@dbml\connector\dist\index.js:3701:279)
+    at async connectionHandler (C:\Users\flima\AppData\Roaming\npm\node_modules\@dbml\cli\lib\index.js:1152:22)
+
