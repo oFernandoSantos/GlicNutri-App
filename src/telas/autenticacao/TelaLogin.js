@@ -53,6 +53,7 @@ import {
 } from '../../servicos/servicoSessaoRpc';
 import { patientAppAlreadyActive } from '../../utilitarios/navegacaoPaciente';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import { executarComTimeout } from '../../utilitarios/executarComTimeout';
 import SeletorPerfil from '../../componentes/comum/SeletorPerfil';
 import CampoSenha from '../../componentes/comum/CampoSenha';
 import {
@@ -71,6 +72,7 @@ const softGreenBorder = {
 };
 
 const AUTH_WEB_MAX_WIDTH = 440;
+const SUPABASE_LOGIN_TIMEOUT_MS = 12 * 1000;
 
 const googleLogo = {
   uri: 'https://img.icons8.com/?size=100&id=xoyhGXWmHnqX&format=png&color=000000',
@@ -386,10 +388,10 @@ export default function TelaLogin({ navigation, route, session }) {
     setLoading(true);
 
     try {
-      let { usuario, motivo } = await buscarUsuarioPorCredenciais(
-        role,
-        identificador,
-        senha
+      let { usuario, motivo } = await executarComTimeout(
+        buscarUsuarioPorCredenciais(role, identificador, senha),
+        SUPABASE_LOGIN_TIMEOUT_MS,
+        'login-supabase'
       );
 
       if (!usuario) {
@@ -542,13 +544,17 @@ export default function TelaLogin({ navigation, route, session }) {
       }
 
       if (usuario?.tipo_perfil !== 'admin') {
-        const rpcToken = await emitirSessaoRpcPosCredencial({
-          role: perfilLogin,
-          identificador,
-          senha,
-          actorId: sessaoEntityId,
-          email: identificador,
-        });
+        const rpcToken = await executarComTimeout(
+          emitirSessaoRpcPosCredencial({
+            role: perfilLogin,
+            identificador,
+            senha,
+            actorId: sessaoEntityId,
+            email: identificador,
+          }),
+          SUPABASE_LOGIN_TIMEOUT_MS,
+          'login-rpc'
+        ).catch(() => null);
         if (!rpcToken) {
           setErrorMessage(
             'Login ok, mas sessao clinica nao iniciou. Saia e entre novamente antes de registrar dados.'
@@ -597,8 +603,16 @@ export default function TelaLogin({ navigation, route, session }) {
           codigo: 'erro_inesperado',
           perfilSelecionado: role,
         },
-      });
-      setErrorMessage('Ocorreu um erro inesperado ao validar seu acesso.');
+      }).catch(() => null);
+
+      const message = String(error?.message || '');
+      if (message.includes('excedeu') || message.includes('timeout') || message.includes('fetch')) {
+        setErrorMessage(
+          'Servidor Supabase indisponivel no momento. Verifique o projeto no dashboard e tente de novo em alguns minutos.'
+        );
+      } else {
+        setErrorMessage('Ocorreu um erro inesperado ao validar seu acesso.');
+      }
     } finally {
       setLoading(false);
     }
