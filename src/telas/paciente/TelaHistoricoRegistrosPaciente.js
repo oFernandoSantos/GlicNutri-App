@@ -173,34 +173,27 @@ function filterByPeriod(items, period, startDateInput, endDateInput, options = {
   const resolveItemDate =
     options.resolveItemDate ||
     ((item) => normalizeDateInput(String(item.date || '').slice(0, 10)));
-  const sortItems = options.sortItems || sortByDateTime;
   const today = getTodayDateString();
   let startDate = today;
   let endDate = today;
 
   if (period === 'today') {
-    const hasTodayRecord = items.some((item) => resolveItemDate(item) === today);
-
-    if (!hasTodayRecord) {
-      const latestRecordDate = sortItems(items).map(resolveItemDate).find(Boolean);
-
-      if (!latestRecordDate) return items;
-
-      startDate = latestRecordDate;
-      endDate = latestRecordDate;
-    }
+    startDate = today;
+    endDate = today;
   } else if (period === '7days') {
     startDate = addDays(today, -6);
+    endDate = today;
   } else if (period === '14days') {
     startDate = addDays(today, -13);
+    endDate = today;
   } else if (period === 'search') {
     startDate = normalizeDateInput(startDateInput);
     endDate = normalizeDateInput(endDateInput);
 
-    if (!startDate && !endDate) return items;
+    if (!startDate && !endDate) return [];
     if (!startDate) startDate = endDate;
     if (!endDate) endDate = startDate;
-  } else if (period !== 'today') {
+  } else {
     return items;
   }
 
@@ -594,7 +587,6 @@ export default function PacienteHistoricoRegistrosScreen({
     () =>
       filterByPeriod(sortedGlucoseReadings, activePeriod, searchStartDate, searchEndDate, {
         resolveItemDate: getGlucoseReadingDisplayDate,
-        sortItems: sortGlucoseReadingsNewestFirst,
       }),
     [activePeriod, searchEndDate, searchStartDate, sortedGlucoseReadings]
   );

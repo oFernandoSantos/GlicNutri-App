@@ -84,6 +84,16 @@ export function extractLocalDateTimeFromIsoTimestamp(
     return null;
   }
 
+  const hasExplicitOffset = /([zZ]|[+-]\d{2}:\d{2})$/.test(raw);
+  const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
+
+  if (isoMatch && !hasExplicitOffset) {
+    return {
+      date: isoMatch[1],
+      time: isoMatch[2],
+    };
+  }
+
   const parsed = new Date(raw);
   if (!Number.isNaN(parsed.getTime())) {
     const local = formatDateTimePartsInTimeZone(parsed, timeZone);
@@ -95,7 +105,6 @@ export function extractLocalDateTimeFromIsoTimestamp(
     }
   }
 
-  const isoMatch = raw.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{2}:\d{2})/);
   if (isoMatch) {
     return {
       date: isoMatch[1],
@@ -676,6 +685,18 @@ export function buildLocalTimeString(date = new Date()) {
   }
 
   return value.toTimeString().slice(0, 8);
+}
+
+/** ISO com offset de Brasilia para timestamptz sem drift na leitura. */
+export function buildLocalTimestampIso(date, time) {
+  const datePart = normalizeLocalDateString(date);
+  const timePart = normalizeLocalTimeString(time).slice(0, 5);
+
+  if (!datePart || !/^\d{2}:\d{2}$/.test(timePart)) {
+    return null;
+  }
+
+  return `${datePart}T${timePart}:00-03:00`;
 }
 
 export function normalizeLocalDateString(value) {

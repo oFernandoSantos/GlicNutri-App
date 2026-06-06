@@ -412,10 +412,16 @@ export default function PacienteDiarioScreen({ navigation, route, usuarioLogado:
         return current;
       }
 
-      return {
+      const nextState = {
         ...current,
         mealEntries: appendNewestEntry(currentEntries, mealEntryFromIA),
       };
+
+      if (patientId || resolvedPatientId) {
+        replaceCachedPatientAppState(resolvedPatientId || patientId, nextState);
+      }
+
+      return nextState;
     });
   }, [mealEntryFromIA, mealIARefreshToken]);
 

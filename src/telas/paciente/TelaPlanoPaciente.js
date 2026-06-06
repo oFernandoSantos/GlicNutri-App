@@ -1,4 +1,4 @@
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View,
@@ -26,6 +26,7 @@ import {
   fetchActiveMealPlanForPatient,
   getCachedActiveMealPlanForPatient,
 } from '../../servicos/servicoPlanoAlimentar';
+import { subscribeToPatientAppState } from '../../servicos/centralAppState';
 import {
   averageAdherence,
 } from '../../utilitarios/adesaoNutricional';
@@ -190,6 +191,20 @@ export default function PacientePlanoScreen({
       loadPlano({ silent: true, forceRefresh: false });
     }, [loadPlano])
   );
+
+  useEffect(() => {
+    if (!patientId) {
+      return undefined;
+    }
+
+    return subscribeToPatientAppState(patientId, (nextAppState) => {
+      if (!nextAppState) {
+        return;
+      }
+
+      setAppState(nextAppState);
+    });
+  }, [patientId]);
 
   const planSections = useMemo(() => {
     return resolvePlanSections({ mealPlan, appState });

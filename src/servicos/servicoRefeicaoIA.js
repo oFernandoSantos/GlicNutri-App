@@ -1240,6 +1240,8 @@ export async function salvarRefeicaoIA({
   alimentos,
   confirmado = true,
   createdAt,
+  mealDate,
+  mealTime,
   mealLabel,
   mealTypeLabel,
   planSectionId,
@@ -1248,10 +1250,15 @@ export async function salvarRefeicaoIA({
     throw new Error('Paciente sem identificador para salvar a refeicao.');
   }
 
+  const resolvedMealDate = String(mealDate || '').trim().slice(0, 10) || null;
+  const resolvedMealTime = String(mealTime || '').trim().slice(0, 5) || null;
+
   const mealMetadata = {
     mealLabel: mealLabel || null,
     mealTypeLabel: mealTypeLabel || mealLabel || null,
     planSectionId: planSectionId || null,
+    date: resolvedMealDate,
+    time: resolvedMealTime,
   };
   function compactarAlimentoParaPersistencia(item = {}) {
     return {

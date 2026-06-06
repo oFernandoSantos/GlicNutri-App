@@ -12,6 +12,7 @@ import {
   Modal,
   PanResponder,
   Animated,
+  AppState,
   useWindowDimensions,
 } from 'react-native';
 import { Ionicons, MaterialCommunityIcons } from '@expo/vector-icons';
@@ -48,8 +49,10 @@ import { getMealEntryNutrition } from '../../servicos/servicoRefeicaoIA';
 import { syncGooglePatientRecord } from '../../servicos/sincronizarPacienteGoogle';
 import {
   buildPlanDayStatus,
+  mergePlanStructureSections,
   resolvePlanSections,
 } from '../../utilitarios/vinculoPlanoRefeicao';
+import { mealPlanSections as defaultMealPlanSections } from '../../dados/dadosExperienciaPaciente';
 import {
   getCachedGlucoseReadings,
   mergeCachedGlucoseReadings,
@@ -814,8 +817,12 @@ export default function PacienteHomeScreen({
   const loadGuardRef = React.useRef(criarGuardiaoCarregamentoInicial());
   const loadInFlightRef = useRef(null);
   const homeLoadedRef = useRef(false);
+  const mealDataRefreshRef = useRef(null);
+  const [homeDayKey, setHomeDayKey] = useState(() => todayDateString());
 
   const usuarioLogado = usuarioProp || route?.params?.usuarioLogado || null;
+  const mealDataRefreshToken =
+    route?.params?.mealDataRefresh || route?.params?.mealIARefreshToken || null;
 
   const idPaciente = useMemo(() => getPatientId(usuarioLogado), [usuarioLogado]);
   const canResolvePatient = useMemo(
@@ -1155,22 +1162,43 @@ export default function PacienteHomeScreen({
     }
   }
 
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        setHomeDayKey(todayDateString());
+      }
+    });
+
+    return () => subscription.remove();
+  }, []);
+
   useFocusEffect(
     useCallback(() => {
+      setHomeDayKey(todayDateString());
+
       if (loadGuardRef.current.deveIgnorarCarregamentoFocus()) {
         return undefined;
       }
 
-      carregarDados({ forceRefresh: false });
+      const shouldForceMealRefresh =
+        Boolean(mealDataRefreshToken) &&
+        mealDataRefreshRef.current !== mealDataRefreshToken;
+
+      if (shouldForceMealRefresh) {
+        mealDataRefreshRef.current = mealDataRefreshToken;
+      }
+
+      carregarDados({ forceRefresh: shouldForceMealRefresh });
       homeLoadedRef.current = true;
 
       if (!idPaciente) {
         return undefined;
       }
 
-      const cacheFresco = isPatientExperienceCacheFresh(idPaciente, homeFetchOptions);
+      const cacheFresco =
+        !shouldForceMealRefresh && isPatientExperienceCacheFresh(idPaciente, homeFetchOptions);
 
-      if (!cacheFresco) {
+      if (shouldForceMealRefresh || !cacheFresco) {
         refreshPatientMealEntries(idPaciente, {
           patientContext: usuarioLogado,
           mealLimit: homeFetchOptions.mealLimit,
@@ -1203,7 +1231,14 @@ export default function PacienteHomeScreen({
       refreshGlucose();
 
       return undefined;
-    }, [carregarDados, homeFetchOptions, idPaciente, navigation, usuarioLogado])
+    }, [
+      carregarDados,
+      homeFetchOptions,
+      idPaciente,
+      mealDataRefreshToken,
+      navigation,
+      usuarioLogado,
+    ])
   );
 
   function navegarParaTela(rota, params = {}) {
@@ -1520,59 +1555,65 @@ export default function PacienteHomeScreen({
   const trendMeta = getTrendMeta(glucoseForInsights);
   const mealEntries = appState?.mealEntries || [];
   const planSections = useMemo(
-    () => resolvePlanSections({ mealPlan: appState?.activeMealPlan, appState }),
+    () =>
+      mergePlanStructureSections(
+        resolvePlanSections({ mealPlan: appState?.activeMealPlan, appState }),
+        defaultMealPlanSections
+      ),
     [appState]
   );
   const waterCount = appState?.waterCount || 0;
   const carouselWidth = Math.max(windowWidth - patientTheme.spacing.screen * 2, 280);
   const glucoseSummary = useMemo(
     () => buildGlucoseSummary(glucoseReadings),
-    [glucoseReadings]
-  );
-  const nutritionSummary = useMemo(
-    () => buildNutritionSummary(mealEntries, planSections),
-    [mealEntries, planSections]
-  );
-  const homePlanDayStatus = useMemo(
-    () => buildPlanDayStatus({ mealEntries, sections: planSections }),
-    [mealEntries, planSections]
+    [glucoseReadings, homeDayKey]
   );
   const todayMealEntries = useMemo(() => {
-    const today = todayDateString();
     return (mealEntries || [])
-      .filter((entry) => String(entry?.date || '').slice(0, 10) === today)
+      .filter((entry) => String(entry?.date || '').slice(0, 10) === homeDayKey)
       .sort((left, right) => String(left.time || '').localeCompare(String(right.time || '')));
-  }, [mealEntries]);
-  const homeMealCards = useMemo(() => {
-    if (todayMealEntries.length) {
-      return todayMealEntries.map((entry) => {
-        const nutrition = getMealEntryNutrition(entry) || {};
+  }, [mealEntries, homeDayKey]);
+  const nutritionSummary = useMemo(
+    () => buildNutritionSummary(todayMealEntries, planSections),
+    [todayMealEntries, planSections]
+  );
+  const homePlanDayStatus = useMemo(
+    () =>
+      buildPlanDayStatus({
+        mealEntries: todayMealEntries,
+        sections: planSections,
+        date: homeDayKey,
+      }),
+    [todayMealEntries, planSections, homeDayKey]
+  );
+  const homeMealCards = useMemo(
+    () =>
+      homePlanDayStatus.meals.slice(0, 7).map((meal) => {
+        const latestEntry = meal.entries?.[0] || null;
+        const nutrition = latestEntry ? getMealEntryNutrition(latestEntry) : null;
+
         return {
-          id: entry.id,
-          title: entry.mealLabel || entry.title || 'Refeição',
-          time: entry.time || '--:--',
-          description: entry.description || '',
+          id: meal.id,
+          title: meal.title,
+          time: latestEntry?.time || meal.time || '--:--',
+          description: latestEntry?.description || '',
           summary: {
-            completed: true,
-            kcal: Math.round(nutrition.calories || entry.kcal || 0),
-            carbs: Math.round(nutrition.carbs || entry.carbsG || 0),
-            protein: Math.round(nutrition.protein || entry.proteinG || 0),
-            fat: Math.round(nutrition.fat || entry.fatG || 0),
+            completed: meal.completed,
+            kcal: Math.round(meal.summary?.kcal || nutrition?.calories || 0),
+            carbs: Math.round(meal.summary?.carbs || nutrition?.carbs || 0),
+            protein: Math.round(meal.summary?.protein || nutrition?.protein || 0),
+            fat: Math.round(meal.summary?.fat || nutrition?.fat || 0),
           },
         };
-      });
-    }
-
-    return homePlanDayStatus.meals.slice(0, 7);
-  }, [homePlanDayStatus.meals, todayMealEntries]);
-  const homePlanProgress = todayMealEntries.length
-    ? Math.min(100, Math.round((todayMealEntries.length / 7) * 100))
-    : homePlanDayStatus.progressPercent;
-  const homePlanCompletedCount = todayMealEntries.length || homePlanDayStatus.completedCount;
-  const homePlanTotalCount = todayMealEntries.length ? 7 : homePlanDayStatus.totalCount || 0;
+      }),
+    [homePlanDayStatus.meals]
+  );
+  const homePlanProgress = homePlanDayStatus.progressPercent;
+  const homePlanCompletedCount = homePlanDayStatus.completedCount;
+  const homePlanTotalCount = homePlanDayStatus.totalCount;
   const insights = useMemo(
-    () => buildHomeInsights(glucoseForInsights, mealEntries.length),
-    [glucoseForInsights, mealEntries.length]
+    () => buildHomeInsights(glucoseForInsights, todayMealEntries.length),
+    [glucoseForInsights, todayMealEntries.length]
   );
   const notificationBaseTime = useMemo(
     () => new Date(),
@@ -1921,9 +1962,7 @@ export default function PacienteHomeScreen({
                 size={15}
                 color={patientTheme.colors.primaryDark}
               />
-              <Text style={styles.homePlanHeaderTitle}>
-                {todayMealEntries.length ? 'Registros alimentares' : 'Plano Alimentar'}
-              </Text>
+              <Text style={styles.homePlanHeaderTitle}>Plano Alimentar</Text>
             </View>
             <Text style={styles.homePlanHeaderCount}>
               {homePlanCompletedCount}/{homePlanTotalCount || 0}
@@ -1931,9 +1970,7 @@ export default function PacienteHomeScreen({
           </View>
 
           <View style={styles.homePlanProgressRow}>
-            <Text style={styles.homePlanProgressLabel}>
-              {todayMealEntries.length ? 'Refeições registradas hoje' : 'Adesão de hoje'}
-            </Text>
+            <Text style={styles.homePlanProgressLabel}>Adesão de hoje</Text>
             <Text style={styles.homePlanProgressValue}>{homePlanProgress}%</Text>
           </View>
           <View style={styles.homePlanProgressTrack}>

@@ -31,6 +31,7 @@ import {
   getPatientId,
   refreshPatientMealEntries,
   savePatientAppState,
+  upsertPatientMealEntryInCache,
 } from '../../servicos/servicoDadosPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import {
@@ -57,9 +58,13 @@ import {
 } from '../../servicos/servicoAprendizadoNutricional';
 import {
   enrichMealEntryWithPlanLink,
+  mergePlanStructureSections,
   resolvePlanSections,
 } from '../../utilitarios/vinculoPlanoRefeicao';
+import { mealPlanSections as defaultMealPlanSections } from '../../dados/dadosExperienciaPaciente';
+import { getCachedPatientAppState } from '../../servicos/centralAppState';
 import { voltarParaAlimentacaoAposSalvarRefeicao } from '../../utilitarios/navegacaoPaciente';
+import { buildLocalTimestampIso } from '../../utilitarios/dataLocal';
 import { mostrarToastPaciente } from '../../servicos/servicoToastPaciente';
 import { PATIENT_TOAST_DURATION_MS } from '../../utilitarios/mensagensPaciente';
 
@@ -225,6 +230,24 @@ function isValidManualTime(value) {
 
   const [hours, minutes] = normalizedTime.split(':').map(Number);
   return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+}
+
+function resolveMealEffectiveDateTime(mealDateInput, mealTimeInput) {
+  const normalizedDate = normalizeManualDateInput(mealDateInput);
+  const normalizedTime = normalizeManualTimeInput(mealTimeInput)?.slice(0, 5);
+
+  const date =
+    isValidManualDate(mealDateInput) && normalizedDate
+      ? normalizedDate
+      : buildLocalDateString();
+  const time =
+    isValidManualTime(mealTimeInput) && normalizedTime
+      ? normalizedTime
+      : buildLocalTimeString().slice(0, 5);
+  const createdAt =
+    buildLocalTimestampIso(date, time) || `${date}T${time}:00-03:00`;
+
+  return { date, time, createdAt };
 }
 
 function formatDateForDisplay(value) {
@@ -1755,15 +1778,10 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
     setLoadingAction('save');
 
     try {
-      const effectiveDate =
-        mealTimingMode === 'previous' && normalizedMealTimingDate
-          ? normalizedMealTimingDate
-          : buildLocalDateString();
-      const effectiveTime =
-        mealTimingMode === 'previous' && normalizedMealTimingTime
-          ? normalizedMealTimingTime
-          : buildLocalTimeString();
-      const createdAt = `${effectiveDate}T${effectiveTime}:00`;
+      const { date: effectiveDate, time: effectiveTime, createdAt } = resolveMealEffectiveDateTime(
+        mealTimingDate,
+        mealTimingTime
+      );
 
       let fotoUrl = uploadedImage?.storagePath || null;
 
@@ -1786,6 +1804,8 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
         alimentos: alimentosParaSalvar,
         confirmado: true,
         createdAt,
+        mealDate: effectiveDate,
+        mealTime: effectiveTime,
         mealLabel: mealType,
         mealTypeLabel: mealType,
       });
@@ -1797,20 +1817,27 @@ export default function RegistroRefeicaoIA({ navigation, route, usuarioLogado: u
           'O servidor não confirmou o registro. Verifique a conexão e tente salvar novamente.'
         );
       }
-      const timelineEntry = {
-        ...buildMealTimelineEntryFromAI({
-          alimentos: saved.foods,
-          totais: saved.totals,
-          date: effectiveDate,
-          time: effectiveTime,
-          mealLabel: mealType,
-          fotoUrl,
-        }),
-        id: recordId ? `meal-ia-${recordId}` : `meal-ia-${Date.now()}`,
-        databaseId: recordId || null,
-        storageOrigin: 'database',
-      };
+      const timelineEntry = enrichMealEntryWithPlanLink(
+        {
+          ...buildMealTimelineEntryFromAI({
+            alimentos: saved.foods,
+            totais: saved.totals,
+            date: effectiveDate,
+            time: effectiveTime,
+            mealLabel: mealType,
+            fotoUrl,
+          }),
+          id: recordId ? `meal-ia-${recordId}` : `meal-ia-${Date.now()}`,
+          databaseId: recordId || null,
+          storageOrigin: 'database',
+        },
+        mergePlanStructureSections(
+          resolvePlanSections({ appState: getCachedPatientAppState(patientId) }),
+          defaultMealPlanSections
+        )
+      );
 
+      upsertPatientMealEntryInCache(patientId, timelineEntry);
       await sincronizarTimeline(timelineEntry);
 
       await refreshPatientMealEntries(patientId, {
