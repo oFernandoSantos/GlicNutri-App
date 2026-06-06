@@ -50,10 +50,20 @@ const camposIniciaisErro = {
   confirmarSenha: '',
 };
 
+function obterPerfilInicialRecuperacao(roleInicial) {
+  if (
+    roleInicial === ROLE_PROFISSIONAL ||
+    roleInicial === 'Nutricionista' ||
+    roleInicial === 'Medico'
+  ) {
+    return ROLE_PROFISSIONAL;
+  }
+
+  return 'Paciente';
+}
+
 export default function ForgotPassword({ navigation, route }) {
-  const [role, setRole] = useState(
-    route?.params?.roleInicial === ROLE_PROFISSIONAL ? ROLE_PROFISSIONAL : 'Paciente'
-  );
+  const [role, setRole] = useState(obterPerfilInicialRecuperacao(route?.params?.roleInicial));
   const [email, setEmail] = useState('');
   const [novaSenha, setNovaSenha] = useState('');
   const [confirmarSenha, setConfirmarSenha] = useState('');
@@ -323,13 +333,12 @@ export default function ForgotPassword({ navigation, route }) {
         details: { perfil: role, etapa: 'confirmar_codigo' },
       });
 
-      setModalCodigoVisible(true);
-      setEmail('');
-      setNovaSenha('');
-      setConfirmarSenha('');
       setCodigo('');
+      setCodigoErro('');
       setNovaSenhaFocada(false);
+      setFieldErrors(camposIniciaisErro);
       setFeedbackSucesso('Codigo validado com sucesso. Voce ja pode fazer login.');
+      setModalCodigoVisible(true);
     } catch (err) {
       console.error('Erro ao confirmar codigo de recuperacao:', err);
       const mensagemErro =
@@ -609,7 +618,11 @@ export default function ForgotPassword({ navigation, route }) {
 
                 <TouchableOpacity
                   style={styles.cancelButton}
-                  onPress={() => setModalCodigoVisible(false)}
+                  onPress={() => {
+                    setModalCodigoVisible(false);
+                    setCodigo('');
+                    setCodigoErro('');
+                  }}
                   disabled={validandoCodigo}
                 >
                   <Text style={styles.cancelButtonText}>Cancelar</Text>

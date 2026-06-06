@@ -96,7 +96,19 @@ function getPasswordValidationMessage(password: string) {
 }
 
 function normalizeRole(role?: string): Role | null {
-  return role === 'Paciente' || role === 'Nutricionista' || role === 'Admin' ? role : null;
+  const value = String(role || '').trim();
+
+  if (value === 'Paciente') return 'Paciente';
+  if (
+    value === 'Nutricionista' ||
+    value === 'Profissional da Saúde' ||
+    value === 'Medico'
+  ) {
+    return 'Nutricionista';
+  }
+  if (value === 'Admin') return 'Admin';
+
+  return null;
 }
 
 function generateCode() {

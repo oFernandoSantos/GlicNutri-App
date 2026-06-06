@@ -36,6 +36,7 @@ import {
   patchCachedPatientExperienceGlucose,
   replaceCachedPatientChat,
 } from './cacheExperienciaPaciente';
+import { mapMealFoodNutritionFields } from './servicoRefeicaoIA';
 
 export {
   getCachedPatientChat,
@@ -750,6 +751,31 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   const sodium =
     Number(row?.sodio_total) ||
     foods.reduce((sum, item) => sum + (Number(item?.sodio) || 0), 0);
+  const mappedFoods = foods
+    .filter((item) => !item?.metadataOnly)
+    .map((item) => mapMealFoodNutritionFields(item));
+  const sumFoodField = (field) =>
+    mappedFoods.reduce((sum, item) => sum + (Number(item?.[field]) || 0), 0);
+  const resolveMicroTotal = (rowKeys, field) => {
+    for (const key of rowKeys) {
+      const value = Number(row?.[key]);
+      if (Number.isFinite(value) && value > 0) {
+        return value;
+      }
+    }
+
+    return sumFoodField(field);
+  };
+  const iron = resolveMicroTotal(['ferro_total', 'ironMg', 'iron'], 'iron');
+  const calcium = resolveMicroTotal(['calcio_total', 'calciumMg', 'calcium'], 'calcium');
+  const magnesium = resolveMicroTotal(['magnesio_total', 'magnesiumMg', 'magnesium'], 'magnesium');
+  const potassium = resolveMicroTotal(['potassio_total', 'potassiumMg', 'potassium'], 'potassium');
+  const zinc = resolveMicroTotal(['zinco_total', 'zincMg', 'zinc'], 'zinc');
+  const vitaminA = resolveMicroTotal(['vitamina_a_total', 'vitaminAMcg', 'vitaminA'], 'vitaminA');
+  const vitaminC = resolveMicroTotal(['vitamina_c_total', 'vitaminCMg', 'vitaminC'], 'vitaminC');
+  const vitaminD = resolveMicroTotal(['vitamina_d_total', 'vitaminDMcg', 'vitaminD'], 'vitaminD');
+  const vitaminB12 = resolveMicroTotal(['vitamina_b12_total', 'vitaminB12Mcg', 'vitaminB12'], 'vitaminB12');
+  const folate = resolveMicroTotal(['folato_total', 'folateMcg', 'folate'], 'folate');
 
   return {
     id: recordId ? `meal-ia-${recordId}` : `meal-db-${date}-${time}-${index}`,
@@ -775,23 +801,17 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
     sugarsG: sugars,
     saturatedFatG: saturatedFat,
     sodiumMg: sodium,
-    foods: foods.map((item) => ({
-      name: String(item?.nome || '').trim(),
-      alimento: String(item?.nome || '').trim(),
-      grams: Math.round(Number(item?.quantidade_gramas) || 0),
-      unit: item?.unidade_quantidade || null,
-      calories: Number(item?.calorias) || 0,
-      carbs: Number(item?.carboidratos) || 0,
-      protein: Number(item?.proteinas) || 0,
-      fat: Number(item?.gorduras) || 0,
-      fiber: Number(item?.fibras) || 0,
-      sugars: Number(item?.acucares) || 0,
-      saturatedFat: Number(item?.gorduras_saturadas) || 0,
-      sodium: Number(item?.sodio) || 0,
-      mealLabel: item?.mealLabel || null,
-      mealTypeLabel: item?.mealTypeLabel || null,
-      planSectionId: item?.planSectionId || null,
-    })),
+    ironMg: iron,
+    calciumMg: calcium,
+    magnesiumMg: magnesium,
+    potassiumMg: potassium,
+    zincMg: zinc,
+    vitaminAMcg: vitaminA,
+    vitaminCMg: vitaminC,
+    vitaminDMcg: vitaminD,
+    vitaminB12Mcg: vitaminB12,
+    folateMcg: folate,
+    foods: mappedFoods,
     storageOrigin: 'database',
     databaseId: recordId || null,
     foto_url: row?.foto_url || null,
