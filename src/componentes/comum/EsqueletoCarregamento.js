@@ -1,8 +1,9 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Platform, StyleSheet, View } from 'react-native';
 import { patientShadow, patientTheme } from '../../temas/temaVisualPaciente';
 
 const SKELETON_BASE = '#E4E9F0';
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 function useSkeletonPulse() {
   const opacity = useRef(new Animated.Value(0.5)).current;
@@ -13,12 +14,12 @@ function useSkeletonPulse() {
         Animated.timing(opacity, {
           toValue: 1,
           duration: 650,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
         Animated.timing(opacity, {
           toValue: 0.5,
           duration: 650,
-          useNativeDriver: true,
+          useNativeDriver: USE_NATIVE_DRIVER,
         }),
       ])
     );

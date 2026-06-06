@@ -25,6 +25,7 @@ import {
 } from '../../componentes/paciente/ModalPacienteComTeclado';
 import { useKeyboardHeight } from '../../componentes/comum/RolagemComTeclado';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
+import { inputFocusBorder, inputWebFocusReset } from '../../temas/temaFocoCampo';
 import {
   DashboardMiniKpiCard,
   KPI_ACCENTS,
@@ -217,12 +218,6 @@ const insulinCategoryOptions = [
     helper: 'Categoria usada antes de refeição ou para correção da glicemia.',
   },
   {
-    id: 'premixed',
-    title: 'Insulina pré-misturada',
-    detail: '(basal + prandial)',
-    helper: 'Formulação que combina componentes basal e prandial em uma mesma aplicação.',
-  },
-  {
     id: 'inhaled',
     title: 'Insulina inalável',
     detail: '(ação ultrarrápida)',
@@ -245,12 +240,6 @@ const insulinTypeOptions = {
     'Asparte',
     'Glulisina',
     'Asparte ultrarrápida',
-  ],
-  premixed: [
-    'NPH/Regular 70/30',
-    'NPL/Lispro 75/25',
-    'NPL/Lispro 50/50',
-    'NPA/Asparte 70/30',
   ],
   inhaled: ['Insulina humana inalável'],
 };
@@ -387,7 +376,6 @@ const basalInsulinOptions = [
 const insulinUsageOptions = {
   basal: ['Rotina da manhã', 'Rotina da noite', 'Semanal', 'Outro horário fixo'],
   prandial: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
-  premixed: ['Antes da refeição', 'Rotina prescrita', 'Outro horário fixo'],
   inhaled: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
 };
 
@@ -416,13 +404,6 @@ function normalizeInsulinCategoryDefault(value) {
     normalized.includes('correc')
   ) {
     return 'prandial';
-  }
-  if (
-    normalized.includes('premist') ||
-    normalized.includes('pré-mist') ||
-    normalized.includes('pre-mist')
-  ) {
-    return 'premixed';
   }
   if (normalized.includes('inal')) return 'inhaled';
 
@@ -3037,11 +3018,18 @@ export default function PacienteMonitoramentoScreen({
         onRequestClose={handleCloseManualModal}
       >
         <View style={[styles.modalOverlay, estiloOverlayModalTeclado]}>
-          <View style={styles.modalCard}>
+          <View
+            style={[
+              styles.modalCard,
+              styles.modalHostRelative,
+              glucoseTypeDropdownVisible && styles.modalCardBehindHidden,
+            ]}
+          >
             <ScrollModalPacienteTeclado
               ref={manualModalScrollRef}
               foco={manualModalFoco}
               keyboardPaddingBase={0}
+              style={glucoseTypeDropdownVisible ? styles.modalContentHidden : null}
               contentContainerStyle={estiloConteudoScrollModalTeclado}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
@@ -3079,7 +3067,6 @@ export default function PacienteMonitoramentoScreen({
                   styles.manualModalInput,
                   styles.labeledInput,
                   styles.dropdownButton,
-                  focusedManualField === 'type' && styles.inputFocused,
                 ]}
                 onPress={handleOpenGlucoseTypeModal}
               >
@@ -3108,7 +3095,6 @@ export default function PacienteMonitoramentoScreen({
                   styles.manualModalInput,
                   styles.glucoseInputWrap,
                   isPreviousGlucoseEntry && styles.labeledInput,
-                  focusedManualField === 'glucose' && styles.inputFocused,
                 ]}
               >
                 <TextInput
@@ -3122,6 +3108,8 @@ export default function PacienteMonitoramentoScreen({
                     setFocusedManualField('glucose')
                   )}
                   onBlur={() => setFocusedManualField(null)}
+                  underlineColorAndroid="transparent"
+                  selectionColor={patientTheme.colors.textMuted}
                 />
                 {newGlucoseValue ? (
                   <Text style={styles.inputUnit}>mg/dL</Text>
@@ -3133,23 +3121,28 @@ export default function PacienteMonitoramentoScreen({
               <View style={styles.previousMeasurementFields}>
                 <CampoFocoModal fieldId="manual-date" style={styles.formField}>
                   <Text style={styles.fieldLabel}>Data</Text>
-                  <TextInput
+                  <View
                     style={[
                       styles.input,
                       styles.manualModalInput,
                       styles.labeledInput,
-                      focusedManualField === 'date' && styles.inputFocused,
                       showInvalidManualDate && styles.inputInvalid,
                     ]}
-                    placeholder="Ex: 20/04/2026"
-                    placeholderTextColor="#8a9095"
-                    value={manualMeasurementDate}
-                    onChangeText={(value) => setManualMeasurementDate(formatManualDateInput(value))}
-                    onFocus={manualModalFoco.criarOnFocus('manual-date', () =>
-                      setFocusedManualField('date')
-                    )}
-                    onBlur={() => setFocusedManualField(null)}
-                  />
+                  >
+                    <TextInput
+                      style={styles.modalFieldTextInput}
+                      placeholder="Ex: 20/04/2026"
+                      placeholderTextColor="#8a9095"
+                      value={manualMeasurementDate}
+                      onChangeText={(value) => setManualMeasurementDate(formatManualDateInput(value))}
+                      onFocus={manualModalFoco.criarOnFocus('manual-date', () =>
+                        setFocusedManualField('date')
+                      )}
+                      onBlur={() => setFocusedManualField(null)}
+                      underlineColorAndroid="transparent"
+                      selectionColor={patientTheme.colors.textMuted}
+                    />
+                  </View>
                   {showInvalidManualDate ? (
                     <Text style={styles.fieldErrorText}>Data inválida</Text>
                   ) : null}
@@ -3157,22 +3150,27 @@ export default function PacienteMonitoramentoScreen({
 
                 <CampoFocoModal fieldId="manual-time" style={styles.formField}>
                   <Text style={styles.fieldLabel}>Hora do uso</Text>
-                  <TextInput
+                  <View
                     style={[
                       styles.input,
                       styles.manualModalInput,
                       styles.labeledInput,
-                      focusedManualField === 'time' && styles.inputFocused,
                     ]}
-                    placeholder="Ex: 10:23"
-                    placeholderTextColor="#8a9095"
-                    value={manualMeasurementTime}
-                    onChangeText={(value) => setManualMeasurementTime(formatManualTimeInput(value))}
-                    onFocus={manualModalFoco.criarOnFocus('manual-time', () =>
-                      setFocusedManualField('time')
-                    )}
-                    onBlur={() => setFocusedManualField(null)}
-                  />
+                  >
+                    <TextInput
+                      style={styles.modalFieldTextInput}
+                      placeholder="Ex: 10:23"
+                      placeholderTextColor="#8a9095"
+                      value={manualMeasurementTime}
+                      onChangeText={(value) => setManualMeasurementTime(formatManualTimeInput(value))}
+                      onFocus={manualModalFoco.criarOnFocus('manual-time', () =>
+                        setFocusedManualField('time')
+                      )}
+                      onBlur={() => setFocusedManualField(null)}
+                      underlineColorAndroid="transparent"
+                      selectionColor={patientTheme.colors.textMuted}
+                    />
+                  </View>
                 </CampoFocoModal>
               </View>
             ) : null}
@@ -3191,59 +3189,6 @@ export default function PacienteMonitoramentoScreen({
                 <Text style={styles.primaryButtonText}>Salvar glicemia</Text>
               )}
             </TouchableOpacity>
-
-          {glucoseTypeDropdownVisible ? (
-            <View style={styles.inlinePopupOverlay}>
-              <View style={styles.glucoseTypeModalCard}>
-                <View style={styles.modalHeader}>
-                  <Text style={styles.modalTitle}>Tipo da Glicose</Text>
-                  <TouchableOpacity
-                    style={styles.modalCloseButton}
-                    onPress={handleCloseGlucoseTypeModal}
-                  >
-                    <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-                  </TouchableOpacity>
-                </View>
-
-                <View style={styles.glucoseTypeOptionList}>
-                  {glucoseTypeOptions.map((option) => {
-                    const selected = option === manualGlucoseType;
-
-                    return (
-                      <TouchableOpacity
-                        key={option}
-                        activeOpacity={0.82}
-                        style={[
-                          styles.glucoseTypeOption,
-                          selected && styles.glucoseTypeOptionSelected,
-                        ]}
-                        onPress={() => {
-                          setManualGlucoseType(option);
-                          handleCloseGlucoseTypeModal();
-                        }}
-                      >
-                        <Text
-                          style={[
-                            styles.glucoseTypeOptionText,
-                            selected && styles.glucoseTypeOptionSelectedText,
-                          ]}
-                        >
-                          {option}
-                        </Text>
-                        {selected ? (
-                          <Ionicons
-                            name="checkmark"
-                            size={18}
-                            color={patientTheme.colors.primaryDark}
-                          />
-                        ) : null}
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-              </View>
-            </View>
-          ) : null}
 
           {glucoseConfirmVisible ? (
             <View style={styles.inlinePopupOverlay}>
@@ -3293,6 +3238,69 @@ export default function PacienteMonitoramentoScreen({
             </View>
           ) : null}
             </ScrollModalPacienteTeclado>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={glucoseTypeDropdownVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={handleCloseGlucoseTypeModal}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalCard, styles.glucoseTypePickerCard]}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Tipo da Glicose</Text>
+              <TouchableOpacity
+                style={styles.modalCloseButton}
+                onPress={handleCloseGlucoseTypeModal}
+              >
+                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView
+              style={styles.unitOptionList}
+              contentContainerStyle={styles.unitOptionListContent}
+              showsVerticalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+            >
+              {glucoseTypeOptions.map((option) => {
+                const selected = option === manualGlucoseType;
+
+                return (
+                  <TouchableOpacity
+                    key={option}
+                    activeOpacity={0.82}
+                    style={[
+                      styles.glucoseTypeOption,
+                      selected && styles.glucoseTypeOptionSelected,
+                    ]}
+                    onPress={() => {
+                      setManualGlucoseType(option);
+                      handleCloseGlucoseTypeModal();
+                    }}
+                  >
+                    <Text
+                      style={[
+                        styles.glucoseTypeOptionText,
+                        selected && styles.glucoseTypeOptionSelectedText,
+                      ]}
+                    >
+                      {option}
+                    </Text>
+                    {selected ? (
+                      <Ionicons
+                        name="checkmark"
+                        size={18}
+                        color={patientTheme.colors.text}
+                      />
+                    ) : null}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -3466,7 +3474,10 @@ export default function PacienteMonitoramentoScreen({
                     ref={medicineFormScrollRef}
                     foco={medicineFormFoco}
                     keyboardPaddingBase={0}
-                    style={styles.medicineFormScroll}
+                    style={[
+                      styles.medicineFormScroll,
+                      (medicineSearchVisible || medicineUnitVisible) && styles.modalContentHidden,
+                    ]}
                     contentContainerStyle={[
                       styles.medicineFormContent,
                       estiloConteudoScrollModalTeclado,
@@ -3475,7 +3486,14 @@ export default function PacienteMonitoramentoScreen({
                     showsVerticalScrollIndicator={false}
                   >
             <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Registrar medicamento</Text>
+              <Text
+                numberOfLines={1}
+                adjustsFontSizeToFit
+                minimumFontScale={0.9}
+                style={[styles.modalTitle, styles.modalTitleSingleLine]}
+              >
+                Registrar medicamento
+              </Text>
               <TouchableOpacity
                 style={styles.modalCloseButton}
                 onPress={handleCloseMedicationFlow}
@@ -3685,7 +3703,7 @@ export default function PacienteMonitoramentoScreen({
                     visible={medicineSearchVisible}
                     onClose={handleCloseMedicineSearch}
                     embeddedPadding={0}
-                    cardStyle={styles.glucoseTypeModalCard}
+                    cardStyle={[styles.glucoseTypeModalCard, styles.medicineSearchModalCard]}
                   >
                     <View style={styles.modalHeader}>
                       <Text style={styles.modalTitle}>Medicamento</Text>
@@ -3699,7 +3717,7 @@ export default function PacienteMonitoramentoScreen({
 
                     <CampoFocoModal fieldId="medicine-search" style={styles.formField}>
                       <TextInput
-                        style={styles.input}
+                        style={[styles.input, styles.medicineSearchInput]}
                         placeholder="Buscar medicamento"
                         placeholderTextColor="#8a9095"
                         value={medicineSearchQuery}
@@ -3709,65 +3727,67 @@ export default function PacienteMonitoramentoScreen({
                       />
                     </CampoFocoModal>
 
-                    {loadingMedicineOptions ? (
-                      <View style={styles.optionLoadingItem}>
-                        <ActivityIndicator color={patientTheme.colors.primaryDark} />
-                        <Text style={styles.optionLoadingText}>Buscando na base da Anvisa...</Text>
-                      </View>
-                    ) : null}
+                    <View style={styles.medicineSearchResultsArea}>
+                      {loadingMedicineOptions ? (
+                        <View style={styles.optionLoadingItem}>
+                          <ActivityIndicator color={patientTheme.colors.primaryDark} />
+                          <Text style={styles.optionLoadingText}>Buscando na base da Anvisa...</Text>
+                        </View>
+                      ) : null}
 
-                    {!loadingMedicineOptions && medicineOptionsLoaded ? (
-                      <Text style={styles.optionResultCount}>
-                        {medicineOptions.length
-                          ? `${medicineOptions.length} resultado(s) encontrado(s) na base da Anvisa`
-                          : `Nenhum resultado online para "${medicineSearchQuery.trim()}"`}
-                      </Text>
-                    ) : null}
+                      {!loadingMedicineOptions && medicineOptionsLoaded ? (
+                        <Text style={styles.optionResultCount}>
+                          {medicineOptions.length
+                            ? `${medicineOptions.length} resultado(s) encontrado(s) na base da Anvisa`
+                            : `Nenhum resultado online para "${medicineSearchQuery.trim()}"`}
+                        </Text>
+                      ) : null}
 
-                    {!loadingMedicineOptions ? (
-                      <ScrollView
-                        style={styles.optionList}
-                        showsVerticalScrollIndicator={false}
-                        keyboardShouldPersistTaps="handled"
-                      >
-                        {medicineOptions.map((item) => (
-                          <TouchableOpacity
-                            key={item}
-                            activeOpacity={0.82}
-                            style={styles.optionItem}
-                            onPress={() => handleSelectMedicineName(item)}
-                          >
-                            <Text style={styles.optionItemText}>{item}</Text>
-                          </TouchableOpacity>
-                        ))}
-
-                        {medicineOptions.length === 0 && medicineSearchQuery.trim() ? (
-                          <>
+                      {!loadingMedicineOptions ? (
+                        <ScrollView
+                          style={styles.optionList}
+                          showsVerticalScrollIndicator={false}
+                          keyboardShouldPersistTaps="handled"
+                        >
+                          {medicineOptions.map((item) => (
                             <TouchableOpacity
+                              key={item}
                               activeOpacity={0.82}
                               style={styles.optionItem}
-                              onPress={() => {
-                                const retryValue = medicineSearchQuery.trim();
-                                setMedicineSearchQuery('');
-                                setTimeout(() => setMedicineSearchQuery(retryValue), 0);
-                              }}
+                              onPress={() => handleSelectMedicineName(item)}
                             >
-                              <Text style={styles.optionItemText}>Tentar busca online novamente</Text>
+                              <Text style={styles.optionItemText}>{item}</Text>
                             </TouchableOpacity>
+                          ))}
 
-                            <TouchableOpacity
-                              activeOpacity={0.82}
-                              style={styles.optionItem}
-                              onPress={() => handleSelectMedicineName(medicineSearchQuery.trim())}
-                            >
-                              <Text style={styles.optionItemText}>
-                                Usar "{medicineSearchQuery.trim()}"
-                              </Text>
-                            </TouchableOpacity>
-                          </>
-                        ) : null}
-                      </ScrollView>
-                    ) : null}
+                          {medicineOptions.length === 0 && medicineSearchQuery.trim() ? (
+                            <>
+                              <TouchableOpacity
+                                activeOpacity={0.82}
+                                style={styles.optionItem}
+                                onPress={() => {
+                                  const retryValue = medicineSearchQuery.trim();
+                                  setMedicineSearchQuery('');
+                                  setTimeout(() => setMedicineSearchQuery(retryValue), 0);
+                                }}
+                              >
+                                <Text style={styles.optionItemText}>Tentar busca online novamente</Text>
+                              </TouchableOpacity>
+
+                              <TouchableOpacity
+                                activeOpacity={0.82}
+                                style={styles.optionItem}
+                                onPress={() => handleSelectMedicineName(medicineSearchQuery.trim())}
+                              >
+                                <Text style={styles.optionItemText}>
+                                  Usar "{medicineSearchQuery.trim()}"
+                                </Text>
+                              </TouchableOpacity>
+                            </>
+                          ) : null}
+                        </ScrollView>
+                      ) : null}
+                    </View>
                   </DrilldownOpcoesPortal>
 
                   <DrilldownOpcoesPortal
@@ -3846,7 +3866,7 @@ export default function PacienteMonitoramentoScreen({
 
             <CampoFocoModal fieldId="medicine-search" style={styles.formField}>
             <TextInput
-              style={styles.input}
+              style={[styles.input, styles.medicineSearchInput]}
               placeholder="Buscar medicamento"
               placeholderTextColor="#8a9095"
               value={medicineSearchQuery}
@@ -4734,6 +4754,8 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   input: {
+    ...inputWebFocusReset,
+    WebkitAppearance: 'none',
     alignSelf: 'stretch',
     marginTop: 14,
     minHeight: 50,
@@ -4751,6 +4773,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     color: patientTheme.colors.text,
     width: '100%',
+  },
+  webTextInputReset: {
+    ...inputWebFocusReset,
+    WebkitAppearance: 'none',
+    outlineOffset: 0,
+  },
+  medicineSearchInput: {
+    backgroundColor: '#ffffff',
+    borderColor: '#EEF2F7',
   },
   primaryButton: {
     flex: 1,
@@ -5178,8 +5209,14 @@ const styles = StyleSheet.create({
   },
   modalCardBehindHidden: {
     backgroundColor: 'transparent',
-    boxShadow: 'none',
+    borderColor: 'transparent',
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
     elevation: 0,
+  },
+  modalContentHidden: {
+    opacity: 0,
   },
   modalHeader: {
     alignItems: 'center',
@@ -5194,9 +5231,12 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     paddingHorizontal: 44,
-    pointerEvents: 'none',
     textAlign: 'center',
     zIndex: 1,
+  },
+  modalTitleSingleLine: {
+    fontSize: 16,
+    paddingHorizontal: 40,
   },
   modalCloseButton: {
     alignItems: 'center',
@@ -5308,20 +5348,18 @@ const styles = StyleSheet.create({
   },
   manualModalInput: {
     alignSelf: 'stretch',
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.surfaceBorder,
+    backgroundColor: '#ffffff',
+    borderColor: '#EEF2F7',
+    borderWidth: 1,
     width: '100%',
+    ...inputWebFocusReset,
   },
   inputFocused: {
-    borderColor: patientTheme.colors.primaryDark,
+    ...inputFocusBorder,
+    backgroundColor: '#ffffff',
     borderWidth: 1,
     borderStyle: 'solid',
-    boxShadow: 'none',
     elevation: 0,
-    outlineColor: 'transparent',
-    outlineStyle: 'none',
-    outlineWidth: 0,
-    outlineOffset: 0,
   },
   inputInvalid: {
     borderColor: '#c74747',
@@ -5470,7 +5508,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   optionList: {
-    marginTop: 14,
+    marginTop: 8,
     maxHeight: 280,
   },
   unitOptionList: {
@@ -5514,7 +5552,8 @@ const styles = StyleSheet.create({
     color: patientTheme.colors.textMuted,
     fontSize: 12,
     fontWeight: '700',
-    marginBottom: 10,
+    marginTop: 2,
+    marginBottom: 8,
     textAlign: 'center',
   },
   glucoseTypeModalCard: {
@@ -5525,13 +5564,27 @@ const styles = StyleSheet.create({
     width: '100%',
     ...patientShadow,
   },
+  medicineSearchModalCard: {
+    minHeight: 360,
+  },
+  glucoseTypePickerCard: {
+    alignSelf: 'center',
+    maxHeight: 360,
+    maxWidth: 420,
+    padding: 16,
+    width: '100%',
+  },
+  medicineSearchResultsArea: {
+    minHeight: 230,
+  },
   inlinePopupOverlay: {
     alignItems: 'center',
-    backgroundColor: 'rgba(47, 52, 56, 0.32)',
+    backgroundColor: 'rgba(47, 52, 56, 0.18)',
     bottom: 0,
     justifyContent: 'center',
     left: 0,
-    padding: 22,
+    paddingHorizontal: 14,
+    paddingVertical: 18,
     position: 'absolute',
     right: 0,
     top: 0,
@@ -5542,18 +5595,19 @@ const styles = StyleSheet.create({
   },
   glucoseTypeOption: {
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.surfaceBorder,
-    borderRadius: patientTheme.radius.lg,
+    backgroundColor: '#f7f8fa',
+    borderColor: '#EEF2F7',
+    borderRadius: 18,
     borderWidth: 1,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    minHeight: 46,
+    minHeight: 42,
     paddingHorizontal: 14,
+    paddingVertical: 10,
   },
   glucoseTypeOptionSelected: {
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: patientTheme.colors.primaryDark,
+    backgroundColor: '#ffffff',
+    borderColor: '#D9E2EC',
   },
   glucoseTypeOptionText: {
     color: patientTheme.colors.textMuted,
@@ -5563,15 +5617,22 @@ const styles = StyleSheet.create({
     marginRight: 8,
   },
   glucoseTypeOptionSelectedText: {
-    color: patientTheme.colors.primaryDark,
+    color: patientTheme.colors.text,
     fontWeight: '800',
   },
   glucoseInputWrap: {
     alignItems: 'center',
     flexDirection: 'row',
+    overflow: 'hidden',
     width: '100%',
   },
   glucoseInput: {
+    ...inputWebFocusReset,
+    WebkitAppearance: 'none',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+    boxShadow: 'none',
     color: patientTheme.colors.text,
     flex: 1,
     minHeight: 48,
@@ -5579,6 +5640,46 @@ const styles = StyleSheet.create({
     outlineColor: 'transparent',
     outlineStyle: 'none',
     outlineWidth: 0,
+    outlineOffset: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+  },
+  glucoseInputFocused: {
+    ...inputWebFocusReset,
+    WebkitAppearance: 'none',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+    outlineOffset: 0,
+  },
+  modalFieldTextInput: {
+    ...inputWebFocusReset,
+    WebkitAppearance: 'none',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+    boxShadow: 'none',
+    color: patientTheme.colors.text,
+    minHeight: 48,
+    outlineColor: 'transparent',
+    outlineStyle: 'none',
+    outlineWidth: 0,
+    outlineOffset: 0,
+    paddingHorizontal: 0,
+    paddingVertical: 0,
+    width: '100%',
+  },
+  modalFieldTextInputFocused: {
+    ...inputWebFocusReset,
+    WebkitAppearance: 'none',
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+    borderWidth: 0,
+    boxShadow: 'none',
+    outlineColor: 'transparent',
+    outlineStyle: 'none',
+    outlineWidth: 0,
+    outlineOffset: 0,
   },
   inputUnit: {
     color: patientTheme.colors.textMuted,

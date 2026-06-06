@@ -448,7 +448,7 @@ export function buildPatientProfileSections(patient) {
     {
       key: 'pharmacology',
       title: 'Terapia com insulina',
-      helper: 'Basal, bolus e mista — marcas, doses e horários do dia.',
+      helper: 'Basal e bolus — marcas, doses e horários do dia.',
       rows: buildPatientPharmacologyRows(patient),
     },
   ];

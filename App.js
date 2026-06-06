@@ -50,7 +50,6 @@ import PacienteSuporteScreen from './src/telas/paciente/TelaSuportePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
 import PacientePerfilNutricionistaScreen from './src/telas/paciente/TelaPerfilNutricionistaAgendamento';
 import PacientePerfilMedicoScreen from './src/telas/paciente/TelaPerfilMedicoAgendamento';
-import PacienteBemEstarScreen from './src/telas/paciente/TelaBemEstarPaciente';
 import PacientePlanoScreen from './src/telas/paciente/TelaPlanoPaciente';
 import PacienteProgressoScreen from './src/telas/paciente/TelaProgressoPaciente';
 import PacienteRelatoriosScreen from './src/telas/paciente/TelaRelatoriosPaciente';
@@ -169,15 +168,15 @@ function useWebDocumentScroll() {
 
       a:focus-visible,
       button:focus-visible,
-      input:not(#admin-logs-search-input):not(#admin-logs-date-start-input):not(#admin-logs-date-end-input):not(#admin-logs-user-input):focus-visible,
-      textarea:focus-visible,
-      select:focus-visible,
       [role='button']:not(#admin-logs-search-button):focus-visible,
       [tabindex]:focus-visible {
         outline: 2px solid #4fdfa3 !important;
         outline-offset: 2px !important;
       }
 
+      input:focus-visible,
+      textarea:focus-visible,
+      select:focus-visible,
       #auth-form input:focus-visible,
       #auth-form textarea:focus-visible,
       #auth-form select:focus-visible {
@@ -917,10 +916,6 @@ export default function App() {
                 {(props) =>
                   withSwipeBack(props, <PacientePerfilMedicoScreen {...getPacienteProps(props)} />)
                 }
-              </Stack.Screen>
-
-              <Stack.Screen name="PacienteBemEstar" options={readerScreenOptions}>
-                {(props) => withSwipeBack(props, <PacienteBemEstarScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
               <Stack.Screen name="PacientePlano" options={mainTabReaderOptions}>

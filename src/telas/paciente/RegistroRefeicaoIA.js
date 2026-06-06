@@ -3294,7 +3294,6 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     paddingHorizontal: 44,
-    pointerEvents: 'none',
     textAlign: 'center',
     zIndex: 1,
   },

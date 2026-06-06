@@ -61,7 +61,6 @@ export const estilosCabecalhoModalPacienteLegado = StyleSheet.create({
     paddingHorizontal: 44,
     textAlign: 'center',
     zIndex: 1,
-    pointerEvents: 'none',
   },
   modalCloseButton: {
     alignItems: 'center',

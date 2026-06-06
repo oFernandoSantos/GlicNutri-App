@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import { brand, radius, spacing } from './designSystem';
 
 /** Autocuidado diário — fundo claro, verde da marca, alertas com contraste WCAG-friendly. */
@@ -31,11 +32,17 @@ export const patientTheme = {
 };
 
 export const patientShadow = {
-  elevation: 0,
-  shadowColor: 'transparent',
-  shadowOpacity: 0,
-  shadowRadius: 0,
-  shadowOffset: { width: 0, height: 0 },
+  ...(Platform.OS === 'web'
+    ? {
+        boxShadow: 'none',
+      }
+    : {
+        elevation: 0,
+        shadowColor: 'transparent',
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        shadowOffset: { width: 0, height: 0 },
+      }),
   borderWidth: 1.5,
   borderColor: '#f4f4f4',
 };

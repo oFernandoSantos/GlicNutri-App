@@ -59,16 +59,6 @@ export const LIMITES_DADOS_PACIENTE = {
     skipAlertSync: true,
     experienceCachePreset: 'assistente',
   },
-  bemestar: {
-    skipChat: true,
-    minimalProfile: true,
-    allowGoogleSync: false,
-    glucoseLimit: 0,
-    medicationLimit: 0,
-    mealLimit: 0,
-    skipAlertSync: true,
-    experienceCachePreset: 'bemestar',
-  },
   progresso: {
     skipChat: true,
     glucoseLimit: 60,

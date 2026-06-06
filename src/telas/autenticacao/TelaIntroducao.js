@@ -5,6 +5,7 @@ import {
   StatusBar,
   ScrollView,
   ImageBackground,
+  Platform,
   Pressable,
   StyleSheet,
   useWindowDimensions,
@@ -20,14 +21,15 @@ const CTA_WIDTH = 330;
 const CTA_HEIGHT = 56;
 const CTA_RADIUS = 20;
 const SCREEN_HORIZONTAL_PADDING = 24;
+const WEB_TITLE_TEXT_SHADOW = '0px 2px 8px rgba(0,0,0,0.38)';
+const WEB_SUBTITLE_TEXT_SHADOW = '0px 1px 5px rgba(0,0,0,0.42)';
+const WEB_SKIP_TEXT_SHADOW = '0px 1px 3px rgba(0,0,0,0.18)';
 
 const introBackgrounds = {
   nutritionist:
     'https://images.pexels.com/photos/8844553/pexels-photo-8844553.jpeg?auto=compress&cs=tinysrgb&w=1600',
   foodPlan:
     'https://unsplash.com/photos/iIDY3j_Gnjc/download?force=true',
-  wellbeing:
-    'https://images.pexels.com/photos/6958605/pexels-photo-6958605.jpeg?auto=compress&cs=tinysrgb&w=1600',
 };
 
 const introSlides = [
@@ -46,12 +48,6 @@ const introSlides = [
     title: 'Plano alimentar\nsempre por\nperto',
     subtitle:
       'Veja orienta\u00E7\u00F5es, metas e lembretes em uma experi\u00EAncia simples de acompanhar.',
-  },
-  {
-    backgroundImage: { uri: introBackgrounds.wellbeing },
-    title: 'Bem-estar\npara entender\nsua glicose',
-    subtitle:
-      'Registre sintomas, sono e estresse para acompanhar melhor sua rotina.',
   },
 ];
 
@@ -408,9 +404,13 @@ const styles = StyleSheet.create({
     lineHeight: 46,
     letterSpacing: 0.3,
     maxWidth: '92%',
-    textShadowColor: 'rgba(0,0,0,0.38)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 8,
+    ...(Platform.OS === 'web'
+      ? { textShadow: WEB_TITLE_TEXT_SHADOW }
+      : {
+          textShadowColor: 'rgba(0,0,0,0.38)',
+          textShadowOffset: { width: 0, height: 2 },
+          textShadowRadius: 8,
+        }),
   },
   subtitle: {
     color: '#FFFFFF',
@@ -418,9 +418,13 @@ const styles = StyleSheet.create({
     marginTop: 18,
     lineHeight: 24,
     maxWidth: '92%',
-    textShadowColor: 'rgba(0,0,0,0.42)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 5,
+    ...(Platform.OS === 'web'
+      ? { textShadow: WEB_SUBTITLE_TEXT_SHADOW }
+      : {
+          textShadowColor: 'rgba(0,0,0,0.42)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 5,
+        }),
   },
   controls: {
     position: 'absolute',
@@ -442,9 +446,13 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '400',
     letterSpacing: 0,
-    textShadowColor: 'rgba(0,0,0,0.18)',
-    textShadowOffset: { width: 0, height: 1 },
-    textShadowRadius: 3,
+    ...(Platform.OS === 'web'
+      ? { textShadow: WEB_SKIP_TEXT_SHADOW }
+      : {
+          textShadowColor: 'rgba(0,0,0,0.18)',
+          textShadowOffset: { width: 0, height: 1 },
+          textShadowRadius: 3,
+        }),
   },
   dotsRow: {
     flexDirection: 'row',

@@ -1420,13 +1420,17 @@ export default function PacienteAgendamentosScreen({
         </TouchableOpacity>
         <TouchableOpacity
           activeOpacity={0.9}
-          style={[styles.segmentedOption, activeSection === 'consultas' && styles.segmentedOptionActive]}
+          style={[
+            styles.segmentedOption,
+            styles.segmentedOptionWide,
+            activeSection === 'consultas' && styles.segmentedOptionActive,
+          ]}
           onPress={() => setActiveSection('consultas')}
         >
           <Text
             numberOfLines={1}
             adjustsFontSizeToFit
-            minimumFontScale={0.82}
+            minimumFontScale={0.88}
             style={[styles.segmentedText, activeSection === 'consultas' && styles.segmentedTextActive]}
           >
             Minhas{'\u00A0'}consultas
@@ -1934,12 +1938,15 @@ const styles = StyleSheet.create({
     minWidth: 0,
     paddingHorizontal: 6,
   },
+  segmentedOptionWide: {
+    flex: 1.18,
+  },
   segmentedOptionActive: {
     backgroundColor: '#ffffff',
   },
   segmentedText: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
     width: '100%',

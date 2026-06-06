@@ -200,22 +200,10 @@ const MESSAGE_REWRITES = [
     subtexto: 'Tente mais tarde ou use importação por arquivo.',
   },
   {
-    match: /bem-estar salvo|sinais do dia foram atualizados/i,
-    tipo: 'sucesso',
-    texto: 'Bem-estar registrado',
-    subtexto: 'Seus sintomas e hábitos foram salvos.',
-  },
-  {
     match: /atividade registrada|caminhada leve salva/i,
     tipo: 'sucesso',
     texto: 'Atividade registrada',
     subtexto: 'Continue registrando para ver tendências.',
-  },
-  {
-    match: /nao foi possivel salvar seu bem-estar|não foi possível salvar seu bem-estar/i,
-    tipo: 'erro',
-    texto: 'Bem-estar não salvo',
-    subtexto: 'Confira a internet e tente novamente.',
   },
   {
     match: /selecione pelo menos um sintoma/i,

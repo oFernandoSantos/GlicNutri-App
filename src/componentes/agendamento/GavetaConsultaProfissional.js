@@ -14,6 +14,7 @@ import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { formatConsultaDateTime } from '../../servicos/servicoConsultas';
 import { normalizeGoogleMeetUrl } from '../../servicos/servicoGoogleMeet';
 import { BotaoAgendamento, BadgeStatusConsulta } from './uiAgendamento';
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 export default function GavetaConsultaProfissional({
   visible,
@@ -31,7 +32,7 @@ export default function GavetaConsultaProfissional({
   useEffect(() => {
     Animated.spring(slide, {
       toValue: visible ? 0 : 480,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
       friction: 9,
     }).start();
   }, [visible, slide]);

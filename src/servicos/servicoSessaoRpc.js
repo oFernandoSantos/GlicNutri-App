@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { supabase } from './configSupabase';
+import { isGoogleUser } from './sincronizarPacienteGoogle';
 
 export const RPC_SESSION_STORAGE_KEY = '@glicnutri:rpcSessionToken';
 export const RPC_SESSION_META_STORAGE_KEY = '@glicnutri:rpcSessionMeta';
@@ -18,6 +19,20 @@ const RPC_ACTOR_UUID_PATTERN =
 
 function isValidRpcActorId(actorId) {
   return RPC_ACTOR_UUID_PATTERN.test(String(actorId || '').trim());
+}
+
+function isPatientProfile(user) {
+  if (!user || typeof user !== 'object') {
+    return false;
+  }
+
+  return Boolean(
+    user?.id_paciente_uuid ||
+      user?.tipo_perfil === 'paciente' ||
+      user?.perfil === 'paciente' ||
+      user?.user_metadata?.tipo_perfil === 'paciente' ||
+      isGoogleUser(user)
+  );
 }
 
 function isRpcRestaurarRequestError(error) {
@@ -158,20 +173,28 @@ export async function garantirSessaoRpcAtiva() {
 }
 
 function isNutricionistaProfile(user) {
+  if (isPatientProfile(user)) {
+    return false;
+  }
+
   return Boolean(
     user?.tipo_perfil === 'nutricionista' ||
       user?.perfil === 'nutricionista' ||
       (user?.id_nutricionista_uuid &&
-        user?.tipo_perfil !== 'paciente' &&
-        user?.perfil !== 'paciente')
+        (user?.email_acesso || user?.crn || user?.crm_numero || user?.especialidade))
   );
 }
 
 function isMedicoProfile(user) {
+  if (isPatientProfile(user)) {
+    return false;
+  }
+
   return Boolean(
     user?.tipo_perfil === 'medico' ||
       user?.perfil === 'medico' ||
-      (user?.id_medico_uuid && user?.tipo_perfil !== 'paciente' && user?.perfil !== 'paciente')
+      (user?.id_medico_uuid &&
+        (user?.email_medico || user?.crm || user?.crm_numero || user?.especialidade))
   );
 }
 
@@ -190,6 +213,22 @@ function resolveActorFromProfile(user) {
     return { actorType: '', actorId: null, email: '' };
   }
 
+  if (user.id_paciente_uuid) {
+    return {
+      actorType: 'paciente',
+      actorId: user.id_paciente_uuid,
+      email: String(user.email_pac || user.email || '').trim(),
+    };
+  }
+
+  if (isPatientProfile(user)) {
+    return {
+      actorType: 'paciente',
+      actorId: isGoogleUser(user) && isValidRpcActorId(user.id) ? user.id : null,
+      email: String(user.email_pac || user.email || '').trim(),
+    };
+  }
+
   if (isNutricionistaProfile(user) && user.id_nutricionista_uuid) {
     return {
       actorType: 'nutricionista',
@@ -203,14 +242,6 @@ function resolveActorFromProfile(user) {
       actorType: 'medico',
       actorId: user.id_medico_uuid,
       email: String(user.email_medico || user.email || '').trim(),
-    };
-  }
-
-  if (user.id_paciente_uuid) {
-    return {
-      actorType: 'paciente',
-      actorId: user.id_paciente_uuid,
-      email: String(user.email_pac || user.email || '').trim(),
     };
   }
 
@@ -400,7 +431,7 @@ function shouldUsePatientOAuthFallback(user = null) {
   if (actorType === 'nutricionista' || actorType === 'medico') {
     return false;
   }
-  if (user?.id_paciente_uuid) {
+  if (user?.id_paciente_uuid || isPatientProfile(user)) {
     return true;
   }
   return !user;
@@ -771,6 +802,17 @@ export function normalizeRpcActorProfile(user = null) {
     return null;
   }
 
+  if (user.id_paciente_uuid || isPatientProfile(user)) {
+    const email = String(user.email_pac || user.email || '').trim();
+    return {
+      ...user,
+      id_paciente_uuid: user.id_paciente_uuid || null,
+      email_pac: email,
+      email,
+      tipo_perfil: 'paciente',
+    };
+  }
+
   if (isNutricionistaProfile(user) && user.id_nutricionista_uuid) {
     const email = resolveNutriEmail(user);
     return {
@@ -789,11 +831,6 @@ export function normalizeRpcActorProfile(user = null) {
       email,
       tipo_perfil: 'medico',
     };
-  }
-
-  if (user.id_paciente_uuid) {
-    const email = String(user.email_pac || user.email || '').trim();
-    return { id_paciente_uuid: user.id_paciente_uuid, email_pac: email, email };
   }
 
   if (user.id_nutricionista_uuid) {

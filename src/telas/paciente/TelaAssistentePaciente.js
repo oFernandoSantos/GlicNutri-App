@@ -15,12 +15,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import PatientScreenLayout from '../../componentes/paciente/LayoutPaciente';
 import { useKeyboardHeight } from '../../componentes/comum/RolagemComTeclado';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
-import {
-  assistantQuickQuestions,
-  sleepOptions,
-  stressOptions,
-  symptomOptions,
-} from '../../dados/dadosExperienciaPaciente';
+import { assistantQuickQuestions } from '../../dados/dadosExperienciaPaciente';
 import {
   createDefaultAppState,
   fetchPatientExperience,
@@ -33,11 +28,7 @@ import {
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 
 const assistantWelcome =
-  'Analisei seus registros recentes para responder com base na sua glicose, alimentação, hidratação e bem-estar.';
-
-const symptomLabelMap = Object.fromEntries(symptomOptions.map((item) => [item.id, item.label]));
-const sleepLabelMap = Object.fromEntries(sleepOptions.map((item) => [item.id, item.label]));
-const stressLabelMap = Object.fromEntries(stressOptions.map((item) => [String(item.id), item.label]));
+  'Analisei seus registros recentes para responder com base na sua glicose, alimentação e hidratação.';
 
 function getTodayDateString() {
   return new Date().toISOString().slice(0, 10);
@@ -48,17 +39,7 @@ function getTodayMealEntries(mealEntries = []) {
   return mealEntries.filter((entry) => !entry?.date || entry.date === today);
 }
 
-function formatSymptoms(symptomIds = []) {
-  const labels = symptomIds.map((item) => symptomLabelMap[item]).filter(Boolean);
-  if (!labels.length) return 'Sem sintomas registrados';
-  return labels.join(', ');
-}
-
-function buildContextSummary({ currentGlucose, todayMealEntries, waterCount, lastSymptomEntry }) {
-  const symptomText = lastSymptomEntry
-    ? formatSymptoms(lastSymptomEntry.selectedSymptoms)
-    : 'Sem check-in recente';
-
+function buildContextSummary({ currentGlucose, todayMealEntries, waterCount }) {
   return [
     {
       id: 'glucose',
@@ -78,18 +59,11 @@ function buildContextSummary({ currentGlucose, todayMealEntries, waterCount, las
       value: String(Number(waterCount || 0)),
       helper: Number(waterCount || 0) >= 6 ? 'Boa hidratação' : 'Pode reforçar a hidratação',
     },
-    {
-      id: 'symptoms',
-      label: 'Bem-estar',
-      value: lastSymptomEntry?.sleep ? sleepLabelMap[lastSymptomEntry.sleep] || 'Registrado' : 'Sem registro',
-      helper: symptomText,
-    },
   ];
 }
 
-function buildDynamicAlerts({ currentGlucose, todayMealEntries, waterCount, lastMealEntry, lastSymptomEntry }) {
+function buildDynamicAlerts({ currentGlucose, todayMealEntries, waterCount, lastMealEntry }) {
   const alerts = [];
-  const stressLabel = stressLabelMap[String(lastSymptomEntry?.stress || '')];
 
   if (currentGlucose >= 180) {
     alerts.push({
@@ -135,23 +109,14 @@ function buildDynamicAlerts({ currentGlucose, todayMealEntries, waterCount, last
       id: 'water-low',
       tag: 'Hidratação',
       title: 'Hidratação abaixo do ideal',
-      description: 'Poucos copos de água foram registrados até agora. Aumentar a hidratação pode ajudar na rotina e no bem-estar geral.',
-    });
-  }
-
-  if (stressLabel && lastSymptomEntry?.stress >= 3) {
-    alerts.push({
-      id: 'stress',
-      tag: 'Bem-estar',
-      title: `Nível de estresse: ${stressLabel}`,
-      description: 'Seu último check-in mostrou estresse mais alto. Vale observar se isso está impactando fome, sono ou vontade de beliscar.',
+      description: 'Poucos copos de água foram registrados até agora. Aumentar a hidratação pode ajudar na sua rotina ao longo do dia.',
     });
   }
 
   return alerts.slice(0, 3);
 }
 
-function buildPositiveMessage({ currentGlucose, todayMealEntries, waterCount, lastSymptomEntry }) {
+function buildPositiveMessage({ currentGlucose, todayMealEntries, waterCount }) {
   if (todayMealEntries.length >= 3 && currentGlucose >= 80 && currentGlucose <= 140) {
     return 'Hoje você já combinou registros consistentes com uma glicose em faixa mais estável. Esse padrão ajuda muito na leitura do seu progresso.';
   }
@@ -160,14 +125,10 @@ function buildPositiveMessage({ currentGlucose, todayMealEntries, waterCount, la
     return 'Sua hidratação está bem encaminhada hoje. Esse cuidado costuma reforçar disposição e organização da rotina.';
   }
 
-  if (lastSymptomEntry?.sleep === 'good' || lastSymptomEntry?.sleep === 'great') {
-    return 'Seu último check-in mostrou uma noite melhor de sono. Esse é um bom sinal para sustentar escolhas mais consistentes ao longo do dia.';
-  }
-
   return 'Mesmo com poucos registros, cada atualização no app melhora a qualidade dos próximos insights. Você já está construindo um acompanhamento mais útil.';
 }
 
-function buildSuggestedQuestions({ currentGlucose, todayMealEntries, lastMealEntry, lastSymptomEntry }) {
+function buildSuggestedQuestions({ currentGlucose, todayMealEntries, lastMealEntry }) {
   const dynamicQuestions = [];
 
   if (currentGlucose >= 140) {
@@ -186,10 +147,6 @@ function buildSuggestedQuestions({ currentGlucose, todayMealEntries, lastMealEnt
     dynamicQuestions.push('Ainda não registrei refeições hoje. Isso atrapalha meus insights?');
   }
 
-  if (lastSymptomEntry?.stress >= 3) {
-    dynamicQuestions.push('Meu estresse pode influenciar minha fome ou glicose hoje?');
-  }
-
   return [...dynamicQuestions, ...assistantQuickQuestions].slice(0, 4);
 }
 
@@ -200,7 +157,6 @@ function buildAssistantReply(question, context) {
     todayMealEntries,
     waterCount,
     lastMealEntry,
-    lastSymptomEntry,
   } = context;
 
   if (!text) return '';
@@ -231,16 +187,6 @@ function buildAssistantReply(question, context) {
     }
 
     return `Até agora vejo ${waterCount || 0} copos de água registrados. Vale aumentar um pouco a hidratação para reforçar sua rotina nas próximas horas.`;
-  }
-
-  if (text.includes('estresse') || text.includes('sono') || text.includes('cansa') || text.includes('ans')) {
-    if (lastSymptomEntry) {
-      const sleepLabel = sleepLabelMap[lastSymptomEntry.sleep] || 'sem padrão definido';
-      const stressLabel = stressLabelMap[String(lastSymptomEntry.stress || '')] || 'sem registro de estresse';
-      return `Seu último check-in mostrou sono ${sleepLabel.toLowerCase()} e estresse ${stressLabel.toLowerCase()}. Esse contexto pode influenciar fome, disposição e constância ao longo do dia.`;
-    }
-
-    return 'Ainda não encontrei um check-in recente de bem-estar. Registrar sono, sintomas e estresse deixa as orientações mais fiéis ao seu momento.';
   }
 
   if (todayMealEntries.length === 0) {
@@ -389,7 +335,6 @@ export default function PacienteAssistenteScreen({
   const mealEntries = Array.isArray(appState?.mealEntries) ? appState.mealEntries : [];
   const todayMealEntries = useMemo(() => getTodayMealEntries(mealEntries), [mealEntries]);
   const lastMealEntry = todayMealEntries[0] || mealEntries[0] || null;
-  const lastSymptomEntry = Array.isArray(appState?.symptomEntries) ? appState.symptomEntries[0] || null : null;
   const currentGlucose = getLatestGlucose(glucoseReadings)?.value || 105;
   const waterCount = Number(appState?.waterCount || 0);
 
@@ -420,9 +365,8 @@ export default function PacienteAssistenteScreen({
         currentGlucose,
         todayMealEntries,
         waterCount,
-        lastSymptomEntry,
       }),
-    [currentGlucose, todayMealEntries, waterCount, lastSymptomEntry]
+    [currentGlucose, todayMealEntries, waterCount]
   );
 
   const alerts = useMemo(
@@ -432,9 +376,8 @@ export default function PacienteAssistenteScreen({
         todayMealEntries,
         waterCount,
         lastMealEntry,
-        lastSymptomEntry,
       }),
-    [currentGlucose, todayMealEntries, waterCount, lastMealEntry, lastSymptomEntry]
+    [currentGlucose, todayMealEntries, waterCount, lastMealEntry]
   );
 
   const positiveMessage = useMemo(
@@ -443,9 +386,8 @@ export default function PacienteAssistenteScreen({
         currentGlucose,
         todayMealEntries,
         waterCount,
-        lastSymptomEntry,
       }),
-    [currentGlucose, todayMealEntries, waterCount, lastSymptomEntry]
+    [currentGlucose, todayMealEntries, waterCount]
   );
 
   const suggestedQuestions = useMemo(
@@ -454,9 +396,8 @@ export default function PacienteAssistenteScreen({
         currentGlucose,
         todayMealEntries,
         lastMealEntry,
-        lastSymptomEntry,
       }),
-    [currentGlucose, todayMealEntries, lastMealEntry, lastSymptomEntry]
+    [currentGlucose, todayMealEntries, lastMealEntry]
   );
 
   async function sendQuestion(text) {
@@ -469,7 +410,6 @@ export default function PacienteAssistenteScreen({
       todayMealEntries,
       waterCount,
       lastMealEntry,
-      lastSymptomEntry,
     });
 
     const timestamp = Date.now();

@@ -23,6 +23,7 @@ import {
   listMedicoAvailability,
   upsertMedicoAvailability,
 } from '../../servicos/servicoAgendaMedico';
+import { inputFocusBorder, inputWebFocusReset } from '../../temas/temaFocoCampo';
 
 const WEEKDAYS = [
   { value: 0, label: 'Dom' },
@@ -68,6 +69,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
   const [feedback, setFeedback] = useState('');
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [focusedField, setFocusedField] = useState('');
 
   const isMedico = variant === 'medico';
   const buildLabel = isMedico ? buildMedicoSlotLabel : buildSlotLabel;
@@ -258,7 +260,9 @@ export default function PainelDisponibilidadeAgendaProfissional({
                   onChangeText={(value) => setForm((current) => ({ ...current, startTime: value }))}
                   placeholder="08:00"
                   placeholderTextColor={theme.colors.textMuted}
-                  style={styles.input}
+                  style={[styles.input, focusedField === 'startTime' ? styles.inputFocused : null]}
+                  onFocus={() => setFocusedField('startTime')}
+                  onBlur={() => setFocusedField('')}
                 />
               </View>
               <View style={styles.timeField}>
@@ -268,7 +272,9 @@ export default function PainelDisponibilidadeAgendaProfissional({
                   onChangeText={(value) => setForm((current) => ({ ...current, endTime: value }))}
                   placeholder="12:00"
                   placeholderTextColor={theme.colors.textMuted}
-                  style={styles.input}
+                  style={[styles.input, focusedField === 'endTime' ? styles.inputFocused : null]}
+                  onFocus={() => setFocusedField('endTime')}
+                  onBlur={() => setFocusedField('')}
                 />
               </View>
             </View>
@@ -505,6 +511,11 @@ function createStyles(theme) {
     paddingVertical: Platform.OS === 'web' ? 10 : 8,
     fontSize: 14,
     color: theme.colors.text,
+    backgroundColor: theme.colors.background,
+    ...inputWebFocusReset,
+  },
+  inputFocused: {
+    ...inputFocusBorder,
     backgroundColor: theme.colors.background,
   },
   slotRow: {
