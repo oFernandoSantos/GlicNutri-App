@@ -86,6 +86,14 @@ import {
 } from '../../utilitarios/navegacaoAbas';
 import { navigatePatientFeature } from '../../utilitarios/navegacaoPaciente';
 import {
+  PACIENTE_ALVOS_PADRAO,
+  PACIENTE_MACRO_NUTRIENTES,
+  PACIENTE_MICRO_NUTRIENTES,
+  buildMacroPlanProgress,
+  buildMicroCoverageScore,
+  normalizePacienteNutritionTotals,
+} from '../../utilitarios/catalogoNutrientesPaciente';
+import {
   buildPatientChatPreview,
   getPatientChatLastReadAt,
   resolveNutritionistThreadMerge,
@@ -371,48 +379,41 @@ function SectionCard({ children, style }) {
   return <View style={[styles.sectionCard, style]}>{children}</View>;
 }
 
-const NUTRIENT_KEYWORDS = [
-  {
-    keys: ['iogurte', 'kefir', 'leite fermentado'],
-    macros: { carbs: 12, protein: 8, fat: 4 },
-    micros: ['Cálcio', 'Probióticos'],
-  },
-  {
-    keys: ['aveia', 'farelo de aveia', 'granola'],
-    macros: { carbs: 27, protein: 5, fat: 3 },
-    micros: ['Fibras', 'Magnésio'],
-  },
-  {
-    keys: ['chia', 'castanha', 'sement'],
-    macros: { carbs: 6, protein: 4, fat: 8 },
-    micros: ['Ômega-3', 'Magnésio'],
-  },
-  {
-    keys: ['morango', 'fruta', 'maçã', 'maca', 'laranja'],
-    macros: { carbs: 15, protein: 1, fat: 0 },
-    micros: ['Vitamina C', 'Fibras'],
-  },
-  {
-    keys: ['arroz', 'quinoa', 'batata-doce', 'pão', 'pao', 'torrada', 'biscoito'],
-    macros: { carbs: 32, protein: 4, fat: 2 },
-    micros: ['Fibras', 'Magnésio'],
-  },
-  {
-    keys: ['feijão', 'feijao', 'lentilha', 'grão-de-bico', 'grao-de-bico'],
-    macros: { carbs: 22, protein: 9, fat: 1 },
-    micros: ['Ferro', 'Fibras'],
-  },
-  {
-    keys: ['frango', 'peixe', 'carne', 'tofu', 'ovo'],
-    macros: { carbs: 0, protein: 25, fat: 7 },
-    micros: ['Ferro', 'Zinco'],
-  },
-  {
-    keys: ['salada', 'legume', 'sopa', 'verdura', 'brócolis', 'brocolis'],
-    macros: { carbs: 10, protein: 3, fat: 1 },
-    micros: ['Potássio', 'Vitamina C'],
-  },
+const NUTRIENT_BASE = {
+  calories: 0,
+  carbs: 0,
+  protein: 0,
+  fat: 0,
+  fiber: 0,
+  sugars: 0,
+  saturatedFat: 0,
+  sodium: 0,
+  iron: 0,
+  calcium: 0,
+  magnesium: 0,
+  potassium: 0,
+  zinc: 0,
+  vitaminA: 0,
+  vitaminC: 0,
+  vitaminD: 0,
+  vitaminB12: 0,
+  folate: 0,
+};
+
+const PLAN_NUTRIENT_KEYWORDS = [
+  { keys: ['arroz', 'massa', 'macarrao', 'batata', 'pao', 'quinoa', 'aveia', 'torrada', 'biscoito', 'tapioca'], calories: 160, carbs: 32, protein: 4, fat: 2, fiber: 3, sugars: 2, saturatedFat: 0.4, sodium: 120, iron: 0.8, calcium: 18, magnesium: 28, potassium: 110, zinc: 0.7, vitaminA: 0, vitaminC: 2, vitaminD: 0, vitaminB12: 0, folate: 28 },
+  { keys: ['feijao', 'feijão', 'lentilha', 'grao de bico', 'grão-de-bico', 'grao-de-bico'], calories: 110, carbs: 19, protein: 7, fat: 1, fiber: 7, sugars: 1, saturatedFat: 0.1, sodium: 10, iron: 2.4, calcium: 40, magnesium: 42, potassium: 240, zinc: 1.1, vitaminA: 8, vitaminC: 1, vitaminD: 0, vitaminB12: 0, folate: 120 },
+  { keys: ['frango', 'carne', 'peixe', 'ovo', 'atum', 'salmao', 'tofu'], calories: 180, carbs: 0, protein: 24, fat: 8, fiber: 0, sugars: 0, saturatedFat: 2.2, sodium: 85, iron: 1.6, calcium: 16, magnesium: 24, potassium: 260, zinc: 1.8, vitaminA: 40, vitaminC: 0, vitaminD: 2.4, vitaminB12: 1.1, folate: 18 },
+  { keys: ['salada', 'legume', 'verdura', 'brocolis', 'brócolis', 'cenoura', 'espinafre', 'couve', 'sopa'], calories: 45, carbs: 8, protein: 2, fat: 0, fiber: 4, sugars: 3, saturatedFat: 0, sodium: 35, iron: 0.9, calcium: 48, magnesium: 30, potassium: 210, zinc: 0.4, vitaminA: 260, vitaminC: 18, vitaminD: 0, vitaminB12: 0, folate: 72 },
+  { keys: ['queijo', 'leite', 'iogurte', 'kefir', 'ricota', 'cottage'], calories: 90, carbs: 6, protein: 6, fat: 5, fiber: 0, sugars: 5, saturatedFat: 3, sodium: 95, iron: 0.1, calcium: 180, magnesium: 18, potassium: 190, zinc: 0.8, vitaminA: 62, vitaminC: 0, vitaminD: 1.2, vitaminB12: 0.9, folate: 10 },
+  { keys: ['fruta', 'banana', 'maca', 'maçã', 'mamao', 'laranja', 'morango', 'abacate'], calories: 70, carbs: 18, protein: 1, fat: 0, fiber: 3, sugars: 12, saturatedFat: 0, sodium: 2, iron: 0.3, calcium: 22, magnesium: 20, potassium: 240, zinc: 0.2, vitaminA: 54, vitaminC: 28, vitaminD: 0, vitaminB12: 0, folate: 34 },
+  { keys: ['castanha', 'amendoa', 'nozes', 'amendoim', 'chia', 'sement', 'granola'], calories: 120, carbs: 5, protein: 4, fat: 10, fiber: 3, sugars: 1, saturatedFat: 1.1, sodium: 2, iron: 1.1, calcium: 48, magnesium: 64, potassium: 180, zinc: 0.9, vitaminA: 0, vitaminC: 0, vitaminD: 0, vitaminB12: 0, folate: 22 },
+  { keys: ['cafe', 'cha', 'chá', 'azeite'], calories: 25, carbs: 1, protein: 0, fat: 2, fiber: 0, sugars: 0, saturatedFat: 0.3, sodium: 2, iron: 0.1, calcium: 2, magnesium: 3, potassium: 20, zinc: 0.1, vitaminA: 0, vitaminC: 0, vitaminD: 0, vitaminB12: 0, folate: 2 },
 ];
+
+const DEFAULT_DAILY_TARGETS = {
+  ...PACIENTE_ALVOS_PADRAO,
+};
 
 function todayDateString() {
   return buildLocalDateString();
@@ -441,31 +442,131 @@ function getPlanText(section) {
     .join(' ');
 }
 
+function formatHomeNutrientValue(value, unit) {
+  const safeValue = Number(value) || 0;
+
+  if (unit === 'kcal') {
+    return `${Math.round(safeValue)}`;
+  }
+
+  if (safeValue >= 100) {
+    return `${Math.round(safeValue)}`;
+  }
+
+  return `${safeValue.toFixed(1).replace(/\.0$/, '')}`;
+}
+
 function estimateNutritionFromTexts(texts) {
-  const totals = { carbs: 0, protein: 0, fat: 0 };
-  const micros = new Set();
-  let matches = 0;
+  return (Array.isArray(texts) ? texts : []).reduce(
+    (totals, rawText) => {
+      const text = normalizeText(rawText);
+      let matched = false;
 
-  texts.forEach((rawText) => {
-    const text = normalizeText(rawText);
+      PLAN_NUTRIENT_KEYWORDS.forEach((item) => {
+        const found = item.keys.some((key) => text.includes(normalizeText(key)));
+        if (!found) {
+          return;
+        }
 
-    NUTRIENT_KEYWORDS.forEach((item) => {
-      const found = item.keys.some((key) => text.includes(normalizeText(key)));
-      if (!found) return;
+        matched = true;
+        totals.matches += 1;
+        totals.calories += item.calories || 0;
+        totals.carbs += item.carbs || 0;
+        totals.protein += item.protein || 0;
+        totals.fat += item.fat || 0;
+        totals.fiber += item.fiber || 0;
+        totals.sugars += item.sugars || 0;
+        totals.saturatedFat += item.saturatedFat || 0;
+        totals.sodium += item.sodium || 0;
+        totals.iron += item.iron || 0;
+        totals.calcium += item.calcium || 0;
+        totals.magnesium += item.magnesium || 0;
+        totals.potassium += item.potassium || 0;
+        totals.zinc += item.zinc || 0;
+        totals.vitaminA += item.vitaminA || 0;
+        totals.vitaminC += item.vitaminC || 0;
+        totals.vitaminD += item.vitaminD || 0;
+        totals.vitaminB12 += item.vitaminB12 || 0;
+        totals.folate += item.folate || 0;
+      });
 
-      matches += 1;
-      totals.carbs += item.macros.carbs;
-      totals.protein += item.macros.protein;
-      totals.fat += item.macros.fat;
-      item.micros.forEach((micro) => micros.add(micro));
-    });
+      if (!matched) {
+        return totals;
+      }
+
+      return totals;
+    },
+    { ...NUTRIENT_BASE, matches: 0 }
+  );
+}
+
+function estimatePlannedDailyNutrition(planSections) {
+  const sections = Array.isArray(planSections) ? planSections : [];
+  const planFoodTexts = sections.flatMap((section) => {
+    const foods = Array.isArray(section?.foods) ? section.foods : [];
+    return foods.length ? foods : [getPlanText(section)];
   });
+  const estimated = estimateNutritionFromTexts(planFoodTexts);
+  const plannedCaloriesFromSections = sections.reduce(
+    (sum, section) => sum + (Number(section?.targetKcal) || 0),
+    0
+  );
+
+  if (!estimated.matches && !plannedCaloriesFromSections) {
+    return { ...DEFAULT_DAILY_TARGETS, matches: 0 };
+  }
 
   return {
-    ...totals,
-    calories: Math.round(totals.carbs * 4 + totals.protein * 4 + totals.fat * 9),
-    micros: Array.from(micros),
-    matches,
+    ...estimated,
+    calories:
+      plannedCaloriesFromSections > 0
+        ? plannedCaloriesFromSections
+        : estimated.calories > 0
+          ? Math.round(estimated.calories)
+          : DEFAULT_DAILY_TARGETS.calories,
+    carbs: estimated.carbs > 0 ? estimated.carbs : DEFAULT_DAILY_TARGETS.carbs,
+    protein: estimated.protein > 0 ? estimated.protein : DEFAULT_DAILY_TARGETS.protein,
+    fat: estimated.fat > 0 ? estimated.fat : DEFAULT_DAILY_TARGETS.fat,
+    fiber: estimated.fiber > 0 ? estimated.fiber : DEFAULT_DAILY_TARGETS.fiber,
+    sugar: estimated.sugars > 0 ? estimated.sugars : DEFAULT_DAILY_TARGETS.sugar,
+    sugars: estimated.sugars > 0 ? estimated.sugars : DEFAULT_DAILY_TARGETS.sugar,
+    saturatedFat:
+      estimated.saturatedFat > 0 ? estimated.saturatedFat : DEFAULT_DAILY_TARGETS.saturatedFat,
+    sodium: estimated.sodium > 0 ? estimated.sodium : DEFAULT_DAILY_TARGETS.sodium,
+    iron: estimated.iron > 0 ? estimated.iron : DEFAULT_DAILY_TARGETS.iron,
+    calcium: estimated.calcium > 0 ? estimated.calcium : DEFAULT_DAILY_TARGETS.calcium,
+    magnesium: estimated.magnesium > 0 ? estimated.magnesium : DEFAULT_DAILY_TARGETS.magnesium,
+    potassium: estimated.potassium > 0 ? estimated.potassium : DEFAULT_DAILY_TARGETS.potassium,
+    zinc: estimated.zinc > 0 ? estimated.zinc : DEFAULT_DAILY_TARGETS.zinc,
+    vitaminA: estimated.vitaminA > 0 ? estimated.vitaminA : DEFAULT_DAILY_TARGETS.vitaminA,
+    vitaminC: estimated.vitaminC > 0 ? estimated.vitaminC : DEFAULT_DAILY_TARGETS.vitaminC,
+    vitaminD: estimated.vitaminD > 0 ? estimated.vitaminD : DEFAULT_DAILY_TARGETS.vitaminD,
+    vitaminB12: estimated.vitaminB12 > 0 ? estimated.vitaminB12 : DEFAULT_DAILY_TARGETS.vitaminB12,
+    folate: estimated.folate > 0 ? estimated.folate : DEFAULT_DAILY_TARGETS.folate,
+    matches: estimated.matches + (plannedCaloriesFromSections > 0 ? 1 : 0),
+  };
+}
+
+function mergeStructuredNutrition(totals, structured) {
+  return {
+    calories: totals.calories + (structured.calories || 0),
+    carbs: totals.carbs + (structured.carbs || 0),
+    protein: totals.protein + (structured.protein || 0),
+    fat: totals.fat + (structured.fat || 0),
+    fiber: totals.fiber + (structured.fiber || 0),
+    sugars: totals.sugars + (structured.sugar ?? structured.sugars ?? 0),
+    saturatedFat: totals.saturatedFat + (structured.saturatedFat || 0),
+    sodium: totals.sodium + (structured.sodium || 0),
+    iron: totals.iron + (structured.iron || 0),
+    calcium: totals.calcium + (structured.calcium || 0),
+    magnesium: totals.magnesium + (structured.magnesium || 0),
+    potassium: totals.potassium + (structured.potassium || 0),
+    zinc: totals.zinc + (structured.zinc || 0),
+    vitaminA: totals.vitaminA + (structured.vitaminA || 0),
+    vitaminC: totals.vitaminC + (structured.vitaminC || 0),
+    vitaminD: totals.vitaminD + (structured.vitaminD || 0),
+    vitaminB12: totals.vitaminB12 + (structured.vitaminB12 || 0),
+    folate: totals.folate + (structured.folate || 0),
   };
 }
 
@@ -474,53 +575,103 @@ function percentage(value, target) {
   return Math.max(0, Math.min(100, Math.round((value / target) * 100)));
 }
 
+const MICRO_STATUS = {
+  NOT_STARTED: 'not_started',
+  IN_PROGRESS: 'in_progress',
+  COMPLETED: 'completed',
+};
+
+const MICRO_STATUS_TONES = {
+  [MICRO_STATUS.NOT_STARTED]: {
+    main: '#F87171',
+    soft: '#FFFFFF',
+    text: '#EF4444',
+  },
+  [MICRO_STATUS.IN_PROGRESS]: {
+    main: '#FBD100',
+    soft: '#FFFFFF',
+    text: '#C9A600',
+  },
+  [MICRO_STATUS.COMPLETED]: {
+    main: patientTheme.colors.primary,
+    soft: '#FFFFFF',
+    text: patientTheme.colors.primaryDark,
+  },
+};
+
+const MICRO_STATUS_LEGEND = [
+  { status: MICRO_STATUS.NOT_STARTED, label: 'Não iniciado' },
+  { status: MICRO_STATUS.IN_PROGRESS, label: 'Em andamento' },
+  { status: MICRO_STATUS.COMPLETED, label: 'Concluído' },
+].map((item) => ({
+  ...item,
+  color: MICRO_STATUS_TONES[item.status].main,
+}));
+
+function getMicroTone(status) {
+  return MICRO_STATUS_TONES[status] || MICRO_STATUS_TONES[MICRO_STATUS.NOT_STARTED];
+}
+
+function resolveMicroStatus(value, target) {
+  const safeValue = Number(value) || 0;
+  const safeTarget = Number(target) || 0;
+
+  if (safeValue <= 0) {
+    return MICRO_STATUS.NOT_STARTED;
+  }
+
+  if (safeTarget > 0 && safeValue >= safeTarget) {
+    return MICRO_STATUS.COMPLETED;
+  }
+
+  return MICRO_STATUS.IN_PROGRESS;
+}
+
+function chunkMicroItems(items, size = 2) {
+  const rows = [];
+
+  for (let index = 0; index < items.length; index += size) {
+    rows.push(items.slice(index, index + size));
+  }
+
+  return rows;
+}
+
 function buildNutritionSummary(mealEntries, planSections) {
-  const today = todayDateString();
-  const todayMeals = (mealEntries || []).filter(
-    (entry) => String(entry?.date || '').slice(0, 10) === today
-  );
+  const todayMeals = Array.isArray(mealEntries) ? mealEntries : [];
   const consumedFromMeals = todayMeals.reduce(
     (totals, entry) => {
       const structured = getMealEntryNutrition(entry);
 
       if (structured) {
-        const structuredMicros = [
-          structured.fiber > 0 ? 'Fibras' : null,
-          structured.sodium > 0 ? 'Sódio' : null,
-          structured.sugars > 0 ? 'Açúcares' : null,
-          structured.saturatedFat > 0 ? 'Gordura saturada' : null,
-        ].filter(Boolean);
-
-        return {
-          carbs: totals.carbs + structured.carbs,
-          protein: totals.protein + structured.protein,
-          fat: totals.fat + structured.fat,
-          calories: totals.calories + structured.calories,
-          fiber: totals.fiber + structured.fiber,
-          sugars: totals.sugars + structured.sugars,
-          saturatedFat: totals.saturatedFat + structured.saturatedFat,
-          sodium: totals.sodium + structured.sodium,
-          micros: Array.from(new Set([...totals.micros, ...structuredMicros])),
-        };
+        return mergeStructuredNutrition(totals, structured);
       }
 
       const estimated = estimateNutritionFromTexts([getMealText(entry)]);
-
       return {
+        calories: totals.calories + estimated.calories,
         carbs: totals.carbs + estimated.carbs,
         protein: totals.protein + estimated.protein,
         fat: totals.fat + estimated.fat,
-        calories: totals.calories + estimated.calories,
-        fiber: totals.fiber,
-        sugars: totals.sugars,
-        saturatedFat: totals.saturatedFat,
-        sodium: totals.sodium,
-        micros: Array.from(new Set([...totals.micros, ...estimated.micros])),
+        fiber: totals.fiber + estimated.fiber,
+        sugars: totals.sugars + estimated.sugars,
+        saturatedFat: totals.saturatedFat + estimated.saturatedFat,
+        sodium: totals.sodium + estimated.sodium,
+        iron: totals.iron + estimated.iron,
+        calcium: totals.calcium + estimated.calcium,
+        magnesium: totals.magnesium + estimated.magnesium,
+        potassium: totals.potassium + estimated.potassium,
+        zinc: totals.zinc + estimated.zinc,
+        vitaminA: totals.vitaminA + estimated.vitaminA,
+        vitaminC: totals.vitaminC + estimated.vitaminC,
+        vitaminD: totals.vitaminD + estimated.vitaminD,
+        vitaminB12: totals.vitaminB12 + estimated.vitaminB12,
+        folate: totals.folate + estimated.folate,
       };
     },
-    { carbs: 0, protein: 0, fat: 0, calories: 0, fiber: 0, sugars: 0, saturatedFat: 0, sodium: 0, micros: [] }
+    { ...NUTRIENT_BASE }
   );
-  const consumed = {
+  const consumed = normalizePacienteNutritionTotals({
     ...consumedFromMeals,
     calories:
       consumedFromMeals.calories > 0
@@ -530,38 +681,45 @@ function buildNutritionSummary(mealEntries, planSections) {
               consumedFromMeals.protein * 4 +
               consumedFromMeals.fat * 9
           ),
-  };
-  const planned = estimateNutritionFromTexts((planSections || []).map(getPlanText));
-  const target = planned.matches
-    ? planned
-    : { carbs: 160, protein: 80, fat: 55, calories: 1455, micros: ['Fibras', 'Ferro', 'Cálcio'] };
+  });
+  const target = normalizePacienteNutritionTotals(estimatePlannedDailyNutrition(planSections));
+  const macroItems = PACIENTE_MACRO_NUTRIENTES.map((item) => {
+    const value = consumed[item.id] || 0;
+    const plannedValue = target[item.id] || item.target || 0;
 
-  const microTarget = target.micros.length || 1;
-  const consumedMicroSet = new Set(consumed.micros);
-  const plannedMicroSet = new Set(target.micros);
-  const matchedMicros = Array.from(consumedMicroSet).filter((item) => plannedMicroSet.has(item));
+    return {
+      label: item.label,
+      shortLabel: item.shortLabel || item.label,
+      value,
+      target: plannedValue,
+      unit: item.unit,
+      status: resolveMicroStatus(value, plannedValue),
+    };
+  });
+  const microItems = PACIENTE_MICRO_NUTRIENTES.map((item) => {
+    const value = consumed[item.id] || 0;
+    const plannedValue = target[item.id] || 0;
+
+    const status = resolveMicroStatus(value, plannedValue);
+
+    return {
+      label: item.label,
+      shortLabel: item.shortLabel || item.label,
+      value,
+      target: plannedValue,
+      unit: item.unit,
+      status,
+      display: `${formatHomeNutrientValue(value, item.unit)}/${formatHomeNutrientValue(plannedValue, item.unit)}${item.unit}`,
+    };
+  });
 
   return {
     consumed,
     target,
-    macroItems: [
-      { label: 'Carboidratos', value: consumed.carbs, target: target.carbs, unit: 'g' },
-      { label: 'Proteínas', value: consumed.protein, target: target.protein, unit: 'g' },
-      { label: 'Gorduras', value: consumed.fat, target: target.fat, unit: 'g' },
-    ],
-    microItems: Array.from(
-      new Map(
-        target.micros.slice(0, 5).map((label) => ({
-          label,
-          reached: consumedMicroSet.has(label),
-        })).concat([
-          { label: 'Fibras', value: Math.round(consumed.fiber), unit: 'g', reached: consumed.fiber > 0 },
-          { label: 'Açúcares', value: Math.round(consumed.sugars), unit: 'g', reached: consumed.sugars > 0 },
-          { label: 'Sódio', value: Math.round(consumed.sodium), unit: 'mg', reached: consumed.sodium > 0 },
-        ]).map((item) => [item.label, item])
-      ).values()
-    ).slice(0, 6),
-    microScore: percentage(matchedMicros.length, microTarget),
+    macroItems,
+    macroProgress: buildMacroPlanProgress(macroItems),
+    microItems,
+    microScore: buildMicroCoverageScore(microItems),
     mealCount: todayMeals.length,
     plannedCount: (planSections || []).length,
   };
@@ -592,20 +750,45 @@ function buildGlucoseSummary(glucoseReadings) {
   };
 }
 
-function ProgressLine({ label, value, target, unit }) {
-  const progress = percentage(value, target);
+function NutrientProgressCell({ item }) {
+  const progress = percentage(item.value, item.target);
+  const tone = getMicroTone(item.status);
+  const label = item.shortLabel || item.label;
+  const valueText =
+    item.display ||
+    `${formatHomeNutrientValue(item.value, item.unit)}/${formatHomeNutrientValue(item.target, item.unit)}${item.unit}`;
 
   return (
-    <View style={styles.nutritionLine}>
-      <View style={styles.nutritionLineTop}>
-        <Text style={styles.nutritionLabel}>{label}</Text>
-        <Text style={styles.nutritionValue}>
-          {Math.round(value)}{unit} / {Math.round(target)}{unit}
+    <View style={styles.macroCell}>
+      <View style={styles.macroCellTop}>
+        <Text style={[styles.macroCellLabel, { color: tone.text }]} numberOfLines={1}>
+          {label}
+        </Text>
+        <Text style={[styles.macroCellValue, { color: tone.text }]} numberOfLines={1}>
+          {valueText}
         </Text>
       </View>
-      <View style={styles.nutritionTrack}>
-        <View style={[styles.nutritionFill, { width: `${progress}%` }]} />
+      <View style={styles.nutrientProgressTrack}>
+        <View
+          style={[
+            styles.macroCellFill,
+            { width: `${progress}%`, backgroundColor: tone.main },
+          ]}
+        />
       </View>
+    </View>
+  );
+}
+
+function NutrientStatusLegend() {
+  return (
+    <View style={styles.microLegend}>
+      {MICRO_STATUS_LEGEND.map((item) => (
+        <View key={item.status} style={styles.microLegendItem}>
+          <View style={[styles.microLegendDot, { backgroundColor: item.color }]} />
+          <Text style={styles.microLegendText}>{item.label}</Text>
+        </View>
+      ))}
     </View>
   );
 }
@@ -671,98 +854,109 @@ function GlucoseMetricCard({
 }
 
 function MacroMetricCard({ width, nutritionSummary }) {
-  const totalProgress = percentage(
-    nutritionSummary.consumed.calories,
-    nutritionSummary.target.calories
-  );
+  const macroRows = chunkMicroItems(nutritionSummary.macroItems);
 
   return (
-    <SectionCard style={[styles.metricSlide, { width }]}>
-      <View style={styles.metricCardHeader}>
-        <View>
-          <Text style={styles.eyebrow}>Macronutrientes</Text>
-          <Text style={styles.metricMainValue}>{totalProgress}% do plano</Text>
+    <SectionCard style={[styles.metricSlide, styles.macroMetricSlide, { width }]}>
+      <View style={styles.macroMetricTop}>
+        <View style={styles.metricCardHeader}>
+          <View style={styles.macroMetricHeaderCopy}>
+            <Text style={[styles.eyebrow, styles.macroMetricEyebrow]}>Macronutrientes</Text>
+            <Text style={[styles.metricMainValue, styles.macroMetricMainValue]}>
+              {nutritionSummary.macroProgress}% do plano
+            </Text>
+          </View>
+
+          <View style={[styles.metricIconWrap, styles.macroMetricIconWrap]}>
+            <MaterialCommunityIcons
+              name="chart-donut"
+              size={18}
+              color={patientTheme.colors.primaryDark}
+            />
+          </View>
         </View>
 
-        <View style={styles.metricIconWrap}>
-          <MaterialCommunityIcons
-            name="chart-donut"
-            size={23}
-            color={patientTheme.colors.primaryDark}
-          />
+        <Text style={[styles.heroHelper, styles.macroMetricHelper]}>
+          Meta do dia no plano vs consumo registrado hoje no diário.
+        </Text>
+
+        <View style={styles.macroGrid}>
+          {macroRows.map((row, rowIndex) => (
+            <View key={`macro-row-${rowIndex}`} style={styles.macroGridRow}>
+              {row.map((item, index) => (
+                <View key={`${item.label}-${rowIndex}-${index}`} style={styles.macroCellWrap}>
+                  <NutrientProgressCell item={item} />
+                </View>
+              ))}
+              {row.length === 1 ? <View style={styles.macroCellWrapSpacer} /> : null}
+            </View>
+          ))}
         </View>
       </View>
 
-      <Text style={styles.heroHelper}>
-        Baseado nas refeições registradas hoje no diário e no plano alimentar proposto.
-      </Text>
+      <View style={styles.macroMetricBottom}>
+        <NutrientStatusLegend />
 
-      <View style={styles.nutritionList}>
-        {nutritionSummary.macroItems.map((item) => (
-          <ProgressLine
-            key={item.label}
-            label={item.label}
-            value={item.value}
-            target={item.target}
-            unit={item.unit}
-          />
-        ))}
+        <Text style={[styles.metricFootnote, styles.macroMetricFootnote]}>
+          {nutritionSummary.mealCount
+            ? `${nutritionSummary.mealCount} refeição(ões) considerada(s) hoje`
+            : 'Registre uma refeição no diário para atualizar este painel'}
+        </Text>
       </View>
-
-      <Text style={styles.metricFootnote}>
-        {nutritionSummary.mealCount
-          ? `${nutritionSummary.mealCount} refeição(ões) considerada(s) hoje`
-          : 'Registre uma refeição no diário para atualizar este painel'}
-      </Text>
     </SectionCard>
   );
 }
 
 function MicroMetricCard({ width, nutritionSummary }) {
+  const microRows = chunkMicroItems(nutritionSummary.microItems);
+
   return (
-    <SectionCard style={[styles.metricSlide, { width }]}>
-      <View style={styles.metricCardHeader}>
-        <View>
-          <Text style={styles.eyebrow}>Micronutrientes</Text>
-          <Text style={styles.metricMainValue}>{nutritionSummary.microScore}% coberto</Text>
-        </View>
-
-        <View style={styles.metricIconWrap}>
-          <MaterialCommunityIcons
-            name="sprout-outline"
-            size={23}
-            color={patientTheme.colors.primaryDark}
-          />
-        </View>
-      </View>
-
-      <Text style={styles.heroHelper}>
-        Vitaminas e minerais estimados pelas escolhas registradas no diário.
-      </Text>
-
-      <View style={styles.microGrid}>
-        {nutritionSummary.microItems.map((item, index) => (
-          <View
-            key={`${item.label}-${index}`}
-            style={[styles.microPill, item.reached && styles.microPillReached]}
-          >
-            <Ionicons
-              name={item.reached ? 'checkmark-circle' : 'ellipse-outline'}
-              size={15}
-              color={item.reached ? patientTheme.colors.primaryDark : patientTheme.colors.textMuted}
-            />
-            <Text style={[styles.microPillText, item.reached && styles.microPillTextReached]}>
-              {item.value != null ? `${item.label}: ${item.value}${item.unit || ''}` : item.label}
+    <SectionCard style={[styles.metricSlide, styles.microMetricSlide, { width }]}>
+      <View style={styles.microMetricTop}>
+        <View style={styles.metricCardHeader}>
+          <View style={styles.microMetricHeaderCopy}>
+            <Text style={[styles.eyebrow, styles.microMetricEyebrow]}>Micronutrientes</Text>
+            <Text style={[styles.metricMainValue, styles.microMetricMainValue]}>
+              {nutritionSummary.microScore}% coberto
             </Text>
           </View>
-        ))}
+
+          <View style={[styles.metricIconWrap, styles.microMetricIconWrap]}>
+            <MaterialCommunityIcons
+              name="sprout-outline"
+              size={18}
+              color={patientTheme.colors.primaryDark}
+            />
+          </View>
+        </View>
+
+        <Text style={[styles.heroHelper, styles.microMetricHelper]}>
+          Meta diária proposta no plano vs micronutrientes registrados hoje.
+        </Text>
+
+        <View style={styles.macroGrid}>
+          {microRows.map((row, rowIndex) => (
+            <View key={`micro-row-${rowIndex}`} style={styles.macroGridRow}>
+              {row.map((item, index) => (
+                <View key={`${item.label}-${rowIndex}-${index}`} style={styles.macroCellWrap}>
+                  <NutrientProgressCell item={item} />
+                </View>
+              ))}
+              {row.length === 1 ? <View style={styles.macroCellWrapSpacer} /> : null}
+            </View>
+          ))}
+        </View>
       </View>
 
-      <Text style={styles.metricFootnote}>
-        {nutritionSummary.mealCount
-          ? 'Quanto mais detalhado o diário, mais preciso fica o resumo.'
-          : 'Sem refeições registradas hoje para cruzar com o plano.'}
-      </Text>
+      <View style={styles.microMetricBottom}>
+        <NutrientStatusLegend />
+
+        <Text style={[styles.metricFootnote, styles.microMetricFootnote]}>
+          {nutritionSummary.mealCount
+            ? 'Quanto mais detalhado o diário, mais preciso fica o resumo.'
+            : 'Sem refeições registradas hoje para cruzar com o plano.'}
+        </Text>
+      </View>
     </SectionCard>
   );
 }
@@ -2232,6 +2426,102 @@ const styles = StyleSheet.create({
   metricSlide: {
     height: 468,
   },
+  macroMetricSlide: {
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  macroMetricTop: {
+    flexShrink: 0,
+  },
+  macroMetricHeaderCopy: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  macroMetricEyebrow: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+  },
+  macroMetricMainValue: {
+    fontSize: 24,
+    marginTop: 4,
+  },
+  macroMetricIconWrap: {
+    borderRadius: 18,
+    height: 36,
+    width: 36,
+  },
+  macroMetricHelper: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 6,
+  },
+  macroGrid: {
+    gap: 6,
+    marginTop: 12,
+  },
+  macroGridRow: {
+    flexDirection: 'row',
+    gap: 6,
+  },
+  macroCellWrap: {
+    flex: 1,
+    minWidth: 0,
+  },
+  macroCellWrapSpacer: {
+    flex: 1,
+  },
+  macroCell: {
+    gap: 3,
+    minWidth: 0,
+  },
+  macroCellTop: {
+    alignItems: 'flex-start',
+    flexDirection: 'column',
+    gap: 1,
+  },
+  macroCellLabel: {
+    color: patientTheme.colors.text,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  macroCellValue: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  macroCellTrack: {
+    backgroundColor: patientTheme.colors.surfaceMuted,
+    borderRadius: 4,
+    height: 4,
+    overflow: 'hidden',
+  },
+  macroCellFill: {
+    backgroundColor: patientTheme.colors.primary,
+    borderRadius: 4,
+    height: '100%',
+  },
+  nutrientProgressTrack: {
+    backgroundColor: '#FFFFFF',
+    borderColor: patientTheme.colors.border,
+    borderRadius: 4,
+    borderWidth: 1,
+    height: 5,
+    overflow: 'hidden',
+  },
+  macroMetricBottom: {
+    borderTopColor: patientTheme.colors.border,
+    borderTopWidth: 1,
+    marginTop: 12,
+    paddingTop: 14,
+  },
+  macroMetricFootnote: {
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 0,
+    paddingTop: 10,
+    textAlign: 'center',
+  },
   carouselDots: {
     alignItems: 'center',
     flexDirection: 'row',
@@ -2450,8 +2740,8 @@ const styles = StyleSheet.create({
     width: 44,
   },
   nutritionList: {
-    gap: 13,
-    marginTop: 20,
+    gap: 8,
+    marginTop: 14,
   },
   nutritionLine: {
     gap: 8,
@@ -2482,34 +2772,114 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     height: '100%',
   },
+  microMetricSlide: {
+    height: 460,
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+  },
+  microMetricTop: {
+    flexShrink: 0,
+  },
+  microMetricBottom: {
+    borderTopColor: patientTheme.colors.border,
+    borderTopWidth: 1,
+    marginTop: 12,
+    paddingTop: 14,
+  },
+  microMetricHeaderCopy: {
+    flex: 1,
+    paddingRight: 8,
+  },
+  microMetricEyebrow: {
+    fontSize: 11,
+    letterSpacing: 0.5,
+  },
+  microMetricMainValue: {
+    fontSize: 24,
+    marginTop: 4,
+  },
+  microMetricIconWrap: {
+    borderRadius: 18,
+    height: 36,
+    width: 36,
+  },
+  microMetricHelper: {
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 6,
+  },
   microGrid: {
+    gap: 6,
+    marginTop: 12,
+  },
+  microGridRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 20,
+    gap: 6,
+  },
+  microPillCell: {
+    flex: 1,
+    minWidth: 0,
+  },
+  microPillCellSpacer: {
+    flex: 1,
   },
   microPill: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
-    borderRadius: 18,
+    borderRadius: 12,
     borderWidth: 1,
     flexDirection: 'row',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
+    minHeight: 42,
+    paddingHorizontal: 8,
+    paddingVertical: 6,
+    width: '100%',
   },
-  microPillReached: {
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: patientTheme.colors.primarySoft,
+  microPillCopy: {
+    flex: 1,
+    marginLeft: 5,
+    minWidth: 0,
   },
   microPillText: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '800',
-    marginLeft: 5,
   },
-  microPillTextReached: {
-    color: patientTheme.colors.primaryDark,
+  microPillValue: {
+    fontSize: 9,
+    fontWeight: '700',
+    marginTop: 1,
+    opacity: 0.92,
+  },
+  microLegend: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 10,
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  microLegendItem: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 4,
+  },
+  microLegendDot: {
+    borderRadius: 4,
+    height: 8,
+    width: 8,
+  },
+  microLegendText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  microMetricFootnote: {
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 0,
+    paddingTop: 0,
+    textAlign: 'center',
   },
   metricFootnote: {
     color: patientTheme.colors.textMuted,

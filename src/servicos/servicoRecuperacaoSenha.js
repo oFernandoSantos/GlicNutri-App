@@ -1,42 +1,81 @@
-import { supabase } from './configSupabase';
+import { supabaseAnonKey, supabaseUrl } from './configSupabase';
 
 function normalizarEmail(email) {
   return String(email || '').trim().toLowerCase();
 }
 
-async function obterMensagemErro(error, data) {
-  if (data?.message || data?.error) {
-    return data.message || data.error;
+function normalizarRoleRecuperacao(role) {
+  const perfil = String(role || '').trim();
+
+  if (
+    perfil === 'Nutricionista' ||
+    perfil === 'Profissional da Saúde' ||
+    perfil === 'Medico'
+  ) {
+    return 'Nutricionista';
   }
 
-  if (error?.context && typeof error.context.json === 'function') {
-    try {
-      const body = await error.context.json();
-      return body?.message || body?.error || error.message;
-    } catch {
-      return error.message;
-    }
+  if (perfil === 'Admin') {
+    return 'Admin';
   }
 
-  return error?.message || 'Nao foi possivel concluir a recuperacao de senha.';
+  return 'Paciente';
+}
+
+function obterMensagemErro(data, fallback = 'Nao foi possivel concluir a recuperacao de senha.') {
+  if (data?.message) return data.message;
+  if (data?.error) return data.error;
+  return fallback;
 }
 
 async function chamarPasswordRecovery(body) {
-  const { data, error } = await supabase.functions.invoke('password-recovery', {
-    body,
-  });
+  try {
+    const response = await fetch(`${supabaseUrl}/functions/v1/password-recovery`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        apikey: supabaseAnonKey,
+        Authorization: `Bearer ${supabaseAnonKey}`,
+      },
+      body: JSON.stringify(body),
+    });
 
-  if (error || data?.ok === false) {
-    throw new Error(await obterMensagemErro(error, data));
+    const text = await response.text();
+    let data = null;
+
+    try {
+      data = text ? JSON.parse(text) : null;
+    } catch {
+      data = null;
+    }
+
+    if (!response.ok) {
+      throw new Error(
+        obterMensagemErro(
+          data,
+          `Erro ao recuperar senha (${response.status}).`
+        )
+      );
+    }
+
+    if (!data || data.ok === false) {
+      throw new Error(obterMensagemErro(data));
+    }
+
+    return data;
+  } catch (error) {
+    if (error?.message === 'Failed to fetch') {
+      throw new Error('Nao foi possivel conectar ao Supabase para enviar o codigo.');
+    }
+
+    throw new Error(error?.message || 'Nao foi possivel concluir a recuperacao de senha.');
   }
-
-  return data;
 }
 
 export async function solicitarCodigoRecuperacaoSenha({ role, email }) {
   return chamarPasswordRecovery({
     action: 'request-code',
-    role,
+    role: normalizarRoleRecuperacao(role),
     email: normalizarEmail(email),
   });
 }
@@ -49,7 +88,7 @@ export async function confirmarCodigoRecuperacaoSenha({
 }) {
   return chamarPasswordRecovery({
     action: 'reset-password',
-    role,
+    role: normalizarRoleRecuperacao(role),
     email: normalizarEmail(email),
     code: String(code || '').replace(/\D/g, ''),
     newPassword,

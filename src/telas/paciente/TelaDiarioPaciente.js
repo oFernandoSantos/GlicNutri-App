@@ -28,6 +28,10 @@ import {
   refreshPatientMealEntries,
 } from '../../servicos/servicoDadosPaciente';
 import { EsqueletoDiarioRefeicoes } from '../../componentes/comum/EsqueletoCarregamento';
+import {
+  PACIENTE_MACRO_NUTRIENTES,
+  PACIENTE_MICRO_NUTRIENTES,
+} from '../../utilitarios/catalogoNutrientesPaciente';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
 import { buildLocalDateString } from '../../utilitarios/dataLocal';
 import {
@@ -58,28 +62,8 @@ const NUTRIENT_BASE = {
   vitaminB12: 0,
   folate: 0,
 };
-const MACRO_NUTRIENTS = [
-  { id: 'calories', label: 'Calorias', unit: 'kcal', target: 1800 },
-  { id: 'carbs', label: 'Carboidratos', unit: 'g', target: 225 },
-  { id: 'protein', label: 'Proteínas', unit: 'g', target: 90 },
-  { id: 'fat', label: 'Gorduras totais', unit: 'g', target: 60 },
-  { id: 'fiber', label: 'Fibras', unit: 'g', target: 25 },
-  { id: 'sugar', label: 'Açúcares', unit: 'g', target: 50 },
-  { id: 'saturatedFat', label: 'Gordura saturada', unit: 'g', target: 20 },
-  { id: 'sodium', label: 'Sodio', unit: 'mg', target: 2000 },
-];
-const MICRO_NUTRIENTS = [
-  { id: 'iron', label: 'Ferro', unit: 'mg', target: 18 },
-  { id: 'calcium', label: 'Calcio', unit: 'mg', target: 1000 },
-  { id: 'magnesium', label: 'Magnesio', unit: 'mg', target: 320 },
-  { id: 'potassium', label: 'Potassio', unit: 'mg', target: 2600 },
-  { id: 'zinc', label: 'Zinco', unit: 'mg', target: 8 },
-  { id: 'vitaminA', label: 'Vitamina A', unit: 'mcg', target: 700 },
-  { id: 'vitaminC', label: 'Vitamina C', unit: 'mg', target: 75 },
-  { id: 'vitaminD', label: 'Vitamina D', unit: 'mcg', target: 15 },
-  { id: 'vitaminB12', label: 'Vitamina B12', unit: 'mcg', target: 2.4 },
-  { id: 'folate', label: 'Folato', unit: 'mcg', target: 400 },
-];
+const MACRO_NUTRIENTS = PACIENTE_MACRO_NUTRIENTES;
+const MICRO_NUTRIENTS = PACIENTE_MICRO_NUTRIENTES;
 
 const NUTRITION_KEYWORDS = [
   { keys: ['arroz', 'massa', 'macarrao', 'batata', 'pao', 'quinoa', 'aveia'], calories: 160, carbs: 32, protein: 4, fat: 2, fiber: 3, sugar: 2, saturatedFat: 0.4, sodium: 120, iron: 0.8, calcium: 18, magnesium: 28, potassium: 110, zinc: 0.7, vitaminA: 0, vitaminC: 2, vitaminD: 0, vitaminB12: 0, folate: 28 },
@@ -149,9 +133,19 @@ function estimateNutritionFromMeal(entry) {
       protein: structured.protein,
       fat: structured.fat,
       fiber: structured.fiber,
-      sugar: structured.sugars,
+      sugar: structured.sugar ?? structured.sugars ?? 0,
       saturatedFat: structured.saturatedFat,
       sodium: structured.sodium,
+      iron: structured.iron ?? 0,
+      calcium: structured.calcium ?? 0,
+      magnesium: structured.magnesium ?? 0,
+      potassium: structured.potassium ?? 0,
+      zinc: structured.zinc ?? 0,
+      vitaminA: structured.vitaminA ?? 0,
+      vitaminC: structured.vitaminC ?? 0,
+      vitaminD: structured.vitaminD ?? 0,
+      vitaminB12: structured.vitaminB12 ?? 0,
+      folate: structured.folate ?? 0,
     };
   }
 

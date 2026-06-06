@@ -915,6 +915,109 @@ export function enriquecerAlimentosIdentificadosComTaco(alimentos = []) {
   });
 }
 
+const MEAL_MICRO_NUTRIENTS = [
+  { id: 'iron', entryKeys: ['ironMg', 'iron', 'ferro_total', 'ferro'], foodKeys: ['iron', 'ferro'] },
+  { id: 'calcium', entryKeys: ['calciumMg', 'calcium', 'calcio_total', 'calcio'], foodKeys: ['calcium', 'calcio'] },
+  {
+    id: 'magnesium',
+    entryKeys: ['magnesiumMg', 'magnesium', 'magnesio_total', 'magnesio'],
+    foodKeys: ['magnesium', 'magnesio'],
+  },
+  {
+    id: 'potassium',
+    entryKeys: ['potassiumMg', 'potassium', 'potassio_total', 'potassio'],
+    foodKeys: ['potassium', 'potassio'],
+  },
+  { id: 'zinc', entryKeys: ['zincMg', 'zinc', 'zinco_total', 'zinco'], foodKeys: ['zinc', 'zinco'] },
+  {
+    id: 'vitaminA',
+    entryKeys: ['vitaminAMcg', 'vitaminA', 'vitamina_a_total', 'vitamina_a'],
+    foodKeys: ['vitaminA', 'vitamina_a'],
+  },
+  {
+    id: 'vitaminC',
+    entryKeys: ['vitaminCMg', 'vitaminC', 'vitamina_c_total', 'vitamina_c'],
+    foodKeys: ['vitaminC', 'vitamina_c'],
+  },
+  {
+    id: 'vitaminD',
+    entryKeys: ['vitaminDMcg', 'vitaminD', 'vitamina_d_total', 'vitamina_d'],
+    foodKeys: ['vitaminD', 'vitamina_d'],
+  },
+  {
+    id: 'vitaminB12',
+    entryKeys: ['vitaminB12Mcg', 'vitaminB12', 'vitamina_b12_total', 'vitamina_b12'],
+    foodKeys: ['vitaminB12', 'vitamina_b12'],
+  },
+  { id: 'folate', entryKeys: ['folateMcg', 'folate', 'folato_total', 'folato'], foodKeys: ['folate', 'folato'] },
+];
+
+function pickNumericField(source, keys) {
+  if (!source || typeof source !== 'object') {
+    return 0;
+  }
+
+  for (const key of keys) {
+    const value = Number(source[key]);
+    if (Number.isFinite(value) && value > 0) {
+      return value;
+    }
+  }
+
+  return 0;
+}
+
+function sumFoodMicroNutrient(foods, foodKeys) {
+  return (Array.isArray(foods) ? foods : []).reduce(
+    (sum, item) => sum + pickNumericField(item, foodKeys),
+    0
+  );
+}
+
+function resolveMealMicroNutrient(entry, config) {
+  const direct = pickNumericField(entry, config.entryKeys);
+  if (direct > 0) {
+    return direct;
+  }
+
+  const fromFoods = sumFoodMicroNutrient(entry?.foods, config.foodKeys);
+  if (fromFoods > 0) {
+    return fromFoods;
+  }
+
+  return sumFoodMicroNutrient(entry?.alimentos, config.foodKeys);
+}
+
+export function mapMealFoodNutritionFields(item = {}) {
+  return {
+    name: String(item?.nome || item?.name || '').trim(),
+    alimento: String(item?.nome || item?.name || item?.alimento || '').trim(),
+    grams: roundNutrient(item?.quantidade_gramas ?? item?.grams ?? 0),
+    unit: item?.unidade_quantidade || item?.unit || null,
+    calories: roundNutrient(item?.calorias ?? item?.calories ?? 0),
+    carbs: roundNutrient(item?.carboidratos ?? item?.carbs ?? 0),
+    protein: roundNutrient(item?.proteinas ?? item?.protein ?? 0),
+    fat: roundNutrient(item?.gorduras ?? item?.fat ?? 0),
+    fiber: roundNutrient(item?.fibras ?? item?.fiber ?? 0),
+    sugars: roundNutrient(item?.acucares ?? item?.sugars ?? 0),
+    saturatedFat: roundNutrient(item?.gorduras_saturadas ?? item?.saturatedFat ?? 0),
+    sodium: roundNutrient(item?.sodio ?? item?.sodium ?? 0),
+    iron: roundNutrient(item?.ferro ?? item?.iron ?? 0),
+    calcium: roundNutrient(item?.calcio ?? item?.calcium ?? 0),
+    magnesium: roundNutrient(item?.magnesio ?? item?.magnesium ?? 0),
+    potassium: roundNutrient(item?.potassio ?? item?.potassium ?? 0),
+    zinc: roundNutrient(item?.zinco ?? item?.zinc ?? 0),
+    vitaminA: roundNutrient(item?.vitamina_a ?? item?.vitaminA ?? 0),
+    vitaminC: roundNutrient(item?.vitamina_c ?? item?.vitaminC ?? 0),
+    vitaminD: roundNutrient(item?.vitamina_d ?? item?.vitaminD ?? 0),
+    vitaminB12: roundNutrient(item?.vitamina_b12 ?? item?.vitaminB12 ?? 0),
+    folate: roundNutrient(item?.folato ?? item?.folate ?? 0),
+    mealLabel: item?.mealLabel || null,
+    mealTypeLabel: item?.mealTypeLabel || null,
+    planSectionId: item?.planSectionId || null,
+  };
+}
+
 export function getMealEntryNutrition(entry) {
   const carbs = Number(entry?.carbsG ?? entry?.carbs);
   const protein = Number(entry?.proteinG ?? entry?.protein);
@@ -934,16 +1037,23 @@ export function getMealEntryNutrition(entry) {
     }
   }
 
+  const microNutrients = MEAL_MICRO_NUTRIENTS.reduce((totals, config) => {
+    totals[config.id] = resolveMealMicroNutrient(entry, config);
+    return totals;
+  }, {});
+
   return {
     calories: kcal,
     carbs: Number.isFinite(carbs) ? carbs : 0,
     protein: Number.isFinite(protein) ? protein : 0,
     fat: Number.isFinite(fat) ? fat : 0,
     fiber: Number(entry?.fiberG ?? entry?.fibrasG ?? entry?.fibras ?? 0) || 0,
-    sugars: Number(entry?.sugarsG ?? entry?.acucaresG ?? entry?.acucares ?? 0) || 0,
+    sugar: Number(entry?.sugarsG ?? entry?.acucaresG ?? entry?.acucares ?? entry?.sugars ?? 0) || 0,
+    sugars: Number(entry?.sugarsG ?? entry?.acucaresG ?? entry?.acucares ?? entry?.sugars ?? 0) || 0,
     saturatedFat:
       Number(entry?.saturatedFatG ?? entry?.gordurasSaturadasG ?? entry?.gorduras_saturadas ?? 0) || 0,
     sodium: Number(entry?.sodiumMg ?? entry?.sodioMg ?? entry?.sodio ?? 0) || 0,
+    ...microNutrients,
   };
 }
 
@@ -1203,20 +1313,17 @@ export function buildMealTimelineEntryFromAI({
     saturatedFatG: roundNutrient(safeTotals.gorduras_saturadas_total),
     transFatG: roundNutrient(safeTotals.gordura_trans_total),
     sodiumMg: roundNutrient(safeTotals.sodio_total),
-    foods: normalizedFoods.map((item) => ({
-      name: item.nome,
-      alimento: item.nome,
-      grams: roundNutrient(item.quantidade_gramas),
-      unit: item.unidade_quantidade || null,
-      calories: roundNutrient(item.calorias),
-      carbs: roundNutrient(item.carboidratos),
-      protein: roundNutrient(item.proteinas),
-      fat: roundNutrient(item.gorduras),
-      fiber: roundNutrient(item.fibras),
-      sugars: roundNutrient(item.acucares),
-      saturatedFat: roundNutrient(item.gorduras_saturadas),
-      sodium: roundNutrient(item.sodio),
-    })),
+    ironMg: roundNutrient(safeTotals.ferro_total),
+    calciumMg: roundNutrient(safeTotals.calcio_total),
+    magnesiumMg: roundNutrient(safeTotals.magnesio_total),
+    potassiumMg: roundNutrient(safeTotals.potassio_total),
+    zincMg: roundNutrient(safeTotals.zinco_total),
+    vitaminAMcg: roundNutrient(safeTotals.vitamina_a_total),
+    vitaminCMg: roundNutrient(safeTotals.vitamina_c_total),
+    vitaminDMcg: roundNutrient(safeTotals.vitamina_d_total),
+    vitaminB12Mcg: roundNutrient(safeTotals.vitamina_b12_total),
+    folateMcg: roundNutrient(safeTotals.folato_total),
+    foods: normalizedFoods.map((item) => mapMealFoodNutritionFields(item)),
     foto_url: normalizedPhotoRef || null,
   };
 }
@@ -1277,6 +1384,16 @@ export async function salvarRefeicaoIA({
       gorduras_saturadas: item.gorduras_saturadas,
       gordura_trans: item.gordura_trans,
       sodio: item.sodio,
+      ferro: item.ferro,
+      calcio: item.calcio,
+      magnesio: item.magnesio,
+      potassio: item.potassio,
+      zinco: item.zinco,
+      vitamina_a: item.vitamina_a,
+      vitamina_c: item.vitamina_c,
+      vitamina_d: item.vitamina_d,
+      vitamina_b12: item.vitamina_b12,
+      folato: item.folato,
       refTacoId: item.refTacoId || null,
       ...mealMetadata,
     };
