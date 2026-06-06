@@ -21,7 +21,6 @@ const menuItems = [
     library: 'ion',
   },
   { label: 'Alimentação', route: 'PacienteDiario', icon: 'book-outline', library: 'ion' },
-  { label: 'Bem-estar', route: 'PacienteBemEstar', icon: 'body-outline', library: 'ion' },
   {
     label: 'Conversas',
     route: 'PacienteChatNutricionista',

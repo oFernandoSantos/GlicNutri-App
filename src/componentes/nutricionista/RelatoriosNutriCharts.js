@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { nutriColors } from '../../temas/designSystemNutricionista';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 export const CHART_PALETTE = {
   green: nutriColors.primary,
@@ -110,8 +111,8 @@ function useChartFadeIn() {
 
   useEffect(() => {
     Animated.parallel([
-      Animated.timing(opacity, { toValue: 1, duration: 420, useNativeDriver: true }),
-      Animated.spring(scale, { toValue: 1, friction: 8, tension: 80, useNativeDriver: true }),
+      Animated.timing(opacity, { toValue: 1, duration: 420, useNativeDriver: USE_NATIVE_DRIVER }),
+      Animated.spring(scale, { toValue: 1, friction: 8, tension: 80, useNativeDriver: USE_NATIVE_DRIVER }),
     ]).start();
   }, [opacity, scale]);
 

@@ -10,6 +10,7 @@ import {
   isTodayKey,
 } from '../../utilitarios/slotsTeleconsulta';
 import { CAL_GREEN, CAL_OCCUPIED } from './coresCalendarioAgenda';
+const USE_NATIVE_DRIVER = false;
 
 const WEEKDAY_LABELS = ['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'];
 const OUTLINE = '#E4E8EC';
@@ -149,7 +150,7 @@ export default function CalendarioHorarios({
   }, [selectedDayKey]);
 
   useEffect(() => {
-    Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: true }).start();
+    Animated.timing(fade, { toValue: 1, duration: 220, useNativeDriver: USE_NATIVE_DRIVER }).start();
   }, [visibleDays, viewMonth.year, viewMonth.month, fade]);
 
   const monthLabel = useMemo(() => {

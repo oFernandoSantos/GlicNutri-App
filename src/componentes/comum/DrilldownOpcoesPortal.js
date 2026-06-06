@@ -37,7 +37,7 @@ export default function DrilldownOpcoesPortal({
       ]}
     >
       <TouchableWithoutFeedback onPress={onClose} accessible={false}>
-        <View style={styles.backdrop} />
+        <View style={[styles.backdrop, embedded && styles.embeddedBackdrop]} />
       </TouchableWithoutFeedback>
       {card}
     </View>
@@ -79,6 +79,9 @@ const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(47, 52, 56, 0.34)',
+  },
+  embeddedBackdrop: {
+    backgroundColor: 'transparent',
   },
   card: {
     maxWidth: 520,

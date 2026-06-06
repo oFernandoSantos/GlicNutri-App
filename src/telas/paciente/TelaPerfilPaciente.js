@@ -97,7 +97,6 @@ const INSULIN_CATEGORY_OPTIONS = [
 const INSULIN_TYPE_OPTIONS = {
   basal: ['NPH', 'Glargina U100', 'Glargina U300', 'Detemir', 'Degludeca', 'Icodec'],
   prandial: ['Regular', 'Lispro', 'Asparte', 'Glulisina', 'Asparte ultrarrapida'],
-  premixed: ['NPH/Regular 70/30', 'NPL/Lispro 75/25', 'NPL/Lispro 50/50', 'NPA/Asparte 70/30'],
   inhaled: ['Insulina humana inalavel'],
 };
 const BASAL_INSULIN_PROFILE_OPTIONS = [
@@ -597,7 +596,6 @@ const THERAPY_WEEKDAY_OPTIONS = [
 const INSULIN_USAGE_OPTIONS = {
   basal: ['Rotina da manhã', 'Rotina da noite', 'Semanal', 'Outro horário fixo'],
   prandial: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
-  premixed: ['Antes da refeição', 'Rotina prescrita', 'Outro horário fixo'],
   inhaled: ['Antes da refeição', 'Correção', 'Antes da refeição e correção'],
 };
 const PHARMACOLOGY_CATEGORY_OPTIONS = [
@@ -610,11 +608,6 @@ const PHARMACOLOGY_CATEGORY_OPTIONS = [
     label: 'Bolus',
     value: 'bolus',
     descricao: 'Insulina usada para refeições ou correção de glicemia alta',
-  },
-  {
-    label: 'Mista',
-    value: 'mista',
-    descricao: 'Insulina pré-misturada, combinando ação rápida/regular com intermediária',
   },
 ];
 const PHARMACOLOGY_BRAND_OPTIONS = {
@@ -652,13 +645,6 @@ const PHARMACOLOGY_BRAND_OPTIONS = {
     { marca: 'Tresiba', molecula: 'Degludeca', classe_acao: 'ultralonga', categoria_funcional: 'basal', apresentacao: 'U100', via: 'subcutanea' },
     { marca: 'Awiqli', molecula: 'Icodeca', classe_acao: 'ultralonga', categoria_funcional: 'basal', apresentacao: 'U700', via: 'subcutanea' },
   ],
-  mista: [
-    { marca: 'NovoMix 30', molecula: 'insulina asparte + insulina asparte protaminada', classe_acao: 'premisturada', categoria_funcional: 'mista' },
-    { marca: 'Humalog Mix 25', molecula: 'insulina lispro + insulina lispro protamina', classe_acao: 'premisturada', categoria_funcional: 'mista' },
-    { marca: 'Humalog Mix 50', molecula: 'insulina lispro + insulina lispro protamina', classe_acao: 'premisturada', categoria_funcional: 'mista' },
-    { marca: 'Humulin 70N/30R', molecula: 'insulina humana NPH + insulina humana regular', classe_acao: 'premisturada', categoria_funcional: 'mista' },
-    { marca: 'Novolin 70/30', molecula: 'insulina humana NPH + insulina humana regular', classe_acao: 'premisturada', categoria_funcional: 'mista' },
-  ],
 };
 const PHARMACOLOGY_DEVICE_OPTIONS = [
   { label: 'Caneta', value: 'caneta' },
@@ -694,7 +680,7 @@ const PHARMACOLOGY_ACTION_PROFILE = {
   longa: { inicio_acao: 'lento', pico: 'baixo ou sem pico definido', duracao: 'longa' },
   ultralonga: { inicio_acao: 'lento', pico: 'sem pico importante', duracao: 'muito longa' },
   semanal: { inicio_acao: 'lento', pico: 'sem pico importante', duracao: 'semanal' },
-  premisturada: { inicio_acao: 'variável', pico: 'presente', duracao: 'mista' },
+  premisturada: { inicio_acao: 'variável', pico: 'presente', duracao: 'combinada' },
 };
 const PHARMACOLOGY_STATUS_OPTIONS = [
   { label: 'Ativo', value: 'ativo' },
@@ -1921,7 +1907,6 @@ function buildPharmacologyPatch(plans, patient) {
     .map((item) => {
       if (item === 'basal') return 'Basal';
       if (item === 'bolus') return 'Bolus';
-      if (item === 'mista') return 'Mista';
       return item;
     })
     .join(', ');
@@ -3708,6 +3693,125 @@ export default function PacientePerfilScreen({
     setFocusedTherapyField('');
   }
 
+  function getTherapyDraftSaveState(baseDraft = therapyDraft) {
+    if (!baseDraft.categoria_funcional) {
+      return {
+        error: { type: 'error', message: 'Selecione a categoria funcional.' },
+        workingDraft: baseDraft,
+      };
+    }
+
+    if (!baseDraft.marca) {
+      return {
+        error: {
+          type: 'error',
+          message:
+            baseDraft.categoria_funcional === 'basal'
+              ? 'Selecione a marca/tipo da insulina basal.'
+              : 'Selecione a marca da insulina.',
+        },
+        workingDraft: baseDraft,
+      };
+    }
+
+    if (baseDraft.categoria_funcional === 'basal' && !baseDraft.dispositivo) {
+      return {
+        error: { type: 'error', message: 'Selecione o dispositivo da insulina basal.' },
+        workingDraft: baseDraft,
+      };
+    }
+
+    if (baseDraft.categoria_funcional === 'bolus' && !baseDraft.dispositivo) {
+      return {
+        error: { type: 'error', message: 'Selecione o dispositivo da insulina bolus.' },
+        workingDraft: baseDraft,
+      };
+    }
+
+    let workingDraft = baseDraft;
+
+    if (baseDraft.categoria_funcional === 'bolus') {
+      if (!String(profileBolusDoseApplied || '').trim()) {
+        return {
+          error: { type: 'error', message: 'Informe a dose aplicada em UI.' },
+          workingDraft,
+        };
+      }
+
+      if (!isValidTime24h(profileBolusTime)) {
+        return {
+          error: { type: 'error', message: 'Informe o horário da aplicação (HH:mm).' },
+          workingDraft,
+        };
+      }
+
+      const rows = (baseDraft.tabela_horarios || []).map((r) => ({ ...r }));
+      const time = formatTimeInput(profileBolusTime);
+      const doseStr = formatSingleDecimalDoseInput(String(profileBolusDoseApplied));
+      const rowIndex = rows.findIndex((r) =>
+        refeicaoMatchesRow(r.refeicao, profileBolusMeal, BOLUS_MEAL_OPTIONS)
+      );
+
+      if (rowIndex >= 0) {
+        rows[rowIndex] = { ...rows[rowIndex], horario: time, dose: doseStr };
+      } else {
+        rows.push({
+          ...createEmptyTherapyScheduleRow(),
+          refeicao: profileBolusMeal,
+          horario: time,
+          dose: doseStr,
+          tipo_dose:
+            profileBolusAppType === 'correcao'
+              ? 'dose_correcao'
+              : profileBolusAppType === 'refeicao'
+                ? 'dose_carboidrato'
+                : 'dose_variavel',
+          dose_unidade: 'UI',
+        });
+      }
+
+      workingDraft = {
+        ...baseDraft,
+        tabela_horarios: buildBolusScheduleRowsForUsage(baseDraft.modo_uso, rows),
+      };
+    }
+
+    if (workingDraft.categoria_funcional === 'basal') {
+      const basalValidationError = validateBasalTherapyDraft(workingDraft);
+      if (basalValidationError) {
+        return { error: basalValidationError, workingDraft };
+      }
+    }
+
+    if (workingDraft.categoria_funcional === 'bolus') {
+      const bolusValidationError = validateBolusTherapyDraft(workingDraft);
+      if (bolusValidationError) {
+        return { error: bolusValidationError, workingDraft };
+      }
+    }
+
+    const doseStepValidationError = validateTherapyDoseStep(workingDraft);
+    if (doseStepValidationError) {
+      return { error: doseStepValidationError, workingDraft };
+    }
+
+    return { error: null, workingDraft };
+  }
+
+  const therapyDraftValidationError = useMemo(() => {
+    if (!therapyEditorVisible) return null;
+    return getTherapyDraftSaveState(therapyDraft).error;
+  }, [
+    therapyEditorVisible,
+    therapyDraft,
+    profileBolusDoseApplied,
+    profileBolusTime,
+    profileBolusMeal,
+    profileBolusAppType,
+  ]);
+
+  const canSaveTherapyDraft = Boolean(therapyEditorVisible) && !therapyDraftValidationError && !savingTherapy;
+
   async function saveTherapyDraftLocally() {
     if (!therapyDraft.categoria_funcional) {
       setTherapyFeedback({ type: 'error', message: 'Selecione a categoria funcional.' });
@@ -3854,6 +3958,80 @@ export default function PacientePerfilScreen({
       closeTherapyEditor();
     } catch (error) {
       console.log('Erro ao salvar plano de insulina:', error);
+      setTherapyFeedback({
+        type: 'error',
+        message: 'Não foi possível salvar o plano de insulina agora. Tente novamente.',
+      });
+    } finally {
+      setSavingTherapy(false);
+    }
+  }
+
+  async function saveTherapyDraftLocallyFast() {
+    const { error, workingDraft } = getTherapyDraftSaveState();
+    if (error) {
+      setTherapyFeedback(error);
+      return;
+    }
+
+    const nextPlan = normalizeTherapyPlan({
+      ...workingDraft,
+      doseStep: resolveDoseStepForPlan(workingDraft),
+      dose:
+        workingDraft.categoria_funcional === 'basal' || workingDraft.categoria_funcional === 'bolus'
+          ? String(workingDraft.tabela_horarios?.[0]?.dose || '').trim()
+          : workingDraft.dose,
+      dose_unidade:
+        workingDraft.categoria_funcional === 'basal'
+          ? 'UI'
+          : workingDraft.categoria_funcional === 'bolus'
+            ? workingDraft.dose_unidade || 'UI'
+            : workingDraft.dose_unidade || workingDraft.escala_unidade || 'UI',
+      tabela_horarios: (workingDraft.tabela_horarios || []).map((item) => ({
+        ...item,
+        dose_unidade:
+          workingDraft.categoria_funcional === 'basal'
+            ? 'UI'
+            : workingDraft.categoria_funcional === 'bolus'
+              ? item.dose_unidade || workingDraft.dose_unidade || 'UI'
+              : item.dose_unidade || workingDraft.dose_unidade || workingDraft.escala_unidade || 'UI',
+      })),
+    });
+
+    const previousPlans = therapyPlans;
+    const previousPatient = paciente;
+    const nextPlans = [
+      ...therapyPlans.filter(
+        (item) =>
+          item.id !== nextPlan.id && item.categoria_funcional !== nextPlan.categoria_funcional
+      ),
+      nextPlan,
+    ];
+
+    try {
+      setSavingTherapy(true);
+      setTherapyFeedback(null);
+      setTherapyPlans(nextPlans);
+      setSavedTherapyPlans(nextPlans);
+      closeTherapyEditor();
+
+      const updatedPatient = await updatePatientProfile({
+        patientId,
+        currentPatient: paciente,
+        patientContext: usuarioLogado,
+        patch: buildPharmacologyPatch(nextPlans, paciente || {}),
+      });
+
+      const nextSavedPlans = buildEditablePharmacologyPlans(updatedPatient || {});
+      setPaciente(updatedPatient);
+      setTherapyPlans(nextSavedPlans);
+      setSavedTherapyPlans(nextSavedPlans);
+      setTherapyFeedback({ type: 'success', message: 'Plano de insulina salvo com sucesso.' });
+    } catch (error) {
+      console.log('Erro ao salvar plano de insulina:', error);
+      setPaciente(previousPatient);
+      setTherapyPlans(previousPlans);
+      setSavedTherapyPlans(previousPlans);
       setTherapyFeedback({
         type: 'error',
         message: 'Não foi possível salvar o plano de insulina agora. Tente novamente.',
@@ -5344,7 +5522,7 @@ export default function PacientePerfilScreen({
                           ]}
                         >
                           {getTherapyFieldDisplayValue('categoria_funcional', therapyDraft.categoria_funcional) ||
-                            'Selecione basal, bolus ou mista'}
+                            'Selecione basal ou bolus'}
                         </Text>
                       </View>
                     </View>
@@ -5947,10 +6125,19 @@ export default function PacientePerfilScreen({
                     <CampoFocoModal fieldId="therapy-modal-actions" style={styles.therapyModalActions}>
                       <TouchableOpacity
                         activeOpacity={0.82}
-                        onPress={saveTherapyDraftLocally}
-                        style={styles.emailModalPrimaryButton}
+                        disabled={!canSaveTherapyDraft}
+                        onPress={saveTherapyDraftLocallyFast}
+                        style={[
+                          styles.emailModalPrimaryButton,
+                          !canSaveTherapyDraft && styles.therapyModalPrimaryButtonDisabled,
+                        ]}
                       >
-                        <Text style={styles.emailModalPrimaryButtonText}>
+                        <Text
+                          style={[
+                            styles.emailModalPrimaryButtonText,
+                            !canSaveTherapyDraft && styles.therapyModalPrimaryButtonTextDisabled,
+                          ]}
+                        >
                           {therapyDraft.categoria_funcional === 'bolus'
                             ? 'Salvar Insulina Bolus'
                             : 'Salvar este plano'}
@@ -8054,6 +8241,12 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 16,
     fontWeight: '800',
+  },
+  therapyModalPrimaryButtonDisabled: {
+    backgroundColor: '#E5E7EB',
+  },
+  therapyModalPrimaryButtonTextDisabled: {
+    color: patientTheme.colors.textMuted,
   },
   emailModalSecondaryButton: {
     alignItems: 'center',

@@ -14,6 +14,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import { getConsultaStatusMeta } from '../../utilitarios/slotsTeleconsulta';
+const USE_NATIVE_DRIVER = Platform.OS !== 'web';
 
 export function CartaoAgendamento({ children, style, onPress, active }) {
   const scale = useRef(new Animated.Value(1)).current;
@@ -21,7 +22,7 @@ export function CartaoAgendamento({ children, style, onPress, active }) {
   useEffect(() => {
     Animated.spring(scale, {
       toValue: active ? 1.01 : 1,
-      useNativeDriver: true,
+      useNativeDriver: USE_NATIVE_DRIVER,
       friction: 8,
     }).start();
   }, [active, scale]);
@@ -225,8 +226,8 @@ export function EsqueletoAgendamento({ rows = 3 }) {
   useEffect(() => {
     const loop = Animated.loop(
       Animated.sequence([
-        Animated.timing(opacity, { toValue: 0.75, duration: 700, useNativeDriver: true }),
-        Animated.timing(opacity, { toValue: 0.35, duration: 700, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 0.75, duration: 700, useNativeDriver: USE_NATIVE_DRIVER }),
+        Animated.timing(opacity, { toValue: 0.35, duration: 700, useNativeDriver: USE_NATIVE_DRIVER }),
       ])
     );
     loop.start();
