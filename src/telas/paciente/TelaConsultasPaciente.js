@@ -162,6 +162,7 @@ export default function PacienteAgendamentosScreen({
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const mensagensSessaoRef = useRef(new Set());
+  const activeSectionRef = useRef(route?.params?.activeSection || 'agendar');
 
   const [nutricionistas, setNutricionistas] = useState([]);
   const [medicos, setMedicos] = useState([]);
@@ -208,12 +209,22 @@ export default function PacienteAgendamentosScreen({
     }, [])
   );
 
-  const exibirMensagemAgendamentos = useCallback((payload) => {
+  const exibirMensagemAgendamentos = useCallback((payload, options = {}) => {
+    if (options.apenasNaAbaConsultas && activeSectionRef.current !== 'consultas') {
+      return;
+    }
+
     const resolved = resolverMensagemPaciente(payload);
     const chave = `${resolved.tipo}|${resolved.texto}|${resolved.subtexto}`;
     if (mensagensSessaoRef.current.has(chave)) return;
     mensagensSessaoRef.current.add(chave);
     mostrarToastPaciente(resolved);
+  }, []);
+
+  const abrirAbaMinhasConsultas = useCallback(() => {
+    activeSectionRef.current = 'consultas';
+    mensagensSessaoRef.current = new Set();
+    setActiveSection('consultas');
   }, []);
 
   const dateFromKey = useMemo(() => parseDateBrToKey(dateFromBr), [dateFromBr]);
@@ -397,6 +408,10 @@ export default function PacienteAgendamentosScreen({
   }, [navigation, loadBase]);
 
   useEffect(() => {
+    activeSectionRef.current = activeSection;
+  }, [activeSection]);
+
+  useEffect(() => {
     if (route?.params?.activeSection) {
       setActiveSection(route.params.activeSection);
     }
@@ -419,10 +434,13 @@ export default function PacienteAgendamentosScreen({
         const latest = items?.[0];
         if (latest && !latest._shown) {
           latest._shown = true;
-          exibirMensagemAgendamentos({
-            tipo: latest.evento === 'cancelada' ? 'aviso' : 'sucesso',
-            texto: latest.mensagem || latest.titulo,
-          });
+          exibirMensagemAgendamentos(
+            {
+              tipo: latest.evento === 'cancelada' ? 'aviso' : 'sucesso',
+              texto: latest.mensagem || latest.titulo,
+            },
+            { apenasNaAbaConsultas: true }
+          );
         }
       },
     });
@@ -815,10 +833,13 @@ export default function PacienteAgendamentosScreen({
     try {
       await abrirLinkGoogleMeet(link);
     } catch (error) {
-      exibirMensagemAgendamentos({
-        tipo: 'erro',
-        texto: error?.message || 'Não foi possível abrir o Google Meet.',
-      });
+      exibirMensagemAgendamentos(
+        {
+          tipo: 'erro',
+          texto: error?.message || 'Não foi possível abrir o Google Meet.',
+        },
+        { apenasNaAbaConsultas: true }
+      );
     }
   }
 
@@ -843,31 +864,6 @@ export default function PacienteAgendamentosScreen({
       exibirMensagemAgendamentos({
         tipo: 'erro',
         texto: error?.message || 'Não foi possível cancelar a consulta.',
-      });
-    }
-  }
-
-  async function handleConfirmarConsultaAgendada(item, nutri) {
-    try {
-      await updateConsultaStatus({
-        consultaId: item.id,
-        status: 'confirmed',
-        nutricionista: nutri,
-        actor: usuarioLogado,
-        origin: 'agendamentos_paciente',
-      });
-      exibirMensagemAgendamentos({
-        tipo: 'sucesso',
-        texto: 'Consulta confirmada com sucesso.',
-      });
-      await loadBase();
-      if (selectedNutri?.id_nutricionista_uuid === nutri?.id_nutricionista_uuid) {
-        await loadSlots();
-      }
-    } catch (error) {
-      exibirMensagemAgendamentos({
-        tipo: 'erro',
-        texto: error?.message || 'Não foi possível confirmar a consulta.',
       });
     }
   }
@@ -1425,7 +1421,7 @@ export default function PacienteAgendamentosScreen({
             styles.segmentedOptionWide,
             activeSection === 'consultas' && styles.segmentedOptionActive,
           ]}
-          onPress={() => setActiveSection('consultas')}
+          onPress={abrirAbaMinhasConsultas}
         >
           <Text
             numberOfLines={1}
@@ -1670,7 +1666,9 @@ export default function PacienteAgendamentosScreen({
               <View style={[styles.sectionHeaderRow, styles.bookingSectionHeaderRow]}>
                 <View>
                   <Text style={styles.sectionTitle}>Minhas consultas agendadas</Text>
-                  <Text style={styles.sectionSubtitle}>Confirme, cancele ou entre pelo Google Meet</Text>
+                  <Text style={styles.sectionSubtitle}>
+                    Consultas pendentes: só cancelamento. Meet após confirmação do profissional.
+                  </Text>
                 </View>
               </View>
 
@@ -1685,6 +1683,8 @@ export default function PacienteAgendamentosScreen({
                     consulta: item,
                     nutricionista: profissional.nutri,
                   });
+                  const consultaStatus = String(item.status || 'scheduled').toLowerCase();
+                  const consultaConfirmada = consultaStatus === 'confirmed';
 
                   return (
                     <CartaoAgendamento key={`next-filtered-${item.id}`} style={styles.bookingCard}>
@@ -1706,21 +1706,13 @@ export default function PacienteAgendamentosScreen({
                       </View>
 
                       <View style={styles.bookingActions}>
-                        {String(item.status || 'scheduled') === 'scheduled' ? (
-                          <BotaoAgendamento
-                            label="Confirmar"
-                            icon="checkmark-circle-outline"
-                            onPress={() => handleConfirmarConsultaAgendada(item, profissional.nutri)}
-                            style={styles.bookingActionPrimary}
-                          />
-                        ) : null}
                         <BotaoAgendamento
                           label="Cancelar"
-                          variant="ghost"
+                          variant="unlink"
                           onPress={() => handleCancelarConsulta(item, profissional.nutri)}
-                          style={styles.bookingActionSecondary}
+                          style={[styles.bookingActionSecondary, styles.bookingActionCancel]}
                         />
-                        {meetLink ? (
+                        {consultaConfirmada && meetLink ? (
                           <BotaoAgendamento
                             label="Entrar"
                             icon="videocam-outline"
@@ -2244,6 +2236,10 @@ const styles = StyleSheet.create({
   bookingActionSecondary: {
     borderWidth: 1,
     flex: 1,
+  },
+  bookingActionCancel: {
+    backgroundColor: patientTheme.colors.background,
+    borderColor: patientTheme.colors.border,
   },
   bookingActionPrimary: {
     flex: 1.15,
