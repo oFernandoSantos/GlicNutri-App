@@ -98,7 +98,37 @@ import {
 } from './src/servicos/servicoLibreViewAutoSync';
 
 const Stack = createStackNavigator();
+const BOOT_RPC_TIMEOUT_MS = 8 * 1000;
+const BOOT_SAFETY_RELEASE_MS = 12 * 1000;
 const WEB_SCROLL_STYLE_ID = 'glicnutri-web-document-scroll';
+
+function executarComTimeout(promise, timeoutMs, label = 'operacao') {
+  return Promise.race([
+    promise,
+    new Promise((_, reject) => {
+      setTimeout(() => {
+        reject(new Error(`${label} excedeu ${timeoutMs}ms`));
+      }, timeoutMs);
+    }),
+  ]);
+}
+
+function restaurarRpcPacienteEmSegundoPlano(paciente) {
+  if (!paciente) return;
+
+  executarComTimeout(
+    (async () => {
+      let rpcToken = await garantirSessaoRpcClinicaComPerfil(paciente);
+      if (!rpcToken) {
+        await emitirSessaoRpcOAuthPaciente(paciente);
+      }
+    })(),
+    BOOT_RPC_TIMEOUT_MS,
+    'rpc-boot-paciente'
+  ).catch((error) => {
+    console.log('RPC boot paciente (nao bloqueante):', error?.message || error);
+  });
+}
 const READER_TOPO_WEB_HEIGHT = 58;
 const SCREEN_WIDTH = Dimensions.get('window').width;
 const fadeCardInterpolator = ({ current }) => ({
@@ -203,6 +233,20 @@ export default function App() {
     initObservabilidade();
   }, []);
 
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setAuthReady(true);
+      setIntroReady(true);
+      setPatientOnboardingReady(true);
+      setPatientLocalReady(true);
+      setAdminReady(true);
+      setNutriReady(true);
+      setMedicoReady(true);
+    }, BOOT_SAFETY_RELEASE_MS);
+
+    return () => clearTimeout(timer);
+  }, []);
+
   const [session, setSession] = useState(null);
   const [authReady, setAuthReady] = useState(false);
   const [introReady, setIntroReady] = useState(false);
@@ -226,10 +270,7 @@ export default function App() {
     async function carregarPacienteLocal() {
       const paciente = await carregarSessaoPaciente();
       if (paciente) {
-        let rpcToken = await garantirSessaoRpcClinicaComPerfil(paciente);
-        if (!rpcToken) {
-          rpcToken = await emitirSessaoRpcOAuthPaciente(paciente);
-        }
+        restaurarRpcPacienteEmSegundoPlano(paciente);
       }
       if (isMounted) {
         setPatientLocalSession(paciente);
@@ -282,7 +323,13 @@ export default function App() {
     async function carregarNutri() {
       const nutri = await carregarSessaoNutricionista();
       if (nutri) {
-        await garantirSessaoRpcClinicaComPerfil(nutri);
+        executarComTimeout(
+          garantirSessaoRpcClinicaComPerfil(nutri),
+          BOOT_RPC_TIMEOUT_MS,
+          'rpc-boot-nutri'
+        ).catch((rpcError) => {
+          console.log('RPC boot nutri (nao bloqueante):', rpcError?.message || rpcError);
+        });
       }
       if (isMounted) {
         setNutriSession(nutri);
@@ -302,7 +349,13 @@ export default function App() {
     async function carregarMedico() {
       const medico = await carregarSessaoMedico();
       if (medico) {
-        await garantirSessaoRpcClinicaComPerfil(medico);
+        executarComTimeout(
+          garantirSessaoRpcClinicaComPerfil(medico),
+          BOOT_RPC_TIMEOUT_MS,
+          'rpc-boot-medico'
+        ).catch((rpcError) => {
+          console.log('RPC boot medico (nao bloqueante):', rpcError?.message || rpcError);
+        });
       }
       if (isMounted) {
         setMedicoSession(medico);
@@ -382,7 +435,20 @@ export default function App() {
 
     async function carregarSessao() {
       setAuthReady(false);
-      const { data, error } = await supabase.auth.getSession();
+      let data = null;
+      let error = null;
+
+      try {
+        const result = await executarComTimeout(
+          supabase.auth.getSession(),
+          BOOT_RPC_TIMEOUT_MS,
+          'auth-getSession'
+        );
+        data = result?.data || null;
+        error = result?.error || null;
+      } catch (sessionError) {
+        console.log('Sessao auth indisponivel no boot:', sessionError?.message || sessionError);
+      }
 
       if (error) {
         console.log('Erro ao carregar sessao inicial:', error.message);

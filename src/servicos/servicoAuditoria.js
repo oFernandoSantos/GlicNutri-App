@@ -4,7 +4,22 @@ const AUDIT_BUCKET = 'audit-logs';
 const AUDIT_PREFIX = 'app';
 const MAX_EVENT_FILE_SIZE = 1024 * 1024;
 const AUDIT_DOWNLOAD_CONCURRENCY = 16;
+const AUDIT_UPLOAD_TIMEOUT_MS = 6 * 1000;
 const auditEventCache = new Map();
+
+function isRemoteAuditUploadEnabled() {
+  return String(process.env.EXPO_PUBLIC_ENABLE_AUDIT_LOG_UPLOAD || '').trim() === '1';
+}
+
+async function executarUploadAuditoriaComTimeout(uploadPromise) {
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Upload de auditoria excedeu ${AUDIT_UPLOAD_TIMEOUT_MS}ms`));
+    }, AUDIT_UPLOAD_TIMEOUT_MS);
+  });
+
+  return Promise.race([uploadPromise, timeoutPromise]);
+}
 
 function inferActorType(actor) {
   if (!actor || typeof actor !== 'object') {
@@ -686,11 +701,18 @@ export async function registrarLogAuditoria(config = {}) {
     return null;
   }
 
-  console.log('AUDITORIA CHAMADA', payload);
+  if (!isRemoteAuditUploadEnabled()) {
+    return {
+      ...payload,
+      path,
+      localOnly: true,
+    };
+  }
 
   try {
-    const restResult = await uploadAuditLogViaStorageRest(path, binaryBody);
-    console.log('UPLOAD RESULT REST', restResult);
+    const restResult = await executarUploadAuditoriaComTimeout(
+      uploadAuditLogViaStorageRest(path, binaryBody)
+    );
 
     if (restResult.ok) {
       return {
@@ -699,19 +721,12 @@ export async function registrarLogAuditoria(config = {}) {
       };
     }
 
-    console.error('ERRO AUDITORIA', restResult.error);
-    console.log('AUDITORIA tentativa SDK apos falha do REST', {
-      restMessage: restResult.error?.message || '',
-    });
-
-    const uploadResult = await supabase.storage
-      .from(AUDIT_BUCKET)
-      .upload(path, binaryBody, {
+    const uploadResult = await executarUploadAuditoriaComTimeout(
+      supabase.storage.from(AUDIT_BUCKET).upload(path, binaryBody, {
         contentType: 'application/json',
         upsert: false,
-      });
-
-    console.log('UPLOAD RESULT SDK', uploadResult);
+      })
+    );
 
     if (!uploadResult.error) {
       return {
@@ -720,30 +735,8 @@ export async function registrarLogAuditoria(config = {}) {
       };
     }
 
-    console.error('ERRO AUDITORIA', uploadResult.error);
     return null;
-  } catch (error) {
-    console.error('ERRO AUDITORIA', error);
-
-    try {
-      const uploadResult = await supabase.storage
-        .from(AUDIT_BUCKET)
-        .upload(path, binaryBody, {
-          contentType: 'application/json',
-          upsert: false,
-        });
-      console.log('UPLOAD RESULT SDK', uploadResult);
-      if (!uploadResult.error) {
-        return {
-          ...payload,
-          path,
-        };
-      }
-      console.error('ERRO AUDITORIA', uploadResult.error);
-    } catch (sdkError) {
-      console.error('ERRO AUDITORIA', sdkError);
-    }
-
+  } catch (_error) {
     return null;
   }
 }

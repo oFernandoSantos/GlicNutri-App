@@ -5,6 +5,43 @@ import { capturarExcecaoObservabilidade } from './servicoObservabilidade';
 const SYSTEM_LOG_BUCKET = 'system-logs';
 const SYSTEM_LOG_PREFIX = 'runtime';
 const MAX_LOG_FILE_SIZE = 1024 * 1024;
+const SYSTEM_LOG_UPLOAD_TIMEOUT_MS = 8 * 1000;
+
+function isRemoteSystemLogUploadEnabled() {
+  return String(process.env.EXPO_PUBLIC_ENABLE_SYSTEM_LOG_UPLOAD || '').trim() === '1';
+}
+
+function shouldMirrorConsoleToRemoteLog(message = '') {
+  const normalized = String(message || '').toLowerCase();
+  if (
+    normalized.includes('shadow') &&
+    normalized.includes('deprecated')
+  ) {
+    return false;
+  }
+  if (normalized.includes('pointerevents') && normalized.includes('deprecated')) {
+    return false;
+  }
+  if (normalized.includes('erro ao gravar log do sistema')) {
+    return false;
+  }
+  return true;
+}
+
+async function uploadSystemLogWithTimeout(path, encoded) {
+  const uploadPromise = supabase.storage.from(SYSTEM_LOG_BUCKET).upload(path, encoded, {
+    contentType: 'text/plain',
+    upsert: false,
+  });
+
+  const timeoutPromise = new Promise((_, reject) => {
+    setTimeout(() => {
+      reject(new Error(`Upload de log excedeu ${SYSTEM_LOG_UPLOAD_TIMEOUT_MS}ms`));
+    }, SYSTEM_LOG_UPLOAD_TIMEOUT_MS);
+  });
+
+  return Promise.race([uploadPromise, timeoutPromise]);
+}
 
 export const TIPOS_HISTORICO_LOG = {
   ABRIR: 'ABRIR',
@@ -376,15 +413,24 @@ export async function registrarLogSistema({
     return null;
   }
 
+  if (!isRemoteSystemLogUploadEnabled()) {
+    return {
+      id,
+      createdAt,
+      level,
+      source,
+      message,
+      context,
+      stack,
+      path,
+      localOnly: true,
+    };
+  }
+
   internalWriteInProgress = true;
 
   try {
-    const { error } = await supabase.storage
-      .from(SYSTEM_LOG_BUCKET)
-      .upload(path, encoded, {
-        contentType: 'text/plain',
-        upsert: false,
-      });
+    const { error } = await uploadSystemLogWithTimeout(path, encoded);
 
     if (error) {
       throw error;
@@ -400,8 +446,7 @@ export async function registrarLogSistema({
       stack,
       path,
     };
-  } catch (error) {
-    originalConsoleMethods?.error?.('Erro ao gravar log do sistema:', error);
+  } catch (_error) {
     return null;
   } finally {
     internalWriteInProgress = false;
@@ -583,10 +628,15 @@ export function configurarCapturaGlobalLogs() {
         return;
       }
 
+      const message = normalizeConsoleArgs(args);
+      if (!shouldMirrorConsoleToRemoteLog(message)) {
+        return;
+      }
+
       registrarLogSistema({
         level,
         source: `console.${level}`,
-        message: normalizeConsoleArgs(args),
+        message,
       });
     };
   });
