@@ -137,7 +137,12 @@ export function voltarParaAlimentacaoAposSalvarRefeicao(navigation, params = {})
       routes: [
         {
           name: 'HomePaciente',
-          params: { usuarioLogado: params.usuarioLogado },
+          params: {
+            usuarioLogado: params.usuarioLogado,
+            mealEntryIA: params.mealEntryIA || null,
+            mealIARefreshToken: params.mealIARefreshToken || null,
+            mealDataRefresh: params.mealDataRefresh || null,
+          },
         },
         {
           name: 'PacienteDiario',

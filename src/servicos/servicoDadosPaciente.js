@@ -697,7 +697,12 @@ function normalizeMealEntryFromDatabase(row, index = 0) {
   const fotoUrl = String(row?.foto_url || '').trim();
   const foods = Array.isArray(row?.alimentos) ? row.alimentos : [];
   const metadataFood = foods.find(
-    (item) => item?.mealLabel || item?.mealTypeLabel || item?.planSectionId
+    (item) =>
+      item?.mealLabel ||
+      item?.mealTypeLabel ||
+      item?.planSectionId ||
+      item?.date ||
+      item?.time
   );
   const explicitDate = String(row?.data_refeicao || row?.data || metadataFood?.date || '').trim();
   const explicitTime = String(row?.hora_refeicao || row?.hora || metadataFood?.time || '').trim();
@@ -819,6 +824,12 @@ function isGenericMealLabel(value) {
   return !raw || raw === 'refeicao registrada' || raw === 'refeicao confirmada manualmente';
 }
 
+function pickMealNutrient(primaryValue, secondaryValue) {
+  const primary = Number(primaryValue) || 0;
+  const secondary = Number(secondaryValue) || 0;
+  return primary > 0 ? primary : secondary;
+}
+
 function mergeMealEntryPair(primary = {}, secondary = {}) {
   const pickLabel = (field) => {
     const primaryValue = primary?.[field];
@@ -844,10 +855,14 @@ function mergeMealEntryPair(primary = {}, secondary = {}) {
     mealTypeLabel: pickLabel('mealTypeLabel') || pickLabel('mealLabel') || pickLabel('title'),
     description: primary?.description || secondary?.description || '',
     foods: primaryFoods.length ? primaryFoods : secondaryFoods,
-    kcal: Number(primary?.kcal) || Number(secondary?.kcal) || 0,
-    carbsG: Number(primary?.carbsG) || Number(secondary?.carbsG) || 0,
-    proteinG: Number(primary?.proteinG) || Number(secondary?.proteinG) || 0,
-    fatG: Number(primary?.fatG) || Number(secondary?.fatG) || 0,
+    kcal: pickMealNutrient(primary?.kcal, secondary?.kcal),
+    carbsG: pickMealNutrient(primary?.carbsG, secondary?.carbsG),
+    proteinG: pickMealNutrient(primary?.proteinG, secondary?.proteinG),
+    fatG: pickMealNutrient(primary?.fatG, secondary?.fatG),
+    fiberG: pickMealNutrient(primary?.fiberG, secondary?.fiberG),
+    sugarsG: pickMealNutrient(primary?.sugarsG, secondary?.sugarsG),
+    saturatedFatG: pickMealNutrient(primary?.saturatedFatG, secondary?.saturatedFatG),
+    sodiumMg: pickMealNutrient(primary?.sodiumMg, secondary?.sodiumMg),
     foto_url: primary?.foto_url || secondary?.foto_url || null,
     kind: primary?.kind || secondary?.kind || 'meal',
   };
@@ -915,10 +930,28 @@ export function mergeAppStateMealEntries(appState, patientId) {
   return {
     ...normalized,
     mealEntries: mergeMealEntries(
-      ensureArray(central?.mealEntries),
-      ensureArray(normalized.mealEntries)
+      ensureArray(normalized.mealEntries),
+      ensureArray(central?.mealEntries)
     ),
   };
+}
+
+export function upsertPatientMealEntryInCache(patientId, entry, { maxEntries = 120 } = {}) {
+  if (!patientId || !entry) {
+    return null;
+  }
+
+  const central = getCachedPatientAppState(patientId) || createDefaultAppState();
+  const mealEntries = appendNewestEntry(central.mealEntries, entry, maxEntries);
+  const nextState = {
+    ...central,
+    mealEntries,
+  };
+
+  replaceCachedPatientAppState(patientId, nextState);
+  invalidatePatientExperienceCache(patientId);
+
+  return nextState;
 }
 
 function buildMedicationEntryFromPayload(payload) {

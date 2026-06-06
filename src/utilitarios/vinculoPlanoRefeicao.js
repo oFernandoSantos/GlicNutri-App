@@ -81,6 +81,15 @@ const PLAN_SECTION_LEGACY_IDS = {
   lanche: 'lanche-tarde',
 };
 
+const MEAL_LABEL_SECTION_IDS = {
+  'cafe da manha': 'cafe-manha',
+  'lanche da manha': 'lanche-manha',
+  almoco: 'almoco',
+  'lanche da tarde': 'lanche-tarde',
+  jantar: 'jantar',
+  ceia: 'ceia',
+};
+
 function resolveSavedSectionKey(section) {
   const normalizedId = section?.normalizedId || normalizeKey(section?.id);
   return PLAN_SECTION_LEGACY_IDS[normalizedId] || normalizedId;
@@ -168,11 +177,34 @@ export function matchMealEntryToPlanSection(entry, sections, options = {}) {
 
   const entryText = getEntryMealText(entry);
   if (entryText) {
+    const aliasSectionId = MEAL_LABEL_SECTION_IDS[entryText];
+    if (aliasSectionId) {
+      const aliasMatch = normalizedSections.find(
+        (section) => section.normalizedId === aliasSectionId || normalizeKey(section.id) === aliasSectionId
+      );
+      if (aliasMatch) {
+        return { section: aliasMatch, sectionId: aliasMatch.id, reason: 'alias' };
+      }
+    }
+
     const labelMatch = normalizedSections.find((section) => {
       if (!section.normalizedTitle) return false;
       return entryText.includes(section.normalizedTitle) || section.normalizedTitle.includes(entryText);
     });
     if (labelMatch) return { section: labelMatch, sectionId: labelMatch.id, reason: 'label' };
+
+    const fuzzyAlias = Object.entries(MEAL_LABEL_SECTION_IDS).find(
+      ([label]) => entryText.includes(label) || label.includes(entryText)
+    );
+    if (fuzzyAlias) {
+      const [, sectionId] = fuzzyAlias;
+      const fuzzyMatch = normalizedSections.find(
+        (section) => section.normalizedId === sectionId || normalizeKey(section.id) === sectionId
+      );
+      if (fuzzyMatch) {
+        return { section: fuzzyMatch, sectionId: fuzzyMatch.id, reason: 'alias-fuzzy' };
+      }
+    }
   }
 
   const entryMinutes = toMinutes(entry?.time);
@@ -231,8 +263,8 @@ export function buildPlanDayStatus({ mealEntries, sections, date } = {}) {
 
   (Array.isArray(mealEntries) ? mealEntries : []).forEach((entry) => {
     if (!entry) return;
-    const entryDate = String(entry.date || '').slice(0, 10) || targetDate;
-    if (entryDate !== targetDate) return;
+    const entryDate = String(entry.date || '').slice(0, 10);
+    if (!entryDate || entryDate !== targetDate) return;
 
     const entryId = getEntryId(entry);
     if (entryId && seenEntries.has(entryId)) return;
@@ -247,21 +279,30 @@ export function buildPlanDayStatus({ mealEntries, sections, date } = {}) {
     buckets.get(match.sectionId).entries.push(entry);
   });
 
-  const meals = Array.from(buckets.values()).map((bucket) => {
-    const summary = sumMealEntryNutrition(bucket.entries);
-    return {
-      ...bucket,
-      completed: bucket.entries.length > 0,
-      summary: {
-        ...summary,
-        completed: bucket.entries.length > 0,
-        kcal: Math.round(summary.kcal),
-        carbs: Math.round(summary.carbs),
-        protein: Math.round(summary.protein),
-        fat: Math.round(summary.fat),
-      },
-    };
-  });
+  const meals = Array.from(buckets.values())
+    .map((bucket) => {
+      const sortedEntries = [...bucket.entries].sort((left, right) =>
+        String(right.time || '').localeCompare(String(left.time || ''))
+      );
+      const summary = sumMealEntryNutrition(sortedEntries);
+      return {
+        ...bucket,
+        entries: sortedEntries,
+        completed: sortedEntries.length > 0,
+        summary: {
+          ...summary,
+          completed: sortedEntries.length > 0,
+          kcal: Math.round(summary.kcal),
+          carbs: Math.round(summary.carbs),
+          protein: Math.round(summary.protein),
+          fat: Math.round(summary.fat),
+        },
+      };
+    })
+    .sort(
+      (left, right) =>
+        (left.timeMinutes ?? Number.MAX_SAFE_INTEGER) - (right.timeMinutes ?? Number.MAX_SAFE_INTEGER)
+    );
   const completedCount = meals.filter((item) => item.completed).length;
   const totalCount = meals.length;
 
