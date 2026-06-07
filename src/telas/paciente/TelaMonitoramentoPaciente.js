@@ -3022,14 +3022,19 @@ export default function PacienteMonitoramentoScreen({
             style={[
               styles.modalCard,
               styles.modalHostRelative,
-              glucoseTypeDropdownVisible && styles.modalCardBehindHidden,
+              (glucoseTypeDropdownVisible || glucoseConfirmVisible) &&
+                styles.modalCardBehindHidden,
             ]}
           >
             <ScrollModalPacienteTeclado
               ref={manualModalScrollRef}
               foco={manualModalFoco}
               keyboardPaddingBase={0}
-              style={glucoseTypeDropdownVisible ? styles.modalContentHidden : null}
+              style={
+                glucoseTypeDropdownVisible || glucoseConfirmVisible
+                  ? styles.modalContentHidden
+                  : null
+              }
               contentContainerStyle={estiloConteudoScrollModalTeclado}
               keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
@@ -3190,123 +3195,119 @@ export default function PacienteMonitoramentoScreen({
               )}
             </TouchableOpacity>
             </ScrollModalPacienteTeclado>
-          </View>
-        </View>
-      </Modal>
 
-      <Modal
-        visible={glucoseConfirmVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setGlucoseConfirmVisible(false)}
-      >
-        <View style={styles.confirmOverlay}>
-          <View style={styles.confirmCard}>
-            <CabecalhoModalPaciente
-              title="Confirmar glicemia?"
-              onClose={() => setGlucoseConfirmVisible(false)}
-            />
-            <View style={styles.confirmIconWrap}>
-              <Ionicons
-                name="water-outline"
-                size={26}
-                color={patientTheme.colors.primaryDark}
-              />
-            </View>
-
-            <Text style={styles.confirmText}>
-              Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
-              {isPreviousGlucoseEntry
-                ? ` em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}?`
-                : ' agora?'} {manualGlucoseType ? `Tipo: ${manualGlucoseType}. ` : ''}Essa leitura vai atualizar a tela de glicose e o Início.
-            </Text>
-
-            <View style={styles.confirmActions}>
-              <TouchableOpacity
-                style={styles.confirmCancelButton}
-                onPress={() => setGlucoseConfirmVisible(false)}
-                disabled={savingGlucose}
-              >
-                <Text style={styles.confirmCancelText}>Cancelar</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.confirmSaveButton}
-                onPress={handleAddGlucose}
-                disabled={savingGlucose}
-              >
-                {savingGlucose ? (
-                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                ) : (
-                  <Text style={styles.confirmSaveText} numberOfLines={1}>
-                    Confirmar registro
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      <Modal
-        visible={glucoseTypeDropdownVisible}
-        transparent
-        animationType="fade"
-        onRequestClose={handleCloseGlucoseTypeModal}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.modalCard, styles.glucoseTypePickerCard]}>
-            <View style={styles.modalHeader}>
-              <Text style={styles.modalTitle}>Tipo da Glicose</Text>
-              <TouchableOpacity
-                style={styles.modalCloseButton}
-                onPress={handleCloseGlucoseTypeModal}
-              >
-                <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <ScrollView
-              style={styles.unitOptionList}
-              contentContainerStyle={styles.unitOptionListContent}
-              showsVerticalScrollIndicator={false}
-              keyboardShouldPersistTaps="handled"
+            <DrilldownOpcoesPortal
+              embedded
+              visible={glucoseTypeDropdownVisible}
+              onClose={handleCloseGlucoseTypeModal}
+              embeddedPadding={0}
+              cardStyle={[styles.glucoseTypeModalCard, styles.glucoseTypePickerCard]}
             >
-              {glucoseTypeOptions.map((option) => {
-                const selected = option === manualGlucoseType;
+              <View style={styles.modalHeader}>
+                <Text style={styles.modalTitle}>Tipo da Glicose</Text>
+                <TouchableOpacity
+                  style={styles.modalCloseButton}
+                  onPress={handleCloseGlucoseTypeModal}
+                >
+                  <Ionicons name="close" size={20} color={patientTheme.colors.textMuted} />
+                </TouchableOpacity>
+              </View>
 
-                return (
-                  <TouchableOpacity
-                    key={option}
-                    activeOpacity={0.82}
-                    style={[
-                      styles.glucoseTypeOption,
-                      selected && styles.glucoseTypeOptionSelected,
-                    ]}
-                    onPress={() => {
-                      setManualGlucoseType(option);
-                      handleCloseGlucoseTypeModal();
-                    }}
-                  >
-                    <Text
+              <ScrollView
+                style={styles.unitOptionList}
+                contentContainerStyle={styles.unitOptionListContent}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+              >
+                {glucoseTypeOptions.map((option) => {
+                  const selected = option === manualGlucoseType;
+
+                  return (
+                    <TouchableOpacity
+                      key={option}
+                      activeOpacity={0.82}
                       style={[
-                        styles.glucoseTypeOptionText,
-                        selected && styles.glucoseTypeOptionSelectedText,
+                        styles.glucoseTypeOption,
+                        selected && styles.glucoseTypeOptionSelected,
                       ]}
+                      onPress={() => {
+                        setManualGlucoseType(option);
+                        handleCloseGlucoseTypeModal();
+                      }}
                     >
-                      {option}
+                      <Text
+                        style={[
+                          styles.glucoseTypeOptionText,
+                          selected && styles.glucoseTypeOptionSelectedText,
+                        ]}
+                      >
+                        {option}
+                      </Text>
+                      {selected ? (
+                        <Ionicons
+                          name="checkmark"
+                          size={18}
+                          color={patientTheme.colors.text}
+                        />
+                      ) : null}
+                    </TouchableOpacity>
+                  );
+                })}
+              </ScrollView>
+            </DrilldownOpcoesPortal>
+
+            <DrilldownOpcoesPortal
+              embedded
+              visible={glucoseConfirmVisible}
+              onClose={() => setGlucoseConfirmVisible(false)}
+              embeddedPadding={0}
+              cardStyle={styles.confirmCard}
+            >
+              <CabecalhoModalPaciente
+                title="Confirmar glicemia?"
+                onClose={() => setGlucoseConfirmVisible(false)}
+              />
+              <View style={styles.confirmIconWrap}>
+                <Ionicons
+                  name="water-outline"
+                  size={26}
+                  color={patientTheme.colors.primaryDark}
+                />
+              </View>
+
+              <Text style={styles.confirmText}>
+                Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
+                {isPreviousGlucoseEntry
+                  ? ` em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}?`
+                  : ' agora?'}{' '}
+                {manualGlucoseType ? `Tipo: ${manualGlucoseType}. ` : ''}Essa leitura vai atualizar a
+                tela de glicose e o Início.
+              </Text>
+
+              <View style={styles.confirmActions}>
+                <TouchableOpacity
+                  style={styles.confirmCancelButton}
+                  onPress={() => setGlucoseConfirmVisible(false)}
+                  disabled={savingGlucose}
+                >
+                  <Text style={styles.confirmCancelText}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.confirmSaveButton}
+                  onPress={handleAddGlucose}
+                  disabled={savingGlucose}
+                >
+                  {savingGlucose ? (
+                    <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                  ) : (
+                    <Text style={styles.confirmSaveText} numberOfLines={1}>
+                      Confirmar registro
                     </Text>
-                    {selected ? (
-                      <Ionicons
-                        name="checkmark"
-                        size={18}
-                        color={patientTheme.colors.text}
-                      />
-                    ) : null}
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </DrilldownOpcoesPortal>
           </View>
         </View>
       </Modal>
@@ -5727,7 +5728,7 @@ const styles = StyleSheet.create({
   confirmCard: {
     width: '100%',
     maxWidth: 360,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: '#ffffff',
     borderRadius: 28,
     paddingHorizontal: 22,
     paddingVertical: 24,
@@ -5761,7 +5762,7 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    backgroundColor: '#f1f3f5',
   },
   confirmCancelText: {
     color: patientTheme.colors.textMuted,
