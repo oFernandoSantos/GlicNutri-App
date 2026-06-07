@@ -99,11 +99,13 @@ export function BotaoAgendamento({
               name={icon}
               size={18}
               color={
-                isPrimary || isDanger
-                  ? patientTheme.colors.onPrimary
-                  : isUnlink || isDangerGhost
-                    ? patientTheme.colors.danger
-                    : patientTheme.colors.primaryDark
+                disabled && isPrimary
+                  ? '#6B7280'
+                  : isPrimary || isDanger
+                    ? patientTheme.colors.onPrimary
+                    : isUnlink || isDangerGhost
+                      ? patientTheme.colors.danger
+                      : patientTheme.colors.primaryDark
               }
             />
           ) : null}
@@ -118,6 +120,7 @@ export function BotaoAgendamento({
               isDanger && styles.buttonTextDanger,
               isDangerGhost && styles.buttonTextDangerGhost,
               isUnlink && styles.buttonTextUnlink,
+              disabled && isPrimary && styles.buttonTextDisabled,
             ]}
           >
             {label}
@@ -315,6 +318,9 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.55,
+  },
+  buttonTextDisabled: {
+    color: '#6B7280',
   },
   buttonText: {
     fontWeight: '800',

@@ -10,15 +10,42 @@ import {
   isPatientLinkedToDoctor,
 } from './servicoVinculosMedico';
 
-function isMissingFollowUpRequestTableError(error, tableName = 'solicitacao_acompanhamento_nutri') {
+function isMissingFollowUpRequestTableError(error) {
   const code = String(error?.code || '');
   const message = String(error?.message || '').toLowerCase();
 
-  return (
-    code === 'PGRST205' ||
-    message.includes(tableName) ||
-    message.includes('could not find the table')
+  return code === 'PGRST205' || message.includes('could not find the table');
+}
+
+const FOLLOW_UP_PATIENT_COLUMNS =
+  'id_paciente_uuid, nome_completo, nome_pac, email_pac';
+
+async function hydrateFollowUpPatients(rows = []) {
+  if (!rows.length) return [];
+
+  const patientIds = [
+    ...new Set(rows.map((row) => row?.paciente_id).filter(Boolean)),
+  ];
+  if (!patientIds.length) return rows;
+
+  const { data, error } = await supabase
+    .from('paciente')
+    .select(FOLLOW_UP_PATIENT_COLUMNS)
+    .in('id_paciente_uuid', patientIds);
+
+  if (error) {
+    console.log('Erro ao hidratar pacientes das solicitacoes:', error);
+    return rows;
+  }
+
+  const patientsById = new Map(
+    (data || []).map((patient) => [patient.id_paciente_uuid, patient])
   );
+
+  return rows.map((row) => ({
+    ...row,
+    paciente: row.paciente || patientsById.get(row.paciente_id) || null,
+  }));
 }
 
 function getPatientName(patient) {
@@ -117,6 +144,28 @@ export async function createFollowUpRequest({
   return data;
 }
 
+export async function hasPendingFollowUpRequestForPatient({
+  pacienteId,
+  nutricionistaId,
+}) {
+  if (!pacienteId || !nutricionistaId) return false;
+
+  const { data, error } = await supabase
+    .from('solicitacao_acompanhamento_nutri')
+    .select('id')
+    .eq('paciente_id', pacienteId)
+    .eq('nutricionista_id', nutricionistaId)
+    .eq('status', 'pending')
+    .limit(1);
+
+  if (error) {
+    if (isMissingFollowUpRequestTableError(error)) return false;
+    throw error;
+  }
+
+  return Boolean(data?.length);
+}
+
 export async function listFollowUpRequestsByNutritionist(
   nutricionistaId,
   { status = 'pending', limit = 40 } = {}
@@ -125,7 +174,7 @@ export async function listFollowUpRequestsByNutritionist(
 
   let query = supabase
     .from('solicitacao_acompanhamento_nutri')
-    .select('*, paciente:paciente_id(*)')
+    .select('*')
     .eq('nutricionista_id', nutricionistaId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -134,10 +183,11 @@ export async function listFollowUpRequestsByNutritionist(
 
   const { data, error } = await query;
   if (error) {
-    if (isMissingFollowUpRequestTableError(error, 'solicitacao_acompanhamento_nutri')) return [];
+    if (isMissingFollowUpRequestTableError(error)) return [];
     throw error;
   }
-  return data || [];
+
+  return hydrateFollowUpPatients(data || []);
 }
 
 export async function updateFollowUpRequestStatus({
@@ -313,7 +363,7 @@ export async function listFollowUpRequestsByDoctor(medicoId, { status = 'pending
 
   let query = supabase
     .from('solicitacao_acompanhamento_medico')
-    .select('*, paciente:paciente_id(*)')
+    .select('*')
     .eq('medico_id', medicoId)
     .order('created_at', { ascending: false })
     .limit(limit);
@@ -322,10 +372,11 @@ export async function listFollowUpRequestsByDoctor(medicoId, { status = 'pending
 
   const { data, error } = await query;
   if (error) {
-    if (isMissingFollowUpRequestTableError(error, 'solicitacao_acompanhamento_medico')) return [];
+    if (isMissingFollowUpRequestTableError(error)) return [];
     throw error;
   }
-  return data || [];
+
+  return hydrateFollowUpPatients(data || []);
 }
 
 export async function updateDoctorFollowUpRequestStatus({

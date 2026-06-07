@@ -57,7 +57,6 @@ import {
   resolveAssignedNutritionistIdFromRecords,
 } from '../../servicos/servicoVinculosNutricionista';
 import { resolveAssignedDoctorIdFromRecords } from '../../servicos/servicoVinculosMedico';
-import { resolveNutricionistaIdForPatient } from '../../servicos/servicoMensagensChat';
 import { formatValorConsulta, resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import {
   listarNotificacoesConsulta,
@@ -299,18 +298,13 @@ export default function PacienteAgendamentosScreen({
             }).catch(() => null)
           : Promise.resolve(null),
       ]);
-      let linkedId = resolveAssignedNutritionistIdFromRecords({
+      const linkedId = resolveAssignedNutritionistIdFromRecords({
         patient: pacienteAtual,
-        consultas: cons,
       });
       const linkedMedId = resolveAssignedDoctorIdFromRecords({
         patient: pacienteAtual,
         consultas: cons,
       });
-
-      if (!linkedId && patientId) {
-        linkedId = await resolveNutricionistaIdForPatient(patientId, null);
-      }
 
       setNutricionistas(nutris || []);
       setMedicos(meds || []);
@@ -444,6 +438,12 @@ export default function PacienteAgendamentosScreen({
           ]);
           if (refreshEvents.has(latest.evento)) {
             loadBase();
+            if (
+              latest.evento === 'meet_disponivel' &&
+              String(latest.mensagem || '').includes('foi atualizado')
+            ) {
+              setConsultasSection('anteriores');
+            }
           }
           exibirMensagemAgendamentos(
             {
@@ -839,8 +839,13 @@ export default function PacienteAgendamentosScreen({
     }
   }
 
-  async function handleAbrirMeet(consulta, nutri) {
-    const link = resolveMeetLink({ consulta, nutricionista: nutri });
+  async function handleAbrirMeet(consulta, profissional) {
+    const link = resolveMeetLink({
+      consulta,
+      nutricionista: profissional?.id_nutricionista_uuid ? profissional : null,
+      medico: profissional?.id_medico_uuid ? profissional : null,
+      profissional,
+    });
     try {
       await abrirLinkGoogleMeet(link);
     } catch (error) {
@@ -1693,6 +1698,7 @@ export default function PacienteAgendamentosScreen({
                   const meetLink = resolveMeetLink({
                     consulta: item,
                     nutricionista: profissional.nutri,
+                    medico: profissional.medico,
                   });
                   const consultaStatus = String(item.status || 'scheduled').toLowerCase();
                   const consultaConfirmada = consultaStatus === 'confirmed';
@@ -1739,7 +1745,9 @@ export default function PacienteAgendamentosScreen({
                           <BotaoAgendamento
                             label="Entrar"
                             icon="videocam-outline"
-                            onPress={() => handleAbrirMeet(item, profissional.nutri)}
+                            onPress={() =>
+                              handleAbrirMeet(item, profissional.nutri || profissional.medico)
+                            }
                             style={styles.bookingActionPrimary}
                           />
                         ) : null}
@@ -1774,6 +1782,13 @@ export default function PacienteAgendamentosScreen({
                     nutricionistas,
                     medicos
                   );
+                  const meetLink = resolveMeetLink({
+                    consulta: item,
+                    nutricionista: profissional.nutri,
+                    medico: profissional.medico,
+                  });
+                  const consultaConfirmada =
+                    String(item.status || 'scheduled').toLowerCase() === 'confirmed';
 
                   return (
                     <CartaoAgendamento key={`past-filtered-${item.id}`} style={styles.bookingCardPast}>
@@ -1792,6 +1807,18 @@ export default function PacienteAgendamentosScreen({
                           </Text>
                         </View>
                       </View>
+                      {consultaConfirmada && meetLink ? (
+                        <View style={styles.bookingActions}>
+                          <BotaoAgendamento
+                            label="Entrar no Meet"
+                            icon="videocam-outline"
+                            onPress={() =>
+                              handleAbrirMeet(item, profissional.nutri || profissional.medico)
+                            }
+                            style={styles.bookingActionPrimary}
+                          />
+                        </View>
+                      ) : null}
                     </CartaoAgendamento>
                   );
                 })

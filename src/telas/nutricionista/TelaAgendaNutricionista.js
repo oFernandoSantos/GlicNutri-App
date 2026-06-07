@@ -26,6 +26,7 @@ import {
   abrirLinkGoogleMeet,
   createConsulta,
   deleteConsulta,
+  isConsultaPendenteConfirmacao,
   normalizeConsultaStatus,
   updateConsultaMeetLink,
   updateConsultaStatus,
@@ -39,7 +40,9 @@ import {
   getNutritionistId,
   listConsultasNutricionistaComPaciente,
   listPatientsByNutritionist,
+  resolveNutritionistId,
 } from '../../servicos/servicoVinculosNutricionista';
+import { carregarSessaoNutricionista } from '../../servicos/servicoSessaoNutricionista';
 import {
   listFollowUpRequestsByNutritionist,
   updateFollowUpRequestStatus,
@@ -376,17 +379,36 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     meetLink: '',
     motivo: '',
   });
-  const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
+  const [nutricionistaId, setNutricionistaId] = useState(() => getNutritionistId(usuarioLogado));
+
+  useEffect(() => {
+    let active = true;
+
+    async function resolverNutricionistaId() {
+      const persisted = await carregarSessaoNutricionista().catch(() => null);
+      const usuario = usuarioLogado || persisted || null;
+      const resolved = (await resolveNutritionistId(usuario)) || getNutritionistId(usuario);
+      if (active) setNutricionistaId(resolved || null);
+    }
+
+    resolverNutricionistaId();
+
+    return () => {
+      active = false;
+    };
+  }, [usuarioLogado]);
 
   const loadAgenda = useCallback(async () => {
+    if (!nutricionistaId) return;
+
     try {
       setLoading(true);
       setLoadError('');
       const [items, pendingRequests, linkedPatients, availability] = await Promise.all([
         listConsultasNutricionistaComPaciente(nutricionistaId, {
-          from: startOfDay(0).toISOString(),
-          to: endOfDay(30).toISOString(),
-          limit: 120,
+          from: startOfDay(-30).toISOString(),
+          to: endOfDay(120).toISOString(),
+          limit: 200,
         }),
         listFollowUpRequestsByNutritionist(nutricionistaId, { status: 'pending' }),
         listPatientsByNutritionist(nutricionistaId, { limit: 120 }),
@@ -412,6 +434,24 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     const unsubscribe = navigation.addListener('focus', loadAgenda);
     return unsubscribe;
   }, [navigation, loadAgenda]);
+
+  useEffect(() => {
+    if (activeAgendaTab !== 'solicitacoes' || !nutricionistaId) return;
+
+    let active = true;
+
+    listFollowUpRequestsByNutritionist(nutricionistaId, { status: 'pending' })
+      .then((pendingRequests) => {
+        if (active) setRequests(pendingRequests || []);
+      })
+      .catch((error) => {
+        console.log('Erro ao recarregar solicitacoes na agenda:', error);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [activeAgendaTab, nutricionistaId]);
 
   const selectedStart = useMemo(() => startOfDay(selectedDayOffset), [selectedDayOffset]);
   const selectedEnd = useMemo(() => endOfDay(selectedDayOffset), [selectedDayOffset]);
@@ -451,27 +491,50 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
     });
   }, [consultas]);
 
-  const scopedConsultaItems = useMemo(() => {
+  const pendingConsultaItems = useMemo(
+    () => consultas.filter((consulta) => isConsultaPendenteConfirmacao(consulta.status)),
+    [consultas]
+  );
+
+  const periodScopedConsultaItems = useMemo(() => {
     if (periodFilter === 'week' && weekScope === 'day') return dayItems;
     return filterConsultasByPeriod(consultas, periodFilter);
   }, [consultas, dayItems, periodFilter, weekScope]);
+
+  const scopedConsultaItems = useMemo(() => {
+    if (statusFilter === 'scheduled') {
+      return pendingConsultaItems;
+    }
+    return periodScopedConsultaItems;
+  }, [pendingConsultaItems, periodScopedConsultaItems, statusFilter]);
 
   const searchScopedConsultaItems = useMemo(() => {
     return scopedConsultaItems.filter((consulta) => matchesConsultaSearch(consulta, consultaDaySearch));
   }, [scopedConsultaItems, consultaDaySearch]);
 
   const statusCounts = useMemo(() => {
+    const periodScopedSearched = periodScopedConsultaItems.filter((consulta) =>
+      matchesConsultaSearch(consulta, consultaDaySearch)
+    );
+    const pendingSearched = pendingConsultaItems.filter((consulta) =>
+      matchesConsultaSearch(consulta, consultaDaySearch)
+    );
+
     return STATUS_FILTERS.reduce((acc, filter) => {
       if (filter.id === 'all') {
-        acc.all = searchScopedConsultaItems.length;
+        acc.all = periodScopedSearched.length;
         return acc;
       }
-      acc[filter.id] = searchScopedConsultaItems.filter(
+      if (filter.id === 'scheduled') {
+        acc.scheduled = pendingSearched.length;
+        return acc;
+      }
+      acc[filter.id] = periodScopedSearched.filter(
         (consulta) => normalizeConsultaStatus(consulta.status) === filter.id
       ).length;
       return acc;
     }, {});
-  }, [searchScopedConsultaItems]);
+  }, [consultaDaySearch, pendingConsultaItems, periodScopedConsultaItems]);
 
   const filteredConsultaItems = useMemo(() => {
     return filterConsultasByStatus(searchScopedConsultaItems, statusFilter).sort((a, b) =>
@@ -1926,11 +1989,14 @@ export default function TelaAgendaNutricionista({ navigation, route }) {
 
 const styles = StyleSheet.create({
   flatCard: {
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
     shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
     elevation: 0,
   },
   summaryGrid: {
@@ -2104,6 +2170,11 @@ const styles = StyleSheet.create({
   },
   requestsPanel: {
     minHeight: 180,
+    backgroundColor: patientTheme.colors.surface,
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
   },
   createConsultaModalCard: {
     width: '100%',

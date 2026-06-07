@@ -1,4 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import { ActivityIndicator, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { BotaoAgendamento, CartaoAgendamento } from '../agendamento/uiAgendamento';
@@ -13,16 +14,25 @@ import { normalizeGoogleMeetUrl, resolveMeetLink } from '../../servicos/servicoG
 import { mostrarToastPaciente, mostrarToastPacienteErro } from '../../servicos/servicoToastPaciente';
 
 const STATUS_ATIVOS = new Set(['scheduled', 'confirmed']);
+const MEET_FUTURE_GRACE_MS = 60 * 60 * 1000;
+const MEET_PAST_WINDOW_MS = 90 * 24 * 60 * 60 * 1000;
 
 function isConsultaAtiva(consulta) {
   const status = String(consulta?.status || 'scheduled').toLowerCase();
   return STATUS_ATIVOS.has(status);
 }
 
-function isConsultaFutura(consulta) {
+function shouldShowInMeetSection(consulta) {
+  if (!isConsultaAtiva(consulta)) return false;
+
   const when = new Date(consulta?.scheduled_at);
+  const now = Date.now();
   if (Number.isNaN(when.getTime())) return true;
-  return when.getTime() >= Date.now() - 60 * 60 * 1000;
+  if (when.getTime() >= now - MEET_FUTURE_GRACE_MS) return true;
+
+  const status = String(consulta?.status || '').toLowerCase();
+  const hasMeet = Boolean(normalizeGoogleMeetUrl(consulta?.meet_link));
+  return status === 'confirmed' && hasMeet && when.getTime() >= now - MEET_PAST_WINDOW_MS;
 }
 
 export default function SecaoMeetConsultasProfissional({
@@ -54,8 +64,7 @@ export default function SecaoMeetConsultasProfissional({
 
       const doProfissional = (todas || [])
         .filter((item) => String(item?.[filtroId] || '') === String(profissionalId))
-        .filter(isConsultaAtiva)
-        .filter(isConsultaFutura)
+        .filter(shouldShowInMeetSection)
         .sort(
           (a, b) =>
             new Date(a?.scheduled_at).getTime() - new Date(b?.scheduled_at).getTime()
@@ -73,6 +82,12 @@ export default function SecaoMeetConsultasProfissional({
   useEffect(() => {
     carregarConsultas();
   }, [carregarConsultas]);
+
+  useFocusEffect(
+    useCallback(() => {
+      carregarConsultas();
+    }, [carregarConsultas])
+  );
 
   async function handleEntrarMeet(consulta) {
     const link = resolveMeetLink({ consulta, profissional });

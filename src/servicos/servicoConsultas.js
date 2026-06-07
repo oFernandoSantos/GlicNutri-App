@@ -13,8 +13,15 @@ import { ensurePatientDoctorLink } from './servicoVinculosMedico';
 
 export function normalizeConsultaStatus(value) {
   const status = String(value || '').trim().toLowerCase();
+  if (status === 'pending' || status === 'pendente' || status === 'agendada') {
+    return 'scheduled';
+  }
   const allowed = new Set(['scheduled', 'confirmed', 'cancelled', 'done', 'no_show']);
   return allowed.has(status) ? status : 'scheduled';
+}
+
+export function isConsultaPendenteConfirmacao(status) {
+  return normalizeConsultaStatus(status) === 'scheduled';
 }
 
 export function formatConsultaDateTime(value) {
@@ -568,7 +575,7 @@ export async function updateConsultaMeetLink({
 
   if (data?.id) {
     const status = normalizeConsultaStatus(data.status);
-    if (normalizedMeetLink && status === 'confirmed') {
+    if (normalizedMeetLink && (status === 'confirmed' || status === 'scheduled')) {
       try {
         const quando = formatConsultaDateTime(data.scheduled_at);
         await criarNotificacaoConsulta({
