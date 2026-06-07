@@ -20,6 +20,7 @@ import { registrarLogAuditoria } from './servicoAuditoria';
 import { syncGooglePatientRecord, isGoogleUser } from './sincronizarPacienteGoogle';
 import {
   getCachedGlucoseReadings,
+  isGlucoseCacheFresh,
   mergeCachedGlucoseReadings,
   replaceCachedGlucoseReadings,
 } from './centralGlicose';
@@ -126,6 +127,7 @@ export function createDefaultAppState() {
     medicationEntries: [],
     hiddenMedicationEntryIds: [],
     symptomEntries: [],
+    weightEntries: [],
     assistantMessages: [],
     patientNotifications: [],
     hiddenGlucoseReadingIds: [],
@@ -305,6 +307,7 @@ function normalizeAppState(rawState) {
     medicationEntries: ensureArray(appState.medicationEntries),
     hiddenMedicationEntryIds: ensureArray(appState.hiddenMedicationEntryIds),
     symptomEntries: ensureArray(appState.symptomEntries),
+    weightEntries: ensureArray(appState.weightEntries),
     assistantMessages: ensureArray(appState.assistantMessages),
     patientNotifications: ensureArray(appState.patientNotifications),
     hiddenGlucoseReadingIds: ensureArray(appState.hiddenGlucoseReadingIds),
@@ -436,6 +439,46 @@ function isRowLevelSecurityError(error) {
     message.includes('violates row-level security policy') ||
     message.includes('permission denied')
   );
+}
+
+function isExpectedGlucoseAccessError(error) {
+  if (!error) return false;
+  if (isRowLevelSecurityError(error)) return true;
+
+  const message = getNormalizedSupabaseErrorMessage(error);
+  const status = Number(error?.status || error?.statusCode || 0);
+
+  return status === 401 || message.includes('unauthorized') || message.includes('jwt');
+}
+
+function isClinicalRpcActor(rpcActor) {
+  if (!rpcActor) return false;
+  const profile = String(rpcActor.tipo_perfil || '').toLowerCase();
+
+  return Boolean(
+    rpcActor.id_nutricionista_uuid ||
+    rpcActor.id_medico_uuid ||
+    profile === 'nutricionista' ||
+    profile === 'medico'
+  );
+}
+
+function logGlucoseFetchError(scope, error) {
+  if (isExpectedGlucoseAccessError(error)) return;
+  const message = String(error?.message || error || '').trim();
+  if (!message) return;
+  console.log(scope, message);
+}
+
+const glucoseReadingsInFlight = new Map();
+
+function getGlucoseFetchKey(patientId, limit, rpcActor) {
+  const actorKey =
+    rpcActor?.id_nutricionista_uuid ||
+    rpcActor?.id_medico_uuid ||
+    rpcActor?.id_paciente_uuid ||
+    'anon';
+  return `${patientId}:${limit}:${actorKey}`;
 }
 
 function buildUuid() {
@@ -1449,7 +1492,10 @@ async function fetchHomeClinicalBundle(resolvedPatientId, options = {}, rpcActor
     };
   }
 
-  const glucoseLimit = Math.max(options.glucoseLimit ?? 48, 48);
+  const glucoseLimit =
+    options.glucoseLimit === 0 || options.glucoseLimit === '0'
+      ? 0
+      : Math.max(Number(options.glucoseLimit ?? 48) || 48, 1);
   const mealLimit = options.homeCritical === true ? 0 : options.mealLimit ?? 0;
   const medicationLimit = options.homeCritical === true ? 0 : options.medicationLimit ?? 0;
   const includeMealPlan = options.homeCritical === true ? false : Boolean(options.includeMealPlan);
@@ -2649,9 +2695,165 @@ export async function updatePatientProfile({
     },
   });
 
+  if (Object.prototype.hasOwnProperty.call(patch || {}, 'peso_atual_kg')) {
+    const previousWeight = Number(resolvedPatient?.peso_atual_kg);
+    const nextWeight = Number(patch.peso_atual_kg);
+    if (Number.isFinite(nextWeight) && nextWeight > 0 && nextWeight !== previousWeight) {
+      await recordPatientWeightEntry(effectivePatientId, nextWeight, {
+        patientContext: currentPatient || patientContext,
+      }).catch((error) =>
+        console.log('Erro ao registrar historico de peso:', error?.message || error)
+      );
+    }
+  }
+
   invalidatePatientExperienceCache(data.id_paciente_uuid);
 
   return sanitizeSensitivePatientData(data);
+}
+
+function addDaysToIsoDate(dateString, amount) {
+  const normalized = extractWeightEntryDate(dateString);
+  if (!normalized) return '';
+
+  const [year, month, day] = normalized.split('-').map(Number);
+  const date = new Date(year, month - 1, day);
+  date.setDate(date.getDate() + amount);
+
+  const nextYear = date.getFullYear();
+  const nextMonth = String(date.getMonth() + 1).padStart(2, '0');
+  const nextDay = String(date.getDate()).padStart(2, '0');
+  return `${nextYear}-${nextMonth}-${nextDay}`;
+}
+
+function extractWeightEntryDate(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  const brMatch = raw.match(/^(\d{2})\/(\d{2})\/(\d{4})$/);
+  if (brMatch) {
+    const [, day, month, year] = brMatch;
+    return `${year}-${month}-${day}`;
+  }
+
+  const isoMatch = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[1]}-${isoMatch[2]}-${isoMatch[3]}`;
+  }
+
+  return '';
+}
+
+export async function recordPatientWeightEntry(patientId, valueKg, options = {}) {
+  const weight = Number(valueKg);
+  if (!patientId || !Number.isFinite(weight) || weight <= 0) {
+    return null;
+  }
+
+  const date = extractWeightEntryDate(options.date) || new Date().toISOString().slice(0, 10);
+  let baseState = normalizeAppState(getCachedPatientAppState(patientId));
+
+  if (!getCachedPatientAppState(patientId)) {
+    const tableState = await fetchPacienteAppStateFromTable(
+      patientId,
+      options.patientContext || null
+    ).catch(() => null);
+    if (tableState) {
+      baseState = normalizeAppState({ ...baseState, ...tableState });
+    }
+  }
+
+  const entries = ensureArray(baseState.weightEntries);
+  const nextEntry = {
+    id: `weight-${date}-${Date.now()}`,
+    date,
+    valueKg: Number(weight.toFixed(1)),
+    recordedAt: new Date().toISOString(),
+  };
+
+  const sameDayIndex = entries.findIndex(
+    (entry) => extractWeightEntryDate(entry?.date || entry?.recordedAt) === date
+  );
+  const nextEntries =
+    sameDayIndex >= 0
+      ? entries.map((entry, index) =>
+          index === sameDayIndex
+            ? {
+                ...entry,
+                ...nextEntry,
+                id: entry?.id || nextEntry.id,
+              }
+            : entry
+        )
+      : [nextEntry, ...entries].slice(0, 120);
+
+  const nextState = normalizeAppState({
+    ...baseState,
+    weightEntries: nextEntries,
+  });
+  const stateForTable = prepareAppStateForStorage(nextState);
+
+  await savePacienteAppStateToTable(
+    patientId,
+    stateForTable,
+    options.patientContext || null
+  ).catch(() => null);
+
+  replaceCachedPatientAppState(patientId, nextState);
+  invalidatePatientExperienceCache(patientId);
+
+  return nextState;
+}
+
+/** Garante 2 registros retroativos para validar curva do grafico de peso. */
+export async function ensurePatientWeightHistoryPreview(patientId, currentWeight, options = {}) {
+  const weight = Number(currentWeight);
+  if (!patientId || !Number.isFinite(weight) || weight <= 0) {
+    return null;
+  }
+
+  let baseState = normalizeAppState(getCachedPatientAppState(patientId));
+  if (!getCachedPatientAppState(patientId)) {
+    const tableState = await fetchPacienteAppStateFromTable(
+      patientId,
+      options.patientContext || null
+    ).catch(() => null);
+    if (tableState) {
+      baseState = normalizeAppState({ ...baseState, ...tableState });
+    }
+  }
+
+  const distinctDates = new Set(
+    ensureArray(baseState.weightEntries)
+      .map((entry) => extractWeightEntryDate(entry?.date || entry?.recordedAt))
+      .filter(Boolean)
+  );
+
+  if (distinctDates.size >= 2) {
+    return baseState;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  const previewDates = [
+    { date: addDaysToIsoDate(today, -4), valueKg: Number((weight + 2).toFixed(1)) },
+    { date: addDaysToIsoDate(today, -2), valueKg: Number((weight + 1).toFixed(1)) },
+  ];
+
+  let latestState = baseState;
+  for (const preview of previewDates) {
+    if (!preview.date || distinctDates.has(preview.date)) continue;
+    const saved = await recordPatientWeightEntry(patientId, preview.valueKg, {
+      ...options,
+      date: preview.date,
+    });
+    if (saved) {
+      latestState = saved;
+      distinctDates.add(preview.date);
+    }
+  }
+
+  invalidatePatientExperienceCache(patientId);
+  return latestState;
 }
 
 function isRpcFunctionMissing(error, functionName) {
@@ -2692,9 +2894,7 @@ async function fetchCgmGlucoseRowsDirect(patientId, limit = 120) {
     .limit(Math.max(limit, 1));
 
   if (error || !Array.isArray(data)) {
-    if (error) {
-      console.log('Erro ao buscar glicemia CGM direto:', error.message);
-    }
+    if (error) logGlucoseFetchError('Erro ao buscar glicemia CGM direto:', error);
     return [];
   }
 
@@ -2711,21 +2911,29 @@ async function fetchManualGlucoseRowsDirect(patientId, limit = 120) {
     .limit(Math.max(limit, 1));
 
   if (error || !Array.isArray(data)) {
-    if (error) {
-      console.log('Erro ao buscar glicemia manual direto:', error.message);
-    }
+    if (error) logGlucoseFetchError('Erro ao buscar glicemia manual direto:', error);
     return [];
   }
 
   return data.map((row, index) => normalizeGlucoseReadingRow(row, index));
 }
 
-export async function fetchGlucoseReadings(patientId, limit = 120, rpcActor = null) {
+async function fetchGlucoseReadingsInternal(patientId, limit = 120, rpcActor = null) {
   if (!patientId) {
     return [];
   }
 
   const safeLimit = Math.max(Number(limit) || 0, 1);
+  const clinicalActor = isClinicalRpcActor(rpcActor);
+  const allowDirectFallback = !clinicalActor;
+
+  if (isGlucoseCacheFresh(patientId)) {
+    const cachedReadings = getCachedGlucoseReadings(patientId);
+    if (cachedReadings.length >= safeLimit) {
+      return cachedReadings.slice(0, safeLimit);
+    }
+  }
+
   const baseParams = await buildRpcParams(
     {
       p_id_paciente_uuid: patientId,
@@ -2757,28 +2965,48 @@ export async function fetchGlucoseReadings(patientId, limit = 120, rpcActor = nu
     if (!rpcError && Array.isArray(rpcData)) {
       rpcReadings = rpcData.map(normalizeGlucoseReadingRow);
     } else if (rpcError && !isRpcFunctionMissing(rpcError, 'listar_glicemias_manuais_paciente')) {
-      console.log('Erro ao buscar glicemia manual por RPC:', rpcError.message);
+      logGlucoseFetchError('Erro ao buscar glicemia manual por RPC:', rpcError);
     }
 
     if (!cgmError && Array.isArray(cgmData)) {
       cgmReadings = cgmData.map((row, index) => mapCgmRowToGlucoseReading(row, index));
     } else if (cgmError && !isRpcFunctionMissing(cgmError, 'listar_glicemias_cgm_paciente')) {
-      console.log('Erro ao buscar glicemia CGM por RPC:', cgmError.message);
+      logGlucoseFetchError('Erro ao buscar glicemia CGM por RPC:', cgmError);
     }
+  } else if (clinicalActor) {
+    const cachedReadings = getCachedGlucoseReadings(patientId);
+    return cachedReadings.length ? cachedReadings.slice(0, safeLimit) : [];
   } else {
     console.log('Sessao RPC indisponivel ao buscar glicose; usando leitura direta das tabelas.');
   }
 
-  if (!rpcReadings.length) {
+  if (allowDirectFallback && !rpcReadings.length) {
     rpcReadings = await fetchManualGlucoseRowsDirect(patientId, safeLimit);
   }
 
-  if (!cgmReadings.length) {
+  if (allowDirectFallback && !cgmReadings.length) {
     cgmReadings = await fetchCgmGlucoseRowsDirect(patientId, safeLimit);
   }
 
   const merged = mergeCachedGlucoseReadings(cgmReadings, rpcReadings);
-  return merged.slice(0, safeLimit);
+  const sliced = merged.slice(0, safeLimit);
+  if (sliced.length) {
+    replaceCachedGlucoseReadings(patientId, sliced);
+  }
+  return sliced;
+}
+
+export async function fetchGlucoseReadings(patientId, limit = 120, rpcActor = null) {
+  const key = getGlucoseFetchKey(patientId, limit, rpcActor);
+  if (glucoseReadingsInFlight.has(key)) {
+    return glucoseReadingsInFlight.get(key);
+  }
+
+  const task = fetchGlucoseReadingsInternal(patientId, limit, rpcActor).finally(() => {
+    glucoseReadingsInFlight.delete(key);
+  });
+  glucoseReadingsInFlight.set(key, task);
+  return task;
 }
 
 export async function refreshPatientGlucoseReadings(patientId, options = {}) {
@@ -3014,6 +3242,57 @@ function pickFirstRpcErrorMessage(errors = []) {
   return first ? String(first).trim() : '';
 }
 
+function buildNutriRegistrosFromExperience(
+  exp,
+  patientRow,
+  { glucoseLimit, medicationLimit, mealLimit, includeHidden }
+) {
+  const objectiveParsed = extractObjectiveAndAppState(patientRow?.objetivo_principal_consulta);
+  const objectiveAppState = normalizeAppState(objectiveParsed.appState || {});
+  const expAppState = normalizeAppState(exp?.appState || {});
+  const mergedAppState = normalizeAppState({ ...objectiveAppState, ...expAppState });
+
+  const hiddenMealIds = includeHidden ? [] : ensureArray(mergedAppState.hiddenMealEntryIds);
+  const hiddenMedIds = includeHidden ? [] : ensureArray(mergedAppState.hiddenMedicationEntryIds);
+  const hiddenGlucoseIds = includeHidden ? [] : ensureArray(mergedAppState.hiddenGlucoseReadingIds);
+
+  const allMedicationEntries = ensureArray(exp?.appState?.medicationEntries);
+  const medicacoes = allMedicationEntries
+    .filter((item) => !isInsulinMedicationEntry(item))
+    .filter(
+      (entry) =>
+        includeHidden ||
+        !hiddenMedIds.includes(entry?.databaseId || entry?.legacyId || entry?.id)
+    );
+  const insulinas = allMedicationEntries
+    .filter((item) => isInsulinMedicationEntry(item))
+    .filter(
+      (entry) =>
+        includeHidden ||
+        !hiddenMedIds.includes(entry?.databaseId || entry?.legacyId || entry?.id)
+    );
+  const refeicoes = ensureArray(exp?.appState?.mealEntries).filter(
+    (entry) => includeHidden || !hiddenMealIds.includes(entry?.id)
+  );
+  const glicemias = ensureArray(exp?.glucoseReadings).filter(
+    (entry) => includeHidden || !hiddenGlucoseIds.includes(entry?.id)
+  );
+
+  const hasAnyData =
+    glicemias.length > 0 ||
+    refeicoes.length > 0 ||
+    medicacoes.length > 0 ||
+    insulinas.length > 0;
+
+  return {
+    glicemias: glicemias.slice(0, glucoseLimit),
+    medicacoes: medicacoes.slice(0, medicationLimit),
+    insulinas: insulinas.slice(0, medicationLimit),
+    refeicoes: refeicoes.slice(0, mealLimit),
+    error: !hasAnyData ? 'Nenhum registro clinico encontrado para este paciente.' : null,
+  };
+}
+
 /**
  * Carrega todos os registros clinicos do paciente para o prontuario da nutricionista.
  */
@@ -3114,6 +3393,15 @@ export async function fetchPatientRegistrosForNutri(
       pushRpcError(error);
       console.log('Experiencia do paciente indisponivel no prontuario:', error?.message || error);
     }
+  }
+
+  if (exp?.patient?.id_paciente_uuid && !forceRefresh) {
+    return buildNutriRegistrosFromExperience(exp, patientRow, {
+      glucoseLimit,
+      medicationLimit,
+      mealLimit,
+      includeHidden,
+    });
   }
 
   const [
@@ -3966,7 +4254,8 @@ export function appendNewestEntry(array, entry, max = 30) {
 }
 
 export function getLatestGlucose(glucoseReadings) {
-  return glucoseReadings[0] || null;
+  const readings = ensureArray(glucoseReadings);
+  return readings[0] || null;
 }
 
 export function buildMonitorSeries(glucoseReadings, range = 'Hoje') {

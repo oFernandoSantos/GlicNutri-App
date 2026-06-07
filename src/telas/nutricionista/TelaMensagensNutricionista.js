@@ -5,6 +5,7 @@ import {
   BackHandler,
   KeyboardAvoidingView,
   Platform,
+  RefreshControl,
   ScrollView,
   StyleSheet,
   Text,
@@ -51,7 +52,7 @@ import {
 } from '../../servicos/servicoVinculosNutricionista';
 import {
   bindChatEnterToSend,
-  CHAT_ACTIVE_POLL_MS,
+  CHAT_REALTIME_BACKUP_POLL_MS,
   isChatCompactLayout,
   loadNutriChatReadAtForPatients,
   markNutriChatRead,
@@ -263,6 +264,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [inboxRefreshing, setInboxRefreshing] = useState(false);
   const [sending, setSending] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [draft, setDraft] = useState('');
@@ -805,7 +807,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
 
     const intervalId = setInterval(() => {
       loadActiveThread(patientId, { silent: true });
-    }, CHAT_ACTIVE_POLL_MS);
+    }, CHAT_REALTIME_BACKUP_POLL_MS);
 
     return () => clearInterval(intervalId);
   }, [activeChatId, loadActiveThread, nutricionistaId]);
@@ -1107,20 +1109,18 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
       contentContainerStyle={styles.layoutContent}
     >
       <View style={[nutriDesktopStyles.pageGap, styles.pageGap]}>
-        {!isCompact ? (
-          <View style={dashboardKpiStyles.grid}>
-            {metrics.map((item) => (
-              <View key={item.id} style={dashboardKpiStyles.cell}>
-                <DashboardKpiCard
-                  icon={item.icon}
-                  accent={item.accent}
-                  label={item.label}
-                  value={item.value}
-                />
-              </View>
-            ))}
-          </View>
-        ) : null}
+        <View style={[dashboardKpiStyles.grid, isCompact && styles.compactKpiGrid]}>
+          {metrics.map((item) => (
+            <View key={item.id} style={dashboardKpiStyles.cell}>
+              <DashboardKpiCard
+                icon={item.icon}
+                accent={item.accent}
+                label={item.label}
+                value={item.value}
+              />
+            </View>
+          ))}
+        </View>
 
         <View style={[styles.chatRow, isCompact && styles.chatRowCompact]}>
         {showListColumn ? (
@@ -1163,6 +1163,20 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
               style={styles.chatListScroll}
               contentContainerStyle={styles.chatList}
               showsVerticalScrollIndicator={false}
+              refreshControl={
+                <RefreshControl
+                  refreshing={inboxRefreshing}
+                  onRefresh={async () => {
+                    setInboxRefreshing(true);
+                    try {
+                      await loadInbox({ silent: true, bustCache: true });
+                    } finally {
+                      setInboxRefreshing(false);
+                    }
+                  }}
+                  colors={[patientTheme.colors.primaryDark]}
+                />
+              }
               onScroll={({ nativeEvent }) => {
                 const { layoutMeasurement, contentOffset, contentSize } = nativeEvent;
                 const isNearBottom =
@@ -1290,7 +1304,7 @@ export default function TelaMensagensNutricionista({ navigation, route }) {
                     <Text style={styles.emptyText}>
                       {activeChat.threadLoaded
                         ? 'Nenhuma mensagem nesta conversa ainda.'
-                        : 'Nao foi possivel carregar o historico. Puxe para atualizar ou tente novamente.'}
+                        : 'Nao foi possivel carregar o historico. Toque em Tentar novamente.'}
                     </Text>
                     {!activeChat.threadLoaded ? (
                       <TouchableOpacity
@@ -1430,6 +1444,9 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
   },
+  compactKpiGrid: {
+    marginBottom: 4,
+  },
   metricGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
@@ -1536,7 +1553,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     shadowColor: 'transparent',
     elevation: 0,
     overflow: 'hidden',
@@ -1548,7 +1565,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     shadowColor: 'transparent',
     elevation: 0,
     overflow: 'hidden',
@@ -1632,7 +1649,7 @@ const styles = StyleSheet.create({
     gap: 12,
     padding: 14,
     borderRadius: 0,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderTopWidth: 1,
     borderTopColor: patientTheme.colors.border,
     shadowColor: 'transparent',
@@ -1790,8 +1807,9 @@ const styles = StyleSheet.create({
     borderBottomLeftRadius: 4,
   },
   bubbleMine: {
-    backgroundColor: patientTheme.colors.primary,
-    borderWidth: 0,
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+    borderWidth: 1,
     borderBottomRightRadius: 4,
   },
   bubbleText: {
@@ -1800,8 +1818,8 @@ const styles = StyleSheet.create({
     fontSize: 15,
   },
   bubbleTextMine: {
-    color: patientTheme.colors.onPrimary,
-    fontWeight: '500',
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '600',
   },
   bubbleTime: {
     marginTop: 6,
@@ -1810,7 +1828,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   bubbleTimeMine: {
-    color: 'rgba(255,255,255,0.85)',
+    color: patientTheme.colors.textMuted,
   },
   registroMessageWrap: {
     maxWidth: '88%',

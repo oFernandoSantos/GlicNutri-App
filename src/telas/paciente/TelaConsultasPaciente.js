@@ -47,6 +47,7 @@ import {
   abrirLinkGoogleMeet,
   createConsulta,
   formatConsultaDateTime,
+  formatConsultaDateTimeLong,
   listConsultasByNutricionista,
   listConsultasByPaciente,
   updateConsultaStatus,
@@ -434,6 +435,16 @@ export default function PacienteAgendamentosScreen({
         const latest = items?.[0];
         if (latest && !latest._shown) {
           latest._shown = true;
+          const refreshEvents = new Set([
+            'agendada',
+            'confirmada',
+            'meet_disponivel',
+            'cancelada',
+            'reagendada',
+          ]);
+          if (refreshEvents.has(latest.evento)) {
+            loadBase();
+          }
           exibirMensagemAgendamentos(
             {
               tipo: latest.evento === 'cancelada' ? 'aviso' : 'sucesso',
@@ -444,7 +455,7 @@ export default function PacienteAgendamentosScreen({
         }
       },
     });
-  }, [patientId]);
+  }, [loadBase, patientId]);
 
   async function abrirPainelNotificacoes() {
     if (!patientId) return;
@@ -698,7 +709,7 @@ export default function PacienteAgendamentosScreen({
         const tipoText = normalizeSearchText(item?.tipo_consulta);
         const dataText = normalizeSearchText(formatConsultaDateTime(item?.scheduled_at));
         const searchable = normalizeSearchText(
-          [profissionalText, tipoText, item?.convenio, item?.status, dataText].join(' ')
+          [profissionalText, tipoText, item?.motivo, item?.convenio, item?.status, dataText].join(' ')
         );
 
         if (consultasSearchNormalized && !searchable.includes(consultasSearchNormalized)) return false;
@@ -1667,7 +1678,7 @@ export default function PacienteAgendamentosScreen({
                 <View>
                   <Text style={styles.sectionTitle}>Minhas consultas agendadas</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Consultas pendentes: só cancelamento. Meet após confirmação do profissional.
+                    Inclui consultas agendadas pelo profissional ou por você. Meet após confirmação.
                   </Text>
                 </View>
               </View>
@@ -1697,11 +1708,23 @@ export default function PacienteAgendamentosScreen({
                         <View style={styles.bookingBody}>
                           <Text style={styles.bookingName}>{profissional.nome}</Text>
                           <Text style={styles.bookingSpec}>{profissional.especialidade}</Text>
-                          <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                          <Text style={styles.bookingDate}>
+                            {formatConsultaDateTimeLong(item.scheduled_at)}
+                          </Text>
                           <Text style={styles.bookingMeta}>
                             {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
                           </Text>
+                          {item.motivo ? (
+                            <Text style={styles.bookingMotivo} numberOfLines={2}>
+                              {item.motivo}
+                            </Text>
+                          ) : null}
                           <ConsultaStatusBadge status={item.status} style={styles.bookingStatusBadge} />
+                          {!consultaConfirmada ? (
+                            <Text style={styles.bookingHint}>
+                              Aguardando confirmação do profissional para liberar o Google Meet.
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
 
@@ -2225,6 +2248,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 4,
+  },
+  bookingMotivo: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  bookingHint: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
+    lineHeight: 16,
   },
   bookingStatusBadge: {
     marginTop: 8,

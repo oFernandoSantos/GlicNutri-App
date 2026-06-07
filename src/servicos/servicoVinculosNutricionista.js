@@ -1,5 +1,10 @@
 import { supabase } from './configSupabase';
 import { registrarLogAuditoria } from './servicoAuditoria';
+import {
+  normalizeRiskBucket,
+  patientHasDiabetes,
+  riskBucketLabel,
+} from '../utilitarios/adesaoNutricional';
 const PATIENT_LIST_COLUMNS =
   'id_paciente_uuid, nome_completo, email_pac, cpf_paciente, objetivo_principal_consulta, id_nutricionista_uuid, peso_atual_kg, imc_calculado, data_nascimento, data_hora_ultima_atualizacao, comorbidades_texto, excluido';
 
@@ -60,14 +65,15 @@ function pickObjective(patient) {
   );
 }
 
-function normalizeRisk(patient, latestGlucose) {
+function normalizeRisk(patient, latestGlucose, objective) {
   const riskText = String(patient?.risco || patient?.nivel_risco || '').trim();
-  if (riskText) return riskText;
+  let bucket = normalizeRiskBucket(riskText, latestGlucose);
 
-  const glucose = Number(latestGlucose);
-  if (glucose >= 250) return 'Alto';
-  if (glucose >= 180) return 'Moderado';
-  return 'Baixo';
+  if (patientHasDiabetes({ raw: patient, objective })) {
+    bucket = 'alto';
+  }
+
+  return riskBucketLabel(bucket);
 }
 
 function normalizePatientCard(patient, meta = {}) {
@@ -75,7 +81,7 @@ function normalizePatientCard(patient, meta = {}) {
   const adherence = Number(patient?.adesao_percentual || patient?.aderencia_percentual) || 78;
   const objective = pickObjective(patient);
   const age = calculateAge(patient?.data_nascimento);
-  const risk = normalizeRisk(patient, latestGlucose);
+  const risk = normalizeRisk(patient, latestGlucose, objective);
 
   return {
     id: patient?.id_paciente_uuid,
@@ -177,21 +183,54 @@ export async function ensurePatientNutritionistLink({
 }) {
   if (!pacienteId || !nutricionistaId) return false;
 
+  const agendadaPeloNutri = origin === 'agenda_nutricionista';
+  const origemVinculo = consultaId ? 'consulta' : 'manual';
+
+  try {
+    const { error: rpcError } = await supabase.rpc('vincular_paciente_profissional', {
+      p_paciente_id: pacienteId,
+      p_nutricionista_id: nutricionistaId,
+      p_medico_id: null,
+      p_origem: origemVinculo,
+      p_consulta_id: consultaId || null,
+    });
+    if (rpcError) {
+      console.log('RPC vincular_paciente_profissional:', rpcError.message || rpcError);
+    }
+  } catch (rpcError) {
+    console.log('RPC vincular_paciente_profissional:', rpcError?.message || rpcError);
+  }
+
   const { data: patient, error: patientError } = await supabase
     .from('paciente')
     .select('id_paciente_uuid, id_nutricionista_uuid')
     .eq('id_paciente_uuid', pacienteId)
     .maybeSingle();
 
-  if (patientError) throw patientError;
+  if (patientError) {
+    if (agendadaPeloNutri) {
+      console.log('Leitura paciente pos-agendamento nutri falhou:', patientError);
+      return false;
+    }
+    throw patientError;
+  }
 
   if (
+    !agendadaPeloNutri &&
     patient?.id_nutricionista_uuid &&
     patient.id_nutricionista_uuid !== nutricionistaId
   ) {
     throw new Error(
       'Voce ja possui um nutricionista vinculado. Desvincule o acompanhamento atual antes de solicitar outro.'
     );
+  }
+
+  if (patient?.id_nutricionista_uuid === nutricionistaId) {
+    return true;
+  }
+
+  if (agendadaPeloNutri && patient?.id_nutricionista_uuid) {
+    return true;
   }
 
   const patch = {
@@ -209,24 +248,22 @@ export async function ensurePatientNutritionistLink({
     console.log('Erro ao vincular paciente ao nutricionista:', error);
   }
 
-  try {
-    await registrarLogAuditoria({
-      actor: actor || null,
-      actorType: actor?.tipo_perfil || null,
-      targetPatientId: pacienteId,
-      action: 'paciente_nutricionista_vinculado',
-      entity: 'paciente',
-      entityId: pacienteId,
-      origin,
-      details: {
-        nutricionistaId,
-        consultaId: consultaId || null,
-        vinculoPersistidoNoPaciente: !error,
-      },
-    });
-  } catch (auditError) {
+  registrarLogAuditoria({
+    actor: actor || null,
+    actorType: actor?.tipo_perfil || null,
+    targetPatientId: pacienteId,
+    action: 'paciente_nutricionista_vinculado',
+    entity: 'paciente',
+    entityId: pacienteId,
+    origin,
+    details: {
+      nutricionistaId,
+      consultaId: consultaId || null,
+      vinculoPersistidoNoPaciente: !error,
+    },
+  }).catch((auditError) => {
     console.log('Auditoria de vinculo paciente/nutricionista falhou:', auditError);
-  }
+  });
 
   return !error;
 }

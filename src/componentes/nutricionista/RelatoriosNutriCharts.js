@@ -119,13 +119,7 @@ function useChartFadeIn() {
   return { opacity, scale };
 }
 
-function webHover(hoverId, setHoverId, id) {
-  if (Platform.OS !== 'web') return {};
-  return {
-    onMouseEnter: () => setHoverId(id),
-    onMouseLeave: () => setHoverId(null),
-  };
-}
+const CHART_PRESS_DELAY_MS = 160;
 
 function ChartTooltip({ visible, title, value, helper }) {
   if (!visible) return null;
@@ -154,8 +148,7 @@ export function InteractiveDonutChart({
   formatTooltip,
 }) {
   const [activeId, setActiveId] = useState(null);
-  const [hoverId, setHoverId] = useState(null);
-  const focusId = hoverId || activeId;
+  const focusId = activeId;
 
   const safeItems = useMemo(
     () => (items || []).map((item) => ({ ...item, value: Number(item.value) || 0 })),
@@ -191,7 +184,7 @@ export function InteractiveDonutChart({
                       {
                         backgroundColor: colors[index] || CHART_PALETTE.green,
                         flex: Math.max(item.value, total ? item.value : 1),
-                        opacity: dimmed ? 0.28 : 1,
+                        opacity: dimmed ? 0.5 : 1,
                       },
                     ]}
                   />
@@ -238,8 +231,8 @@ export function InteractiveDonutChart({
             <Pressable
               key={item.id}
               style={[styles.legendRow, selected && styles.legendRowActive]}
+              delayPressIn={CHART_PRESS_DELAY_MS}
               onPress={() => setActiveId(selected ? null : item.id)}
-              {...webHover(hoverId, setHoverId, item.id)}
             >
               <View style={styles.legendLeft}>
                 <View
@@ -264,8 +257,7 @@ export function InteractiveDonutChart({
 
 export function InteractiveHorizontalBarChart({ items, colors, emptyLabel = 'Sem dados no período' }) {
   const [activeId, setActiveId] = useState(null);
-  const [hoverId, setHoverId] = useState(null);
-  const focusId = hoverId || activeId;
+  const focusId = activeId;
   const safeItems = items?.length ? items : [];
   const max = Math.max(...safeItems.map((item) => Number(item.value) || 0), 1);
   const total = sumChartValues(safeItems);
@@ -285,8 +277,8 @@ export function InteractiveHorizontalBarChart({ items, colors, emptyLabel = 'Sem
           <Pressable
             key={item.id}
             style={[styles.horizontalBarRow, selected && styles.barRowActive]}
+            delayPressIn={CHART_PRESS_DELAY_MS}
             onPress={() => setActiveId(selected ? null : item.id)}
-            {...webHover(hoverId, setHoverId, item.id)}
           >
             <View style={styles.horizontalBarHeader}>
               <Text style={[styles.horizontalBarLabel, selected && styles.labelActive]} numberOfLines={1}>
@@ -324,8 +316,7 @@ export function InteractiveHorizontalBarChart({ items, colors, emptyLabel = 'Sem
 
 export function InteractiveProgressChart({ items, colors, valueSuffix = 'pacientes', percentBase }) {
   const [activeId, setActiveId] = useState(null);
-  const [hoverId, setHoverId] = useState(null);
-  const focusId = hoverId || activeId;
+  const focusId = activeId;
   const safeItems = items?.length ? items : [];
   const max = Math.max(...safeItems.map((item) => Number(item.value) || 0), 1);
   const total = sumChartValues(safeItems);
@@ -347,8 +338,8 @@ export function InteractiveProgressChart({ items, colors, valueSuffix = 'pacient
           <Pressable
             key={item.id}
             style={[styles.progressRow, selected && styles.barRowActive]}
+            delayPressIn={CHART_PRESS_DELAY_MS}
             onPress={() => setActiveId(selected ? null : item.id)}
-            {...webHover(hoverId, setHoverId, item.id)}
           >
             <View style={styles.progressHeader}>
               <Text style={[styles.progressLabel, selected && styles.labelActive]}>{item.label}</Text>
@@ -384,7 +375,7 @@ const LINE_CHART = {
   dotHaloSize: 22,
   dotHaloSizeActive: 28,
   strokeWidth: 3,
-  hitSize: 40,
+  hitSize: 30,
   yAxisWidth: 50,
   tickLength: 5,
 };
@@ -590,9 +581,8 @@ export function InteractiveLineChart({
   showAllLabels = false,
 }) {
   const [activeId, setActiveId] = useState(null);
-  const [hoverId, setHoverId] = useState(null);
   const [plotLayout, setPlotLayout] = useState({ width: 0, height: 0 });
-  const focusId = hoverId || activeId;
+  const focusId = activeId;
 
   const safeItems = items?.length ? items : [{ id: 'empty', label: '—', value: 0 }];
   const chartLayout = computeLineChartLayout(safeItems, plotLayout.width, plotLayout.height);
@@ -661,8 +651,8 @@ export function InteractiveLineChart({
                       height: LINE_CHART.hitSize,
                     },
                   ]}
+                  delayPressIn={CHART_PRESS_DELAY_MS}
                   onPress={() => setActiveId(selected ? null : point.id)}
-                  {...webHover(hoverId, setHoverId, point.id)}
                 >
                   {showLabel ? (
                     <View style={[styles.linePointValueBadge, selected && styles.linePointValueBadgeActive]}>

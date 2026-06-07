@@ -1,5 +1,5 @@
 import { nutriGreenRgb } from '../temas/designSystemNutricionista';
-import { clampPercent, riskBucketLabel } from './adesaoNutricional';
+import { averageAdherence, buildGlycemicSummary, clampPercent, riskBucketLabel } from './adesaoNutricional';
 import { buildExecutiveAlerts, resolveMealTypeLabel } from './relatorioPacienteAnalytics';
 
 const CONTROL_LABELS = {
@@ -39,6 +39,22 @@ function getTodayDateString() {
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const day = String(now.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
+}
+
+export function resolveInactiveDaysForPeriod(periodBounds = {}) {
+  const periodDays = Math.max(buildDayKeys(periodBounds.startDate, periodBounds.endDate).length, 1);
+  return Math.max(3, Math.min(14, Math.round(periodDays * 0.4)));
+}
+
+export function countPortfolioPeriodAlerts(rows = []) {
+  return rows.filter((row) => {
+    if (row.controlBucket === 'critico' || row.controlBucket === 'atencao') return true;
+    if (row.inactive) return true;
+    if (Number(row.glucoseAverage) >= 180) return true;
+    if (Number(row.adherence) > 0 && Number(row.adherence) < 60) return true;
+    if (Number(row.medicationAdherencePct) > 0 && Number(row.medicationAdherencePct) < 50) return true;
+    return false;
+  }).length;
 }
 
 export function buildDayKeys(startDate, endDate) {
@@ -193,14 +209,20 @@ export function enrichPatientRowWithPeriodData(row, experience = {}, periodBound
   const pureMedicationEntries = experience?.filteredPureMeds || medicationEntries;
 
   const { dailyGlucoseAvgMap, dailyTirMap } = buildDailyGlucoseMaps(glucoseReadings, periodBounds);
+  const periodGlucoseSummary = buildGlycemicSummary(glucoseReadings);
+  const totalRecords =
+    mealEntries.length + glucoseReadings.length + medicationEntries.length;
   const lastRecordDate = resolveLastRecordDate([
     ...mealEntries,
     ...glucoseReadings,
     ...medicationEntries,
   ]);
   const daysSinceLastRecord = computeDaysSince(lastRecordDate, periodBounds.endDate);
+  const inactiveThreshold = Number(inactiveDays || resolveInactiveDaysForPeriod(periodBounds));
   const inactive =
-    daysSinceLastRecord == null ? true : daysSinceLastRecord >= Number(inactiveDays || 7);
+    totalRecords === 0 ||
+    daysSinceLastRecord == null ||
+    daysSinceLastRecord >= inactiveThreshold;
 
   const periodDayKeys = buildDayKeys(periodBounds.startDate, periodBounds.endDate);
   const periodDays = Math.max(periodDayKeys.length, 1);
@@ -212,8 +234,9 @@ export function enrichPatientRowWithPeriodData(row, experience = {}, periodBound
   });
 
   const activeDays = activeDaySet.size;
-  const totalRecords =
-    mealEntries.length + glucoseReadings.length + medicationEntries.length;
+  const periodAdherence = (row.weeklyItems || []).some((item) => Number(item.mealsLogged) > 0)
+    ? averageAdherence(row.weeklyItems)
+    : 0;
 
   let usageFrequency = 'inativo';
   if (!inactive && totalRecords > 0) {
@@ -290,8 +313,12 @@ export function enrichPatientRowWithPeriodData(row, experience = {}, periodBound
 
   return {
     ...row,
+    adherence: periodAdherence,
     mealsInPeriod: mealEntries.length,
-    glucoseCount: glucoseReadings.length,
+    glucoseCount: periodGlucoseSummary.count,
+    glucoseAverage: periodGlucoseSummary.average,
+    glucoseTir: periodGlucoseSummary.tir,
+    latestGlucose: periodGlucoseSummary.last ?? row.latestGlucose ?? null,
     insulinCount: insulinEntries.length,
     medicationsInPeriod: pureMedicationEntries.length,
     totalRecords,
@@ -315,8 +342,11 @@ export function enrichPatientRowWithPeriodData(row, experience = {}, periodBound
     hasUpcomingConsulta,
     controlBucket: classifyPatientControl({
       ...row,
+      adherence: periodAdherence,
+      glucoseAverage: periodGlucoseSummary.average,
+      glucoseTir: periodGlucoseSummary.tir,
       mealsInPeriod: mealEntries.length,
-      glucoseCount: glucoseReadings.length,
+      glucoseCount: periodGlucoseSummary.count,
       insulinCount: insulinEntries.length,
       medicationsInPeriod: pureMedicationEntries.length,
       inactive,

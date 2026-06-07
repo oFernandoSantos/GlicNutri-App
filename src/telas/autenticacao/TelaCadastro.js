@@ -14,11 +14,13 @@ import {
   StyleSheet,
   Image,
   Keyboard,
+  Linking,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { EnvoltorioModalPacienteTeclado } from '../../componentes/paciente/ModalPacienteComTeclado';
 import { Ionicons } from '@expo/vector-icons';
 import { supabase } from '../../servicos/configSupabase';
+import { obterSessaoAuthSegura } from '../../servicos/servicoSessaoAuth';
 import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
@@ -52,6 +54,7 @@ import {
   solicitarCodigoValidacaoEmailCadastro,
 } from '../../servicos/servicoVerificacaoEmail';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
+import { getTermsOfUseUrl } from '../../constantes/configPublicaApp';
 
 const softGreenBorder = {
   borderWidth: 1,
@@ -120,6 +123,7 @@ export default function TelaCadastroFixed({ navigation, route }) {
     scrollToField,
   } = useKeyboardAwareScroll({ topOffset: 115 });
   const googleSessionHandledRef = useRef(false);
+  const duplicidadeVerificadaRef = useRef({ email: '', documento: '', role: '' });
   const opcoesGenero = ['Masculino', 'Feminino', 'Não binário', 'Prefiro não informar'];
   const isPaciente = role === 'Paciente';
   const desativarAutofillIOS = shouldDisableIOSPasswordAutofill();
@@ -139,17 +143,17 @@ export default function TelaCadastroFixed({ navigation, route }) {
   useEffect(() => {
     async function verificarSessaoAtual() {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const { session, error } = await obterSessaoAuthSegura();
 
         console.log('Sessao atual ao abrir Cadastro =>', {
-          hasSession: !!data?.session,
-          userId: data?.session?.user?.id || null,
+          hasSession: !!session,
+          userId: session?.user?.id || null,
           error: error?.message || null,
         });
 
-        if (data?.session?.user && !googleSessionHandledRef.current) {
+        if (session?.user && !googleSessionHandledRef.current) {
           googleSessionHandledRef.current = true;
-          await finalizarCadastroGoogleComUsuario(data.session.user);
+          await finalizarCadastroGoogleComUsuario(session.user);
         }
       } catch (error) {
         console.log('Erro ao verificar sessao atual no cadastro =>', error);
@@ -222,12 +226,14 @@ export default function TelaCadastroFixed({ navigation, route }) {
     setModalCadastroSucessoVisible(false);
     setMensagemCadastroSucesso('');
     limparErrosCamposCadastro();
+    duplicidadeVerificadaRef.current = { email: '', documento: '', role: '' };
   };
 
   const trocarPerfil = (perfil) => {
     setRole(perfil);
     setFeedbackCadastro(null);
     setErroCodigoAcesso('');
+    duplicidadeVerificadaRef.current = { email: '', documento: '', role: '' };
     limparFormulario();
   };
 
@@ -593,6 +599,12 @@ export default function TelaCadastroFixed({ navigation, route }) {
         await verificarDuplicidadeNutricionista(documentoFormatado, emailLimpo);
       }
 
+      duplicidadeVerificadaRef.current = {
+        email: emailLimpo,
+        documento: documentoFormatado,
+        role,
+      };
+
       setCodigoAcessoPendenteCadastro(codigoAcessoNormalizado);
       setEmailPendenteCadastro(emailLimpo);
       setCodigoValidacaoEmail('');
@@ -661,8 +673,15 @@ export default function TelaCadastroFixed({ navigation, route }) {
     setLoading(true);
 
     try {
+      const duplicidadeJaVerificada =
+        duplicidadeVerificadaRef.current.email === emailLimpo &&
+        duplicidadeVerificadaRef.current.documento === documentoFormatado &&
+        duplicidadeVerificadaRef.current.role === role;
+
       if (isPaciente) {
-        await verificarDuplicidadePaciente(documentoFormatado, emailLimpo);
+        if (!duplicidadeJaVerificada) {
+          await verificarDuplicidadePaciente(documentoFormatado, emailLimpo);
+        }
 
         const objetoCadastro = {
           nome_completo: nomeLimpo,
@@ -707,7 +726,9 @@ export default function TelaCadastroFixed({ navigation, route }) {
 
         console.log('Paciente salvo com sucesso:', data);
       } else {
-        await verificarDuplicidadeNutricionista(documentoFormatado, emailLimpo);
+        if (!duplicidadeJaVerificada) {
+          await verificarDuplicidadeNutricionista(documentoFormatado, emailLimpo);
+        }
 
         const objetoCadastro = {
           nome_completo_nutri: nomeLimpo,
@@ -963,7 +984,8 @@ export default function TelaCadastroFixed({ navigation, route }) {
         return;
       }
 
-      const finalSession = googleSession || (await supabase.auth.getSession()).data?.session;
+      const { session: fallbackSession } = await obterSessaoAuthSegura();
+      const finalSession = googleSession || fallbackSession;
 
       if (finalSession?.user) {
         googleSessionHandledRef.current = true;
@@ -1249,25 +1271,34 @@ export default function TelaCadastroFixed({ navigation, route }) {
             </View>
             {renderFieldError('confirmarSenha')}
 
-            <TouchableOpacity
-              style={styles.checkboxContainer}
-              onPress={() => {
-                setAceitouLgpd(!aceitouLgpd);
-                atualizarErroCampoCadastro('aceitouLgpd', {
-                  overrides: { aceitouLgpd: !aceitouLgpd },
-                });
-              }}
-              activeOpacity={0.8}
-            >
-              <Ionicons
-                name={aceitouLgpd ? 'checkbox' : 'square-outline'}
-                size={22}
-                color={aceitouLgpd ? '#4fdfa3' : '#7f8c8d'}
-              />
+            <View style={styles.checkboxContainer}>
+              <TouchableOpacity
+                onPress={() => {
+                  setAceitouLgpd(!aceitouLgpd);
+                  atualizarErroCampoCadastro('aceitouLgpd', {
+                    overrides: { aceitouLgpd: !aceitouLgpd },
+                  });
+                }}
+                activeOpacity={0.8}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons
+                  name={aceitouLgpd ? 'checkbox' : 'square-outline'}
+                  size={22}
+                  color={aceitouLgpd ? '#4fdfa3' : '#7f8c8d'}
+                />
+              </TouchableOpacity>
               <Text style={styles.checkboxText}>
-                Li e aceito os termos de uso e a politica de privacidade conforme a LGPD.
+                Li e aceito os{' '}
+                <Text
+                  style={styles.checkboxLink}
+                  onPress={() => Linking.openURL(getTermsOfUseUrl())}
+                >
+                  termos de uso e a politica de privacidade
+                </Text>
+                {' conforme a LGPD.'}
               </Text>
-            </TouchableOpacity>
+            </View>
             {fieldErrors.aceitouLgpd ? (
               <Text style={styles.checkboxErrorText}>{fieldErrors.aceitouLgpd}</Text>
             ) : null}
@@ -1740,6 +1771,11 @@ const styles = StyleSheet.create({
     color: '#34495e',
     fontSize: 13,
     lineHeight: 18,
+  },
+  checkboxLink: {
+    color: '#4fdfa3',
+    fontWeight: '600',
+    textDecorationLine: 'underline',
   },
   checkboxErrorText: {
     marginTop: -6,

@@ -8,6 +8,7 @@ import { sortChatThreadByCreatedAt } from '../servicos/servicoMensagensChat';
 
 export const CHAT_COMPACT_BREAKPOINT = 900;
 export const CHAT_ACTIVE_POLL_MS = 4000;
+export const CHAT_REALTIME_BACKUP_POLL_MS = 12000;
 const PATIENT_CHAT_READ_PREFIX = '@glicnutri:patientChatReadAt:';
 const NUTRI_CHAT_READ_PREFIX = '@glicnutri:nutriChatReadAt:';
 

@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SectionCard } from '../nutricionista/NutriDesktopUI';
+import { ChipFiltro } from './uiAgendamento';
 import {
   buildSlotLabel,
   deleteNutriAvailability,
@@ -36,6 +38,12 @@ const WEEKDAYS = [
 ];
 
 const SLOT_MINUTES_OPTIONS = [15, 30, 45, 60];
+
+const AVAILABILITY_ACTIVE_FILTERS = [
+  { id: 'all', label: 'Todos', icon: 'apps-outline' },
+  { id: 'active', label: 'Ativos', icon: 'checkmark-circle-outline' },
+  { id: 'inactive', label: 'Inativos', icon: 'close-circle-outline' },
+];
 
 function isDefaultRow(row) {
   return row?.is_default === true || String(row?.id || '').startsWith('default-');
@@ -70,6 +78,8 @@ export default function PainelDisponibilidadeAgendaProfissional({
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [focusedField, setFocusedField] = useState('');
+  const [listWeekdayFilter, setListWeekdayFilter] = useState('all');
+  const [listActiveFilter, setListActiveFilter] = useState('all');
 
   const isMedico = variant === 'medico';
   const buildLabel = isMedico ? buildMedicoSlotLabel : buildSlotLabel;
@@ -109,6 +119,17 @@ export default function PainelDisponibilidadeAgendaProfissional({
     () => (rows || []).filter((row) => row.active !== false),
     [rows]
   );
+
+  const filteredRows = useMemo(() => {
+    return (rows || []).filter((row) => {
+      if (listWeekdayFilter !== 'all' && Number(row.weekday) !== Number(listWeekdayFilter)) {
+        return false;
+      }
+      if (listActiveFilter === 'active' && row.active === false) return false;
+      if (listActiveFilter === 'inactive' && row.active !== false) return false;
+      return true;
+    });
+  }, [rows, listWeekdayFilter, listActiveFilter]);
 
   function resetForm() {
     setEditingId(null);
@@ -331,16 +352,57 @@ export default function PainelDisponibilidadeAgendaProfissional({
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
 
+          <Text style={styles.filterSectionLabel}>Filtros — Disponibilidade</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            <ChipFiltro
+              label="Todos os dias"
+              icon="calendar-outline"
+              active={listWeekdayFilter === 'all'}
+              onPress={() => setListWeekdayFilter('all')}
+              style={styles.filterChip}
+            />
+            {WEEKDAYS.map((day) => (
+              <ChipFiltro
+                key={`availability-day-${day.value}`}
+                label={day.label}
+                active={listWeekdayFilter === day.value}
+                onPress={() => setListWeekdayFilter(day.value)}
+                style={styles.filterChip}
+              />
+            ))}
+          </ScrollView>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            {AVAILABILITY_ACTIVE_FILTERS.map((filter) => (
+              <ChipFiltro
+                key={`availability-active-${filter.id}`}
+                label={filter.label}
+                icon={filter.icon}
+                active={listActiveFilter === filter.id}
+                onPress={() => setListActiveFilter(filter.id)}
+                style={styles.filterChip}
+              />
+            ))}
+          </ScrollView>
+
           <View style={styles.listHeader}>
             <Text style={styles.listTitle}>Horarios publicados</Text>
             <Text style={styles.listMeta}>
-              {rows.length} {rows.length === 1 ? 'faixa cadastrada' : 'faixas cadastradas'}
+              {filteredRows.length} de {rows.length}{' '}
+              {rows.length === 1 ? 'faixa' : 'faixas'}
             </Text>
           </View>
 
-          {rows.length ? (
+          {filteredRows.length ? (
             <View style={styles.list}>
-              {rows.map((row, index) => {
+              {filteredRows.map((row, index) => {
                 const rowKey = row.id || `${row.weekday}-${row.start_time}-${index}`;
                 const label = buildLabel({
                   weekday: row.weekday,
@@ -391,6 +453,21 @@ export default function PainelDisponibilidadeAgendaProfissional({
                   </View>
                 );
               })}
+            </View>
+          ) : rows.length ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="funnel-outline" size={42} color={theme.colors.border} />
+              <Text style={styles.emptyText}>Nenhum horário corresponde aos filtros.</Text>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                activeOpacity={0.9}
+                onPress={() => {
+                  setListWeekdayFilter('all');
+                  setListActiveFilter('all');
+                }}
+              >
+                <Text style={styles.secondaryButtonText}>Limpar filtros</Text>
+              </TouchableOpacity>
             </View>
           ) : (
             <View style={styles.emptyState}>
@@ -587,6 +664,21 @@ function createStyles(theme) {
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+  filterSectionLabel: {
+    color: theme.colors.primaryDark,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  filterRow: {
+    gap: 6,
+    paddingBottom: 2,
+  },
+  filterChip: {
+    minHeight: 30,
+    paddingHorizontal: 10,
   },
   listHeader: {
     flexDirection: 'row',

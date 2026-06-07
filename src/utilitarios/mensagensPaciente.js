@@ -146,7 +146,8 @@ const MESSAGE_REWRITES = [
     subtexto: 'Tente novamente em alguns instantes.',
   },
   {
-    match: /nao foi possivel abrir o google meet|google meet/i,
+    match:
+      /nao foi possivel abrir o google meet|não foi possível abrir o google meet|link do google meet indispon|link do meet indispon/i,
     tipo: 'erro',
     texto: 'Link da consulta indisponível',
     subtexto: 'Peça um novo link à sua nutricionista ou médico.',

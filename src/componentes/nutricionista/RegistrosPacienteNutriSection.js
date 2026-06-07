@@ -59,12 +59,16 @@ function RegistroChatButton({ onPress, disabled, loading }) {
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityLabel="Abrir chat sobre este registro"
+      accessibilityRole="button"
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
       {loading ? (
         <ActivityIndicator size="small" color={patientTheme.colors.primary} />
       ) : (
-        <Ionicons name="chatbubble-ellipses-outline" size={20} color={patientTheme.colors.primary} />
+        <>
+          <Ionicons name="chatbubble-ellipses-outline" size={18} color={patientTheme.colors.primary} />
+          <Text style={styles.chatButtonLabel}>Chat</Text>
+        </>
       )}
     </TouchableOpacity>
   );
@@ -259,6 +263,8 @@ export default function RegistrosPacienteNutriSection({
   return (
     <View style={styles.pageGap}>
       <FilterTabs
+        scrollable
+        fill={false}
         items={registrosTabs}
         active={registrosTab}
         onChange={(tab) => {
@@ -336,7 +342,7 @@ export default function RegistrosPacienteNutriSection({
                     </View>
                     {contexto ? <Text style={styles.registroMeta}>{contexto}</Text> : null}
                     {obs && obs !== contexto ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {obs}
                       </Text>
                     ) : null}
@@ -365,7 +371,7 @@ export default function RegistrosPacienteNutriSection({
                     </Text>
                     {dose ? <Text style={styles.registroMeta}>{dose}</Text> : null}
                     {m.observation ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {m.observation}
                       </Text>
                     ) : null}
@@ -421,12 +427,12 @@ export default function RegistrosPacienteNutriSection({
                     </Text>
                     {kcal ? <Text style={styles.registroMeta}>{kcal} kcal</Text> : null}
                     {r.description ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {r.description}
                       </Text>
                     ) : null}
                     {r.resumo_ia ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {r.resumo_ia}
                       </Text>
                     ) : null}
@@ -455,7 +461,7 @@ export default function RegistrosPacienteNutriSection({
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.photoModalCard}>
                 <View style={styles.photoModalHeader}>
-                  <Text style={styles.photoModalTitle} numberOfLines={2}>
+                  <Text style={styles.photoModalTitle} numberOfLines={4}>
                     {mealPhotoViewer?.title || 'Foto da refeição'}
                   </Text>
                   <TouchableOpacity onPress={() => setMealPhotoViewer(null)}>
@@ -535,11 +541,17 @@ const styles = StyleSheet.create({
   registroNome: { fontWeight: '700', color: patientTheme.colors.text },
   registroMeta: { fontSize: 12, color: patientTheme.colors.textMuted },
   chatButton: {
-    width: 36,
-    height: 36,
+    minWidth: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
+    gap: 2,
+  },
+  chatButtonLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: patientTheme.colors.primary,
   },
   glucoseBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, alignSelf: 'flex-start' },
   glucoseBadgeText: { fontWeight: '900', fontSize: 13 },
@@ -548,11 +560,11 @@ const styles = StyleSheet.create({
   glucoseHigh: { backgroundColor: '#FEE2E2' },
   glucoseLow: { backgroundColor: '#E0F2FE' },
   mealPhotoSlot: { marginTop: 4 },
-  mealThumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: patientTheme.colors.backgroundSoft },
+  mealThumb: { width: 72, height: 72, borderRadius: 10, backgroundColor: patientTheme.colors.backgroundSoft },
   mealThumbPlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
+    width: 72,
+    height: 72,
+    borderRadius: 10,
     backgroundColor: patientTheme.colors.backgroundSoft,
     alignItems: 'center',
     justifyContent: 'center',

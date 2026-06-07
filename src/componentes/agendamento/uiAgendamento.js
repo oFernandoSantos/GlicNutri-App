@@ -61,6 +61,7 @@ export function BotaoAgendamento({
   const isPrimary = variant === 'primary';
   const isGhost = variant === 'ghost';
   const isDanger = variant === 'danger';
+  const isDangerGhost = variant === 'dangerGhost';
   const isUnlink = variant === 'unlink';
 
   return (
@@ -70,6 +71,7 @@ export function BotaoAgendamento({
         isPrimary && styles.buttonPrimary,
         isGhost && styles.buttonGhost,
         isDanger && styles.buttonDanger,
+        isDangerGhost && styles.buttonDangerGhost,
         isUnlink && styles.buttonUnlink,
         disabled && styles.buttonDisabled,
         style,
@@ -85,7 +87,7 @@ export function BotaoAgendamento({
           color={
             isPrimary || isDanger
               ? patientTheme.colors.onPrimary
-              : isUnlink
+              : isUnlink || isDangerGhost
                 ? patientTheme.colors.danger
                 : patientTheme.colors.primaryDark
           }
@@ -99,7 +101,7 @@ export function BotaoAgendamento({
               color={
                 isPrimary || isDanger
                   ? patientTheme.colors.onPrimary
-                  : isUnlink
+                  : isUnlink || isDangerGhost
                     ? patientTheme.colors.danger
                     : patientTheme.colors.primaryDark
               }
@@ -114,6 +116,7 @@ export function BotaoAgendamento({
               isPrimary && styles.buttonTextPrimary,
               isGhost && styles.buttonTextGhost,
               isDanger && styles.buttonTextDanger,
+              isDangerGhost && styles.buttonTextDangerGhost,
               isUnlink && styles.buttonTextUnlink,
             ]}
           >
@@ -298,6 +301,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: patientTheme.colors.border,
   },
+  buttonDangerGhost: {
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1.5,
+    borderColor: patientTheme.colors.danger,
+  },
   buttonUnlink: {
     backgroundColor: 'transparent',
     borderWidth: 0,
@@ -319,6 +327,9 @@ const styles = StyleSheet.create({
   },
   buttonTextGhost: {
     color: patientTheme.colors.primaryDark,
+  },
+  buttonTextDangerGhost: {
+    color: patientTheme.colors.danger,
   },
   buttonTextUnlink: {
     color: patientTheme.colors.danger,

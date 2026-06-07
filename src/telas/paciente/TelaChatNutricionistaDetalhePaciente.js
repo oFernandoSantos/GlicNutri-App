@@ -43,7 +43,7 @@ import {
   normalizeRpcActorProfile,
 } from '../../servicos/servicoSessaoRpc';
 import {
-  CHAT_ACTIVE_POLL_MS,
+  CHAT_REALTIME_BACKUP_POLL_MS,
   markPatientChatRead,
   bindChatEnterToSend,
   scrollChatToEnd,
@@ -300,8 +300,8 @@ export default function TelaChatNutricionistaDetalhePaciente({
       load({ silent: hasLoadedRef.current, forceRefresh: true });
       hasLoadedRef.current = true;
       const intervalId = setInterval(() => {
-        loadRef.current({ silent: true, forceRefresh: true });
-      }, CHAT_ACTIVE_POLL_MS);
+        loadRef.current({ silent: true, forceRefresh: false });
+      }, CHAT_REALTIME_BACKUP_POLL_MS);
       return () => {
         clearInterval(intervalId);
       };

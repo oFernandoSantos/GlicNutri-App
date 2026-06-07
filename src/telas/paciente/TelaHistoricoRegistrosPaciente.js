@@ -448,10 +448,12 @@ export default function PacienteHistoricoRegistrosScreen({
 
     async function load() {
       try {
-        if (!historicoCacheQuente) {
-          setLoading(true);
+        if (historicoCacheQuente) {
+          historicoLoadGuardRef.current.marcarCarregado();
+          return;
         }
-        await fetchHistoricoComErro({ forceRefresh: !historicoCacheQuente });
+        setLoading(true);
+        await fetchHistoricoComErro({ forceRefresh: true });
       } finally {
         if (active) {
           setLoading(false);

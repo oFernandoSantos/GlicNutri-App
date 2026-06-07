@@ -143,6 +143,7 @@ export default function PacientePerfilNutricionistaScreen({
   const valorLabel = formatValorConsulta(VALOR_CONSULTA_PERFIL_CENTAVOS);
   const normalizedSlots = useMemo(() => uniqueSlotsByScheduledAt(slots), [slots]);
   const calendarDays = useMemo(() => groupSlotsByDay(normalizedSlots), [normalizedSlots]);
+  const canConfirmAgendamento = Boolean(selectedDayKey && selectedSlot?.scheduledAt);
   const availableDays = useMemo(
     () =>
       calendarDays.filter((day) =>
@@ -510,6 +511,8 @@ export default function PacientePerfilNutricionistaScreen({
                   label="Confirmar agendamento"
                   onPress={handleConfirmarAgendamento}
                   loading={confirmando}
+                  disabled={!canConfirmAgendamento}
+                  style={!canConfirmAgendamento ? styles.disabledConfirmButton : null}
                 />
               </View>
             </>
@@ -909,6 +912,10 @@ const styles = StyleSheet.create({
   },
   inlineAgendaActions: {
     marginTop: 12,
+  },
+  disabledConfirmButton: {
+    backgroundColor: '#C9D1D9',
+    borderColor: '#C9D1D9',
   },
   errorText: {
     color: '#c45b5b',

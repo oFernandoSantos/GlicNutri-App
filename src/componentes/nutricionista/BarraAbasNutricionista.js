@@ -2,13 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Platform, View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { sombraPaciente, temaPaciente } from '../../temas/temaPaciente';
+import { temaPaciente, sombraPaciente } from '../../temas/temaPaciente';
 import { navigateNutriTab } from '../../utilitarios/navegacaoAbas';
 
 export const NUTRI_TAB_BAR_HEIGHT = 64;
 export const NUTRI_TAB_BAR_SPACE = 14;
 /** Mesmas cores do rodapé do acesso paciente (BarraAbasPaciente). */
-const TAB_HIGHLIGHT_COLOR = temaPaciente.cores.primaria;
+const TAB_HIGHLIGHT_COLOR = '#4fdfa3';
 const TAB_ACTIVE_BACKGROUND = '#FFFFFF';
 const TAB_BAR_FOOTER_BG = temaPaciente.cores.fundo;
 

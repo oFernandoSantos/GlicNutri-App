@@ -219,7 +219,7 @@ export default function TelaChatNutricionistaPaciente({
       load({ silent: hasLoadedRef.current, forceRefresh: false });
       hasLoadedRef.current = true;
       const intervalId = setInterval(
-        () => load({ silent: true, forceRefresh: true }),
+        () => load({ silent: true, forceRefresh: false }),
         CHAT_ACTIVE_POLL_MS
       );
       return () => {
