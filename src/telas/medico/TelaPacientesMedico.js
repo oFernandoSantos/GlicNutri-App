@@ -1,9 +1,19 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import LayoutMedico from '../../componentes/medico/LayoutMedico';
 import {
   AvatarBadge,
+  FilterTabs,
+  formatPatientRiskLabel,
+  getPatientRiskPalette,
   SearchInput,
   SectionCard,
   nutriDesktopStyles,
@@ -15,30 +25,14 @@ import {
   getMedicoId,
   listPatientsByDoctor,
 } from '../../servicos/servicoVinculosMedico';
+import {
+  countPatientsByObjectiveFilter,
+  patientMatchesObjectiveFilter,
+} from '../../utilitarios/adesaoNutricional';
 import { medicoTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 
-function getRiskMeta(patient) {
-  const risk = String(patient?.risk || '').toLowerCase();
-  if (risk.includes('alto')) {
-    return {
-      label: 'Alto Risco',
-      badgeStyle: styles.riskBadgeHigh,
-      badgeTextStyle: styles.riskBadgeTextHigh,
-    };
-  }
-  if (risk.includes('moderado') || risk.includes('medio')) {
-    return {
-      label: 'Médio Risco',
-      badgeStyle: styles.riskBadgeMedium,
-      badgeTextStyle: styles.riskBadgeTextMedium,
-    };
-  }
-  return {
-    label: 'Baixo Risco',
-    badgeStyle: styles.riskBadgeLow,
-    badgeTextStyle: styles.riskBadgeTextLow,
-  };
-}
+const MEDICO_KPI_BLUE = '#278EF5';
 
 const FILTER_ORDER = [
   { value: 'Todos', label: 'Todos' },
@@ -55,12 +49,14 @@ export default function MedicoPacientesStyled({ navigation, route }) {
   const [activeFilter, setActiveFilter] = useState('Todos');
   const [patients, setPatients] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const medicoId = useMemo(() => getMedicoId(usuarioLogado), [usuarioLogado]);
+  const patientsLoadGuardRef = useRef(criarGuardiaoCarregamentoInicial());
 
-  const loadPatients = useCallback(async () => {
+  const loadPatients = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setLoadError('');
       const items = await listPatientsByDoctor(medicoId);
       setPatients(items || []);
@@ -68,16 +64,38 @@ export default function MedicoPacientesStyled({ navigation, route }) {
       console.log('Erro ao carregar pacientes vinculados:', error);
       setLoadError('Nao foi possivel carregar os pacientes vinculados.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [medicoId]);
 
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadPatients({ silent: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPatients]);
+
+  const hasActiveFilters = Boolean(search.trim()) || activeFilter !== 'Todos';
+
+  const clearFilters = useCallback(() => {
+    setSearch('');
+    setActiveFilter('Todos');
+  }, []);
+
   useEffect(() => {
-    loadPatients();
+    (async () => {
+      await loadPatients();
+      patientsLoadGuardRef.current.marcarCarregado();
+    })();
   }, [loadPatients]);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', loadPatients);
+    const unsubscribe = navigation.addListener('focus', () => {
+      if (patientsLoadGuardRef.current.deveIgnorarCarregamentoFocus()) return;
+      loadPatients({ silent: true });
+    });
     return unsubscribe;
   }, [navigation, loadPatients]);
 
@@ -90,13 +108,7 @@ export default function MedicoPacientesStyled({ navigation, route }) {
         [patient.name, patient.specialtyTag, patient.objective, patient.notes]
           .some((field) => String(field || '').toLowerCase().includes(normalized));
 
-      const matchesFilter =
-        activeFilter === 'Todos' ||
-        (activeFilter === 'Diabetes' && patient.objective === 'Diabetes') ||
-        (activeFilter === 'Emagrecimento' && patient.objective === 'Emagrecimento') ||
-        (activeFilter === 'Ganho de Massa' && patient.objective === 'Ganho de Massa') ||
-        (activeFilter === 'Reeducacao' && patient.objective === 'Reeducacao') ||
-        (activeFilter === 'Prioritarios' && (patient.risk === 'Alto' || Number(patient.alerts || 0) > 0));
+      const matchesFilter = patientMatchesObjectiveFilter(patient, activeFilter, patients);
 
       return matchesSearch && matchesFilter;
     });
@@ -110,44 +122,24 @@ export default function MedicoPacientesStyled({ navigation, route }) {
       ? Math.round(patients.reduce((sum, item) => sum + Number(item.adherence || 0), 0) / total)
       : 0;
 
+    const placeholder = loading ? '—' : null;
+
     return [
-      { id: 'total', label: 'Total Pacientes', value: String(total), icon: 'people-outline', accent: KPI_ACCENTS.blue },
-      { id: 'high-risk', label: 'Alto Risco', value: String(highRisk), icon: 'alert-circle-outline', accent: KPI_ACCENTS.red },
-      { id: 'adherence', label: 'Adesão Média', value: `${avgAdherence}%`, icon: 'trending-up-outline', accent: KPI_ACCENTS.green },
-      { id: 'alerts', label: 'Alertas Ativos', value: String(withAlerts), icon: 'notifications-outline', accent: KPI_ACCENTS.yellow },
+      { id: 'total', label: 'Total Pacientes', value: placeholder ?? String(total), icon: 'people-outline', accent: KPI_ACCENTS.blue },
+      { id: 'high-risk', label: 'Alto Risco', value: placeholder ?? String(highRisk), icon: 'alert-circle-outline', accent: KPI_ACCENTS.red },
+      { id: 'adherence', label: 'Adesão Média', value: placeholder ?? `${avgAdherence}%`, icon: 'trending-up-outline', accent: MEDICO_KPI_BLUE },
+      { id: 'alerts', label: 'Pac. c/ Alerta', value: placeholder ?? String(withAlerts), icon: 'notifications-outline', accent: KPI_ACCENTS.yellow },
     ];
-  }, [patients]);
+  }, [loading, patients]);
 
-  const filterItems = useMemo(() => {
-    const total = patients.length;
-    const diabetes = patients.filter((patient) => patient.objective === 'Diabetes').length;
-    const emagrecimento = patients.filter((patient) => patient.objective === 'Emagrecimento').length;
-    const ganho = patients.filter((patient) => patient.objective === 'Ganho de Massa').length;
-    const reeducacao = patients.filter((patient) => patient.objective === 'Reeducacao').length;
-    const prioritarios = patients.filter(
-      (patient) => patient.risk === 'Alto' || Number(patient.alerts || 0) > 0
-    ).length;
-
-    return FILTER_ORDER.map((item) => {
-      const count =
-        item.value === 'Todos'
-          ? total
-          : item.value === 'Diabetes'
-            ? diabetes
-            : item.value === 'Emagrecimento'
-              ? emagrecimento
-              : item.value === 'Ganho de Massa'
-                ? ganho
-                : item.value === 'Reeducacao'
-                  ? reeducacao
-                  : prioritarios;
-
-      return {
+  const filterItems = useMemo(
+    () =>
+      FILTER_ORDER.map((item) => ({
         ...item,
-        fullLabel: `${item.label} (${count})`,
-      };
-    });
-  }, [patients]);
+        fullLabel: `${item.label} (${countPatientsByObjectiveFilter(patients, item.value)})`,
+      })),
+    [patients]
+  );
 
   return (
     <LayoutMedico
@@ -157,16 +149,15 @@ export default function MedicoPacientesStyled({ navigation, route }) {
       title=""
       subtitle=""
       showTabBar={route?.name === 'MedicoPacientes'}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          colors={[patientTheme.colors.primaryDark]}
+        />
+      }
     >
       <View style={nutriDesktopStyles.pageGap}>
-        <SectionCard style={styles.searchCard}>
-          <SearchInput
-            value={search}
-            onChangeText={setSearch}
-            placeholder="Buscar paciente por nome..."
-          />
-        </SectionCard>
-
         <View style={dashboardKpiStyles.grid}>
           {summary.map((item) => (
             <View key={item.id} style={dashboardKpiStyles.cell}>
@@ -180,114 +171,229 @@ export default function MedicoPacientesStyled({ navigation, route }) {
           ))}
         </View>
 
-        <SectionCard style={[styles.filtersCard, styles.flatCard]}>
-          <View style={styles.filtersRow}>
-            {filterItems.map((item) => {
-              const selected = item.value === activeFilter;
-              return (
-                <TouchableOpacity
-                  key={item.value}
-                  style={[styles.filterChip, selected && styles.filterChipActive]}
-                  onPress={() => setActiveFilter(item.value)}
-                  activeOpacity={0.9}
-                >
-                  <Text style={[styles.filterChipText, selected && styles.filterChipTextActive]}>
-                    {item.fullLabel}
-                  </Text>
-                </TouchableOpacity>
-              );
-            })}
-          </View>
-        </SectionCard>
-
-        {loading ? (
-          <SectionCard style={[styles.emptyCard, styles.flatCard]}>
-            <ActivityIndicator color={patientTheme.colors.primaryDark} />
-            <Text style={styles.emptyText}>Carregando pacientes vinculados...</Text>
-          </SectionCard>
-        ) : loadError ? (
-          <SectionCard style={[styles.emptyCard, styles.flatCard]}>
-            <Text style={styles.emptyTitle}>{loadError}</Text>
-            <TouchableOpacity style={styles.retryButton} onPress={loadPatients} activeOpacity={0.9}>
-              <Text style={styles.retryButtonText}>Tentar novamente</Text>
-            </TouchableOpacity>
-          </SectionCard>
-        ) : null}
-
-        {!loading && !loadError && !filteredPatients.length ? (
-          <SectionCard style={[styles.emptyCard, styles.flatCard]}>
-            <Text style={styles.emptyTitle}>Nenhum paciente encontrado</Text>
-            <Text style={styles.emptyText}>
-              Ajuste os filtros ou aguarde novos pacientes vinculados.
-            </Text>
-          </SectionCard>
-        ) : null}
-
-        <View style={styles.patientList}>
-          {filteredPatients.map((patient) => {
-            const riskMeta = getRiskMeta(patient);
-            const alerts = Number(patient.alerts || 0);
-
-            return (
-              <TouchableOpacity
-                key={patient.id}
-                style={[styles.patientCard, styles.flatCard]}
-                activeOpacity={0.92}
-                onPress={() =>
-                  navigation.navigate('MedicoProntuarioPaciente', {
-                    usuarioLogado,
-                    pacienteId: patient.id,
-                    paciente: patient,
-                  })
-                }
+        <SectionCard style={[styles.patientsPanel, styles.patientsPanelCard]}>
+          <View style={styles.panelHeader}>
+            <View style={styles.panelHeaderCopy}>
+              <Text style={styles.panelTitle}>Pacientes</Text>
+              <Text style={styles.panelHelper}>
+                Carteira vinculada com busca e filtros clínicos
+              </Text>
+            </View>
+            <View
+              style={[
+                styles.countBadge,
+                filteredPatients.length > 0 && styles.countBadgeActive,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.countBadgeText,
+                  filteredPatients.length > 0 && styles.countBadgeTextActive,
+                ]}
               >
-                <View style={styles.patientLeft}>
-                  <AvatarBadge name={patient.name} size={40} subtle />
-                  <View style={styles.patientCopy}>
-                    <View style={styles.patientTopRow}>
-                      <Text style={styles.patientName}>{patient.name}</Text>
-                      <View style={[styles.riskBadgePill, riskMeta.badgeStyle]}>
-                        <Text style={[styles.riskBadgePillText, riskMeta.badgeTextStyle]}>
-                          {riskMeta.label}
-                        </Text>
-                      </View>
-                    </View>
+                {filteredPatients.length}
+              </Text>
+            </View>
+          </View>
 
-                    <Text style={styles.patientMeta}>
-                      {patient.specialtyTag} · {patient.age} anos
-                    </Text>
+          <FilterTabs
+            items={filterItems.map((item) => ({ value: item.value, label: item.fullLabel }))}
+            active={activeFilter}
+            onChange={setActiveFilter}
+            compact
+            fill
+            theme={patientTheme}
+          />
 
-                    <View style={styles.patientStatusRow}>
-                      <View style={styles.statusItem}>
-                        <Ionicons name="trending-up-outline" size={10} color="#5c6e83" />
-                        <Text style={styles.statusItemText}>Adesão: {patient.adherence}%</Text>
-                      </View>
-                      {alerts ? (
-                        <View style={styles.statusItem}>
-                          <Ionicons name="alert-circle-outline" size={10} color={patientTheme.colors.danger} />
-                          <Text style={[styles.statusItemText, styles.statusItemAlertText]}>
-                            {alerts} {alerts === 1 ? 'alerta' : 'alertas'}
-                          </Text>
-                        </View>
-                      ) : null}
-                    </View>
-                  </View>
-                </View>
+          <SearchInput
+            value={search}
+            onChangeText={setSearch}
+            placeholder="Buscar paciente por nome..."
+          />
 
-                <View style={styles.patientRight}>
-                  <Text style={styles.updatedLabel}>Atualizado</Text>
-                  <Text style={styles.updatedTime}>{patient.updatedAt || '--'}</Text>
-                </View>
+          <View style={styles.panelDivider} />
+
+          {loading ? (
+            <View style={styles.emptyPanel}>
+              <ActivityIndicator color={patientTheme.colors.primaryDark} />
+              <Text style={styles.emptyText}>Carregando pacientes vinculados...</Text>
+            </View>
+          ) : loadError ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>{loadError}</Text>
+              <TouchableOpacity style={styles.retryButton} onPress={loadPatients} activeOpacity={0.9}>
+                <Text style={styles.retryButtonText}>Tentar novamente</Text>
               </TouchableOpacity>
-            );
-          })}
-        </View>
+            </View>
+          ) : !filteredPatients.length ? (
+            <View style={styles.emptyPanel}>
+              <Text style={styles.emptyTitle}>Nenhum paciente encontrado</Text>
+              <Text style={styles.emptyText}>
+                {hasActiveFilters
+                  ? 'Nenhum paciente corresponde aos filtros atuais.'
+                  : 'Aguarde novos pacientes vinculados à sua carteira.'}
+              </Text>
+              {hasActiveFilters ? (
+                <TouchableOpacity style={styles.clearFiltersButton} onPress={clearFilters} activeOpacity={0.9}>
+                  <Text style={styles.clearFiltersButtonText}>Limpar filtros</Text>
+                </TouchableOpacity>
+              ) : null}
+            </View>
+          ) : (
+            <View style={styles.patientListPanel}>
+              <View style={styles.patientList}>
+                {filteredPatients.map((patient) => {
+                  const alerts = Number(patient.alerts || 0);
+                  const riskPalette = getPatientRiskPalette(patient);
+
+                  return (
+                    <View key={patient.id} style={styles.patientRow}>
+                      <Pressable
+                        style={({ pressed }) => [
+                          styles.flatCard,
+                          styles.patientCard,
+                          { borderLeftColor: riskPalette.border, borderLeftWidth: 4 },
+                          pressed && styles.patientCardPressed,
+                        ]}
+                        onPress={() =>
+                          navigation.navigate('MedicoProntuarioPaciente', {
+                            usuarioLogado,
+                            pacienteId: patient.id,
+                            paciente: patient,
+                          })
+                        }
+                      >
+                        <View style={styles.patientScheduleCol}>
+                          <Text style={styles.patientScheduleTime}>
+                            {patient.updatedAt || '--'}
+                          </Text>
+                          <Text style={styles.patientScheduleDate}>Atualizado</Text>
+                        </View>
+
+                        <View style={styles.patientBody}>
+                          <AvatarBadge name={patient.name} size={38} subtle theme={patientTheme} />
+                          <View style={styles.patientCopy}>
+                            <Text style={styles.patientName} numberOfLines={1}>
+                              {patient.name}
+                            </Text>
+                            <View style={styles.patientMetaRow}>
+                              <View
+                                style={[
+                                  styles.patientStatusPill,
+                                  {
+                                    backgroundColor: riskPalette.bg,
+                                    borderColor: riskPalette.border,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.patientStatusPillText,
+                                    { color: riskPalette.text },
+                                  ]}
+                                >
+                                  {formatPatientRiskLabel(patient)}
+                                </Text>
+                              </View>
+                              <Text style={styles.patientMeta} numberOfLines={1}>
+                                {patient.specialtyTag} · {patient.age} anos
+                              </Text>
+                            </View>
+                            {patient.email ? (
+                              <Text style={styles.patientEmail} numberOfLines={1}>
+                                {patient.email}
+                              </Text>
+                            ) : null}
+                            <Text style={styles.patientDetailMeta}>
+                              Adesão: {patient.adherence}%
+                              {alerts
+                                ? ` · ${alerts} ${alerts === 1 ? 'alerta' : 'alertas'}`
+                                : ''}
+                            </Text>
+                          </View>
+                        </View>
+                      </Pressable>
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+          )}
+        </SectionCard>
       </View>
     </LayoutMedico>
   );
 }
 
 const styles = StyleSheet.create({
+  patientsPanel: {
+    width: '100%',
+    alignSelf: 'stretch',
+    overflow: 'visible',
+  },
+  patientsPanelCard: {
+    width: '100%',
+    minWidth: 0,
+    flexDirection: 'column',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+    overflow: 'visible',
+  },
+  panelHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 8,
+  },
+  panelHeaderCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  panelTitle: {
+    color: '#111111',
+    fontSize: 16,
+    fontWeight: '700',
+  },
+  panelHelper: {
+    marginTop: 4,
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  countBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  countBadgeActive: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderColor: patientTheme.colors.primaryDark,
+  },
+  countBadgeText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '800',
+  },
+  countBadgeTextActive: {
+    color: patientTheme.colors.primaryDark,
+  },
+  panelDivider: {
+    height: 1,
+    backgroundColor: patientTheme.colors.border,
+    marginTop: 2,
+  },
+  emptyPanel: {
+    alignItems: 'flex-start',
+    gap: 10,
+    paddingVertical: 8,
+  },
   flatCard: {
     backgroundColor: patientTheme.colors.background,
     borderWidth: 1,
@@ -296,186 +402,118 @@ const styles = StyleSheet.create({
     shadowColor: 'transparent',
     elevation: 0,
   },
-  searchCard: {
-    backgroundColor: patientTheme.colors.background,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    shadowColor: 'transparent',
-    elevation: 0,
-  },
-  summaryGrid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 12,
-  },
-  summaryCard: {
-    width: Platform.OS === 'web' ? '24%' : '48%',
-    minWidth: 160,
-    flexGrow: 1,
-    minHeight: 74,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  summaryLabel: {
-    fontSize: 11,
-    color: patientTheme.colors.textMuted,
-    fontWeight: '500',
-    textAlign: 'center',
-  },
-  summaryValue: {
-    marginTop: 8,
-    fontSize: 18,
-    fontWeight: '900',
-    textAlign: 'center',
-  },
-  metricValueDefault: {
-    color: patientTheme.colors.text,
-  },
-  metricValueHighRisk: {
-    color: patientTheme.colors.danger,
-  },
-  metricValueAdherence: {
-    color: patientTheme.colors.primaryDark,
-  },
-  metricValueAlerts: {
-    color: patientTheme.colors.warning,
-  },
-  filtersCard: {
-    paddingVertical: 6,
-    paddingHorizontal: 0,
-  },
-  filtersRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 6,
-    paddingHorizontal: 4,
-  },
-  filterChip: {
-    minHeight: 24,
-    paddingHorizontal: 14,
-    borderRadius: patientTheme.radius.pill,
-    justifyContent: 'center',
-    backgroundColor: 'transparent',
-  },
-  filterChipActive: {
-    backgroundColor: patientTheme.colors.surface,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.surfaceBorder,
-  },
-  filterChipText: {
-    color: patientTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  filterChipTextActive: {
-    fontWeight: '700',
+  patientListPanel: {
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+    paddingBottom: 4,
   },
   patientList: {
-    gap: 10,
+    width: '100%',
+    minWidth: 0,
+    marginTop: 8,
+    gap: 8,
+  },
+  patientRow: {
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
   },
   patientCard: {
-    minHeight: 76,
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    minHeight: 64,
+    backgroundColor: patientTheme.colors.surface,
     flexDirection: 'row',
-    justifyContent: 'space-between',
     alignItems: 'center',
-    gap: 14,
-    paddingVertical: 12,
-    paddingHorizontal: 14,
+    paddingVertical: 10,
+    paddingRight: 10,
+    paddingLeft: 0,
+    gap: 8,
+    alignSelf: 'stretch',
   },
-  patientLeft: {
+  patientCardPressed: {
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  patientScheduleCol: {
+    width: 68,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    borderRightWidth: 1,
+    borderRightColor: patientTheme.colors.border,
+  },
+  patientScheduleTime: {
+    color: '#111111',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  patientScheduleDate: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12,
+  },
+  patientBody: {
+    flex: 1,
+    minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    flex: 1,
+    gap: 10,
+    paddingRight: 8,
   },
   patientCopy: {
     flex: 1,
     minWidth: 0,
-  },
-  patientTopRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
+    gap: 2,
   },
   patientName: {
+    color: '#111111',
     fontSize: 14,
-    fontWeight: '700',
-    color: patientTheme.colors.text,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  patientMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+    marginTop: 2,
+  },
+  patientStatusPill: {
+    flexShrink: 0,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  patientStatusPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 12,
   },
   patientMeta: {
-    marginTop: 4,
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-  },
-  patientStatusRow: {
-    marginTop: 6,
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 10,
-    alignItems: 'center',
-  },
-  statusItem: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  statusItemText: {
+    flex: 1,
+    minWidth: 0,
     color: patientTheme.colors.textMuted,
     fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
   },
-  statusItemAlertText: {
-    color: patientTheme.colors.warning,
-  },
-  patientRight: {
-    alignItems: 'flex-end',
-  },
-  updatedLabel: {
+  patientEmail: {
     color: patientTheme.colors.textMuted,
     fontSize: 10,
+    lineHeight: 13,
   },
-  updatedTime: {
-    marginTop: 4,
-    color: patientTheme.colors.text,
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  riskBadgePill: {
-    borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-  },
-  riskBadgePillText: {
+  patientDetailMeta: {
+    color: patientTheme.colors.textMuted,
     fontSize: 10,
-    fontWeight: '700',
-  },
-  riskBadgeHigh: {
-    backgroundColor: patientTheme.colors.dangerSoft,
-    borderColor: patientTheme.colors.danger,
-  },
-  riskBadgeTextHigh: {
-    color: patientTheme.colors.text,
-  },
-  riskBadgeMedium: {
-    backgroundColor: patientTheme.colors.warningSoft,
-    borderColor: patientTheme.colors.warning,
-  },
-  riskBadgeTextMedium: {
-    color: patientTheme.colors.text,
-  },
-  riskBadgeLow: {
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: patientTheme.colors.primary,
-  },
-  riskBadgeTextLow: {
-    color: patientTheme.colors.primaryDark,
-  },
-  emptyCard: {
-    alignItems: 'flex-start',
-    gap: 10,
+    lineHeight: 13,
+    fontWeight: '600',
   },
   emptyTitle: {
     color: patientTheme.colors.text,
@@ -485,6 +523,22 @@ const styles = StyleSheet.create({
   emptyText: {
     color: patientTheme.colors.textMuted,
     lineHeight: 20,
+  },
+  clearFiltersButton: {
+    marginTop: 14,
+    minHeight: 44,
+    alignSelf: 'center',
+    paddingHorizontal: 18,
+    paddingVertical: 10,
+    borderRadius: patientTheme.radius.pill,
+    backgroundColor: patientTheme.colors.primary,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.primary,
+  },
+  clearFiltersButtonText: {
+    color: patientTheme.colors.onPrimary,
+    fontWeight: '800',
+    fontSize: 13,
   },
   retryButton: {
     alignSelf: 'flex-start',

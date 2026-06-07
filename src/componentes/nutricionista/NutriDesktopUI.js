@@ -37,7 +37,8 @@ export function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
-export function AvatarBadge({ name, size = 48, subtle = false }) {
+export function AvatarBadge({ name, size = 48, subtle = false, theme }) {
+  const palette = theme?.colors || patientTheme.colors;
   const initials = String(name || 'Paciente')
     .split(' ')
     .filter(Boolean)
@@ -50,10 +51,19 @@ export function AvatarBadge({ name, size = 48, subtle = false }) {
       style={[
         styles.avatar,
         subtle ? styles.avatarSubtle : styles.avatarStrong,
+        subtle && { backgroundColor: palette.primarySoft },
         { width: size, height: size, borderRadius: size / 2 },
       ]}
     >
-      <Text style={[styles.avatarText, subtle && styles.avatarTextSubtle]}>{initials}</Text>
+      <Text
+        style={[
+          styles.avatarText,
+          subtle && styles.avatarTextSubtle,
+          subtle && { color: palette.primaryDark },
+        ]}
+      >
+        {initials}
+      </Text>
     </View>
   );
 }
@@ -150,7 +160,9 @@ export function FilterTabs({
   compact = false,
   scrollable = false,
   fill = true,
+  theme,
 }) {
+  const tabTheme = theme?.colors || patientTheme.colors;
   const { width: windowWidth } = useWindowDimensions();
   const tabGap = compact ? 7 : 10;
   const minChipWidth = compact ? 68 : 84;
@@ -170,6 +182,10 @@ export function FilterTabs({
           useFill && styles.tabChipFill,
           useHorizontalScroll && styles.tabChipScrollable,
           selected && styles.tabChipActive,
+          selected && {
+            backgroundColor: tabTheme.primary,
+            borderColor: tabTheme.primary,
+          },
         ]}
         onPress={() => onChange(item.value)}
         activeOpacity={0.85}

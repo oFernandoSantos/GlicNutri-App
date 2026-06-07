@@ -18,8 +18,17 @@ const menuItems = [
   { label: 'Gerenciamento de Pacientes', route: 'MedicoPacientes', icon: 'people-outline' },
   { label: 'Início', route: 'HomeMedico', icon: 'home-outline' },
   { label: 'Mensagens', route: 'MedicoMensagens', icon: 'chatbubbles-outline' },
-  { label: 'Relatorios', route: 'MedicoRelatorios', icon: 'bar-chart-outline' },
+  { label: 'Relatórios', route: 'MedicoRelatorios', icon: 'bar-chart-outline' },
 ];
+
+function getFirstName(name) {
+  return (
+    String(name || 'Médico')
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean)[0] || 'Médico'
+  );
+}
 
 export default function MedicoDrawer({
   visible,
@@ -46,30 +55,41 @@ export default function MedicoDrawer({
           style={[styles.drawer, { width: drawerWidth }]}
         >
           <View style={[styles.header, compact && styles.headerCompact]}>
-            <View style={[styles.avatar, compact && styles.avatarCompact]}>
-              <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>
-                {(userName || 'N').trim().slice(0, 1).toUpperCase()}
-              </Text>
+            <View style={styles.headerProfile}>
+              <View style={[styles.avatar, compact && styles.avatarCompact]}>
+                <Text style={[styles.avatarText, compact && styles.avatarTextCompact]}>
+                  {(userName || 'M').trim().slice(0, 1).toUpperCase()}
+                </Text>
+              </View>
+
+              <View style={styles.headerText}>
+                <Text style={[styles.title, compact && styles.titleCompact]}>Painel profissional</Text>
+                <Text
+                  style={[styles.userName, compact && styles.userNameCompact]}
+                  numberOfLines={1}
+                  ellipsizeMode="tail"
+                >
+                  {getFirstName(userName)}
+                </Text>
+                {userSubtitle ? (
+                  <Text
+                    style={[styles.userSubtitle, compact && styles.userSubtitleCompact]}
+                    numberOfLines={2}
+                  >
+                    {userSubtitle}
+                  </Text>
+                ) : null}
+              </View>
             </View>
 
-            <View style={styles.headerText}>
-              <Text style={[styles.title, compact && styles.titleCompact]}>Painel profissional</Text>
-              <Text
-                style={[styles.userName, compact && styles.userNameCompact]}
-                numberOfLines={2}
-              >
-                {userName || 'Medico'}
-              </Text>
-              <Text
-                style={[styles.userSubtitle, compact && styles.userSubtitleCompact]}
-                numberOfLines={3}
-              >
-                {userSubtitle || 'Monitore pacientes, alertas e aderencia em um so lugar'}
-              </Text>
-            </View>
-
-            <TouchableOpacity style={styles.closeButton} onPress={onClose}>
-              <Ionicons name="close" size={24} color={patientTheme.colors.text} />
+            <TouchableOpacity
+              style={styles.closeButton}
+              onPress={onClose}
+              accessibilityRole="button"
+              accessibilityLabel="Fechar menu"
+              hitSlop={{ top: 8, right: 8, bottom: 8, left: 8 }}
+            >
+              <Ionicons name="close" size={24} color={patientTheme.colors.onPrimary} />
             </TouchableOpacity>
           </View>
 
@@ -100,7 +120,7 @@ export default function MedicoDrawer({
                   >
                     <Ionicons
                       name={item.icon}
-                      size={22}
+                      size={20}
                       color={
                         active
                           ? patientTheme.colors.primaryDark
@@ -175,46 +195,56 @@ const styles = StyleSheet.create({
   },
   header: {
     margin: 16,
-    padding: 18,
+    paddingHorizontal: 18,
+    paddingVertical: 14,
     borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: patientTheme.colors.primary,
     flexDirection: 'row',
     alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 8,
     ...patientShadow,
-    borderColor: patientTheme.colors.surfaceBorder,
+  },
+  headerProfile: {
+    alignItems: 'flex-start',
+    flex: 1,
+    flexDirection: 'row',
+    gap: 12,
+    minWidth: 0,
   },
   headerCompact: {
     margin: 12,
-    padding: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
   },
   avatar: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: 'rgba(255,255,255,0.24)',
     alignItems: 'center',
     justifyContent: 'center',
     marginRight: 12,
   },
   avatarCompact: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
     marginRight: 10,
   },
   avatarText: {
-    color: patientTheme.colors.text,
-    fontSize: 20,
+    color: patientTheme.colors.onPrimary,
+    fontSize: 18,
     fontWeight: '700',
   },
   avatarTextCompact: {
-    fontSize: 18,
+    fontSize: 16,
   },
   headerText: {
     flex: 1,
   },
   title: {
-    color: patientTheme.colors.textMuted,
+    color: 'rgba(255,255,255,0.82)',
     fontSize: 12,
     marginBottom: 4,
     textTransform: 'uppercase',
@@ -224,29 +254,29 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
   userName: {
-    color: patientTheme.colors.text,
-    fontSize: 18,
+    color: patientTheme.colors.onPrimary,
+    fontSize: 17,
     fontWeight: '700',
   },
   userNameCompact: {
-    fontSize: 16,
+    fontSize: 15,
   },
   userSubtitle: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 11,
+    lineHeight: 16,
     marginTop: 4,
   },
   userSubtitleCompact: {
-    fontSize: 11,
-    lineHeight: 16,
+    fontSize: 10,
+    lineHeight: 14,
   },
   closeButton: {
     marginLeft: 8,
   },
   menuList: {
     paddingHorizontal: 16,
-    gap: 8,
+    gap: 6,
   },
   menuListCompact: {
     paddingHorizontal: 12,
@@ -254,30 +284,30 @@ const styles = StyleSheet.create({
   menuItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 14,
-    paddingVertical: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderRadius: patientTheme.radius.lg,
   },
   menuItemCompact: {
-    paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
   },
   menuItemActive: {
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    backgroundColor: patientTheme.colors.primarySoft,
   },
   menuLabel: {
     flexShrink: 1,
-    marginLeft: 12,
-    fontSize: 15,
+    marginLeft: 10,
+    fontSize: 14,
     color: patientTheme.colors.text,
     fontWeight: '600',
   },
   menuLabelCompact: {
-    marginLeft: 10,
-    fontSize: 14,
+    marginLeft: 9,
+    fontSize: 13,
   },
   menuLabelActive: {
-    color: patientTheme.colors.text,
+    color: patientTheme.colors.primaryDark,
   },
   footer: {
     marginTop: 'auto',
@@ -289,7 +319,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     paddingVertical: 14,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.dangerSoft,
   },
   logoutButtonCompact: {
     paddingHorizontal: 12,
@@ -298,7 +327,7 @@ const styles = StyleSheet.create({
   logoutText: {
     marginLeft: 12,
     fontSize: 15,
-    color: patientTheme.colors.danger,
+    color: '#b91c1c',
     fontWeight: '700',
   },
   logoutTextCompact: {
