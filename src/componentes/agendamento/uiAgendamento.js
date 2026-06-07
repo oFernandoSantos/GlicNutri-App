@@ -144,18 +144,27 @@ export function BadgeStatusConsulta({ status }) {
   return <BadgeAgendamento label={meta.label} tone={meta.tone} />;
 }
 
-export function ChipFiltro({ label, active, onPress, icon, style, textStyle, inactiveStyle }) {
+export function ChipFiltro({ label, active, onPress, icon, style, textStyle, inactiveStyle, theme }) {
   const { width } = useWindowDimensions();
   const compact = width < 420;
+  const palette = theme?.colors || patientTheme.colors;
 
   return (
     <TouchableOpacity
       style={[
         styles.chip,
         compact && styles.chipCompact,
+        !active && {
+          borderColor: palette.primary,
+          backgroundColor: palette.surface || palette.background,
+        },
         !active && inactiveStyle,
         style,
         active && styles.chipActive,
+        active && {
+          backgroundColor: palette.primary,
+          borderColor: palette.primaryDark,
+        },
       ]}
       onPress={onPress}
       activeOpacity={0.85}
@@ -164,7 +173,7 @@ export function ChipFiltro({ label, active, onPress, icon, style, textStyle, ina
         <Ionicons
           name={icon}
           size={compact ? 12 : 14}
-          color={active ? patientTheme.colors.onPrimary : patientTheme.colors.primaryDark}
+          color={active ? palette.onPrimary : palette.primaryDark}
         />
       ) : null}
       <Text
@@ -173,6 +182,7 @@ export function ChipFiltro({ label, active, onPress, icon, style, textStyle, ina
         style={[
           styles.chipText,
           compact && styles.chipTextCompact,
+          !active && { color: palette.primaryDark },
           active && styles.chipTextActive,
           textStyle,
         ]}

@@ -28,6 +28,7 @@ export const PATIENT_APP_ROUTE_NAMES = new Set([
   'RegistroRefeicaoIA',
   'PacienteChatNutricionista',
   'PacienteChatNutricionistaDetalhe',
+  'PacienteChatMedicoDetalhe',
   'PacientePrevisaoML',
   'PacientePerfilNutricionista',
   'PacientePerfilMedico',

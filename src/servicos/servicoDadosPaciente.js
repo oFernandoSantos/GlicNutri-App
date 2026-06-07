@@ -223,7 +223,7 @@ export function buildNutritionistThreadPreview(thread = [], { lastReadAt = null 
 }
 
 function isOptimisticChatMessageId(id) {
-  return /^(user|nutri|thread)-/.test(String(id || ''));
+  return /^(user|nutri|medico|thread)-/.test(String(id || ''));
 }
 
 function ensureThreadContainsMessage(thread = [], message = null) {

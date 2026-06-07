@@ -8,29 +8,41 @@ import {
   nutriSpacing,
 } from './designSystemNutricionista';
 
+const MEDICO_BRAND = '#278EF5';
+const MEDICO_BRAND_DARK = '#1D6FCC';
+const MEDICO_BRAND_SOFT = '#E8F4FE';
+
 const medicoColors = {
-  background: '#FFFFFF',
-  backgroundSoft: '#F7F9FB',
-  surface: '#FFFFFF',
-  surfaceMuted: '#F7F9FB',
-  primary: '#4FDFA3',
-  primaryDark: '#2F9D78',
-  primarySoft: '#E8FFF5',
-  surfaceBorder: '#D8E0E7',
-  onPrimary: '#FFFFFF',
-  text: '#2F3438',
-  textMuted: '#687780',
-  border: '#D8E0E7',
-  warning: '#E8B84A',
-  warningSoft: '#FFF6DD',
-  info: '#4D7FD8',
-  infoSoft: '#EAF1FF',
-  danger: '#EF4444',
+  background: nutriColors.background,
+  backgroundSoft: nutriColors.backgroundSoft,
+  surface: nutriColors.surface,
+  surfaceMuted: nutriColors.surfaceMuted,
+  primary: MEDICO_BRAND,
+  primaryDark: MEDICO_BRAND_DARK,
+  primaryActive: MEDICO_BRAND_DARK,
+  primaryBorder: MEDICO_BRAND,
+  primarySoft: MEDICO_BRAND_SOFT,
+  primaryLight: MEDICO_BRAND_SOFT,
+  surfaceBorder: nutriColors.border,
+  onPrimary: nutriColors.onPrimary,
+  text: nutriColors.textPrimary,
+  textMuted: nutriColors.textSecondary,
+  border: nutriColors.border,
+  warning: nutriColors.warning,
+  warningSoft: '#FFFBEB',
+  info: nutriColors.info,
+  infoSoft: '#E0F2FE',
+  danger: nutriColors.danger,
   dangerSoft: '#FEE2E2',
-  success: '#2F9D78',
-  successSoft: '#E8FFF5',
-  shadow: 'rgba(47, 157, 120, 0.12)',
-  overlay: 'rgba(24, 34, 31, 0.26)',
+  success: nutriColors.success,
+  successSoft: MEDICO_BRAND_SOFT,
+  shadow: nutriColors.shadow,
+  overlay: nutriColors.overlay,
+  highlightSurface: nutriColors.surface,
+  highlightBorder: nutriColors.border,
+  actionPrimary: '#278EF5',
+  actionPrimaryPressed: '#1D6FCC',
+  actionPrimaryHover: '#2080E0',
 };
 
 export const nutriTheme = {
@@ -72,29 +84,9 @@ export const nutriShadow = nutriShadowTokens.card;
 
 export const medicoTheme = {
   colors: medicoColors,
-  radius: {
-    md: 14,
-    lg: 18,
-    xl: 24,
-    pill: 999,
-  },
-  spacing: {
-    xs: 6,
-    sm: 10,
-    md: 14,
-    lg: 18,
-    xl: 24,
-    screen: 20,
-    card: 18,
-  },
+  radius: nutriRadius,
+  spacing: nutriSpacing,
+  shadow: nutriShadowTokens.card,
 };
 
-export const medicoShadow = {
-  elevation: 2,
-  shadowColor: '#2F9D78',
-  shadowOpacity: 0.12,
-  shadowRadius: 14,
-  shadowOffset: { width: 0, height: 6 },
-  borderWidth: 1,
-  borderColor: '#D8E0E7',
-};
+export const medicoShadow = nutriShadowTokens.card;

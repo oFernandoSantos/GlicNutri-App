@@ -38,11 +38,20 @@ export function abrirMensagensProfissionalVinculado(
   }
 
   if (papel === 'medico') {
-    mostrarToastPaciente({
-      tipo: 'info',
-      texto: 'Mensagens com o médico',
-      subtexto:
-        'O chat com o médico ainda não está disponível no app. Use Suporte ou Agendamentos se precisar de contato.',
+    const medicoId = profissional?.id_medico_uuid;
+    if (!medicoId) {
+      mostrarToastPaciente({
+        tipo: 'erro',
+        texto: 'Medico indisponivel',
+        subtexto: 'Tente novamente em instantes.',
+      });
+      return;
+    }
+
+    navigation.navigate('PacienteChatMedicoDetalhe', {
+      usuarioLogado,
+      medico: profissional,
+      initialMedico: profissional,
     });
   }
 }

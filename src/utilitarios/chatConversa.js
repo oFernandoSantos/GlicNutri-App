@@ -10,7 +10,9 @@ export const CHAT_COMPACT_BREAKPOINT = 900;
 export const CHAT_ACTIVE_POLL_MS = 4000;
 export const CHAT_REALTIME_BACKUP_POLL_MS = 12000;
 const PATIENT_CHAT_READ_PREFIX = '@glicnutri:patientChatReadAt:';
+const PATIENT_MEDICO_CHAT_READ_PREFIX = '@glicnutri:patientMedicoChatReadAt:';
 const NUTRI_CHAT_READ_PREFIX = '@glicnutri:nutriChatReadAt:';
+const MEDICO_CHAT_READ_PREFIX = '@glicnutri:medicoChatReadAt:';
 
 export function isChatCompactLayout(windowWidth) {
   if (Platform.OS !== 'web') return true;
@@ -37,6 +39,14 @@ export function resolveNutritionistThreadMerge(current = [], incoming = []) {
   if (incomingTime > currentTime) return incomingList;
   if (currentTime > incomingTime) return currentList;
   return incomingList.length >= currentList.length ? incomingList : currentList;
+}
+
+/** Reload thread: servidor com dados ganha; vazio preserva local. */
+export function resolveChatThreadReload(current = [], incoming = []) {
+  const incomingList = Array.isArray(incoming) ? incoming : [];
+  const currentList = Array.isArray(current) ? current : [];
+  if (incomingList.length) return incomingList;
+  return currentList;
 }
 
 export function normalizeChatMessages(
@@ -109,6 +119,41 @@ export async function markPatientChatRead(patientId, readAt = new Date().toISOSt
   }
 }
 
+function getPatientMedicoChatReadKey(patientId, medicoId) {
+  return patientId && medicoId
+    ? `${PATIENT_MEDICO_CHAT_READ_PREFIX}${patientId}:${medicoId}`
+    : '';
+}
+
+export async function getPatientMedicoChatLastReadAt(patientId, medicoId) {
+  const key = getPatientMedicoChatReadKey(patientId, medicoId);
+  if (!key) return null;
+
+  try {
+    return (await AsyncStorage.getItem(key)) || null;
+  } catch (error) {
+    console.log('Erro ao carregar leitura do chat (paciente/medico):', error);
+    return null;
+  }
+}
+
+export async function markPatientMedicoChatRead(
+  patientId,
+  medicoId,
+  readAt = new Date().toISOString()
+) {
+  const key = getPatientMedicoChatReadKey(patientId, medicoId);
+  if (!key) return null;
+
+  try {
+    await AsyncStorage.setItem(key, readAt);
+    return readAt;
+  } catch (error) {
+    console.log('Erro ao salvar leitura do chat (paciente/medico):', error);
+    return null;
+  }
+}
+
 function getNutriChatReadKey(nutricionistaId, patientId) {
   return nutricionistaId && patientId
     ? `${NUTRI_CHAT_READ_PREFIX}${nutricionistaId}:${patientId}`
@@ -162,6 +207,53 @@ export function buildNutriChatPreview(thread = [], options = {}) {
   return buildNutritionistThreadPreview(normalizeChatMessages(thread, options), {
     lastReadAt: options.lastReadAt,
   });
+}
+
+function getMedicoChatReadKey(medicoId, patientId) {
+  return medicoId && patientId ? `${MEDICO_CHAT_READ_PREFIX}${medicoId}:${patientId}` : '';
+}
+
+export async function getMedicoChatLastReadAt(medicoId, patientId) {
+  const key = getMedicoChatReadKey(medicoId, patientId);
+  if (!key) return null;
+
+  try {
+    return (await AsyncStorage.getItem(key)) || null;
+  } catch (error) {
+    console.log('Erro ao carregar leitura do chat (medico):', error);
+    return null;
+  }
+}
+
+export async function markMedicoChatRead(
+  medicoId,
+  patientId,
+  readAt = new Date().toISOString()
+) {
+  const key = getMedicoChatReadKey(medicoId, patientId);
+  if (!key) return null;
+
+  try {
+    await AsyncStorage.setItem(key, readAt);
+    return readAt;
+  } catch (error) {
+    console.log('Erro ao salvar leitura do chat (medico):', error);
+    return null;
+  }
+}
+
+export async function loadMedicoChatReadAtForPatients(medicoId, patientIds = []) {
+  const map = {};
+  if (!medicoId || !patientIds.length) return map;
+
+  await Promise.all(
+    patientIds.map(async (patientId) => {
+      const readAt = await getMedicoChatLastReadAt(medicoId, patientId);
+      if (readAt) map[patientId] = readAt;
+    })
+  );
+
+  return map;
 }
 
 export function getLastChatMessage(thread = [], options = {}) {

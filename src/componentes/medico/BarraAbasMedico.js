@@ -2,13 +2,14 @@ import React, { useEffect, useState } from 'react';
 import { Platform, View, Text, Pressable, StyleSheet } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { medicoTheme as theme, medicoShadow as shadow } from '../../temas/temaVisualNutricionista';
+import { temaPaciente, sombraPaciente } from '../../temas/temaPaciente';
 import { navigateMedicoTab } from '../../utilitarios/navegacaoAbas';
 
 export const MEDICO_TAB_BAR_HEIGHT = 64;
 export const MEDICO_TAB_BAR_SPACE = 14;
-const TAB_HIGHLIGHT_COLOR = '#4fdfa3';
+const TAB_HIGHLIGHT_COLOR = '#278EF5';
 const TAB_ACTIVE_BACKGROUND = '#FFFFFF';
+const TAB_BAR_FOOTER_BG = temaPaciente.cores.fundo;
 
 const abasPrincipais = [
   { rota: 'MedicoAgenda', rotulo: 'Agenda', icone: 'calendar-outline' },
@@ -89,7 +90,7 @@ const styles = StyleSheet.create({
     width: '100%',
     zIndex: 40,
     elevation: 14,
-    backgroundColor: theme.colors.background,
+    backgroundColor: TAB_BAR_FOOTER_BG,
     borderTopWidth: 1,
     borderTopColor: '#FFFFFF',
   },
@@ -99,11 +100,11 @@ const styles = StyleSheet.create({
     paddingTop: 1,
     paddingBottom: 3,
     paddingHorizontal: 6,
-    backgroundColor: theme.colors.background,
+    backgroundColor: TAB_BAR_FOOTER_BG,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    ...shadow,
+    ...sombraPaciente,
     borderColor: '#FFFFFF',
     zIndex: 80,
   },
