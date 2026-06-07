@@ -18,6 +18,7 @@ import {
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
 import {
   createDefaultAppState,
+  ensurePatientWeightHistoryPreview,
   fetchPatientExperience,
   getCachedPatientExperience,
   getPatientDisplayName,
@@ -34,8 +35,9 @@ import {
 } from '../../utilitarios/vinculoPlanoRefeicao';
 
 const WEEKDAY_LABELS = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
-const PANEL_GAP = patientTheme.spacing.lg;
-const SECTION_INNER_GAP = patientTheme.spacing.md;
+const PANEL_GAP = patientTheme.spacing.md;
+const SECTION_INNER_GAP = patientTheme.spacing.sm;
+const PROGRESS_CARD_PAD = 11;
 /** Verde marca GlicNutri (#4FDFA3) — KPIs Progresso */
 const GLIC_GREEN = patientTheme.colors.primary;
 const PROGRESS_PERIOD_TABS = [
@@ -62,6 +64,37 @@ function formatSignedWeight(value) {
   const number = toNumber(value);
   const prefix = number > 0 ? '+' : '';
   return `${prefix}${number.toFixed(1)}kg`;
+}
+
+function resolveWeightChangeRecords(periodRecords, chartRecords) {
+  if (periodRecords.length >= 2) return periodRecords;
+  if (chartRecords.length >= 2) return chartRecords;
+  return periodRecords.length ? periodRecords : chartRecords;
+}
+
+function calculateWeightChange(records = []) {
+  if (!Array.isArray(records) || records.length < 2) return 0;
+  const first = toNumber(records[0]?.valueKg);
+  const last = toNumber(records[records.length - 1]?.valueKg);
+  return Number((first - last).toFixed(1));
+}
+
+function formatWeightChangeDisplay(change) {
+  const number = toNumber(change);
+  if (Math.abs(number) < 0.05) return '0.0kg';
+  if (number > 0) return `-${number.toFixed(1)}kg`;
+  return `+${Math.abs(number).toFixed(1)}kg`;
+}
+
+function getWeightChangeMeta(change) {
+  const number = toNumber(change);
+  if (Math.abs(number) < 0.05) {
+    return { label: 'Peso estável', icon: 'remove-outline', color: GLIC_GREEN };
+  }
+  if (number > 0) {
+    return { label: 'Perda de peso', icon: 'trending-down-outline', color: GLIC_GREEN };
+  }
+  return { label: 'Ganho de peso', icon: 'trending-up-outline', color: '#ff7a12' };
 }
 
 function getBarTone(value) {
@@ -195,36 +228,138 @@ function filterEntriesByPeriod(items, period, startDateInput, endDateInput, getD
   });
 }
 
-function buildWeightSeries(currentWeight) {
-  if (!(currentWeight > 0)) {
+function ensureWeightArray(value) {
+  return Array.isArray(value) ? value : [];
+}
+
+function buildWeightHistoryRecords(weightEntries = []) {
+  const byDate = new Map();
+
+  ensureWeightArray(weightEntries).forEach((entry, index) => {
+    const date = extractIsoDate(entry?.date || entry?.recordedAt || entry?.createdAt);
+    const valueKg = toNumber(entry?.valueKg ?? entry?.value ?? entry?.peso_kg);
+    if (!date || !(valueKg > 0)) return;
+
+    const next = {
+      id: entry?.id || `weight-entry-${date}-${index}`,
+      date,
+      valueKg: Number(valueKg.toFixed(1)),
+      recordedAt: entry?.recordedAt || entry?.createdAt || null,
+    };
+    const existing = byDate.get(date);
+    if (!existing || String(next.recordedAt || '') >= String(existing.recordedAt || '')) {
+      byDate.set(date, next);
+    }
+  });
+
+  return [...byDate.values()].sort((left, right) => left.date.localeCompare(right.date));
+}
+
+function resolvePeriodWeightLoss(historyRecords, period, searchStartDate, searchEndDate) {
+  const filtered = filterEntriesByPeriod(
+    historyRecords,
+    period,
+    searchStartDate,
+    searchEndDate,
+    (item) => item?.date
+  );
+
+  if (filtered.length >= 2) {
+    return filtered;
+  }
+
+  if (filtered.length === 1) {
+    const { startDate } = getPeriodBounds(period, searchStartDate, searchEndDate);
+    const prior = historyRecords.filter((record) => record.date < startDate);
+    if (prior.length) {
+      return [prior[prior.length - 1], filtered[0]];
+    }
+    return filtered;
+  }
+
+  const recent = historyRecords.slice(-30);
+  return recent.length ? recent : filtered;
+}
+
+function buildWeightSeries({
+  weightEntries = [],
+  currentWeight = 0,
+  period = 'today',
+  searchStartDate = '',
+  searchEndDate = '',
+}) {
+  const historyRecords = buildWeightHistoryRecords(weightEntries);
+  const chartRecords = historyRecords.slice(-30);
+  const lossRecords = resolvePeriodWeightLoss(
+    historyRecords,
+    period,
+    searchStartDate,
+    searchEndDate
+  );
+  const changeRecords = resolveWeightChangeRecords(lossRecords, chartRecords);
+  const displayRecords = lossRecords.length ? lossRecords : chartRecords;
+
+  const latestHistoryWeight = chartRecords.length
+    ? toNumber(chartRecords[chartRecords.length - 1]?.valueKg)
+    : 0;
+  const current =
+    currentWeight > 0
+      ? currentWeight
+      : latestHistoryWeight > 0
+        ? latestHistoryWeight
+        : null;
+  const hasHistory = chartRecords.length > 0;
+  const hasData = Number(current) > 0;
+
+  if (!hasData) {
     return {
       initial: null,
       current: null,
       goal: null,
       loss: 0,
       hasData: false,
+      hasHistory: false,
       points: [],
     };
   }
 
-  const current = currentWeight;
-  const initial = current;
-  const goal = Math.max(current - 4.8, 50);
+  const initial = toNumber(displayRecords[0]?.valueKg, current);
+  const goal = Math.max(Number(current) - 4.8, 50);
+  const weightChange = calculateWeightChange(changeRecords);
+  const changeMeta = getWeightChangeMeta(weightChange);
 
   return {
     initial,
     current,
     goal,
-    loss: 0,
+    loss: weightChange,
+    weightChange,
+    changeLabel: changeMeta.label,
+    changeIcon: changeMeta.icon,
+    changeColor: changeMeta.color,
     hasData: true,
-    points: [
-      {
-        id: 'weight-current',
-        label: 'Atual',
-        value: Number(current.toFixed(1)),
-      },
-    ],
+    hasHistory,
+    points: chartRecords.map((record, index) => ({
+      id: record.id || `weight-point-${index}`,
+      label: formatShortDateLabel(record.date),
+      fullLabel: formatDateLabel(record.date),
+      date: record.date,
+      value: Number(toNumber(record.valueKg).toFixed(1)),
+    })),
   };
+}
+
+function shouldShowWeightChartLabel(index, total) {
+  if (total <= 6) return true;
+  if (index === 0 || index === total - 1) return true;
+  const step = Math.max(Math.ceil(total / 5), 1);
+  return index % step === 0;
+}
+
+function formatWeightChartValue(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric)) return '—';
+  return `${Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(1)}kg`;
 }
 
 function countMealsByDate(mealEntries) {
@@ -293,7 +428,7 @@ function buildAchievements(weeklyAdherence, weightSeries, mealEntries, glucoseRe
     }
   }
 
-  const achievedWeightLoss = Math.abs(weightSeries.loss);
+  const achievedWeightChange = Math.abs(weightSeries.weightChange ?? weightSeries.loss);
   const activeDays = new Set(
     (Array.isArray(mealEntries) ? mealEntries : []).map((entry) => entry?.date).filter(Boolean)
   ).size;
@@ -317,10 +452,10 @@ function buildAchievements(weeklyAdherence, weightSeries, mealEntries, glucoseRe
       id: 'achievement-weight',
       icon: 'star-outline',
       iconColor: patientTheme.colors.primaryDark,
-      title: achievedWeightLoss >= 3 ? 'Meta em andamento' : 'Meta iniciada',
+      title: achievedWeightChange >= 3 ? 'Meta em andamento' : 'Meta iniciada',
       description:
-        achievedWeightLoss >= 3
-          ? `${Math.abs(weightSeries.loss).toFixed(1)}kg de evolução no período.`
+        achievedWeightChange >= 3
+          ? `${formatWeightChangeDisplay(weightSeries.weightChange ?? weightSeries.loss)} de evolução no período.`
           : 'Seu plano já está gerando os primeiros sinais de progresso.',
       badge: null,
       tone: patientTheme.colors.primarySoft,
@@ -419,13 +554,13 @@ function buildMealRecords(mealEntries) {
 }
 
 function WeightChart({ points }) {
-  const chartHeight = 154;
+  const chartHeight = 136;
   const [chartWidth, setChartWidth] = useState(0);
   const max = Math.max(...points.map((point) => point.value)) + 1;
   const min = Math.min(...points.map((point) => point.value)) - 1;
   const range = Math.max(max - min, 1);
   const innerWidth = Math.max(chartWidth - 32, 1);
-  const innerHeight = chartHeight - 42;
+  const innerHeight = chartHeight - 50;
 
   const positioned = points.map((point, index) => {
     const x =
@@ -445,7 +580,7 @@ function WeightChart({ points }) {
           style={[
             styles.chartGridLine,
             {
-              top: 24 + line * 34,
+              top: 20 + line * 28,
             },
           ]}
         />
@@ -476,10 +611,23 @@ function WeightChart({ points }) {
       })}
 
       {chartWidth > 0 &&
-        positioned.map((point) => (
+        positioned.map((point, index) => (
         <React.Fragment key={point.id}>
-          <View style={[styles.weightDot, { left: point.x - 4, top: point.y - 4 }]} />
-          <Text style={[styles.weightLabel, { left: point.x - 16 }]}>{point.label}</Text>
+          <Text
+            style={[
+              styles.weightValueTag,
+              {
+                left: point.x - 22,
+                top: Math.max(4, point.y - 24),
+              },
+            ]}
+          >
+            {formatWeightChartValue(point.value)}
+          </Text>
+          <View style={[styles.weightDot, { left: point.x - 3, top: point.y - 3 }]} />
+          {shouldShowWeightChartLabel(index, positioned.length) ? (
+            <Text style={[styles.weightLabel, { left: point.x - 14 }]}>{point.label}</Text>
+          ) : null}
         </React.Fragment>
       ))}
     </View>
@@ -585,6 +733,25 @@ export default function PacienteProgressoScreen({
   const [searchStartDate, setSearchStartDate] = useState('');
   const [searchEndDate, setSearchEndDate] = useState('');
   const hasLoadedRef = useRef(false);
+  const weightPreviewSeededRef = useRef(false);
+
+  const applyWeightHistoryPreview = useCallback(
+    async (experience) => {
+      const activePatientId = experience?.patient?.id_paciente_uuid || patientId;
+      const currentWeight = toNumber(experience?.patient?.peso_atual_kg, 0);
+      if (!activePatientId || !(currentWeight > 0) || weightPreviewSeededRef.current) {
+        return experience?.appState || createDefaultAppState();
+      }
+
+      weightPreviewSeededRef.current = true;
+      const seededAppState = await ensurePatientWeightHistoryPreview(activePatientId, currentWeight, {
+        patientContext: usuarioLogado,
+      });
+
+      return seededAppState || experience?.appState || createDefaultAppState();
+    },
+    [patientId, usuarioLogado]
+  );
 
   const loadProgresso = useCallback(
     async ({ silent = false, forceRefresh = false } = {}) => {
@@ -606,8 +773,9 @@ export default function PacienteProgressoScreen({
           patientId && isPatientExperienceCacheFresh(patientId, progressoFetchLimits);
 
         if (cachedExperience) {
+          const previewAppState = await applyWeightHistoryPreview(cachedExperience);
           setPatient(cachedExperience.patient || null);
-          setAppState(cachedExperience.appState || createDefaultAppState());
+          setAppState(previewAppState);
           setGlucoseReadings(cachedExperience.glucoseReadings || []);
 
           if (cacheFresco && !forceRefresh) {
@@ -619,9 +787,10 @@ export default function PacienteProgressoScreen({
             forceRefresh: forceRefresh || !cacheFresco,
             ...progressoFetchLimits,
           })
-            .then((experience) => {
+            .then(async (experience) => {
+              const nextAppState = await applyWeightHistoryPreview(experience);
               setPatient(experience?.patient || null);
-              setAppState(experience?.appState || createDefaultAppState());
+              setAppState(nextAppState);
               setGlucoseReadings(experience?.glucoseReadings || []);
             })
             .catch((error) => console.log('Refresh progresso:', error));
@@ -634,8 +803,9 @@ export default function PacienteProgressoScreen({
           ...progressoFetchLimits,
         });
 
+        const nextAppState = await applyWeightHistoryPreview(experience);
         setPatient(experience?.patient || null);
-        setAppState(experience?.appState || createDefaultAppState());
+        setAppState(nextAppState);
         setGlucoseReadings(experience?.glucoseReadings || []);
       } catch (error) {
         console.log('Erro ao carregar progresso:', error);
@@ -643,7 +813,7 @@ export default function PacienteProgressoScreen({
         if (!silent) setLoading(false);
       }
     },
-    [canResolvePatient, patientId, progressoFetchLimits, usuarioLogado]
+    [applyWeightHistoryPreview, canResolvePatient, patientId, progressoFetchLimits, usuarioLogado]
   );
 
   useFocusEffect(
@@ -780,8 +950,21 @@ export default function PacienteProgressoScreen({
     adherenceSeries.reduce((sum, item) => sum + item.value, 0) / Math.max(adherenceSeries.length, 1)
   );
   const weightSeries = useMemo(
-    () => buildWeightSeries(toNumber(patient?.peso_atual_kg, 0)),
-    [patient?.peso_atual_kg]
+    () =>
+      buildWeightSeries({
+        weightEntries: appState?.weightEntries,
+        currentWeight: toNumber(patient?.peso_atual_kg, 0),
+        period: selectedPeriod,
+        searchStartDate,
+        searchEndDate,
+      }),
+    [
+      appState?.weightEntries,
+      patient?.peso_atual_kg,
+      searchEndDate,
+      searchStartDate,
+      selectedPeriod,
+    ]
   );
   const glycemicMetrics = useMemo(
     () => buildGlycemicMetrics(filteredGlucoseReadings),
@@ -992,21 +1175,37 @@ export default function PacienteProgressoScreen({
             <View style={[dashboardKpiStyles.cell, styles.overviewMetricCell]}>
               <View style={styles.overviewMetricCard}>
                 <View style={styles.overviewMetricIconRow}>
-                  <Ionicons name="trending-down-outline" size={20} color={GLIC_GREEN} />
+                  <Ionicons
+                    name={weightSeries.changeIcon || 'trending-down-outline'}
+                    size={17}
+                    color={weightSeries.changeColor || GLIC_GREEN}
+                  />
                 </View>
-                <Text style={styles.overviewMetricLabel}>Perda de peso</Text>
-                <Text style={[styles.overviewMetricValue, { color: GLIC_GREEN }]}>
-                  {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : '—'}
+                <Text style={styles.overviewMetricLabel}>
+                  {weightSeries.changeLabel || 'Perda de peso'}
+                </Text>
+                <Text
+                  style={[
+                    styles.overviewMetricValue,
+                    { color: weightSeries.changeColor || GLIC_GREEN },
+                  ]}
+                >
+                  {weightSeries.hasData
+                    ? formatWeightChangeDisplay(weightSeries.weightChange ?? weightSeries.loss)
+                    : '—'}
                 </Text>
                 <View
-                  style={[styles.overviewMetricAccentBar, { backgroundColor: GLIC_GREEN }]}
+                  style={[
+                    styles.overviewMetricAccentBar,
+                    { backgroundColor: weightSeries.changeColor || GLIC_GREEN },
+                  ]}
                 />
               </View>
             </View>
             <View style={[dashboardKpiStyles.cell, styles.overviewMetricCell]}>
               <View style={styles.overviewMetricCard}>
                 <View style={styles.overviewMetricIconRow}>
-                  <Ionicons name="analytics-outline" size={20} color={GLIC_GREEN} />
+                  <Ionicons name="analytics-outline" size={17} color={GLIC_GREEN} />
                 </View>
                 <Text style={styles.overviewMetricLabel}>Adesão média</Text>
                 <Text style={[styles.overviewMetricValue, { color: GLIC_GREEN }]}>
@@ -1024,7 +1223,9 @@ export default function PacienteProgressoScreen({
               <Text style={styles.sectionTitle}>Sua evolução</Text>
               <View style={styles.badgeSoft}>
                 <Text style={styles.badgeSoftText}>
-                  {weightSeries.hasData ? formatSignedWeight(weightSeries.loss) : 'Sem peso'}
+                  {weightSeries.hasData
+                    ? formatWeightChangeDisplay(weightSeries.weightChange ?? weightSeries.loss)
+                    : 'Sem peso'}
                 </Text>
               </View>
             </View>
@@ -1044,7 +1245,13 @@ export default function PacienteProgressoScreen({
                   </View>
                 </View>
 
-                <WeightChart points={weightSeries.points} />
+                {weightSeries.hasHistory ? (
+                  <WeightChart points={weightSeries.points} />
+                ) : (
+                  <Text style={styles.emptyStateText}>
+                    Salve seu peso no perfil em dias diferentes para ver o histórico no gráfico.
+                  </Text>
+                )}
               </>
             ) : (
               <Text style={styles.emptyStateText}>
@@ -1113,7 +1320,7 @@ export default function PacienteProgressoScreen({
               <View style={styles.sectionTitleRow}>
                 <Ionicons
                   name="pulse-outline"
-                  size={15}
+                  size={13}
                   color={GLIC_GREEN}
                 />
                 <Text style={styles.sectionTitle}>Controle glicêmico</Text>
@@ -1199,7 +1406,7 @@ export default function PacienteProgressoScreen({
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
-                <Ionicons name="water-outline" size={15} color="#9f7aea" />
+                <Ionicons name="water-outline" size={13} color="#9f7aea" />
                 <Text style={styles.sectionTitle}>Insulina</Text>
               </View>
               <View style={styles.badgeSoft}>
@@ -1215,7 +1422,7 @@ export default function PacienteProgressoScreen({
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
-                <Ionicons name="medkit-outline" size={15} color="#ed8936" />
+                <Ionicons name="medkit-outline" size={13} color="#ed8936" />
                 <Text style={styles.sectionTitle}>Medicação</Text>
               </View>
               <View style={styles.badgeSoft}>
@@ -1231,7 +1438,7 @@ export default function PacienteProgressoScreen({
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
-                <Ionicons name="restaurant-outline" size={15} color="#4299e1" />
+                <Ionicons name="restaurant-outline" size={13} color="#4299e1" />
                 <Text style={styles.sectionTitle}>Alimentação no período</Text>
               </View>
               <View style={styles.badgeSoft}>
@@ -1244,7 +1451,7 @@ export default function PacienteProgressoScreen({
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeader}>
               <View style={styles.sectionTitleRow}>
-                <Ionicons name="trophy-outline" size={15} color={patientTheme.colors.warning} />
+                <Ionicons name="trophy-outline" size={13} color={patientTheme.colors.warning} />
                 <Text style={styles.sectionTitle}>Conquistas</Text>
               </View>
             </View>
@@ -1262,7 +1469,7 @@ export default function PacienteProgressoScreen({
                 ]}
               >
                 <View style={styles.achievementIconWrap}>
-                  <Ionicons name={item.icon} size={18} color={item.iconColor} />
+                  <Ionicons name={item.icon} size={15} color={item.iconColor} />
                 </View>
                 <View style={styles.achievementCopy}>
                   <Text style={styles.achievementTitle}>{item.title}</Text>
@@ -1343,28 +1550,28 @@ const styles = StyleSheet.create({
   loadingCard: {
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
+    borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     marginTop: 4,
-    padding: patientTheme.spacing.xl,
+    padding: 16,
     ...patientShadow,
   },
   loadingText: {
     color: patientTheme.colors.textMuted,
-    fontSize: 14,
-    marginTop: 12,
+    fontSize: 12,
+    marginTop: 8,
   },
   overviewKpiGrid: {
     marginBottom: 0,
   },
   exportPanel: {
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
+    borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    gap: 10,
-    padding: patientTheme.spacing.card,
+    gap: 8,
+    padding: PROGRESS_CARD_PAD,
     ...patientShadow,
   },
   exportButton: {
@@ -1372,39 +1579,39 @@ const styles = StyleSheet.create({
     backgroundColor: patientTheme.colors.primaryDark,
     borderRadius: patientTheme.radius.pill,
     flexDirection: 'row',
-    gap: 8,
+    gap: 6,
     justifyContent: 'center',
-    minHeight: 48,
-    paddingHorizontal: 16,
-    paddingVertical: 12,
+    minHeight: 40,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
   },
   exportButtonText: {
     color: patientTheme.colors.onPrimary,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '800',
   },
   exportHint: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 16,
     textAlign: 'center',
   },
   periodSelectorWrap: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
+    gap: 8,
   },
   periodChip: {
     flex: 1,
-    minWidth: 72,
-    minHeight: 42,
+    minWidth: 64,
+    minHeight: 34,
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     justifyContent: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     ...patientShadow,
   },
   periodChipActive: {
@@ -1413,7 +1620,7 @@ const styles = StyleSheet.create({
   },
   periodChipText: {
     color: patientTheme.colors.text,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
   },
@@ -1436,26 +1643,26 @@ const styles = StyleSheet.create({
   },
   searchDateLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '700',
-    marginBottom: 6,
+    marginBottom: 4,
   },
   searchDateInput: {
-    minHeight: 46,
-    borderRadius: patientTheme.radius.lg,
+    minHeight: 38,
+    borderRadius: patientTheme.radius.md,
     backgroundColor: patientTheme.colors.backgroundSoft,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     color: patientTheme.colors.text,
-    fontSize: 14,
-    paddingHorizontal: 12,
-    paddingVertical: Platform.OS === 'ios' ? 12 : 9,
+    fontSize: 12,
+    paddingHorizontal: 10,
+    paddingVertical: Platform.OS === 'ios' ? 9 : 7,
   },
   searchDateHint: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 10,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 8,
   },
   metricsRow: {
     flexDirection: 'row',
@@ -1469,36 +1676,36 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surface,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.xl,
+    borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     justifyContent: 'center',
-    minHeight: 132,
-    paddingHorizontal: 16,
-    paddingVertical: 18,
+    minHeight: 104,
+    paddingHorizontal: 10,
+    paddingVertical: 12,
     ...patientShadow,
   },
   overviewMetricIconRow: {
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 8,
   },
   overviewMetricLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '600',
     textAlign: 'center',
   },
   overviewMetricValue: {
-    marginTop: 8,
-    fontSize: 18,
-    lineHeight: 22,
+    marginTop: 5,
+    fontSize: 15,
+    lineHeight: 18,
     fontWeight: '900',
     textAlign: 'center',
   },
   overviewMetricAccentBar: {
-    marginTop: 10,
-    width: 30,
-    height: 3,
+    marginTop: 7,
+    width: 24,
+    height: 2,
     borderRadius: 999,
   },
   topMetricCard: {
@@ -1515,22 +1722,22 @@ const styles = StyleSheet.create({
   },
   topMetricValue: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '700',
-    marginTop: 10,
+    marginTop: 6,
   },
   topMetricLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    marginTop: 4,
+    fontSize: 11,
+    marginTop: 3,
   },
   sectionCard: {
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
+    borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     gap: SECTION_INNER_GAP,
-    padding: patientTheme.spacing.card,
+    padding: PROGRESS_CARD_PAD,
     ...patientShadow,
   },
   sectionHeader: {
@@ -1550,7 +1757,7 @@ const styles = StyleSheet.create({
   },
   chartSectionTitle: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
+    fontSize: 11,
     fontWeight: '700',
   },
   chartBlock: {
@@ -1563,18 +1770,18 @@ const styles = StyleSheet.create({
   },
   sectionTitle: {
     color: patientTheme.colors.text,
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
   },
   badgeSoft: {
     backgroundColor: patientTheme.colors.primarySoft,
     borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   badgeSoftText: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '700',
   },
   weightStatsRow: {
@@ -1588,12 +1795,12 @@ const styles = StyleSheet.create({
   },
   weightStatLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    marginBottom: 4,
+    fontSize: 11,
+    marginBottom: 2,
   },
   weightStatValue: {
     color: patientTheme.colors.text,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '700',
   },
   weightStatValueHighlight: {
@@ -1602,10 +1809,10 @@ const styles = StyleSheet.create({
   chartCardFrame: {
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
+    borderRadius: patientTheme.radius.md,
     borderWidth: 1,
-    height: 178,
-    marginTop: 4,
+    height: 158,
+    marginTop: 2,
     overflow: 'hidden',
     position: 'relative',
   },
@@ -1628,16 +1835,29 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.primaryDark,
     borderRadius: 999,
     borderWidth: 2,
-    height: 8,
+    height: 6,
     position: 'absolute',
-    width: 8,
+    width: 6,
+  },
+  weightValueTag: {
+    backgroundColor: patientTheme.colors.primarySoft,
+    borderRadius: 6,
+    color: patientTheme.colors.primaryDark,
+    fontSize: 9,
+    fontWeight: '700',
+    overflow: 'hidden',
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    position: 'absolute',
+    textAlign: 'center',
+    width: 44,
   },
   weightLabel: {
-    bottom: 12,
+    bottom: 8,
     color: patientTheme.colors.textMuted,
-    fontSize: 10,
+    fontSize: 9,
     position: 'absolute',
-    width: 38,
+    width: 32,
     textAlign: 'center',
   },
   adherenceChartWrap: {
@@ -1657,13 +1877,13 @@ const styles = StyleSheet.create({
   adherenceBarTrack: {
     backgroundColor: patientTheme.colors.background,
     borderColor: patientTheme.colors.border,
-    borderRadius: 10,
+    borderRadius: 8,
     borderWidth: 1,
-    height: 104,
+    height: 84,
     justifyContent: 'flex-end',
     overflow: 'hidden',
     width: '72%',
-    maxWidth: 28,
+    maxWidth: 24,
   },
   adherenceBarFill: {
     borderRadius: 8,
@@ -1671,47 +1891,47 @@ const styles = StyleSheet.create({
   },
   adherenceBarLabel: {
     color: patientTheme.colors.text,
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
-    marginTop: 8,
+    marginTop: 6,
   },
   adherenceBarPercent: {
     color: patientTheme.colors.textMuted,
-    fontSize: 10,
-    marginTop: 2,
+    fontSize: 9,
+    marginTop: 1,
   },
   sectionFootnote: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 2,
     textAlign: 'center',
   },
   todayMealsList: {
-    gap: 12,
+    gap: 8,
   },
   todayMealCard: {
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
+    borderRadius: patientTheme.radius.md,
     borderWidth: 1,
     flexDirection: 'row',
-    padding: 14,
+    padding: 10,
   },
   todayMealTimeBlock: {
-    width: 52,
-    marginRight: 10,
+    width: 44,
+    marginRight: 8,
   },
   todayMealTimeLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
-    marginBottom: 2,
+    fontSize: 10,
+    marginBottom: 1,
   },
   todayMealTimeValue: {
     color: patientTheme.colors.text,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '700',
-    lineHeight: 24,
+    lineHeight: 19,
   },
   todayMealCopy: {
     flex: 1,
@@ -1719,14 +1939,14 @@ const styles = StyleSheet.create({
   },
   todayMealTitle: {
     color: patientTheme.colors.text,
-    fontSize: 16,
+    fontSize: 13,
     fontWeight: '700',
   },
   todayMealSummary: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
-    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 3,
   },
   todayMealBadge: {
     alignSelf: 'flex-start',
@@ -1734,30 +1954,30 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.pill,
     borderWidth: 1,
-    marginTop: 10,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    marginTop: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
   },
   todayMealBadgeText: {
     color: patientTheme.colors.text,
-    fontSize: 12,
+    fontSize: 10,
     fontWeight: '700',
   },
   emptyMealText: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 11,
+    lineHeight: 16,
   },
   emptyStateText: {
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
+    borderRadius: patientTheme.radius.md,
     borderWidth: 1,
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
-    lineHeight: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 16,
+    fontSize: 11,
+    lineHeight: 16,
+    paddingHorizontal: 10,
+    paddingVertical: 11,
     textAlign: 'center',
   },
   glycemicTirBlock: {
@@ -1770,18 +1990,18 @@ const styles = StyleSheet.create({
   },
   glycemicTrackLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 13,
+    fontSize: 11,
   },
   glycemicTrackValue: {
     color: GLIC_GREEN,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '700',
   },
   glycemicTrack: {
     backgroundColor: patientTheme.colors.primarySoft,
     borderRadius: patientTheme.radius.pill,
-    height: 12,
-    marginTop: 10,
+    height: 9,
+    marginTop: 7,
     overflow: 'hidden',
   },
   glycemicTrackFill: {
@@ -1799,34 +2019,34 @@ const styles = StyleSheet.create({
   },
   progressMiniCard: {
     minWidth: 0,
-    minHeight: 106,
-    paddingHorizontal: 10,
-    paddingVertical: 12,
-    borderRadius: patientTheme.radius.xl,
+    minHeight: 86,
+    paddingHorizontal: 8,
+    paddingVertical: 9,
+    borderRadius: patientTheme.radius.lg,
     backgroundColor: patientTheme.colors.surface,
     borderColor: patientTheme.colors.border,
     borderWidth: 1,
     ...patientShadow,
   },
   progressMiniLabel: {
-    minHeight: 24,
-    fontSize: 11,
-    lineHeight: 13,
+    minHeight: 20,
+    fontSize: 10,
+    lineHeight: 12,
   },
   progressMiniValue: {
-    marginTop: 5,
-    fontSize: 18,
-    lineHeight: 21,
+    marginTop: 3,
+    fontSize: 15,
+    lineHeight: 17,
   },
   progressMiniHelper: {
-    minHeight: 16,
-    marginTop: 4,
-    fontSize: 10,
-    lineHeight: 11,
+    minHeight: 13,
+    marginTop: 2,
+    fontSize: 9,
+    lineHeight: 10,
   },
   progressMiniAccentBar: {
-    marginTop: 8,
-    width: 28,
+    marginTop: 6,
+    width: 22,
   },
   glycemicMetricsRow: {
     flexDirection: 'row',
@@ -1837,40 +2057,40 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
+    borderRadius: patientTheme.radius.md,
     borderWidth: 1,
-    padding: 12,
+    padding: 9,
   },
   glycemicMetricLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
+    fontSize: 10,
   },
   glycemicMetricValue: {
     color: patientTheme.colors.text,
-    fontSize: 22,
+    fontSize: 17,
     fontWeight: '700',
-    marginTop: 8,
+    marginTop: 5,
   },
   glycemicMetricUnit: {
     color: patientTheme.colors.textMuted,
-    fontSize: 11,
-    marginTop: 4,
+    fontSize: 10,
+    marginTop: 2,
   },
   achievementsList: {
-    gap: 10,
+    gap: 8,
   },
   achievementCard: {
     alignItems: 'center',
-    borderRadius: patientTheme.radius.lg,
+    borderRadius: patientTheme.radius.md,
     borderWidth: 1,
     flexDirection: 'row',
-    padding: 14,
+    padding: 10,
   },
   achievementIconWrap: {
     alignItems: 'center',
-    height: 34,
+    height: 28,
     justifyContent: 'center',
-    width: 28,
+    width: 24,
   },
   achievementCopy: {
     flex: 1,
@@ -1879,33 +2099,33 @@ const styles = StyleSheet.create({
   },
   achievementTitle: {
     color: patientTheme.colors.text,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '700',
   },
   achievementText: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 18,
-    marginTop: 4,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
   },
   achievementBadge: {
     backgroundColor: '#fff3cf',
     borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
   },
   achievementBadgeText: {
     color: '#b27b00',
-    fontSize: 11,
+    fontSize: 10,
     fontWeight: '700',
   },
   summaryCard: {
     backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.xl,
+    borderRadius: patientTheme.radius.lg,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     gap: SECTION_INNER_GAP,
-    padding: patientTheme.spacing.card,
+    padding: PROGRESS_CARD_PAD,
     ...patientShadow,
   },
   summaryGrid: {
@@ -1918,25 +2138,25 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     backgroundColor: patientTheme.colors.surfaceMuted,
     borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.lg,
+    borderRadius: patientTheme.radius.md,
     borderWidth: 1,
     justifyContent: 'center',
-    minHeight: 100,
-    paddingHorizontal: 12,
-    paddingVertical: 16,
+    minHeight: 78,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
     width: '47.5%',
   },
   summaryValue: {
     color: patientTheme.colors.primaryDark,
-    fontSize: 28,
+    fontSize: 22,
     fontWeight: '700',
     textAlign: 'center',
   },
   summaryLabel: {
     color: patientTheme.colors.textMuted,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 6,
+    fontSize: 10,
+    lineHeight: 14,
+    marginTop: 4,
     textAlign: 'center',
   },
   summaryButton: {
@@ -1946,13 +2166,13 @@ const styles = StyleSheet.create({
     borderRadius: patientTheme.radius.pill,
     flexDirection: 'row',
     justifyContent: 'center',
-    marginTop: 4,
-    minHeight: 48,
+    marginTop: 2,
+    minHeight: 40,
   },
   summaryButtonText: {
     color: patientTheme.colors.onPrimary,
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: '800',
-    marginLeft: 8,
+    marginLeft: 6,
   },
 });

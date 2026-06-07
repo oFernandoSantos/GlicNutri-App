@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Dimensions,
   Text,
+  LogBox,
 } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { NavigationContainer } from '@react-navigation/native';
@@ -45,7 +46,6 @@ import PacienteDiarioScreen from './src/telas/paciente/TelaDiarioPaciente';
 import PacienteMonitoramentoScreen from './src/telas/paciente/TelaMonitoramentoPaciente';
 import PacienteIntegracaoSensorScreen from './src/telas/paciente/TelaIntegracaoSensorPaciente';
 import PacienteHistoricoRegistrosScreen from './src/telas/paciente/TelaHistoricoRegistrosPaciente';
-import PacienteAssistenteScreen from './src/telas/paciente/TelaAssistentePaciente';
 import PacienteSuporteScreen from './src/telas/paciente/TelaSuportePaciente';
 import PacienteAgendamentosScreen from './src/telas/paciente/TelaConsultasPaciente';
 import PacientePerfilNutricionistaScreen from './src/telas/paciente/TelaPerfilNutricionistaAgendamento';
@@ -56,11 +56,13 @@ import PacienteRelatoriosScreen from './src/telas/paciente/TelaRelatoriosPacient
 import PacientePerfilScreen from './src/telas/paciente/TelaPerfilPaciente';
 import PacienteChatNutricionistaScreen from './src/telas/paciente/TelaChatNutricionistaPaciente';
 import PacienteChatNutricionistaDetalheScreen from './src/telas/paciente/TelaChatNutricionistaDetalhePaciente';
+import PacienteChatMedicoDetalheScreen from './src/telas/paciente/TelaChatMedicoDetalhePaciente';
 import RegistroRefeicaoIAScreen from './src/telas/paciente/RegistroRefeicaoIA';
 import TelaPrevisaoMl from './src/telas/paciente/TelaPrevisaoMl';
 import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
 import SwipeBackContainer from './src/componentes/comum/SwipeBackContainer';
 import { supabase, isSupabaseConfigured } from './src/servicos/configSupabase';
+import { obterSessaoAuthSegura } from './src/servicos/servicoSessaoAuth';
 import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
 import { configurarCapturaGlobalLogs } from './src/servicos/servicoLogSistema';
 import { initObservabilidade } from './src/servicos/servicoObservabilidade';
@@ -96,6 +98,8 @@ import {
   startLibreViewAutoSync,
   stopLibreViewAutoSync,
 } from './src/servicos/servicoLibreViewAutoSync';
+
+LogBox.ignoreLogs([/Invalid Refresh Token/i, /AuthApiError/i]);
 
 const Stack = createStackNavigator();
 const BOOT_RPC_TIMEOUT_MS = 8 * 1000;
@@ -440,11 +444,11 @@ export default function App() {
 
       try {
         const result = await executarComTimeout(
-          supabase.auth.getSession(),
+          obterSessaoAuthSegura(),
           BOOT_RPC_TIMEOUT_MS,
           'auth-getSession'
         );
-        data = result?.data || null;
+        data = { session: result?.session || null };
         error = result?.error || null;
       } catch (sessionError) {
         console.log('Sessao auth indisponivel no boot:', sessionError?.message || sessionError);
@@ -961,10 +965,6 @@ export default function App() {
                 {(props) => withSwipeBack(props, <PacienteHistoricoRegistrosScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
 
-              <Stack.Screen name="PacienteAssistente" options={readerScreenOptions}>
-                {(props) => withSwipeBack(props, <PacienteAssistenteScreen {...getPacienteProps(props)} />)}
-              </Stack.Screen>
-
               <Stack.Screen name="PacienteSuporte" options={readerScreenOptions}>
                 {(props) => withSwipeBack(props, <PacienteSuporteScreen {...getPacienteProps(props)} />)}
               </Stack.Screen>
@@ -999,6 +999,15 @@ export default function App() {
                   withSwipeBack(
                     props,
                     <PacienteChatNutricionistaDetalheScreen {...getPacienteProps(props)} />
+                  )
+                }
+              </Stack.Screen>
+
+              <Stack.Screen name="PacienteChatMedicoDetalhe" options={readerScreenOptions}>
+                {(props) =>
+                  withSwipeBack(
+                    props,
+                    <PacienteChatMedicoDetalheScreen {...getPacienteProps(props)} />
                   )
                 }
               </Stack.Screen>

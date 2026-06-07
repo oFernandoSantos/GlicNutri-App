@@ -22,9 +22,11 @@ const h = (token) => ({
   'Content-Type': 'application/json',
 });
 
+const ADMIN_EMAIL = 'admin@glicnutri.local';
 const NUTRI_EMAIL = 'rayssa.lira@gmail.com';
 const PAC_EMAIL = 'seed.paciente001@glicnutri.demo';
 const PASSWORDS = ['123456', '12345678', 'Rayssa@123', 'glicnutri'];
+const ADMIN_PASSWORDS = ['Admin@123!', '123456', 'admin123'];
 
 function ms(start) {
   return `${Date.now() - start}ms`;
@@ -77,9 +79,11 @@ async function main() {
   const report = {
     migration: { applied: '20260604150000 confirmed via prior db push' },
     rpcPostMigration: {},
+    admin: { email: ADMIN_EMAIL },
     nutri: { email: NUTRI_EMAIL },
     paciente: { email: PAC_EMAIL },
-    roteiro: { nutri: [], paciente: [] },
+    roteiro: { admin: [], nutri: [], paciente: [] },
+    vereditoTcc: {},
   };
 
   // RPC sanity (session required — expect 400 invalid session, NOT 404)
@@ -268,6 +272,58 @@ async function main() {
     return steps;
   }
 
+  async function runAdminFlow() {
+    const steps = [];
+    const add = (name, res, extra = {}) =>
+      steps.push({
+        etapa: name,
+        sucesso: res.ok !== false && (res.status === undefined || res.status < 400),
+        ...res,
+        ...extra,
+      });
+
+    add('1 Login', {
+      ok: true,
+      status: 200,
+      duration: adminLogin.duration || 'n/a',
+      detail: adminLogin.adminId ? `admin:${adminLogin.adminId}` : 'verificar_login_admin ok',
+    });
+
+    const counts = await Promise.all([
+      get('paciente', 'select=id_paciente_uuid&limit=1'),
+      get('nutricionista', 'select=id_nutricionista_uuid&limit=1'),
+      get('medico', 'select=id_medico_uuid&limit=1'),
+      get('administrador', 'select=id_admin_uuid&limit=1'),
+    ]);
+    add('2 Cadastros (leitura)', {
+      status: counts.every((c) => c.status === 200) ? 200 : 400,
+      duration: counts.map((c) => c.duration).join('+'),
+      ok: counts.every((c) => c.status === 200),
+      detail: `paciente:${counts[0].status} nutri:${counts[1].status} medico:${counts[2].status} admin:${counts[3].status}`,
+    });
+
+    const auditoria = await get(
+      'evento_auditoria',
+      'select=id_evento_auditoria&order=created_at.desc&limit=5',
+    );
+    add('3 Auditoria/logs', {
+      status: auditoria.status,
+      duration: auditoria.duration,
+      ok: auditoria.status === 200,
+      detail: `eventos:${Array.isArray(auditoria.data) ? auditoria.data.length : 0}`,
+    });
+
+    const contarAdmin = await rpc('contar_administradores', {});
+    add('4 Dashboard admin', {
+      status: contarAdmin.status,
+      duration: contarAdmin.duration,
+      ok: contarAdmin.status === 200,
+      detail: contarAdmin.status === 200 ? JSON.stringify(contarAdmin.data).slice(0, 120) : contarAdmin.error?.message,
+    });
+
+    return steps;
+  }
+
   async function runNutriFlow(token) {
     const steps = [];
     const add = (name, res, extra = {}) =>
@@ -398,6 +454,42 @@ async function main() {
     return steps;
   }
 
+  let adminLogin = { ok: false, last: null, duration: 'n/a' };
+  for (const senha of ADMIN_PASSWORDS) {
+    const start = Date.now();
+    const res = await rpc('verificar_login_admin', {
+      p_identificador: ADMIN_EMAIL,
+      p_senha: senha,
+    });
+    const row = Array.isArray(res.data) ? res.data[0] : res.data;
+    if (res.status === 200 && row?.id_admin_uuid) {
+      adminLogin = {
+        ok: true,
+        adminId: row.id_admin_uuid,
+        senhaUsed: senha,
+        duration: ms(start),
+      };
+      break;
+    }
+    adminLogin.last = res;
+  }
+  report.admin.login = adminLogin;
+
+  if (adminLogin.ok) {
+    report.roteiro.admin = await runAdminFlow();
+    report.admin.apto =
+      report.roteiro.admin.filter((s) => s.sucesso).length >= 3;
+  } else {
+    report.admin.apto = false;
+    report.roteiro.admin = [
+      {
+        etapa: 'login',
+        sucesso: false,
+        detail: adminLogin.last?.error?.message || 'senha admin nao encontrada',
+      },
+    ];
+  }
+
   if (pacLogin.ok) {
     report.roteiro.paciente = await runPacienteFlow(pacLogin.token);
     report.paciente.apto =
@@ -421,6 +513,16 @@ async function main() {
       },
     ];
   }
+
+  report.vereditoTcc = {
+    admin: report.admin.apto ? 'FUNCIONAL' : 'VERIFICAR',
+    nutri: report.nutri.apto ? 'FUNCIONAL' : 'VERIFICAR',
+    paciente: report.paciente.apto ? 'FUNCIONAL' : 'VERIFICAR',
+    demoHoje:
+      report.admin.apto && report.nutri.apto && report.paciente.apto
+        ? 'APTO'
+        : 'REVISAR_CREDENCIAIS_OU_SUPABASE',
+  };
 
   console.log(JSON.stringify(report, null, 2));
 }

@@ -10,7 +10,6 @@ import {
   averageAdherence,
   buildGlycemicSummary,
   buildPortfolioWeeklyAdherence,
-  buildWeeklyAdherenceFromMeals,
   categorizeObjectiveText,
   computeAdherenceStreak,
   normalizeRiskBucket,
@@ -27,7 +26,9 @@ import {
   buildNutritionistPatientAlerts,
   buildPortfolioReportAnalytics,
   buildReportsDashboardAnalytics,
+  countPortfolioPeriodAlerts,
   enrichPatientRowWithPeriodData,
+  resolveInactiveDaysForPeriod,
   resolveReportPeriodLabel,
 } from '../utilitarios/relatorioNutricionistaAnalytics';
 import {
@@ -72,13 +73,47 @@ function chunkArray(items, size) {
   return chunks;
 }
 
-async function loadPatientClinicalRow(patientCard, periodBounds = {}, inactiveDays = 7) {
+const REPORT_BUNDLE_TTL_MS = 3 * 60 * 1000;
+const REPORT_PATIENT_BATCH_SIZE = 6;
+const reportBundleCache = new Map();
+
+function getReportBundleCacheKey(nutricionistaId, period) {
+  return `${nutricionistaId}:${period}`;
+}
+
+export function getCachedNutritionistReportBundle(nutricionistaId, period = '7days') {
+  if (!nutricionistaId) return null;
+  const entry = reportBundleCache.get(getReportBundleCacheKey(nutricionistaId, period));
+  if (!entry) return null;
+  if (Date.now() - entry.fetchedAt > REPORT_BUNDLE_TTL_MS) return null;
+  return entry.data;
+}
+
+function resolveReportFetchLimits(period = '7days') {
+  const base = mesclarLimitesDadosPaciente('relatorio');
+  if (period === '30days') {
+    return { ...base, glucoseLimit: 200, mealLimit: 200, medicationLimit: 200 };
+  }
+  if (period === '15days') {
+    return { ...base, glucoseLimit: 120, mealLimit: 120, medicationLimit: 120 };
+  }
+  return { ...base, glucoseLimit: 60, mealLimit: 60, medicationLimit: 60 };
+}
+
+async function loadPatientClinicalRow(
+  patientCard,
+  periodBounds = {},
+  inactiveDays = 7,
+  period = '7days'
+) {
   const patientId = patientCard?.id;
   if (!patientId) return null;
 
   try {
     const experience = await fetchPatientExperience(patientId, {
-      ...mesclarLimitesDadosPaciente('relatorio'),
+      ...resolveReportFetchLimits(period),
+      patientContext: patientCard,
+      forceRefresh: false,
     });
 
     const allMeals = experience?.appState?.mealEntries || [];
@@ -92,13 +127,9 @@ async function loadPatientClinicalRow(patientCard, periodBounds = {}, inactiveDa
 
     const targetMeals = experience?.appState?.planSections?.length || 3;
     const adherenceSeries = buildAdherenceSeriesForRange(filteredMeals, periodBounds, targetMeals);
-    const weekly = adherenceSeries.hasRealData
-      ? adherenceSeries
-      : buildWeeklyAdherenceFromMeals(allMeals, targetMeals);
-    const adherence = weekly.hasRealData
-      ? averageAdherence(weekly.items)
-      : Number(patientCard.adherence) || 0;
-    const glucoseSummary = buildGlycemicSummary(filteredGlucose.length ? filteredGlucose : allGlucose);
+    const weekly = adherenceSeries;
+    const adherence = adherenceSeries.hasRealData ? averageAdherence(adherenceSeries.items) : 0;
+    const glucoseSummary = buildGlycemicSummary(filteredGlucose);
     const objectiveSource =
       experience?.clinicalObjective ||
       patientCard.objective ||
@@ -262,7 +293,7 @@ const MAX_REPORT_PATIENTS = 80;
 
 export async function buildNutritionistReportBundle(
   usuarioLogado,
-  { period = '7days', startDate = '', endDate = '', inactiveDays = 7 } = {}
+  { period = '7days', startDate = '', endDate = '', inactiveDays } = {}
 ) {
   const nutricionistaId = getNutritionistId(usuarioLogado);
   if (!nutricionistaId) {
@@ -270,6 +301,7 @@ export async function buildNutritionistReportBundle(
   }
 
   const periodBounds = getReportPeriodBounds(period, startDate, endDate);
+  const resolvedInactiveDays = Number(inactiveDays) || resolveInactiveDaysForPeriod(periodBounds);
   const periodLabel = resolveReportPeriodLabel(period, periodBounds);
 
   const [patientCards, consultas] = await Promise.all([
@@ -279,11 +311,13 @@ export async function buildNutritionistReportBundle(
 
   const scopedPatients = (patientCards || []).slice(0, MAX_REPORT_PATIENTS);
   const rows = [];
-  const batches = chunkArray(scopedPatients, 2);
+  const batches = chunkArray(scopedPatients, REPORT_PATIENT_BATCH_SIZE);
 
   for (const batch of batches) {
     const batchRows = await Promise.all(
-      batch.map((patient) => loadPatientClinicalRow(patient, periodBounds, inactiveDays))
+      batch.map((patient) =>
+        loadPatientClinicalRow(patient, periodBounds, resolvedInactiveDays, period)
+      )
     );
     rows.push(...batchRows.filter(Boolean));
   }
@@ -291,12 +325,11 @@ export async function buildNutritionistReportBundle(
   const weeklyPortfolio = buildPortfolioWeeklyAdherence(
     rows.map((row) => ({ items: row.weeklyItems }))
   );
-  const adherenceValues = rows.map((row) => row.adherence).filter((value) => value > 0);
-  const averageAdherenceValue = adherenceValues.length
-    ? Math.round(adherenceValues.reduce((sum, value) => sum + value, 0) / adherenceValues.length)
+  const averageAdherenceValue = rows.length
+    ? Math.round(rows.reduce((sum, row) => sum + Number(row.adherence || 0), 0) / rows.length)
     : 0;
   const highRiskCount = rows.filter((row) => row.riskBucket === 'alto').length;
-  const alertsTotal = rows.reduce((sum, row) => sum + Number(row.alerts || 0), 0);
+  const alertsTotal = countPortfolioPeriodAlerts(rows);
 
   const weeklyValues = weeklyPortfolio.map((item) => Number(item.value || 0));
   const bestDay = weeklyValues.length ? Math.max(...weeklyValues) : 0;
@@ -310,7 +343,7 @@ export async function buildNutritionistReportBundle(
     period,
     periodBounds,
     periodLabel,
-    inactiveDays,
+    inactiveDays: resolvedInactiveDays,
     nutricionista: {
       id: nutricionistaId,
       nome:
@@ -341,11 +374,18 @@ export async function buildNutritionistReportBundle(
     consultas: summarizeConsultas(consultas),
   };
 
-  return {
+  const result = {
     ...baseBundle,
     portfolioAnalytics: buildPortfolioReportAnalytics(baseBundle),
     dashboardAnalytics: buildReportsDashboardAnalytics(baseBundle),
   };
+
+  reportBundleCache.set(getReportBundleCacheKey(nutricionistaId, period), {
+    fetchedAt: Date.now(),
+    data: result,
+  });
+
+  return result;
 }
 
 function headerBlock(bundle, title) {

@@ -9,6 +9,10 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutMedico from '../../componentes/medico/LayoutMedico';
+import BotaoAcaoMedico from '../../componentes/medico/BotaoAcaoMedico';
+import EstadoErroCarregamento from '../../componentes/comum/EstadoErroCarregamento';
+import { ConsultaStatusBadge } from '../../componentes/comum/ui';
+import { SectionCard } from '../../componentes/nutricionista/NutriDesktopUI';
 import { supabase } from '../../servicos/configSupabase';
 import {
   abrirLinkGoogleMeet,
@@ -19,11 +23,13 @@ import { resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import { addEvolucao } from '../../servicos/servicoProntuarioCompleto';
 import { getMedicoId } from '../../servicos/servicoVinculosMedico';
 import { medicoTheme as theme } from '../../temas/temaVisualNutricionista';
+import { inputWebFocusReset } from '../../temas/temaFocoCampo';
 
 export default function TelaConsultaMedico({ navigation, route }) {
   const { usuarioLogado, consultaId, pacienteId } = route.params || {};
   const medicoId = useMemo(() => getMedicoId(usuarioLogado), [usuarioLogado]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [consulta, setConsulta] = useState(null);
   const [conduta, setConduta] = useState('');
   const [exames, setExames] = useState('');
@@ -32,9 +38,13 @@ export default function TelaConsultaMedico({ navigation, route }) {
   const load = useCallback(async () => {
     try {
       setLoading(true);
+      setLoadError('');
       if (!consultaId) return;
-      const { data } = await supabase.from('consulta').select('*').eq('id', consultaId).maybeSingle();
+      const { data, error } = await supabase.from('consulta').select('*').eq('id', consultaId).maybeSingle();
+      if (error) throw error;
       setConsulta(data || null);
+    } catch {
+      setLoadError('Não foi possível carregar a consulta. Verifique a conexão e tente novamente.');
     } finally {
       setLoading(false);
     }
@@ -44,7 +54,7 @@ export default function TelaConsultaMedico({ navigation, route }) {
     load();
   }, [load]);
 
-  const meetLink = consulta ? resolveMeetLink({ consulta, nutricionista: usuarioLogado }) : '';
+  const meetLink = consulta ? resolveMeetLink({ consulta, profissional: usuarioLogado }) : '';
   const effectivePacienteId = pacienteId || consulta?.paciente_id;
 
   async function finalizarConsulta() {
@@ -81,54 +91,65 @@ export default function TelaConsultaMedico({ navigation, route }) {
       showTabBar={false}
     >
       {loading ? (
-        <ActivityIndicator style={{ marginTop: 40 }} color={theme.colors.primaryDark} />
+        <ActivityIndicator style={styles.loader} color={theme.colors.primaryDark} />
+      ) : loadError ? (
+        <EstadoErroCarregamento mensagem={loadError} onTentarNovamente={load} />
       ) : !consulta ? (
         <Text style={styles.empty}>Consulta não encontrada.</Text>
       ) : (
         <View style={styles.wrap}>
-          <Text style={styles.when}>{formatConsultaDateTime(consulta.scheduled_at)}</Text>
-          <Text style={styles.meta}>Status: {consulta.status}</Text>
-          <Text style={styles.meta}>{consulta.motivo || 'Consulta clínica'}</Text>
+          <SectionCard style={styles.card}>
+            <Text style={styles.when}>{formatConsultaDateTime(consulta.scheduled_at)}</Text>
+            <ConsultaStatusBadge status={consulta.status} persona="medico" />
+            <Text style={styles.meta}>{consulta.motivo || 'Consulta clínica'}</Text>
 
-          {meetLink ? (
-            <TouchableOpacity style={styles.meetBtn} onPress={() => abrirLinkGoogleMeet(meetLink)}>
-              <Ionicons name="videocam" size={18} color={theme.colors.onPrimary} />
-              <Text style={styles.meetText}>Entrar no Google Meet</Text>
+            {meetLink ? (
+              <TouchableOpacity style={styles.meetBtn} onPress={() => abrirLinkGoogleMeet(meetLink)}>
+                <Ionicons name="videocam" size={18} color={theme.colors.onPrimary} />
+                <Text style={styles.meetText}>Entrar no Google Meet</Text>
+              </TouchableOpacity>
+            ) : null}
+
+            <TouchableOpacity
+              style={styles.linkBtn}
+              onPress={() =>
+                navigation.navigate('MedicoProntuarioPaciente', {
+                  usuarioLogado,
+                  pacienteId: effectivePacienteId,
+                })
+              }
+            >
+              <Ionicons name="document-text-outline" size={16} color={theme.colors.primaryDark} />
+              <Text style={styles.linkText}>Abrir prontuário clínico</Text>
             </TouchableOpacity>
-          ) : null}
+          </SectionCard>
 
-          <TouchableOpacity
-            style={styles.linkBtn}
-            onPress={() =>
-              navigation.navigate('MedicoProntuarioPaciente', {
-                usuarioLogado,
-                pacienteId: effectivePacienteId,
-              })
-            }
-          >
-            <Ionicons name="document-text-outline" size={16} color={theme.colors.primaryDark} />
-            <Text style={styles.linkText}>Abrir prontuário clínico</Text>
-          </TouchableOpacity>
-
-          <Text style={styles.label}>Conduta / evolução clínica</Text>
-          <TextInput
-            style={[styles.input, styles.area]}
-            value={conduta}
-            onChangeText={setConduta}
-            placeholder="HbA1c, ajuste de insulina, hipoglicemia…"
-            multiline
-          />
-          <Text style={styles.label}>Exames solicitados</Text>
-          <TextInput
-            style={styles.input}
-            value={exames}
-            onChangeText={setExames}
-            placeholder="Ex.: HbA1c, perfil lipídico, microalbuminúria"
-          />
-
-          <TouchableOpacity style={styles.doneBtn} onPress={finalizarConsulta} disabled={saving}>
-            <Text style={styles.doneText}>{saving ? 'Salvando…' : 'Finalizar consulta'}</Text>
-          </TouchableOpacity>
+          <SectionCard style={styles.card}>
+            <Text style={styles.sectionTitle}>Conduta clínica</Text>
+            <Text style={styles.label}>Conduta / evolução clínica</Text>
+            <TextInput
+              style={[styles.input, styles.area]}
+              value={conduta}
+              onChangeText={setConduta}
+              placeholder="HbA1c, ajuste de insulina, hipoglicemia…"
+              multiline
+            />
+            <Text style={styles.label}>Exames solicitados</Text>
+            <TextInput
+              style={styles.input}
+              value={exames}
+              onChangeText={setExames}
+              placeholder="Ex.: HbA1c, perfil lipídico, microalbuminúria"
+            />
+            <BotaoAcaoMedico
+              label={saving ? 'Salvando…' : 'Finalizar consulta'}
+              onPress={finalizarConsulta}
+              disabled={saving}
+              loading={saving}
+              icon="checkmark-circle-outline"
+              style={styles.primaryAction}
+            />
+          </SectionCard>
         </View>
       )}
     </LayoutMedico>
@@ -136,17 +157,46 @@ export default function TelaConsultaMedico({ navigation, route }) {
 }
 
 const styles = StyleSheet.create({
-  wrap: { gap: 10, paddingBottom: 24 },
+  wrap: { gap: 14, paddingBottom: 24 },
+  card: { gap: 10 },
+  loader: { marginTop: 40 },
   when: { fontSize: 18, fontWeight: '900', color: theme.colors.text },
-  meta: { color: theme.colors.textMuted },
+  sectionTitle: { fontSize: 16, fontWeight: '800', color: theme.colors.text },
+  meta: { color: theme.colors.textMuted, fontSize: 13, lineHeight: 18 },
   empty: { textAlign: 'center', color: theme.colors.textMuted, marginTop: 40 },
-  meetBtn: { flexDirection: 'row', gap: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: theme.colors.primaryDark, borderRadius: theme.radius.pill, minHeight: 44 },
+  meetBtn: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: theme.colors.primaryDark,
+    borderRadius: theme.radius.pill,
+    minHeight: 44,
+    marginTop: 4,
+  },
   meetText: { color: theme.colors.onPrimary, fontWeight: '800' },
-  linkBtn: { flexDirection: 'row', gap: 8, alignItems: 'center', padding: 12, borderRadius: 12, backgroundColor: theme.colors.backgroundSoft },
+  linkBtn: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: theme.radius.lg,
+    backgroundColor: theme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    marginTop: 4,
+  },
   linkText: { fontWeight: '800', color: theme.colors.primaryDark },
-  label: { fontWeight: '800', color: theme.colors.text, marginTop: 8 },
-  input: { borderWidth: 1, borderColor: theme.colors.border, borderRadius: 12, padding: 10, backgroundColor: '#fff' },
+  label: { fontWeight: '800', color: theme.colors.text, marginTop: 8, fontSize: 12 },
+  input: {
+    borderWidth: 1,
+    borderColor: theme.colors.border,
+    borderRadius: theme.radius.lg,
+    padding: 12,
+    backgroundColor: theme.colors.surface,
+    color: theme.colors.text,
+    ...inputWebFocusReset,
+  },
   area: { minHeight: 100, textAlignVertical: 'top' },
-  doneBtn: { marginTop: 12, backgroundColor: theme.colors.success, borderRadius: theme.radius.pill, minHeight: 46, alignItems: 'center', justifyContent: 'center' },
-  doneText: { color: '#fff', fontWeight: '900' },
+  primaryAction: { marginTop: 12 },
 });

@@ -15,6 +15,7 @@ import { patientTheme } from '../../temas/temaVisualPaciente';
 import { supabase } from '../../servicos/configSupabase';
 import {
   createDefaultAppState,
+  fetchPatientById,
   fetchPatientNutritionistChat,
   getPatientDisplayName,
   getPatientId,
@@ -26,13 +27,26 @@ import {
   invalidatePatientChatCache,
 } from '../../servicos/cacheExperienciaPaciente';
 import { getNutritionistById } from '../../servicos/servicoNutricionistas';
+import {
+  buildPatientMedicoChatPreview,
+  fetchPatientMedicoChatThread,
+  mergeMedicoChatMessageIntoThread,
+} from '../../servicos/servicoChatMedico';
+import { mapMedicoRealtimeChatRowToThreadEntry } from '../../servicos/servicoMensagensChatMedico';
+import { getMedicoById, getMedicoEspecialidadeLabel } from '../../servicos/servicoMedicos';
 import { listConsultasByPaciente } from '../../servicos/servicoConsultas';
 import { mesclarLimitesDadosPaciente } from '../../servicos/limitesDadosPaciente';
+import {
+  garantirSessaoRpcClinicaComPerfil,
+  normalizeRpcActorProfile,
+} from '../../servicos/servicoSessaoRpc';
 import {
   buildPatientChatPreview,
   CHAT_ACTIVE_POLL_MS,
   getPatientChatLastReadAt,
+  getPatientMedicoChatLastReadAt,
   markPatientChatRead,
+  markPatientMedicoChatRead,
 } from '../../utilitarios/chatConversa';
 
 function getInitials(name) {
@@ -61,7 +75,7 @@ function buildFallbackNutritionist(routeNutri, thread) {
   };
 }
 
-function selectAssignedConsulta(consultas) {
+function selectAssignedConsulta(consultas, { professionalKey = 'nutricionista_id' } = {}) {
   const priority = {
     confirmed: 0,
     scheduled: 1,
@@ -71,12 +85,28 @@ function selectAssignedConsulta(consultas) {
   };
 
   return [...(consultas || [])]
-    .filter((item) => item?.nutricionista_id && item?.status !== 'cancelled')
+    .filter((item) => item?.[professionalKey] && item?.status !== 'cancelled')
     .sort((left, right) => {
       const priorityDiff = (priority[left?.status] ?? 5) - (priority[right?.status] ?? 5);
       if (priorityDiff !== 0) return priorityDiff;
       return String(right?.scheduled_at || '').localeCompare(String(left?.scheduled_at || ''));
     })[0] || null;
+}
+
+function buildFallbackMedico(routeMedico, thread) {
+  const threadMedico = (thread || []).find((item) => item?.role === 'medico');
+  const name =
+    routeMedico?.nome_completo_medico ||
+    routeMedico?.nome_medico ||
+    threadMedico?.author ||
+    'Medico de acompanhamento';
+
+  return {
+    nome_completo_medico: name,
+    especialidade_medico: routeMedico?.especialidade_medico || 'Acompanhamento medico',
+    crm_medico: routeMedico?.crm_medico || '',
+    ...routeMedico,
+  };
 }
 
 export default function TelaChatNutricionistaPaciente({
@@ -99,6 +129,7 @@ export default function TelaChatNutricionistaPaciente({
     [patientId, usuarioLogado]
   );
   const routeNutritionist = route?.params?.nutricionista || null;
+  const routeMedico = route?.params?.medico || null;
   const patientName = useMemo(() => getPatientDisplayName(usuarioLogado), [usuarioLogado]);
   const patientFirstName = useMemo(
     () => String(patientName || 'Paciente').trim().split(/\s+/)[0] || 'Paciente',
@@ -106,6 +137,9 @@ export default function TelaChatNutricionistaPaciente({
   );
   const hasLoadedRef = useRef(false);
   const loadRef = useRef(() => Promise.resolve());
+  const loadInFlightRef = useRef(false);
+  const rpcSessionEnsuredRef = useRef(false);
+  const consultasCacheRef = useRef(null);
 
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -114,6 +148,15 @@ export default function TelaChatNutricionistaPaciente({
     buildFallbackNutritionist(routeNutritionist, [])
   );
   const [chatLastReadAt, setChatLastReadAt] = useState(null);
+  const [medico, setMedico] = useState(buildFallbackMedico(routeMedico, []));
+  const [medicoThread, setMedicoThread] = useState([]);
+
+  useEffect(() => {
+    medicoThreadRef.current = medicoThread;
+  }, [medicoThread]);
+  const [medicoLastReadAt, setMedicoLastReadAt] = useState(null);
+  const medicoIdRef = useRef(routeMedico?.id_medico_uuid || null);
+  const medicoThreadRef = useRef([]);
 
   useEffect(() => {
     navigation.setOptions({
@@ -127,8 +170,102 @@ export default function TelaChatNutricionistaPaciente({
     };
   }, [navigation]);
 
+  const loadMedicoPreview = useCallback(
+    async ({
+      patientActor,
+      resolvedMedicoId,
+      experiencePatient = null,
+      silent = false,
+    } = {}) => {
+      let medicoId =
+        resolvedMedicoId ||
+        routeMedico?.id_medico_uuid ||
+        experiencePatient?.id_medico_uuid ||
+        usuarioLogado?.id_medico_uuid ||
+        medicoIdRef.current ||
+        null;
+
+      if (!medicoId && patientId) {
+        let patientRow = experiencePatient;
+        if (!patientRow?.id_medico_uuid) {
+          try {
+            patientRow = await fetchPatientById(patientId, {
+              patientContext: usuarioLogado,
+              currentPatient: usuarioLogado,
+            });
+          } catch (error) {
+            console.log('Erro ao carregar paciente para chat medico:', error);
+          }
+        }
+        medicoId = patientRow?.id_medico_uuid || medicoIdRef.current || null;
+      }
+
+      if (!medicoId && patientId) {
+        try {
+          const consultas =
+            consultasCacheRef.current ||
+            (await listConsultasByPaciente(patientId, { limit: 40 }));
+          consultasCacheRef.current = consultas;
+          const assignedConsulta = selectAssignedConsulta(consultas, {
+            professionalKey: 'medico_id',
+          });
+          medicoId = assignedConsulta?.medico_id || null;
+        } catch (error) {
+          console.log('Erro ao localizar medico vinculado:', error);
+        }
+      }
+
+      medicoIdRef.current = medicoId;
+      if (!medicoId || !patientId) {
+        if (!silent) {
+          setMedicoThread([]);
+          setMedico(buildFallbackMedico(routeMedico, []));
+        }
+        return;
+      }
+
+      const medicoNamePreview =
+        routeMedico?.nome_completo_medico || routeMedico?.nome_medico || 'Medico';
+      let resolvedMedicoThread = medicoThreadRef.current;
+      try {
+        resolvedMedicoThread = await fetchPatientMedicoChatThread(patientId, medicoId, {
+          patientContext: usuarioLogado,
+          patientName,
+          medicoName: medicoNamePreview,
+          limit: 200,
+          rpcActor: patientActor,
+          fallbackThread: medicoThreadRef.current,
+        });
+      } catch (error) {
+        console.log('Erro ao carregar preview chat medico:', error);
+      }
+      setMedicoThread(resolvedMedicoThread);
+
+      if (!silent || !medico?.id_medico_uuid) {
+        let resolvedMedico = routeMedico;
+        if (medicoId) {
+          try {
+            resolvedMedico = await getMedicoById(medicoId);
+          } catch (error) {
+            console.log('Erro ao carregar medico vinculado:', error);
+          }
+        }
+        setMedico(
+          buildFallbackMedico(
+            resolvedMedico || { id_medico_uuid: medicoId },
+            resolvedMedicoThread
+          )
+        );
+      }
+    },
+    [medico?.id_medico_uuid, patientId, patientName, routeMedico, usuarioLogado]
+  );
+
   const load = useCallback(
     async ({ silent = false, forceRefresh = false } = {}) => {
+      if (silent && loadInFlightRef.current) return;
+
+      loadInFlightRef.current = true;
       try {
         if (!silent) setLoading(true);
 
@@ -150,13 +287,31 @@ export default function TelaChatNutricionistaPaciente({
           setLoading(false);
         }
 
+        const patientActor = normalizeRpcActorProfile(usuarioLogado);
+        if (patientActor?.id_paciente_uuid && !rpcSessionEnsuredRef.current) {
+          await garantirSessaoRpcClinicaComPerfil(patientActor).catch((error) => {
+            console.log('Sessao RPC lista conversas paciente:', error?.message || error);
+          });
+          rpcSessionEnsuredRef.current = true;
+        }
+
         const experience = await fetchPatientNutritionistChat(patientId, {
           ...mesclarLimitesDadosPaciente('chat'),
           patientContext: usuarioLogado,
-          forceRefresh,
+          forceRefresh: silent ? false : forceRefresh,
         });
 
         setAppState(experience.appState || createDefaultAppState());
+
+        if (silent && hasLoadedRef.current) {
+          await loadMedicoPreview({
+            patientActor,
+            resolvedMedicoId: medicoIdRef.current,
+            experiencePatient: experience?.patient || null,
+            silent: true,
+          });
+          return;
+        }
 
         let resolvedNutritionist = routeNutritionist;
         const routeNutritionistId = routeNutritionist?.id_nutricionista_uuid;
@@ -171,7 +326,7 @@ export default function TelaChatNutricionistaPaciente({
           }
         }
 
-        if (!resolvedNutritionist && linkedNutritionistId) {
+        if (!resolvedNutritionist?.id_nutricionista_uuid && linkedNutritionistId) {
           try {
             resolvedNutritionist = await getNutritionistById(linkedNutritionistId);
           } catch (error) {
@@ -179,15 +334,33 @@ export default function TelaChatNutricionistaPaciente({
           }
         }
 
-        if (!resolvedNutritionist && patientId) {
+        let consultas = consultasCacheRef.current;
+        const hasKnownMedicoId = Boolean(
+          routeMedico?.id_medico_uuid ||
+            experience?.patient?.id_medico_uuid ||
+            usuarioLogado?.id_medico_uuid ||
+            medicoIdRef.current
+        );
+        const needsConsultasLookup =
+          patientId &&
+          (!resolvedNutritionist?.id_nutricionista_uuid || !hasKnownMedicoId);
+        if (needsConsultasLookup && !consultas) {
           try {
-            const consultas = await listConsultasByPaciente(patientId, { limit: 40 });
-            const assignedConsulta = selectAssignedConsulta(consultas);
-            if (assignedConsulta?.nutricionista_id) {
-              resolvedNutritionist = await getNutritionistById(assignedConsulta.nutricionista_id);
-            }
+            consultas = await listConsultasByPaciente(patientId, { limit: 40 });
+            consultasCacheRef.current = consultas;
           } catch (error) {
-            console.log('Erro ao localizar nutricionista vinculada:', error);
+            console.log('Erro ao localizar profissionais vinculados:', error);
+          }
+        }
+
+        if (!resolvedNutritionist?.id_nutricionista_uuid && consultas?.length) {
+          const assignedConsulta = selectAssignedConsulta(consultas);
+          if (assignedConsulta?.nutricionista_id) {
+            try {
+              resolvedNutritionist = await getNutritionistById(assignedConsulta.nutricionista_id);
+            } catch (error) {
+              console.log('Erro ao localizar nutricionista vinculada:', error);
+            }
           }
         }
 
@@ -197,13 +370,34 @@ export default function TelaChatNutricionistaPaciente({
             experience.appState?.nutritionistThread || []
           )
         );
+
+        const resolvedMedicoId =
+          routeMedico?.id_medico_uuid ||
+          experience?.patient?.id_medico_uuid ||
+          usuarioLogado?.id_medico_uuid ||
+          medicoIdRef.current ||
+          null;
+
+        await loadMedicoPreview({
+          patientActor,
+          resolvedMedicoId,
+          experiencePatient: experience?.patient || null,
+          silent: false,
+        });
       } catch (error) {
         console.log('Erro ao carregar lista de conversas do paciente:', error);
       } finally {
+        loadInFlightRef.current = false;
         if (!silent) setLoading(false);
       }
     },
-    [canResolvePatient, patientId, routeNutritionist, usuarioLogado]
+    [
+      canResolvePatient,
+      loadMedicoPreview,
+      patientId,
+      routeNutritionist,
+      usuarioLogado,
+    ]
   );
 
   useEffect(() => {
@@ -216,10 +410,13 @@ export default function TelaChatNutricionistaPaciente({
       getPatientChatLastReadAt(patientId).then((readAt) => {
         if (active) setChatLastReadAt(readAt);
       });
+      getPatientMedicoChatLastReadAt(patientId, medicoIdRef.current).then((readAt) => {
+        if (active) setMedicoLastReadAt(readAt);
+      });
       load({ silent: hasLoadedRef.current, forceRefresh: false });
       hasLoadedRef.current = true;
       const intervalId = setInterval(
-        () => load({ silent: true, forceRefresh: true }),
+        () => load({ silent: true, forceRefresh: false }),
         CHAT_ACTIVE_POLL_MS
       );
       return () => {
@@ -234,6 +431,7 @@ export default function TelaChatNutricionistaPaciente({
 
   const nutritionistName =
     nutritionist?.nome_completo_nutri || nutritionist?.nome_nutri || 'Nutricionista';
+  const medicoName = medico?.nome_completo_medico || medico?.nome_medico || 'Medico';
 
   useEffect(() => {
     if (!patientId) return undefined;
@@ -275,6 +473,40 @@ export default function TelaChatNutricionistaPaciente({
     };
   }, [patientId, patientFirstName, nutritionistName]);
 
+  useEffect(() => {
+    if (!patientId) return undefined;
+
+    const channel = supabase
+      .channel(`patient-medico-chat-list-${patientId}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'mensagem_chat_medico',
+          filter: `paciente_id=eq.${patientId}`,
+        },
+        (payload) => {
+          const row = payload?.new;
+          if (row?.texto && payload?.eventType === 'INSERT') {
+            const entry = mapMedicoRealtimeChatRowToThreadEntry(row, patientFirstName, {
+              medicoName,
+            });
+            if (entry) {
+              setMedicoThread((current) => mergeMedicoChatMessageIntoThread(current, entry));
+              return;
+            }
+          }
+          loadRef.current({ silent: true, forceRefresh: false });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [medicoName, patientFirstName, patientId]);
+
   const chatPreview = useMemo(
     () =>
       buildPatientChatPreview(appState?.nutritionistThread, {
@@ -285,12 +517,18 @@ export default function TelaChatNutricionistaPaciente({
     [appState?.nutritionistThread, nutritionistName, patientFirstName, chatLastReadAt]
   );
 
+  const medicoChatPreview = useMemo(
+    () => buildPatientMedicoChatPreview(medicoThread, { lastReadAt: medicoLastReadAt }),
+    [medicoLastReadAt, medicoThread]
+  );
+
   const chatItems = useMemo(() => {
-    return [
+    const items = [
       {
         id: `nutri-${nutritionist?.id_nutricionista_uuid || nutritionistName}`,
-        nutritionistName,
-        nutritionistMeta: [
+        type: 'nutri',
+        professionalName: nutritionistName,
+        professionalMeta: [
           nutritionist?.especialidade || 'Acompanhamento nutricional',
           nutritionist?.crm_numero ? `CRN ${nutritionist.crm_numero}` : '',
         ]
@@ -301,19 +539,56 @@ export default function TelaChatNutricionistaPaciente({
         unread: chatPreview.unread,
       },
     ];
-  }, [chatPreview, nutritionist, nutritionistName]);
+
+    if (medico?.id_medico_uuid || medicoIdRef.current || medicoThread.length > 0) {
+      items.push({
+        id: `medico-${medico?.id_medico_uuid || medicoIdRef.current || medicoName}`,
+        type: 'medico',
+        professionalName: medicoName,
+        professionalMeta: [
+          getMedicoEspecialidadeLabel(medico),
+          medico?.crm_medico ? `CRM ${medico.crm_medico}` : '',
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        preview: medicoChatPreview.lastMessage || 'Nenhuma mensagem ainda.',
+        time: medicoChatPreview.lastMessageAt || '',
+        unread: medicoChatPreview.unread,
+        medico,
+        medicoThread,
+      });
+    }
+
+    return items;
+  }, [chatPreview, medico, medicoChatPreview, medicoName, medicoThread, nutritionist, nutritionistName]);
 
   const filteredChats = useMemo(() => {
     const normalized = String(search || '').toLowerCase().trim();
     if (!normalized) return chatItems;
     return chatItems.filter((item) =>
-      [item.nutritionistName, item.preview].some((field) =>
+      [item.professionalName, item.preview].some((field) =>
         String(field || '').toLowerCase().includes(normalized)
       )
     );
   }, [chatItems, search]);
 
   async function openChat(chat) {
+    if (chat.type === 'medico') {
+      const medicoId = chat.medico?.id_medico_uuid || medicoIdRef.current;
+      const readAt = await markPatientMedicoChatRead(patientId, medicoId);
+      if (readAt) setMedicoLastReadAt(readAt);
+
+      navigation.navigate('PacienteChatMedicoDetalhe', {
+        usuarioLogado,
+        conversationId: chat.id,
+        medico: chat.medico || medico,
+        initialAppState: { medicoThread: chat.medicoThread || medicoThread },
+        initialMedico: chat.medico || medico,
+        initialReadAt: readAt,
+      });
+      return;
+    }
+
     const readAt = await markPatientChatRead(patientId);
     if (readAt) setChatLastReadAt(readAt);
 
@@ -374,12 +649,12 @@ export default function TelaChatNutricionistaPaciente({
                 <View style={styles.chatRowTop}>
                   <View style={styles.identityRow}>
                     <View style={styles.avatar}>
-                      <Text style={styles.avatarText}>{getInitials(chat.nutritionistName)}</Text>
+                      <Text style={styles.avatarText}>{getInitials(chat.professionalName)}</Text>
                     </View>
                     <View style={styles.chatListCopy}>
                       <View style={styles.chatListTop}>
                         <Text style={styles.chatListName} numberOfLines={1}>
-                          {chat.nutritionistName}
+                          {chat.professionalName}
                         </Text>
                         <Text style={styles.chatListTime}>{chat.time}</Text>
                       </View>

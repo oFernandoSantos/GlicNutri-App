@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Platform,
+  ScrollView,
   StyleSheet,
   Switch,
   Text,
@@ -11,6 +12,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { SectionCard } from '../nutricionista/NutriDesktopUI';
+import { ChipFiltro } from './uiAgendamento';
 import {
   buildSlotLabel,
   deleteNutriAvailability,
@@ -24,18 +26,18 @@ import {
   upsertMedicoAvailability,
 } from '../../servicos/servicoAgendaMedico';
 import { inputFocusBorder, inputWebFocusReset } from '../../temas/temaFocoCampo';
-
-const WEEKDAYS = [
-  { value: 0, label: 'Dom' },
-  { value: 1, label: 'Seg' },
-  { value: 2, label: 'Ter' },
-  { value: 3, label: 'Qua' },
-  { value: 4, label: 'Qui' },
-  { value: 5, label: 'Sex' },
-  { value: 6, label: 'Sab' },
-];
+import {
+  formatDateKeyToBr,
+  parseDateBrToKey,
+} from './FiltrosAgendamentoAvancado';
 
 const SLOT_MINUTES_OPTIONS = [15, 30, 45, 60];
+
+const AVAILABILITY_ACTIVE_FILTERS = [
+  { id: 'all', label: 'Todos', icon: 'apps-outline' },
+  { id: 'active', label: 'Ativos', icon: 'checkmark-circle-outline' },
+  { id: 'inactive', label: 'Inativos', icon: 'close-circle-outline' },
+];
 
 function isDefaultRow(row) {
   return row?.is_default === true || String(row?.id || '').startsWith('default-');
@@ -46,13 +48,101 @@ function resolvePersistedId(row) {
   return row.id;
 }
 
+const DATE_MODE = {
+  single: 'single',
+  range: 'range',
+};
+
 const EMPTY_FORM = {
-  weekday: 1,
+  dateMode: DATE_MODE.single,
+  dateInput: '',
   startTime: '08:00',
   endTime: '12:00',
   slotMinutes: 30,
   active: true,
 };
+
+function formatBrDateFromDigits(digits) {
+  const clean = String(digits || '').replace(/\D/g, '').slice(0, 8);
+  if (clean.length <= 2) return clean;
+  if (clean.length <= 4) return `${clean.slice(0, 2)}/${clean.slice(2)}`;
+  return `${clean.slice(0, 2)}/${clean.slice(2, 4)}/${clean.slice(4)}`;
+}
+
+function extractFirstBrDate(value) {
+  const match = String(value || '').trim().match(/^(\d{2}\/\d{2}\/\d{4})/);
+  return match ? match[1] : '';
+}
+
+function maskAvailabilityDateInput(value, mode = DATE_MODE.single) {
+  if (mode === DATE_MODE.range) {
+    const digits = String(value || '').replace(/\D/g, '').slice(0, 16);
+    const first = formatBrDateFromDigits(digits.slice(0, 8));
+    const secondDigits = digits.slice(8);
+    if (!secondDigits.length) return first;
+    const second = formatBrDateFromDigits(secondDigits);
+    return `${first} - ${second}`;
+  }
+
+  return formatBrDateFromDigits(value);
+}
+
+function expandDateRangeKeys(fromKey, toKey) {
+  const [fromYear, fromMonth, fromDay] = fromKey.split('-').map(Number);
+  const [toYear, toMonth, toDay] = toKey.split('-').map(Number);
+  const cursor = new Date(fromYear, fromMonth - 1, fromDay);
+  const end = new Date(toYear, toMonth - 1, toDay);
+  const dates = [];
+
+  while (cursor.getTime() <= end.getTime()) {
+    const year = cursor.getFullYear();
+    const month = String(cursor.getMonth() + 1).padStart(2, '0');
+    const day = String(cursor.getDate()).padStart(2, '0');
+    dates.push(`${year}-${month}-${day}`);
+    cursor.setDate(cursor.getDate() + 1);
+  }
+
+  return dates;
+}
+
+function parseAvailabilityDatesInput(value, mode = DATE_MODE.single) {
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return {
+      error:
+        mode === DATE_MODE.range
+          ? 'Informe o intervalo no formato dd/mm/aaaa - dd/mm/aaaa.'
+          : 'Informe a data no formato dd/mm/aaaa.',
+    };
+  }
+
+  if (mode === DATE_MODE.range) {
+    const rangeMatch = raw.match(/^(\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})$/);
+    if (!rangeMatch) {
+      return { error: 'Intervalo invalido. Use dd/mm/aaaa - dd/mm/aaaa.' };
+    }
+    const fromKey = parseDateBrToKey(rangeMatch[1]);
+    const toKey = parseDateBrToKey(rangeMatch[2]);
+    if (!fromKey || !toKey) {
+      return { error: 'Intervalo de datas invalido. Use dd/mm/aaaa - dd/mm/aaaa.' };
+    }
+    if (fromKey > toKey) {
+      return { error: 'A data inicial deve ser anterior ou igual a data final.' };
+    }
+    const dates = expandDateRangeKeys(fromKey, toKey);
+    if (dates.length > 120) {
+      return { error: 'O intervalo pode ter no maximo 120 dias.' };
+    }
+    return { dates };
+  }
+
+  const singleKey = parseDateBrToKey(raw);
+  if (!singleKey) {
+    return { error: 'Data invalida. Use dd/mm/aaaa.' };
+  }
+
+  return { dates: [singleKey] };
+}
 
 export default function PainelDisponibilidadeAgendaProfissional({
   variant = 'nutri',
@@ -70,6 +160,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [focusedField, setFocusedField] = useState('');
+  const [listActiveFilter, setListActiveFilter] = useState('all');
 
   const isMedico = variant === 'medico';
   const buildLabel = isMedico ? buildMedicoSlotLabel : buildSlotLabel;
@@ -110,6 +201,14 @@ export default function PainelDisponibilidadeAgendaProfissional({
     [rows]
   );
 
+  const filteredRows = useMemo(() => {
+    return (rows || []).filter((row) => {
+      if (listActiveFilter === 'active' && row.active === false) return false;
+      if (listActiveFilter === 'inactive' && row.active !== false) return false;
+      return true;
+    });
+  }, [rows, listActiveFilter]);
+
   function resetForm() {
     setEditingId(null);
     setForm(EMPTY_FORM);
@@ -118,8 +217,12 @@ export default function PainelDisponibilidadeAgendaProfissional({
 
   function handleEditRow(row) {
     setEditingId(resolvePersistedId(row));
+    const availabilityDate = row.availability_date
+      ? String(row.availability_date).slice(0, 10)
+      : '';
     setForm({
-      weekday: row.weekday,
+      dateMode: DATE_MODE.single,
+      dateInput: availabilityDate ? formatDateKeyToBr(availabilityDate) : '',
       startTime: String(row.start_time || '').slice(0, 5),
       endTime: String(row.end_time || '').slice(0, 5),
       slotMinutes: Number(row.slot_minutes) || 30,
@@ -131,27 +234,40 @@ export default function PainelDisponibilidadeAgendaProfissional({
   async function handleSaveRow() {
     if (!professionalId) return;
 
+    const dateMode = editingId ? DATE_MODE.single : form.dateMode;
+    const parsedDates = parseAvailabilityDatesInput(form.dateInput, dateMode);
+    if (parsedDates.error) {
+      setError(parsedDates.error);
+      return;
+    }
+
     try {
       setSaving(true);
       setError('');
       setFeedback('');
 
-      const payload = {
-        ...(editingId ? { id: editingId } : null),
-        [professionalKey]: professionalId,
-        weekday: form.weekday,
-        startTime: form.startTime,
-        endTime: form.endTime,
-        slotMinutes: form.slotMinutes,
-        active: form.active,
-        actor,
-        origin: writeOrigin,
-      };
+      for (const availabilityDate of parsedDates.dates) {
+        await upsertAvailability({
+          ...(editingId ? { id: editingId } : null),
+          [professionalKey]: professionalId,
+          availabilityDate,
+          startTime: form.startTime,
+          endTime: form.endTime,
+          slotMinutes: form.slotMinutes,
+          active: form.active,
+          actor,
+          origin: writeOrigin,
+        });
+      }
 
-      await upsertAvailability(payload);
       await loadRows();
       resetForm();
-      setFeedback('Disponibilidade salva. Os pacientes já podem visualizar esses horários.');
+      const count = parsedDates.dates.length;
+      setFeedback(
+        count > 1
+          ? `${count} dias publicados. Os pacientes ja podem visualizar esses horarios.`
+          : 'Disponibilidade salva. Os pacientes ja podem visualizar esse horario.'
+      );
     } catch (saveError) {
       console.log('Erro ao salvar disponibilidade:', saveError);
       setError(saveError?.message || 'Não foi possível salvar a disponibilidade.');
@@ -170,6 +286,9 @@ export default function PainelDisponibilidadeAgendaProfissional({
         id: resolvePersistedId(row) || undefined,
         [professionalKey]: professionalId,
         weekday: row.weekday,
+        availabilityDate: row.availability_date
+          ? String(row.availability_date).slice(0, 10)
+          : null,
         startTime: String(row.start_time || '').slice(0, 5),
         endTime: String(row.end_time || '').slice(0, 5),
         slotMinutes: Number(row.slot_minutes) || 30,
@@ -213,7 +332,7 @@ export default function PainelDisponibilidadeAgendaProfissional({
         <View style={styles.headerCopy}>
           <Text style={styles.title}>Disponibilidade para pacientes</Text>
           <Text style={styles.subtitle}>
-            Configure os dias e horários em que pacientes podem ver vagas ao solicitar acompanhamento.
+            Configure as datas e horarios em que pacientes podem ver vagas ao solicitar acompanhamento.
           </Text>
         </View>
         <View style={styles.countBadge}>
@@ -233,24 +352,88 @@ export default function PainelDisponibilidadeAgendaProfissional({
               {editingId ? 'Editar faixa de horário' : 'Nova faixa de horário'}
             </Text>
 
-            <Text style={styles.fieldLabel}>Dia da semana</Text>
-            <View style={styles.weekdayRow}>
-              {WEEKDAYS.map((day) => {
-                const active = Number(form.weekday) === day.value;
-                return (
-                  <TouchableOpacity
-                    key={day.value}
-                    style={[styles.weekdayChip, active && styles.weekdayChipActive]}
-                    activeOpacity={0.9}
-                    onPress={() => setForm((current) => ({ ...current, weekday: day.value }))}
+            <Text style={styles.fieldLabel}>Data</Text>
+            {!editingId ? (
+              <View style={styles.dateModeRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.dateModeChip,
+                    form.dateMode === DATE_MODE.single && styles.dateModeChipActive,
+                  ]}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    setForm((current) => {
+                      const firstDate = extractFirstBrDate(current.dateInput);
+                      return {
+                        ...current,
+                        dateMode: DATE_MODE.single,
+                        dateInput: firstDate || maskAvailabilityDateInput(current.dateInput, DATE_MODE.single),
+                      };
+                    })
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.dateModeChipText,
+                      form.dateMode === DATE_MODE.single && styles.dateModeChipTextActive,
+                    ]}
                   >
-                    <Text style={[styles.weekdayChipText, active && styles.weekdayChipTextActive]}>
-                      {day.label}
-                    </Text>
-                  </TouchableOpacity>
-                );
-              })}
-            </View>
+                    Por dia
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.dateModeChip,
+                    form.dateMode === DATE_MODE.range && styles.dateModeChipActive,
+                  ]}
+                  activeOpacity={0.9}
+                  onPress={() =>
+                    setForm((current) => ({
+                      ...current,
+                      dateMode: DATE_MODE.range,
+                      dateInput: maskAvailabilityDateInput(current.dateInput, DATE_MODE.range),
+                    }))
+                  }
+                >
+                  <Text
+                    style={[
+                      styles.dateModeChipText,
+                      form.dateMode === DATE_MODE.range && styles.dateModeChipTextActive,
+                    ]}
+                  >
+                    Em massa
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            ) : null}
+            <TextInput
+              value={form.dateInput}
+              onChangeText={(value) =>
+                setForm((current) => ({
+                  ...current,
+                  dateInput: maskAvailabilityDateInput(
+                    value,
+                    editingId ? DATE_MODE.single : current.dateMode
+                  ),
+                }))
+              }
+              placeholder={
+                editingId || form.dateMode === DATE_MODE.single
+                  ? 'dd/mm/aaaa'
+                  : 'dd/mm/aaaa - dd/mm/aaaa'
+              }
+              placeholderTextColor={theme.colors.textMuted}
+              keyboardType="numeric"
+              maxLength={editingId || form.dateMode === DATE_MODE.single ? 10 : 23}
+              style={[styles.input, focusedField === 'dateInput' ? styles.inputFocused : null]}
+              onFocus={() => setFocusedField('dateInput')}
+              onBlur={() => setFocusedField('')}
+            />
+            <Text style={styles.fieldHint}>
+              {editingId || form.dateMode === DATE_MODE.single
+                ? 'Um dia no formato dd/mm/aaaa.'
+                : 'Intervalo em massa: dd/mm/aaaa - dd/mm/aaaa (ate 120 dias).'}
+            </Text>
 
             <View style={styles.timeRow}>
               <View style={styles.timeField}>
@@ -331,19 +514,41 @@ export default function PainelDisponibilidadeAgendaProfissional({
           {error ? <Text style={styles.errorText}>{error}</Text> : null}
           {feedback ? <Text style={styles.feedbackText}>{feedback}</Text> : null}
 
+          <Text style={styles.filterSectionLabel}>Filtros — Disponibilidade</Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.filterRow}
+          >
+            {AVAILABILITY_ACTIVE_FILTERS.map((filter) => (
+              <ChipFiltro
+                key={`availability-active-${filter.id}`}
+                label={filter.label}
+                icon={filter.icon}
+                active={listActiveFilter === filter.id}
+                onPress={() => setListActiveFilter(filter.id)}
+                style={styles.filterChip}
+              />
+            ))}
+          </ScrollView>
+
           <View style={styles.listHeader}>
             <Text style={styles.listTitle}>Horarios publicados</Text>
             <Text style={styles.listMeta}>
-              {rows.length} {rows.length === 1 ? 'faixa cadastrada' : 'faixas cadastradas'}
+              {filteredRows.length} de {rows.length}{' '}
+              {rows.length === 1 ? 'faixa' : 'faixas'}
             </Text>
           </View>
 
-          {rows.length ? (
+          {filteredRows.length ? (
             <View style={styles.list}>
-              {rows.map((row, index) => {
+              {filteredRows.map((row, index) => {
                 const rowKey = row.id || `${row.weekday}-${row.start_time}-${index}`;
                 const label = buildLabel({
                   weekday: row.weekday,
+                  availabilityDate: row.availability_date
+                    ? String(row.availability_date).slice(0, 10)
+                    : null,
                   startTime: String(row.start_time || '').slice(0, 5),
                   endTime: String(row.end_time || '').slice(0, 5),
                   slotMinutes: Number(row.slot_minutes) || 30,
@@ -392,6 +597,18 @@ export default function PainelDisponibilidadeAgendaProfissional({
                 );
               })}
             </View>
+          ) : rows.length ? (
+            <View style={styles.emptyState}>
+              <Ionicons name="funnel-outline" size={42} color={theme.colors.border} />
+              <Text style={styles.emptyText}>Nenhum horário corresponde aos filtros.</Text>
+              <TouchableOpacity
+                style={styles.secondaryButton}
+                activeOpacity={0.9}
+                onPress={() => setListActiveFilter('all')}
+              >
+                <Text style={styles.secondaryButtonText}>Limpar filtros</Text>
+              </TouchableOpacity>
+            </View>
           ) : (
             <View style={styles.emptyState}>
               <Ionicons name="time-outline" size={48} color={theme.colors.border} />
@@ -412,11 +629,14 @@ function createStyles(theme) {
     gap: 16,
   },
   flatCard: {
-    backgroundColor: theme.colors.background,
+    backgroundColor: theme.colors.surface,
     borderWidth: 1,
     borderColor: theme.colors.border,
     borderRadius: theme.radius?.xl || 16,
     shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
     elevation: 0,
   },
   header: {
@@ -455,10 +675,10 @@ function createStyles(theme) {
   formCard: {
     gap: 10,
     padding: 14,
-    borderRadius: 14,
+    borderRadius: theme.radius?.card ?? theme.radius?.lg ?? 16,
     borderWidth: 1,
     borderColor: theme.colors.border,
-    backgroundColor: theme.colors.surface || '#FAFBFC',
+    backgroundColor: theme.colors.surface,
   },
   formTitle: {
     fontSize: 14,
@@ -470,30 +690,35 @@ function createStyles(theme) {
     fontWeight: '600',
     color: theme.colors.textMuted,
   },
-  weekdayRow: {
+  fieldHint: {
+    fontSize: 11,
+    lineHeight: 16,
+    color: theme.colors.textMuted,
+  },
+  dateModeRow: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 8,
   },
-  weekdayChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
+  dateModeChip: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
     borderRadius: 999,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.background,
   },
-  weekdayChipActive: {
+  dateModeChipActive: {
     borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.primarySoft || '#E8F8F1',
+    backgroundColor: theme.colors.primary,
   },
-  weekdayChipText: {
+  dateModeChipText: {
     fontSize: 12,
     fontWeight: '600',
     color: theme.colors.textMuted,
   },
-  weekdayChipTextActive: {
-    color: theme.colors.primaryDark,
+  dateModeChipTextActive: {
+    color: theme.colors.onPrimary,
   },
   timeRow: {
     flexDirection: 'row',
@@ -506,7 +731,7 @@ function createStyles(theme) {
   input: {
     borderWidth: 1,
     borderColor: theme.colors.border,
-    borderRadius: 10,
+    borderRadius: theme.radius?.lg ?? 16,
     paddingHorizontal: 12,
     paddingVertical: Platform.OS === 'web' ? 10 : 8,
     fontSize: 14,
@@ -533,7 +758,7 @@ function createStyles(theme) {
   },
   slotChipActive: {
     borderColor: theme.colors.primary,
-    backgroundColor: theme.colors.primarySoft || '#E8F8F1',
+    backgroundColor: theme.colors.primary,
   },
   slotChipText: {
     fontSize: 12,
@@ -541,7 +766,7 @@ function createStyles(theme) {
     color: theme.colors.textMuted,
   },
   slotChipTextActive: {
-    color: theme.colors.primaryDark,
+    color: theme.colors.onPrimary,
   },
   activeRow: {
     flexDirection: 'row',
@@ -562,9 +787,7 @@ function createStyles(theme) {
     paddingHorizontal: 14,
     paddingVertical: 11,
     minHeight: 48,
-    borderRadius: theme.radius?.lg ?? 16,
-    borderWidth: 1,
-    borderColor: theme.colors.primaryBorder || theme.colors.primary,
+    borderRadius: theme.radius?.pill ?? 999,
     backgroundColor: theme.colors.primary,
   },
   primaryButtonText: {
@@ -575,7 +798,8 @@ function createStyles(theme) {
   secondaryButton: {
     paddingHorizontal: 14,
     paddingVertical: 11,
-    borderRadius: 10,
+    minHeight: 48,
+    borderRadius: theme.radius?.pill ?? 999,
     borderWidth: 1,
     borderColor: theme.colors.border,
     backgroundColor: theme.colors.background,
@@ -587,6 +811,21 @@ function createStyles(theme) {
   },
   buttonDisabled: {
     opacity: 0.7,
+  },
+  filterSectionLabel: {
+    color: theme.colors.primaryDark,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  filterRow: {
+    gap: 6,
+    paddingBottom: 2,
+  },
+  filterChip: {
+    minHeight: 30,
+    paddingHorizontal: 10,
   },
   listHeader: {
     flexDirection: 'row',

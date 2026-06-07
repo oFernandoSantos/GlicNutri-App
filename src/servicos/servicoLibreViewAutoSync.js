@@ -22,6 +22,7 @@ export const LIBRE_AUTO_SYNC_INTERVAL_MS = 5 * 60 * 1000;
 export const LIBRE_AUTO_SYNC_START_DELAY_MS = 45 * 1000;
 export const LIBRE_MIN_MANUAL_SYNC_GAP_MS = 90 * 1000;
 export const LIBRE_RATE_LIMIT_BACKOFF_MS = 10 * 60 * 1000;
+const LIBRE_RPC_SESSION_TIMEOUT_MS = 12 * 1000;
 
 let activeTimerId = null;
 let activeStartTimerId = null;
@@ -98,6 +99,31 @@ function mapLibreReadingsToCacheEntries(readings, patientId) {
   return (readings || [])
     .map((reading, index) => mapRemoteGlucoseReadingToEntry(reading, patientId, { index }))
     .filter(Boolean);
+}
+
+async function ensureLibreRpcSession(rpcActor) {
+  try {
+    await Promise.race([
+      garantirSessaoRpcClinicaComPerfil(rpcActor),
+      new Promise((_, reject) => {
+        setTimeout(
+          () => reject(new Error('Sessao RPC expirou ao sincronizar LibreView.')),
+          LIBRE_RPC_SESSION_TIMEOUT_MS
+        );
+      }),
+    ]);
+    return { ok: true, rpcUnavailable: false };
+  } catch (error) {
+    console.log('Sessao RPC ausente ao sincronizar LibreView:', error?.message || error);
+    return { ok: false, rpcUnavailable: true, error };
+  }
+}
+
+function applyOptimisticLibreReadings(patientId, normalizedLibreReadings) {
+  const optimisticEntries = mapLibreReadingsToCacheEntries(normalizedLibreReadings, patientId);
+  replaceCachedGlucoseReadings(patientId, optimisticEntries);
+  invalidatePatientExperienceCache(patientId);
+  return optimisticEntries;
 }
 
 export async function hasLibreLinkUpLinked(patientId) {
@@ -247,12 +273,11 @@ async function executeLinkedLibreViewSync({
     return emptyResult;
   }
 
-  try {
-    await garantirSessaoRpcClinicaComPerfil(rpcActor);
-  } catch (error) {
-    console.log('Sessao RPC ausente ao sincronizar LibreView:', error?.message || error);
+  const rpcSession = await ensureLibreRpcSession(rpcActor);
+  if (!rpcSession.ok) {
+    const optimisticReadings = applyOptimisticLibreReadings(patientId, normalizedLibreReadings);
     if (!silent) {
-      throw error;
+      throw rpcSession.error || new Error('Sessao clinica indisponivel para salvar leituras Libre.');
     }
     return {
       linked: true,
@@ -260,8 +285,9 @@ async function executeLinkedLibreViewSync({
       fetched: fetchedCount,
       pending: normalizedLibreReadings.length,
       ignored: 0,
-      readings: getCachedGlucoseReadings(patientId),
+      readings: optimisticReadings.length ? optimisticReadings : getCachedGlucoseReadings(patientId),
       connection: result.connection || null,
+      rpcUnavailable: true,
       silent,
     };
   }
@@ -294,10 +320,7 @@ async function executeLinkedLibreViewSync({
     invalidatePatientExperienceCache(patientId);
   } catch (error) {
     console.log('Falha ao atualizar cache de glicose apos LibreView:', error?.message || error);
-    const optimisticEntries = mapLibreReadingsToCacheEntries(normalizedLibreReadings, patientId);
-    mergedReadings = optimisticEntries;
-    replaceCachedGlucoseReadings(patientId, optimisticEntries);
-    invalidatePatientExperienceCache(patientId);
+    mergedReadings = applyOptimisticLibreReadings(patientId, normalizedLibreReadings);
   }
 
   if (result.connection?.patientId) {

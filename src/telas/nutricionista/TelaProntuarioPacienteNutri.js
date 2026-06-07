@@ -21,6 +21,7 @@ import {
 } from '../../componentes/nutricionista/NutriDesktopUI';
 import RegistrosPacienteNutriSection from '../../componentes/nutricionista/RegistrosPacienteNutriSection';
 import {
+  fetchGlucoseReadings,
   fetchPatientById,
   fetchPatientExperience,
   fetchPatientRegistrosForNutri,
@@ -34,7 +35,11 @@ import {
   buildWeeklyAdherenceFromMeals,
 } from '../../utilitarios/adesaoNutricional';
 import { pickGlucoseReadingsForRecentChart } from '../../utilitarios/dataLocal';
-import { mergeCachedGlucoseReadings } from '../../servicos/centralGlicose';
+import {
+  getCachedGlucoseReadings,
+  isGlucoseCacheFresh,
+  mergeCachedGlucoseReadings,
+} from '../../servicos/centralGlicose';
 import { garantirSessaoRpcClinicaComPerfil } from '../../servicos/servicoSessaoRpc';
 import { carregarSessaoNutricionista } from '../../servicos/servicoSessaoNutricionista';
 import { invalidatePatientExperienceCache } from '../../servicos/cacheExperienciaPaciente';
@@ -91,11 +96,32 @@ function formatDateTime(value) {
   return `${date.toLocaleDateString('pt-BR')} ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
 }
 
+function resolverAlturaCm(ultAnt, patient) {
+  return ultAnt?.altura_cm || patient?.alturaAtual || patient?.rawData?.altura_cm || null;
+}
+
 function calcBmi(pesoKg, alturaCm) {
   const p = Number(pesoKg);
   const a = Number(alturaCm) / 100;
   if (!p || !a) return null;
   return (p / (a * a)).toFixed(1);
+}
+
+const GLUCOSE_CHART_FETCH_LIMIT = 120;
+
+function buildGlucose12hSeries(readings = []) {
+  const merged = mergeCachedGlucoseReadings(readings);
+  return pickGlucoseReadingsForRecentChart(merged, 12).map((reading, index) => ({
+    id: reading.id || `glucose-12h-${index}`,
+    value: Number(reading.value) || 0,
+    label: String(reading.time || '').trim().slice(0, 5) || `${index + 1}`,
+    time: reading.time,
+  }));
+}
+
+function readCachedGlucose12hSeries(patientId) {
+  if (!patientId || !isGlucoseCacheFresh(patientId)) return [];
+  return buildGlucose12hSeries(getCachedGlucoseReadings(patientId));
 }
 
 function normalizePatientForProntuario(patient) {
@@ -117,6 +143,7 @@ function normalizePatientForProntuario(patient) {
     age: patient.age || calculateAge(raw.data_nascimento),
     bmi: patient.bmi || raw.imc_calculado || raw.imc_atual || '--',
     pesoAtual: raw.peso_atual_kg || null,
+    alturaAtual: raw.altura_cm || null,
     specialtyTag: patient.specialtyTag || objective,
     risk: patient.risk || 'Baixo',
     latestGlucose,
@@ -126,10 +153,7 @@ function normalizePatientForProntuario(patient) {
     notes: patient.notes || raw.observacoes || 'Paciente vinculado ao acompanhamento nutricional.',
     glucose12h: patient.glucose12h || [],
     planMeals: patient.planMeals || [],
-    goals: patient.goals || [
-      { id: 'goal-glicose', label: 'Controle glicêmico', progress: 70 },
-      { id: 'goal-plano', label: 'Plano alimentar', progress: 65 },
-    ],
+    goals: patient.goals || [],
     recommendations: patient.recommendations || ['Revisar registros recentes', 'Ajustar metas na consulta'],
     comorbidities: patient.comorbidities || [raw.condicoes_saude || raw.comorbidades_texto || 'Não informado'],
     medications: patient.medications || [raw.medicamentos_uso_continuo || 'Não informado'],
@@ -165,9 +189,19 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   const [mealFoods, setMealFoods] = useState('');
   const [mealSubstitutions, setMealSubstitutions] = useState('');
   const [mealSummary, setMealSummary] = useState('');
+  const [mealDetailsOpen, setMealDetailsOpen] = useState(false);
   const [extraMeals, setExtraMeals] = useState([]);
   const [patientExperience, setPatientExperience] = useState(null);
   const [experienceLoadError, setExperienceLoadError] = useState('');
+  const initialChartPatientId =
+    pacienteId || paciente?.id || paciente?.raw?.id_paciente_uuid || null;
+  const [glucose12hChart, setGlucose12hChart] = useState(() =>
+    readCachedGlucose12hSeries(initialChartPatientId)
+  );
+  const [loadingGlucose12h, setLoadingGlucose12h] = useState(
+    () => !readCachedGlucose12hSeries(initialChartPatientId).length
+  );
+  const glucose12hLoadPatientRef = useRef(null);
 
   // ── Estado prontuário completo ───────────────────────────────────
   const [prontuarioCompleto, setProntuarioCompleto] = useState(null);
@@ -318,32 +352,78 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     };
   }, [nutriRpcActor, paciente, pacienteId, patientRecord]);
 
+  const chartPatientId = useMemo(
+    () =>
+      resolvedPatientId ||
+      pacienteId ||
+      paciente?.id ||
+      paciente?.raw?.id_paciente_uuid ||
+      null,
+    [resolvedPatientId, pacienteId, paciente]
+  );
+
+  const loadGlucose12hChart = useCallback(
+    async (patientId, { force = false } = {}) => {
+      if (!patientId) return;
+      if (!force && glucose12hLoadPatientRef.current === patientId) return;
+
+      const hasCachedSeries = readCachedGlucose12hSeries(patientId).length > 0;
+      if (!hasCachedSeries) setLoadingGlucose12h(true);
+
+      try {
+        if (!nutriRpcActor?.id_nutricionista_uuid) return;
+        await garantirSessaoRpcClinicaComPerfil(nutriRpcActor).catch(() => {});
+        const readings = await fetchGlucoseReadings(
+          patientId,
+          GLUCOSE_CHART_FETCH_LIMIT,
+          nutriRpcActor
+        );
+        glucose12hLoadPatientRef.current = patientId;
+        setGlucose12hChart(buildGlucose12hSeries(readings));
+      } catch (_) {
+        glucose12hLoadPatientRef.current = patientId;
+        if (!readCachedGlucose12hSeries(patientId).length) {
+          setGlucose12hChart([]);
+        }
+      } finally {
+        setLoadingGlucose12h(false);
+      }
+    },
+    [nutriRpcActor]
+  );
+
+  useEffect(() => {
+    if (!chartPatientId || !nutriRpcActor?.id_nutricionista_uuid) return;
+    if (glucose12hLoadPatientRef.current === chartPatientId) return;
+    loadGlucose12hChart(chartPatientId);
+  }, [chartPatientId, loadGlucose12hChart, nutriRpcActor?.id_nutricionista_uuid]);
+
   // Carregar experiência do paciente (glicemia, medicação, refeições para visão geral e registros)
   useEffect(() => {
     let active = true;
-    if (!resolvedPatientId) return;
+    if (!chartPatientId || !nutriRpcActor?.id_nutricionista_uuid) return;
 
     const limites = mesclarLimitesDadosPaciente('prontuario', { includeHidden: true });
-    const forceRefresh = experienceLoadedPatientRef.current !== resolvedPatientId;
+    const forceRefresh = experienceLoadedPatientRef.current !== chartPatientId;
 
     async function load() {
       try {
         setExperienceLoadError('');
         if (nutriRpcActor?.id_nutricionista_uuid) {
-          await garantirSessaoRpcClinicaComPerfil(nutriRpcActor);
+          await garantirSessaoRpcClinicaComPerfil(nutriRpcActor).catch(() => {});
         }
-        const exp = await fetchPatientExperience(resolvedPatientId, {
+        const exp = await fetchPatientExperience(chartPatientId, {
           ...limites,
           skipChat: true,
           patientContext: nutriRpcActor,
           currentPatient:
             patientRecord ||
             paciente?.raw ||
-            (paciente?.id ? { id_paciente_uuid: paciente.id } : { id_paciente_uuid: resolvedPatientId }),
+            (paciente?.id ? { id_paciente_uuid: paciente.id } : { id_paciente_uuid: chartPatientId }),
           forceRefresh,
         });
         if (!active) return;
-        experienceLoadedPatientRef.current = resolvedPatientId;
+        experienceLoadedPatientRef.current = chartPatientId;
         setPatientExperience(exp);
       } catch (error) {
         if (!active) return;
@@ -358,21 +438,32 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     return () => {
       active = false;
     };
-  }, [nutriRpcActor, paciente, paciente?.id, paciente?.raw, patientRecord, resolvedPatientId]);
+  }, [chartPatientId, nutriRpcActor, paciente, paciente?.id, paciente?.raw, patientRecord]);
 
   const currentPatient = useMemo(() => {
     const base = normalizePatientForProntuario(paciente || patientRecord || null);
-    if (!base || !patientExperience) return base;
+    if (!base) return null;
+
+    const mergedGlucose = patientExperience
+      ? mergeCachedGlucoseReadings(patientExperience.glucoseReadings || [])
+      : [];
+    const experienceGlucose12h = patientExperience ? buildGlucose12hSeries(mergedGlucose) : [];
+    const glucose12h = experienceGlucose12h.length ? experienceGlucose12h : glucose12hChart;
+    const latestGlucose = getLatestGlucose(mergedGlucose);
+
+    if (!patientExperience) {
+      return {
+        ...base,
+        glucose12h,
+        latestGlucose: latestGlucose?.value ?? base.latestGlucose,
+        trendText: latestGlucose?.value
+          ? `Última leitura: ${latestGlucose.value} mg/dL`
+          : base.trendText,
+      };
+    }
+
     const { items } = buildWeeklyAdherenceFromMeals(patientExperience.appState?.mealEntries, 3);
     const adherence = averageAdherence(items);
-    const mergedGlucose = mergeCachedGlucoseReadings(patientExperience.glucoseReadings || []);
-    const latestGlucose = getLatestGlucose(mergedGlucose);
-    const glucose12h = pickGlucoseReadingsForRecentChart(mergedGlucose, 12).map((reading, index) => ({
-      id: reading.id || `glucose-12h-${index}`,
-      value: Number(reading.value) || 0,
-      label: String(reading.time || '').trim().slice(0, 5) || `${index + 1}`,
-      time: reading.time,
-    }));
 
     return {
       ...base,
@@ -381,7 +472,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       glucose12h,
       trendText: latestGlucose?.value ? `Última leitura: ${latestGlucose.value} mg/dL` : base.trendText,
     };
-  }, [paciente, patientExperience, patientRecord]);
+  }, [paciente, patientExperience, patientRecord, glucose12hChart]);
 
   const effectivePacienteId = useMemo(
     () => resolvedPatientId || pacienteId || currentPatient?.id || null,
@@ -441,9 +532,16 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
       }
       if (resultado?.ultimaAntropometria) {
         const a = resultado.ultimaAntropometria;
-        setAntPeso(String(a.peso_kg || ''));
-        setAntAltura(String(a.altura_cm || ''));
+        const alturaRegistrada =
+          a.altura_cm || patientRecord?.altura_cm || paciente?.raw?.altura_cm || null;
+        setAntPeso(String(a.peso_kg || patientRecord?.peso_atual_kg || paciente?.raw?.peso_atual_kg || ''));
+        setAntAltura(String(alturaRegistrada || ''));
         setAntCirc(String(a.circunferencia_abdominal_cm || ''));
+      } else {
+        const alturaRegistrada = patientRecord?.altura_cm || paciente?.raw?.altura_cm || null;
+        const pesoRegistrado = patientRecord?.peso_atual_kg || paciente?.raw?.peso_atual_kg || null;
+        if (pesoRegistrado) setAntPeso(String(pesoRegistrado));
+        if (alturaRegistrada) setAntAltura(String(alturaRegistrada));
       }
       if (resultado?.metaAtiva) {
         const m = resultado.metaAtiva;
@@ -462,7 +560,13 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
     } finally {
       if (seq === prontuarioLoadSeqRef.current) setLoadingProntuario(false);
     }
-  }, [effectivePacienteId]);
+  }, [
+    effectivePacienteId,
+    paciente?.raw?.altura_cm,
+    paciente?.raw?.peso_atual_kg,
+    patientRecord?.altura_cm,
+    patientRecord?.peso_atual_kg,
+  ]);
 
   useEffect(() => {
     prontuarioLoadSeqRef.current += 1;
@@ -488,25 +592,27 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   }, [effectivePacienteId, paciente, patientRecord]);
 
   const reloadPatientExperience = useCallback(async () => {
-    if (!resolvedPatientId) return;
+    if (!chartPatientId) return;
     const limites = mesclarLimitesDadosPaciente('prontuario', { includeHidden: true });
     try {
       setExperienceLoadError('');
       if (nutriRpcActor?.id_nutricionista_uuid) {
         await garantirSessaoRpcClinicaComPerfil(nutriRpcActor);
       }
-      invalidatePatientExperienceCache(resolvedPatientId);
-      const exp = await fetchPatientExperience(resolvedPatientId, {
+      invalidatePatientExperienceCache(chartPatientId);
+      glucose12hLoadPatientRef.current = null;
+      await loadGlucose12hChart(chartPatientId, { force: true });
+      const exp = await fetchPatientExperience(chartPatientId, {
         ...limites,
         skipChat: true,
         patientContext: nutriRpcActor,
         currentPatient:
           patientRecord ||
           paciente?.raw ||
-          (paciente?.id ? { id_paciente_uuid: paciente.id } : { id_paciente_uuid: resolvedPatientId }),
+          (paciente?.id ? { id_paciente_uuid: paciente.id } : { id_paciente_uuid: chartPatientId }),
         forceRefresh: true,
       });
-      experienceLoadedPatientRef.current = resolvedPatientId;
+      experienceLoadedPatientRef.current = chartPatientId;
       setPatientExperience(exp);
     } catch (error) {
       experienceLoadedPatientRef.current = null;
@@ -515,7 +621,15 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         error?.message || 'Nao foi possivel carregar os dados clinicos deste paciente.'
       );
     }
-  }, [nutriRpcActor, paciente, paciente?.id, paciente?.raw, patientRecord, resolvedPatientId]);
+  }, [
+    chartPatientId,
+    loadGlucose12hChart,
+    nutriRpcActor,
+    paciente,
+    paciente?.id,
+    paciente?.raw,
+    patientRecord,
+  ]);
 
   const loadRegistros = useCallback(async () => {
     if (!effectivePacienteId) return;
@@ -862,12 +976,13 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
   }
 
   const ultAnt = prontuarioCompleto?.ultimaAntropometria;
+  const alturaRegistrada = resolverAlturaCm(ultAnt, currentPatient);
   const pesoExibir = ultAnt?.peso_kg || currentPatient?.pesoAtual || '--';
-  const alturaExibir = ultAnt?.altura_cm || '--';
+  const alturaExibir = alturaRegistrada || '--';
   const circExibir = ultAnt?.circunferencia_abdominal_cm || '--';
   const imcExibir = ultAnt
-    ? (calcBmi(ultAnt.peso_kg, ultAnt.altura_cm) ?? currentPatient.bmi)
-    : currentPatient.bmi;
+    ? (calcBmi(ultAnt.peso_kg, alturaRegistrada) ?? currentPatient.bmi)
+    : (calcBmi(currentPatient?.pesoAtual, alturaRegistrada) ?? currentPatient.bmi);
   const metaAtiva = prontuarioCompleto?.metaAtiva;
 
   return (
@@ -887,7 +1002,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
             </View>
             <RiskBadge risk={`${currentPatient.risk} risco`} />
           </View>
-          <FilterTabs items={detailTabs} active={activeTab} onChange={setActiveTab} compact />
+          <FilterTabs items={detailTabs} active={activeTab} onChange={setActiveTab} compact scrollable fill />
         </View>
       </View>
 
@@ -895,7 +1010,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
         style={styles.scroll}
         contentContainerStyle={styles.content}
         keyboardBottomBase={48}
-        showsVerticalScrollIndicator={false}
+        showsVerticalScrollIndicator
       >
         {/* ── TAB: VISÃO GERAL ──────────────────────────────────────────── */}
         {activeTab === 'overview' ? (
@@ -915,6 +1030,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
               title="Glicemia nas últimas 12h"
               subtitle="Leituras resumidas para detectar subida, estabilidade e pontos de atenção."
               data={currentPatient.glucose12h}
+              loading={loadingGlucose12h}
             />
             <View style={styles.overviewStats}>
               <SectionCard style={styles.statCard}>
@@ -1042,7 +1158,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
               ) : null}
 
               {/* Histórico antropometria */}
-              {(prontuarioCompleto?.antropometria || []).length > 1 ? (
+              {(prontuarioCompleto?.antropometria || []).length >= 1 ? (
                 <View style={{ marginTop: 12 }}>
                   <Text style={styles.subLabel}>Histórico</Text>
                   {(prontuarioCompleto.antropometria || []).slice(0, 5).map((a, i) => (
@@ -1087,6 +1203,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
                 <View style={styles.fieldList}>
                   <FieldRow label="Tipo de Diabetes" value={prontuarioCompleto?.prontuario?.tipo_diabetes || '--'} />
                   <FieldRow label="Queixa Principal" value={prontuarioCompleto?.prontuario?.queixa_principal || '--'} />
+                  <FieldRow label="Histórico da Doença" value={prontuarioCompleto?.prontuario?.historico_doenca_atual || '--'} />
                   <FieldRow label="Diagnósticos/CID" value={(prontuarioCompleto?.prontuario?.diagnosticos_cid || []).join(', ') || '--'} />
                   <FieldRow label="Alergias / Intolerâncias" value={(prontuarioCompleto?.prontuario?.alergias || []).join(', ') || '--'} />
                   <FieldRow label="Comorbidades" value={(prontuarioCompleto?.prontuario?.comorbidades || []).join(', ') || currentPatient.comorbidities?.join(', ') || '--'} />
@@ -1204,7 +1321,7 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
                   </View>
                 ))}
               </View>
-              <PrimaryButton label={activeMealPlan?.id ? 'Atualizar plano' : 'Salvar plano'} icon="save-outline" onPress={saveMealPlan} loading={savingPlan} disabled={!linkedToNutri} />
+              <PrimaryButton label={activeMealPlan?.id ? 'Atualizar plano' : 'Salvar plano'} icon="save-outline" onPress={saveMealPlan} loading={savingPlan} disabled={!linkedToNutri} variant="brand" />
             </SectionCard>
 
             <SectionCard>
@@ -1213,12 +1330,29 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
                 <TextInput style={[styles.input, styles.inputFlex]} value={mealTitle} onChangeText={setMealTitle} placeholder="Nome da refeição" placeholderTextColor={patientTheme.colors.textMuted} />
                 <TextInput style={[styles.input, styles.timeInput]} value={mealTime} onChangeText={setMealTime} placeholder="08:00" placeholderTextColor={patientTheme.colors.textMuted} />
               </View>
-              <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealObjective} onChangeText={setMealObjective} placeholder="Objetivo da refeição" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
-              <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealFoods} onChangeText={setMealFoods} placeholder="Alimentos separados por vírgula" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
-              <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealSubstitutions} onChangeText={setMealSubstitutions} placeholder="Substituições. Ex.: Arroz integral: quinoa, batata-doce" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
-              <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealSummary} onChangeText={setMealSummary} placeholder="Descreva o que foi proposto" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
-              <PrimaryButton label="Adicionar refeição" icon="add-circle-outline" onPress={addMeal} />
-              <PrimaryButton label="Salvar plano" icon="save-outline" onPress={saveMealPlan} loading={savingPlan} disabled={!linkedToNutri} style={{ marginTop: 8 }} />
+              <TouchableOpacity
+                style={styles.mealDetailsToggle}
+                onPress={() => setMealDetailsOpen((open) => !open)}
+                activeOpacity={0.85}
+              >
+                <Text style={styles.mealDetailsToggleText}>
+                  {mealDetailsOpen ? 'Ocultar detalhes opcionais' : 'Mostrar detalhes opcionais'}
+                </Text>
+                <Ionicons
+                  name={mealDetailsOpen ? 'chevron-up-outline' : 'chevron-down-outline'}
+                  size={16}
+                  color={patientTheme.colors.primaryDark}
+                />
+              </TouchableOpacity>
+              {mealDetailsOpen ? (
+                <>
+                  <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealObjective} onChangeText={setMealObjective} placeholder="Objetivo da refeição" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
+                  <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealFoods} onChangeText={setMealFoods} placeholder="Alimentos separados por vírgula" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
+                  <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealSubstitutions} onChangeText={setMealSubstitutions} placeholder="Substituições. Ex.: Arroz integral: quinoa, batata-doce" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
+                  <TextInput style={[styles.input, styles.inputMultiline, { marginTop: 10 }]} value={mealSummary} onChangeText={setMealSummary} placeholder="Descreva o que foi proposto" placeholderTextColor={patientTheme.colors.textMuted} multiline textAlignVertical="top" />
+                </>
+              ) : null}
+              <PrimaryButton label="Adicionar refeição" icon="add-circle-outline" onPress={addMeal} variant="brandText" />
             </SectionCard>
           </View>
         ) : null}
@@ -1311,17 +1445,25 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
             {/* Metas de adesão (legacy) */}
             <SectionCard>
               <Text style={styles.sectionTitle}>Metas de Adesão</Text>
-              <View style={styles.goalList}>
-                {currentPatient.goals.map(goal => (
-                  <View key={goal.id} style={styles.goalItem}>
+              <Text style={styles.sectionHelper}>
+                Indicadores calculados a partir dos registros recentes do paciente.
+              </Text>
+              {patientExperience ? (
+                <View style={styles.goalList}>
+                  <View style={styles.goalItem}>
                     <View style={styles.goalTop}>
-                      <Text style={styles.goalLabel}>{goal.label}</Text>
-                      <Text style={styles.goalValue}>{goal.progress}%</Text>
+                      <Text style={styles.goalLabel}>Adesão ao plano alimentar</Text>
+                      <Text style={styles.goalValue}>{currentPatient.adherence}%</Text>
                     </View>
-                    <ProgressBar value={goal.progress} tone={goal.progress < 70 ? 'warning' : 'success'} />
+                    <ProgressBar
+                      value={currentPatient.adherence}
+                      tone={currentPatient.adherence < 70 ? 'warning' : 'success'}
+                    />
                   </View>
-                ))}
-              </View>
+                </View>
+              ) : (
+                <Text style={styles.helperText}>Sem dados de adesão calculados ainda.</Text>
+              )}
             </SectionCard>
           </View>
         ) : null}
@@ -1375,19 +1517,37 @@ export default function TelaProntuarioPacienteNutri({ navigation, route }) {
 // Sub-componentes
 // ──────────────────────────────────────────────────────────────────
 
-function PrimaryButton({ label, icon, onPress, loading, disabled, style }) {
+function PrimaryButton({ label, icon, onPress, loading, disabled, style, variant }) {
+  const isBrand = variant === 'brand';
+  const isBrandText = variant === 'brandText';
+  const accentColor = isBrand ? patientTheme.colors.onPrimary : patientTheme.colors.text;
+  const iconColor = isBrandText ? patientTheme.colors.primary : accentColor;
+
   return (
     <TouchableOpacity
-      style={[styles.primaryButton, (disabled || loading) && styles.buttonDisabled, style]}
+      style={[
+        styles.primaryButton,
+        isBrand && styles.primaryButtonBrand,
+        (disabled || loading) && styles.buttonDisabled,
+        style,
+      ]}
       onPress={onPress}
       disabled={disabled || loading}
     >
       {loading ? (
-        <ActivityIndicator color={patientTheme.colors.onPrimary} />
+        <ActivityIndicator color={accentColor} />
       ) : icon ? (
-        <Ionicons name={icon} size={18} color={patientTheme.colors.onPrimary} />
+        <Ionicons name={icon} size={18} color={iconColor} />
       ) : null}
-      <Text style={styles.primaryButtonText}>{label}</Text>
+      <Text
+        style={[
+          styles.primaryButtonText,
+          isBrand && styles.primaryButtonBrandText,
+          isBrandText && styles.primaryButtonBrandTextOnly,
+        ]}
+      >
+        {label}
+      </Text>
     </TouchableOpacity>
   );
 }
@@ -1468,6 +1628,8 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: patientTheme.colors.background },
   headerShell: { paddingHorizontal: patientTheme.spacing.screen, paddingTop: 16, paddingBottom: 8 },
   headerCard: {
+    width: '100%',
+    alignSelf: 'stretch',
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.card,
     borderColor: patientTheme.colors.border,
@@ -1482,7 +1644,7 @@ const styles = StyleSheet.create({
   patientMeta: { marginTop: 6, color: patientTheme.colors.textMuted, lineHeight: 20 },
   scroll: { flex: 1 },
   content: { paddingHorizontal: patientTheme.spacing.screen, paddingBottom: 28, gap: 14 },
-  pageGap: { gap: 14 },
+  pageGap: { width: '100%', alignSelf: 'stretch', gap: 14 },
   overviewStats: { flexDirection: Platform.OS === 'web' ? 'row' : 'column', gap: 12 },
   reportCard: { gap: 10 },
   experienceErrorCard: {
@@ -1572,14 +1734,37 @@ const styles = StyleSheet.create({
   inputMultiline: { minHeight: 90 },
   planTitleInput: { marginBottom: 12 },
   primaryButton: { marginTop: 12, minHeight: 48, borderRadius: patientTheme.radius.pill, backgroundColor: patientTheme.colors.surface, borderWidth: 1, borderColor: patientTheme.colors.surfaceBorder, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8 },
+  primaryButtonBrand: {
+    backgroundColor: patientTheme.colors.primary,
+    borderColor: patientTheme.colors.primaryDark,
+  },
   buttonDisabled: { opacity: 0.55 },
   primaryButtonText: { color: patientTheme.colors.text, fontWeight: '900' },
+  primaryButtonBrandText: { color: patientTheme.colors.onPrimary },
+  primaryButtonBrandTextOnly: { color: patientTheme.colors.primary },
   secondaryButton: { marginTop: 12, minHeight: 48, borderRadius: patientTheme.radius.pill, backgroundColor: patientTheme.colors.backgroundSoft, alignItems: 'center', justifyContent: 'center', flex: 1 },
   secondaryButtonText: { color: patientTheme.colors.text, fontWeight: '900' },
   messageBox: { backgroundColor: patientTheme.colors.background, borderWidth: 1, borderColor: patientTheme.colors.border, borderRadius: patientTheme.radius.lg, marginBottom: 12, padding: 12 },
   messageBoxError: { backgroundColor: '#fff4f4', borderColor: '#f0d2d2', borderRadius: patientTheme.radius.lg, borderWidth: 1, marginBottom: 12, padding: 12 },
   messageText: { color: patientTheme.colors.primaryDark, fontWeight: '800', lineHeight: 20 },
   messageTextError: { color: patientTheme.colors.danger, fontWeight: '800', lineHeight: 20 },
+  mealDetailsToggle: {
+    marginTop: 12,
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 12,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+  },
+  mealDetailsToggleText: {
+    color: patientTheme.colors.primaryDark,
+    fontWeight: '800',
+    fontSize: 13,
+  },
   mealList: { gap: 10 },
   mealCard: { padding: 14, borderRadius: patientTheme.radius.lg, backgroundColor: patientTheme.colors.background, borderWidth: 1, borderColor: patientTheme.colors.border, ...patientShadow },
   mealTop: { flexDirection: 'row', gap: 12, alignItems: 'center' },

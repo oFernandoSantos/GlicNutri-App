@@ -18,6 +18,7 @@ import {
 import CalendarioHorarios from '../../componentes/agendamento/CalendarioHorarios';
 import { patientTheme } from '../../temas/temaVisualPaciente';
 import { fetchPatientById, getPatientId } from '../../servicos/servicoDadosPaciente';
+import { invalidatePatientExperienceCache } from '../../servicos/cacheExperienciaPaciente';
 import {
   formatValorConsulta,
   VALOR_CONSULTA_PERFIL_CENTAVOS,
@@ -26,7 +27,10 @@ import {
   createConsulta,
   listConsultasByNutricionista,
 } from '../../servicos/servicoConsultas';
-import { createFollowUpRequest } from '../../servicos/servicoSolicitacoesAcompanhamento';
+import {
+  createFollowUpRequest,
+  hasPendingFollowUpRequestForPatient,
+} from '../../servicos/servicoSolicitacoesAcompanhamento';
 import {
   isPatientLinkedToNutritionist,
   unlinkPatientNutritionist,
@@ -84,6 +88,7 @@ export default function PacientePerfilNutricionistaScreen({
   const [desvinculando, setDesvinculando] = useState(false);
   const [linkedToNutri, setLinkedToNutri] = useState(false);
   const [linkedNutritionistId, setLinkedNutritionistId] = useState(null);
+  const [solicitacaoPendente, setSolicitacaoPendente] = useState(false);
   const [slots, setSlots] = useState([]);
   const [selectedDayKey, setSelectedDayKey] = useState('');
   const [selectedSlot, setSelectedSlot] = useState(null);
@@ -143,6 +148,7 @@ export default function PacientePerfilNutricionistaScreen({
   const valorLabel = formatValorConsulta(VALOR_CONSULTA_PERFIL_CENTAVOS);
   const normalizedSlots = useMemo(() => uniqueSlotsByScheduledAt(slots), [slots]);
   const calendarDays = useMemo(() => groupSlotsByDay(normalizedSlots), [normalizedSlots]);
+  const canConfirmAgendamento = Boolean(selectedDayKey && selectedSlot?.scheduledAt);
   const availableDays = useMemo(
     () =>
       calendarDays.filter((day) =>
@@ -238,19 +244,27 @@ export default function PacientePerfilNutricionistaScreen({
           patientContext: usuarioLogado,
         }).catch(() => null);
         const currentLinkedId = pacienteAtual?.id_nutricionista_uuid || null;
-        const linked = await isPatientLinkedToNutritionist({
-          pacienteId: patientId,
-          nutricionistaId: nutricionista.id_nutricionista_uuid,
-        });
+        const [linked, pending] = await Promise.all([
+          isPatientLinkedToNutritionist({
+            pacienteId: patientId,
+            nutricionistaId: nutricionista.id_nutricionista_uuid,
+          }),
+          hasPendingFollowUpRequestForPatient({
+            pacienteId: patientId,
+            nutricionistaId: nutricionista.id_nutricionista_uuid,
+          }),
+        ]);
         if (active) {
           setLinkedNutritionistId(currentLinkedId);
           setLinkedToNutri(linked);
+          setSolicitacaoPendente(!linked && pending);
         }
       } catch (error) {
         console.log('Erro ao verificar vinculo com nutricionista:', error);
         if (active) {
           setLinkedNutritionistId(null);
           setLinkedToNutri(false);
+          setSolicitacaoPendente(false);
         }
       }
     }
@@ -263,6 +277,8 @@ export default function PacientePerfilNutricionistaScreen({
   }, [nutricionista?.id_nutricionista_uuid, patientId]);
 
   async function handleSolicitarAcompanhamento() {
+    if (solicitacaoPendente) return;
+
     if (!nutricionista?.id_nutricionista_uuid || !patientId) {
       mostrarToastPaciente({ tipo: 'erro', texto: 'Não encontramos seu cadastro ou a nutricionista' });
       return;
@@ -296,7 +312,12 @@ export default function PacientePerfilNutricionistaScreen({
           result?.message ||
           'A nutricionista precisa aprovar antes do agendamento.',
       });
-      if (result?.alreadyLinked) setLinkedToNutri(true);
+      if (result?.alreadyLinked) {
+        setLinkedToNutri(true);
+        setSolicitacaoPendente(false);
+      } else {
+        setSolicitacaoPendente(true);
+      }
     } catch (error) {
       console.log('Erro ao solicitar acompanhamento:', error);
       mostrarToastPacienteErro(error, 'Não foi possível enviar sua solicitação agora.');
@@ -319,7 +340,13 @@ export default function PacientePerfilNutricionistaScreen({
         actor: usuarioLogado,
         origin: 'paciente',
       });
+      invalidatePatientExperienceCache(patientId);
       setLinkedToNutri(false);
+      setLinkedNutritionistId(null);
+      setSolicitacaoPendente(false);
+      setSelectedSlot(null);
+      setSelectedDayKey('');
+      setObservacoes('');
       mostrarToastPaciente({
         tipo: 'sucesso',
         texto: 'Acompanhamento encerrado',
@@ -510,6 +537,8 @@ export default function PacientePerfilNutricionistaScreen({
                   label="Confirmar agendamento"
                   onPress={handleConfirmarAgendamento}
                   loading={confirmando}
+                  disabled={!canConfirmAgendamento}
+                  style={!canConfirmAgendamento ? styles.disabledConfirmButton : null}
                 />
               </View>
             </>
@@ -518,10 +547,12 @@ export default function PacientePerfilNutricionistaScreen({
 
         {!linkedToNutri ? (
           <BotaoAgendamento
-            label="Solicitar acompanhamento"
-            icon="person-add-outline"
+            label={solicitacaoPendente ? 'Solicitação enviada' : 'Solicitar acompanhamento'}
+            icon={solicitacaoPendente ? 'time-outline' : 'person-add-outline'}
             onPress={handleSolicitarAcompanhamento}
             loading={solicitando}
+            disabled={solicitacaoPendente}
+            style={solicitacaoPendente ? styles.disabledSolicitarButton : null}
           />
         ) : (
           <BotaoAgendamento
@@ -909,6 +940,15 @@ const styles = StyleSheet.create({
   },
   inlineAgendaActions: {
     marginTop: 12,
+  },
+  disabledConfirmButton: {
+    backgroundColor: '#C9D1D9',
+    borderColor: '#C9D1D9',
+  },
+  disabledSolicitarButton: {
+    backgroundColor: '#C9D1D9',
+    borderColor: '#C9D1D9',
+    opacity: 1,
   },
   errorText: {
     color: '#c45b5b',

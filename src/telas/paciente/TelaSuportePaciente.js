@@ -452,13 +452,6 @@ export default function PacienteSuporteScreen({
         <Text style={styles.sectionTitle}>Antes de enviar</Text>
         <Text style={styles.tipsItem}>Nutricionista ou consulta → Mensagens ou Agendamentos.</Text>
         <Text style={styles.tipsItem}>Urgência médica → médico ou SAMU (192).</Text>
-        <TouchableOpacity
-          style={styles.linkRow}
-          onPress={() => navigation.navigate('PacienteAssistente', { usuarioLogado })}
-        >
-          <Text style={styles.linkText}>Dúvidas rápidas sobre rotina (assistente)</Text>
-          <Ionicons name="chevron-forward" size={16} color={patientTheme.colors.primaryDark} />
-        </TouchableOpacity>
       </View>
       <Modal
         visible={confirmacaoEnvioVisible}

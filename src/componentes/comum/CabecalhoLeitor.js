@@ -3,7 +3,7 @@ import { ActivityIndicator, Platform, StatusBar, StyleSheet, Text, TouchableOpac
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { patientTheme, patientShadow } from '../../temas/temaVisualPaciente';
-import { nutriTheme } from '../../temas/temaVisualNutricionista';
+import { medicoTheme, nutriTheme } from '../../temas/temaVisualNutricionista';
 import { adminTheme } from '../../temas/temaVisualAdmin';
 import { StackActions } from '@react-navigation/native';
 import { stripAuthRoutesFromPatientStack } from '../../utilitarios/navegacaoPaciente';
@@ -14,7 +14,6 @@ const PATIENT_ROUTES = new Set([
   'PacienteDiario',
   'PacienteMonitoramento',
   'PacienteHistoricoRegistros',
-  'PacienteAssistente',
   'PacienteSuporte',
   'PacienteAgendamentos',
   'PacientePlano',
@@ -31,6 +30,7 @@ const PATIENT_ROUTES = new Set([
   'RegistroRefeicaoIA',
   'PacienteChatNutricionista',
   'PacienteChatNutricionistaDetalhe',
+  'PacienteChatMedicoDetalhe',
   'PacientePerfilNutricionista',
   'PacientePerfilMedico',
 ]);
@@ -67,7 +67,6 @@ const routeTitles = {
   PacienteDiario: 'Alimentação',
   PacienteMonitoramento: 'Glicose',
   PacienteHistoricoRegistros: 'Histórico de Registros',
-  PacienteAssistente: 'Assistente',
   PacienteSuporte: 'Suporte',
   PacienteAgendamentos: 'Agendamentos',
   PacientePlano: 'Plano',
@@ -84,6 +83,7 @@ const routeTitles = {
   RegistroRefeicaoIA: 'Registrar Refeição',
   PacienteChatNutricionista: 'Mensagens',
   PacienteChatNutricionistaDetalhe: 'Conversa',
+  PacienteChatMedicoDetalhe: 'Conversa',
   PacientePerfilNutricionista: 'Nutricionista',
   PacientePerfilMedico: 'Médico',
   HomeNutricionista: 'GlicNutri',
@@ -111,6 +111,7 @@ const routeTitles = {
 
 const ROUTE_BACK_FALLBACK = {
   PacienteChatNutricionistaDetalhe: 'PacienteChatNutricionista',
+  PacienteChatMedicoDetalhe: 'PacientePerfilMedico',
   PacientePerfilNutricionista: 'PacienteAgendamentos',
   PacientePerfilMedico: 'PacienteAgendamentos',
   NutriProntuarioPaciente: 'GerenciarPacientes',
@@ -172,6 +173,8 @@ export default function ReaderTopo({ navigation, route, options }) {
   const isNutriHome = route?.name === 'HomeNutricionista';
   const isNutriContext =
     isNutriHome || NUTRITIONIST_ROUTES.has(route?.name);
+  const isMedicoHome = route?.name === 'HomeMedico';
+  const isMedicoContext = isMedicoHome || MEDICO_ROUTES.has(route?.name);
   const isAdminHome = route?.name === 'AdminHome';
   const isAdminContext = isAdminLogin || isAdminHome || ADMIN_ROUTES.has(route?.name);
   const accentColor =
@@ -180,7 +183,9 @@ export default function ReaderTopo({ navigation, route, options }) {
       ? adminTheme.colors.primary
       : isNutriContext
         ? nutriTheme.colors.primary
-        : patientTheme.colors.primary);
+        : isMedicoContext
+          ? medicoTheme.colors.primary
+          : patientTheme.colors.primary);
   const menuAction = options?.readerOnMenuPress;
   const menuDisabled = options?.readerMenuDisabled;
   const menuLoading = options?.readerMenuLoading;
@@ -325,6 +330,7 @@ export default function ReaderTopo({ navigation, route, options }) {
                 styles.title,
                 isAdminContext && styles.titleAdmin,
                 isNutriContext && styles.titleNutri,
+                isMedicoContext && styles.titleMedico,
                 readerAccentColor ? { color: readerAccentColor } : null,
               ]}
               numberOfLines={1}
@@ -516,6 +522,9 @@ const styles = StyleSheet.create({
   },
   titleNutri: {
     color: nutriTheme.colors.primary,
+  },
+  titleMedico: {
+    color: medicoTheme.colors.primary,
   },
   extraContent: {
     backgroundColor: '#ffffff',

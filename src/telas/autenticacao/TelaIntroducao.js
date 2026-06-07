@@ -14,7 +14,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { INTRO_SEEN_STORAGE_KEY } from '../../constantes/chavesArmazenamento';
 import { LIBRE_BLUE, LIBRE_BLUE_SOFT, LIBRE_YELLOW } from '../../temas/coresLibre';
-import { supabase } from '../../servicos/configSupabase';
+import { obterSessaoAuthSegura } from '../../servicos/servicoSessaoAuth';
 import { salvarSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
 
 const CTA_WIDTH = 330;
@@ -73,16 +73,16 @@ export default function TelaIntroducao({ navigation, onIntroFinished }) {
 
     async function checkSession() {
       try {
-        const { data, error } = await supabase.auth.getSession();
+        const { session, error } = await obterSessaoAuthSegura();
 
         if (error) {
           console.log('Erro ao verificar sessao na Intro:', error.message);
           return;
         }
 
-        if (isMounted && data?.session?.user && !checkedSession.current) {
+        if (isMounted && session?.user && !checkedSession.current) {
           checkedSession.current = true;
-          const usuarioPaciente = (await salvarSessaoPaciente(data.session.user)) || data.session.user;
+          const usuarioPaciente = (await salvarSessaoPaciente(session.user)) || session.user;
 
           navigation.reset({
             index: 0,

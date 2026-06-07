@@ -1,11 +1,15 @@
-import React, { useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  ActivityIndicator,
+  PanResponder,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -20,6 +24,10 @@ import {
   nutriColors,
   nutriKpiAccents,
 } from '../../temas/designSystemNutricionista';
+import {
+  formatPatientRiskLabelFromBucket,
+  resolvePatientRiskBucket,
+} from '../../utilitarios/adesaoNutricional';
 
 export { DashboardKpiCard, DashboardMiniKpiCard, dashboardKpiStyles };
 export const KPI_ACCENTS = nutriKpiAccents;
@@ -29,7 +37,8 @@ export function SectionCard({ children, style }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
 
-export function AvatarBadge({ name, size = 48, subtle = false }) {
+export function AvatarBadge({ name, size = 48, subtle = false, theme }) {
+  const palette = theme?.colors || patientTheme.colors;
   const initials = String(name || 'Paciente')
     .split(' ')
     .filter(Boolean)
@@ -42,10 +51,19 @@ export function AvatarBadge({ name, size = 48, subtle = false }) {
       style={[
         styles.avatar,
         subtle ? styles.avatarSubtle : styles.avatarStrong,
+        subtle && { backgroundColor: palette.primarySoft },
         { width: size, height: size, borderRadius: size / 2 },
       ]}
     >
-      <Text style={[styles.avatarText, subtle && styles.avatarTextSubtle]}>{initials}</Text>
+      <Text
+        style={[
+          styles.avatarText,
+          subtle && styles.avatarTextSubtle,
+          subtle && { color: palette.primaryDark },
+        ]}
+      >
+        {initials}
+      </Text>
     </View>
   );
 }
@@ -65,6 +83,21 @@ export function ProgressBar({ value, tone = 'default' }) {
       />
     </View>
   );
+}
+
+export function formatPatientRiskLabel(patient) {
+  return formatPatientRiskLabelFromBucket(resolvePatientRiskBucket(patient));
+}
+
+export function getPatientRiskPalette(patient) {
+  const bucket = resolvePatientRiskBucket(patient);
+  if (bucket === 'alto') {
+    return { label: 'Alto Risco', ...nutriClinicalStatus.critical };
+  }
+  if (bucket === 'moderado') {
+    return { label: 'Médio Risco', ...nutriClinicalStatus.attention };
+  }
+  return { label: 'Baixo Risco', ...nutriClinicalStatus.normal };
 }
 
 export function RiskBadge({ risk }) {
@@ -127,8 +160,16 @@ export function FilterTabs({
   compact = false,
   scrollable = false,
   fill = true,
+  theme,
 }) {
-  const useHorizontalScroll = scrollable && !fill;
+  const tabTheme = theme?.colors || patientTheme.colors;
+  const { width: windowWidth } = useWindowDimensions();
+  const tabGap = compact ? 7 : 10;
+  const minChipWidth = compact ? 68 : 84;
+  const tabsFitInRow =
+    items.length * minChipWidth + Math.max(0, items.length - 1) * tabGap <= windowWidth - 40;
+  const useFill = fill && tabsFitInRow;
+  const useHorizontalScroll = scrollable && !useFill;
 
   const chips = items.map((item) => {
     const selected = active === item.value;
@@ -138,9 +179,13 @@ export function FilterTabs({
         style={[
           styles.tabChip,
           compact && styles.tabChipCompact,
-          fill && !useHorizontalScroll && styles.tabChipFill,
+          useFill && styles.tabChipFill,
           useHorizontalScroll && styles.tabChipScrollable,
           selected && styles.tabChipActive,
+          selected && {
+            backgroundColor: tabTheme.primary,
+            borderColor: tabTheme.primary,
+          },
         ]}
         onPress={() => onChange(item.value)}
         activeOpacity={0.85}
@@ -260,13 +305,13 @@ function normalizeTrendChartSeries(data = []) {
 
 function buildGlucoseYScale(values = []) {
   if (!values.length) {
-    return { min: GLUCOSE_TARGET_MIN, max: 220, ticks: [70, 100, 140, 180, 220] };
+    return { min: GLUCOSE_TARGET_MIN, max: 220, ticks: [70, 110, 150, 190, 220] };
   }
 
   const dataMin = Math.min(...values);
   const dataMax = Math.max(...values);
   let min = Math.min(GLUCOSE_TARGET_MIN, Math.floor(dataMin / 20) * 20 - 20);
-  let max = Math.max(220, Math.ceil(dataMax / 20) * 20 + 20);
+  let max = Math.max(220, Math.ceil(dataMax / 40) * 40);
   if (max - min < 100) max = min + 100;
 
   const step = max - min <= 160 ? 20 : 40;
@@ -274,26 +319,233 @@ function buildGlucoseYScale(values = []) {
   for (let tick = min; tick <= max; tick += step) {
     ticks.push(tick);
   }
-  if (ticks[ticks.length - 1] !== max) ticks.push(max);
+
+  const lastTick = ticks[ticks.length - 1];
+  if (max - lastTick >= step * 0.6) {
+    ticks.push(max);
+  } else if (lastTick !== max) {
+    ticks[ticks.length - 1] = max;
+  }
 
   return { min, max, ticks };
 }
 
-export function TrendChartCard({ title, subtitle, data }) {
+function pickVisibleLabelIndexes(length, maxLabels = 6) {
+  if (length <= 1) return [0];
+  if (length <= maxLabels) {
+    return Array.from({ length }, (_, index) => index);
+  }
+
+  const indexes = [];
+  for (let index = 0; index < maxLabels; index += 1) {
+    indexes.push(Math.round((index / (maxLabels - 1)) * (length - 1)));
+  }
+
+  return [...new Set(indexes)];
+}
+
+function pickSparseIndexesByX(points, minGap = 48) {
+  if (!points.length) return [];
+  if (points.length === 1) return [0];
+
+  const indexes = [0];
+  let anchor = 0;
+
+  for (let index = 1; index < points.length; index += 1) {
+    if (points[index].x - points[anchor].x >= minGap) {
+      indexes.push(index);
+      anchor = index;
+    }
+  }
+
+  const lastIndex = points.length - 1;
+  if (indexes[indexes.length - 1] !== lastIndex) {
+    indexes.push(lastIndex);
+  }
+
+  return [...new Set(indexes)];
+}
+
+function getPointValuePosition(point, index, points, chartContentWidth, paddingTop, paddingLeft) {
+  const previous = points[index - 1];
+  const next = points[index + 1];
+  const crowded =
+    (previous && point.x - previous.x < 42) || (next && next.x - point.x < 42);
+  const placeBelow = crowded && index % 2 === 1;
+
+  return {
+    left: Math.min(Math.max(point.x - 20, paddingLeft), chartContentWidth - 44),
+    top: placeBelow ? point.y + 12 : Math.max(point.y - 30, paddingTop),
+  };
+}
+
+function clampTrendScrollThumbLeft(thumbLeft, trackWidth, thumbWidth) {
+  const maxThumbTravel = Math.max(trackWidth - thumbWidth, 0);
+  return Math.min(Math.max(thumbLeft, 0), maxThumbTravel);
+}
+
+function thumbLeftToScrollX(thumbLeft, trackWidth, thumbWidth, maxScroll) {
+  const maxThumbTravel = Math.max(trackWidth - thumbWidth, 0);
+  if (maxThumbTravel <= 0) return 0;
+  return (thumbLeft / maxThumbTravel) * maxScroll;
+}
+
+export function TrendChartCard({ title, subtitle, data, loading = false }) {
+  const chartScrollRef = useRef(null);
+  const scrollXRef = useRef(0);
+  const scrollMetricsRef = useRef({
+    trackWidth: 0,
+    thumbWidth: 0,
+    maxScroll: 0,
+    canScroll: false,
+  });
+  const thumbDragRef = useRef({ startThumbLeft: 0 });
+  const webThumbDragRef = useRef({ active: false, startX: 0, startThumbLeft: 0 });
+  const [isThumbDragging, setIsThumbDragging] = useState(false);
   const [chartWidth, setChartWidth] = useState(0);
-  const chartHeight = 248;
-  const paddingLeft = 44;
-  const paddingRight = 14;
-  const paddingTop = 22;
-  const paddingBottom = 36;
+  const [scrollX, setScrollX] = useState(0);
+  const chartHeight = 260;
+  const paddingLeft = 52;
+  const paddingRight = 16;
+  const paddingTop = 28;
+  const paddingBottom = 44;
+  const pointSpacing = 62;
 
   const series = useMemo(() => normalizeTrendChartSeries(data), [data]);
   const values = useMemo(() => series.map((item) => item.value), [series]);
   const scale = useMemo(() => buildGlucoseYScale(values), [values]);
   const range = Math.max(scale.max - scale.min, 1);
 
-  const plotWidth = Math.max(chartWidth - paddingLeft - paddingRight, 1);
+  const chartContentWidth = Math.max(
+    chartWidth,
+    paddingLeft + paddingRight + Math.max(series.length - 1, 1) * pointSpacing
+  );
+  const plotWidth = Math.max(chartContentWidth - paddingLeft - paddingRight, 1);
   const plotHeight = chartHeight - paddingTop - paddingBottom;
+  const canScroll = chartContentWidth > chartWidth + 1;
+  const scrollBarMetrics = useMemo(() => {
+    if (!canScroll || chartWidth <= 0) {
+      return { trackWidth: 0, thumbWidth: 0, thumbLeft: 0 };
+    }
+
+    const trackInset = 12;
+    const trackWidth = Math.max(chartWidth - trackInset * 2, 0);
+    const thumbWidth = Math.max(Math.round((chartWidth / chartContentWidth) * trackWidth), 28);
+    const maxScroll = Math.max(chartContentWidth - chartWidth, 1);
+    const maxThumbTravel = Math.max(trackWidth - thumbWidth, 0);
+    const thumbLeft = (scrollX / maxScroll) * maxThumbTravel;
+
+    return { trackWidth, thumbWidth, thumbLeft, maxScroll };
+  }, [canScroll, chartWidth, chartContentWidth, scrollX]);
+
+  const applyScrollFromThumbLeft = useCallback((thumbLeft) => {
+    const { trackWidth, thumbWidth, maxScroll } = scrollMetricsRef.current;
+    const nextThumbLeft = clampTrendScrollThumbLeft(thumbLeft, trackWidth, thumbWidth);
+    const nextScrollX = thumbLeftToScrollX(nextThumbLeft, trackWidth, thumbWidth, maxScroll);
+
+    chartScrollRef.current?.scrollTo?.({ x: nextScrollX, animated: false });
+    scrollXRef.current = nextScrollX;
+    setScrollX(nextScrollX);
+  }, []);
+
+  const thumbPanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onStartShouldSetPanResponder: () => scrollMetricsRef.current.canScroll,
+        onMoveShouldSetPanResponder: () => scrollMetricsRef.current.canScroll,
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderGrant: () => {
+          const { trackWidth, thumbWidth, maxScroll } = scrollMetricsRef.current;
+          const maxThumbTravel = Math.max(trackWidth - thumbWidth, 0);
+          thumbDragRef.current.startThumbLeft =
+            maxScroll > 0 ? (scrollXRef.current / maxScroll) * maxThumbTravel : 0;
+        },
+        onPanResponderMove: (_, gestureState) => {
+          if (!scrollMetricsRef.current.canScroll) return;
+          applyScrollFromThumbLeft(thumbDragRef.current.startThumbLeft + gestureState.dx);
+        },
+      }),
+    [applyScrollFromThumbLeft]
+  );
+
+  useEffect(() => {
+    scrollXRef.current = scrollX;
+  }, [scrollX]);
+
+  useEffect(() => {
+    scrollMetricsRef.current = {
+      trackWidth: scrollBarMetrics.trackWidth,
+      thumbWidth: scrollBarMetrics.thumbWidth,
+      maxScroll: scrollBarMetrics.maxScroll || 0,
+      canScroll,
+    };
+  }, [scrollBarMetrics, canScroll]);
+
+  useEffect(() => {
+    setScrollX(0);
+    scrollXRef.current = 0;
+    chartScrollRef.current?.scrollTo?.({ x: 0, animated: false });
+  }, [series.length, chartContentWidth]);
+
+  const handleScrollTrackPress = useCallback(
+    (event) => {
+      if (!scrollMetricsRef.current.canScroll) return;
+
+      const { trackWidth, thumbWidth } = scrollMetricsRef.current;
+      const locationX = Number(event?.nativeEvent?.locationX) || 0;
+      const targetThumbLeft = locationX - thumbWidth / 2;
+      applyScrollFromThumbLeft(targetThumbLeft);
+    },
+    [applyScrollFromThumbLeft]
+  );
+
+  const getCurrentThumbLeft = useCallback(() => {
+    const { trackWidth, thumbWidth, maxScroll } = scrollMetricsRef.current;
+    const maxThumbTravel = Math.max(trackWidth - thumbWidth, 0);
+    return maxScroll > 0 ? (scrollXRef.current / maxScroll) * maxThumbTravel : 0;
+  }, []);
+
+  const handleThumbMouseDown = useCallback(
+    (event) => {
+      if (Platform.OS !== 'web' || !scrollMetricsRef.current.canScroll) return;
+
+      event?.preventDefault?.();
+      event?.stopPropagation?.();
+
+      webThumbDragRef.current = {
+        active: true,
+        startX: event?.clientX ?? event?.nativeEvent?.pageX ?? 0,
+        startThumbLeft: getCurrentThumbLeft(),
+      };
+      setIsThumbDragging(true);
+    },
+    [getCurrentThumbLeft]
+  );
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return undefined;
+
+    const handleMouseMove = (event) => {
+      if (!webThumbDragRef.current.active) return;
+
+      const deltaX = event.clientX - webThumbDragRef.current.startX;
+      applyScrollFromThumbLeft(webThumbDragRef.current.startThumbLeft + deltaX);
+    };
+
+    const stopDrag = () => {
+      if (!webThumbDragRef.current.active) return;
+      webThumbDragRef.current.active = false;
+      setIsThumbDragging(false);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', stopDrag);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', stopDrag);
+    };
+  }, [applyScrollFromThumbLeft]);
 
   const valueToTop = (value) =>
     paddingTop + (1 - (Math.min(Math.max(value, scale.min), scale.max) - scale.min) / range) * plotHeight;
@@ -332,111 +584,170 @@ export function TrendChartCard({ title, subtitle, data }) {
         </View>
       </View>
 
-      {!series.length ? (
+      {loading && !series.length ? (
+        <View style={styles.trendLoading}>
+          <ActivityIndicator color={patientTheme.colors.primaryDark} />
+          <Text style={styles.trendLoadingText}>Carregando leituras das últimas 12h...</Text>
+        </View>
+      ) : !series.length ? (
         <View style={styles.trendEmpty}>
           <Text style={styles.trendEmptyText}>Sem leituras nas últimas 12 horas.</Text>
         </View>
       ) : (
         <View
-          style={[styles.trendPlot, { height: chartHeight }]}
+          style={styles.trendPlotViewport}
           onLayout={({ nativeEvent }) => setChartWidth(nativeEvent.layout.width)}
         >
-          <View
-            style={[
-              styles.trendTargetBand,
-              { top: targetTop, height: targetHeight, left: paddingLeft, right: paddingRight },
-            ]}
-          />
+          <ScrollView
+            ref={chartScrollRef}
+            horizontal
+            nestedScrollEnabled
+            showsHorizontalScrollIndicator={Platform.OS !== 'web'}
+            scrollEventThrottle={16}
+            onScroll={(event) => setScrollX(event.nativeEvent.contentOffset.x)}
+            contentContainerStyle={styles.trendPlotScrollContent}
+          >
+            <View style={[styles.trendPlot, { width: chartContentWidth, height: chartHeight }]}>
+              <View
+                style={[
+                  styles.trendTargetBand,
+                  {
+                    top: targetTop,
+                    height: targetHeight,
+                    left: paddingLeft,
+                    width: Math.max(plotWidth, 0),
+                  },
+                ]}
+              />
 
-          {scale.ticks.map((tick) => {
-            const top = valueToTop(tick);
-            return (
-              <View key={`tick-${tick}`} style={[styles.trendGridLine, { top }]}>
-                <Text style={styles.trendYLabel}>{tick}</Text>
-                <View
-                  style={[
-                    styles.trendGridRule,
-                    { left: paddingLeft, width: Math.max(plotWidth, 0) },
-                  ]}
-                />
-              </View>
-            );
-          })}
-
-          {chartWidth > 0 && points.length > 1
-            ? points.slice(1).map((point, index) => {
-                const previous = points[index];
-                const dx = point.x - previous.x;
-                const dy = point.y - previous.y;
-                const length = Math.sqrt(dx * dx + dy * dy);
-                const angle = `${Math.atan2(dy, dx)}rad`;
+              {scale.ticks.map((tick, tickIndex) => {
+                const top = valueToTop(tick);
+                const isTopTick = tickIndex === scale.ticks.length - 1;
+                if (isTopTick && top < 18) return null;
 
                 return (
-                  <View
-                    key={`segment-${point.id}`}
-                    style={[
-                      styles.trendLineSegment,
-                      {
-                        backgroundColor: point.color,
-                        left: previous.x + dx / 2 - length / 2,
-                        top: previous.y + dy / 2 - 1.5,
-                        width: length,
-                        transform: [{ rotate: angle }],
-                      },
-                    ]}
-                  />
+                  <View key={`tick-${tick}`} style={[styles.trendGridLine, { top }]}>
+                    <Text style={styles.trendYLabel}>{tick}</Text>
+                    <View
+                      style={[
+                        styles.trendGridRule,
+                        { left: paddingLeft, width: Math.max(plotWidth, 0) },
+                      ]}
+                    />
+                  </View>
                 );
-              })
-            : null}
+              })}
 
-          {chartWidth > 0
-            ? points.map((point) => (
-                <View key={point.id}>
-                  <View
-                    style={[
-                      styles.trendPointDot,
-                      {
-                        backgroundColor: point.color,
-                        borderColor: '#FFFFFF',
-                        left: point.x - 7,
-                        top: point.y - 7,
-                      },
-                    ]}
-                  />
-                  <Text
-                    style={[
-                      styles.trendPointValue,
-                      {
-                        color: point.color,
-                        left: Math.min(Math.max(point.x - 20, paddingLeft), chartWidth - 40),
-                        top: Math.max(point.y - 28, 4),
-                      },
-                    ]}
-                  >
-                    {point.value}
-                  </Text>
+              {chartWidth > 0 && points.length > 1
+                ? points.slice(1).map((point, index) => {
+                    const previous = points[index];
+                    const dx = point.x - previous.x;
+                    const dy = point.y - previous.y;
+                    const length = Math.sqrt(dx * dx + dy * dy);
+                    const angle = `${Math.atan2(dy, dx)}rad`;
+
+                    return (
+                      <View
+                        key={`segment-${point.id}`}
+                        style={[
+                          styles.trendLineSegment,
+                          {
+                            backgroundColor: point.color,
+                            left: previous.x + dx / 2 - length / 2,
+                            top: previous.y + dy / 2 - 1.5,
+                            width: length,
+                            transform: [{ rotate: angle }],
+                          },
+                        ]}
+                      />
+                    );
+                  })
+                : null}
+
+              {chartWidth > 0
+                ? points.map((point, index) => (
+                    <View key={point.id}>
+                      <View
+                        style={[
+                          styles.trendPointDot,
+                          {
+                            backgroundColor: point.color,
+                            borderColor: '#FFFFFF',
+                            left: point.x - 7,
+                            top: point.y - 7,
+                          },
+                        ]}
+                      />
+                      <Text
+                        style={[
+                          styles.trendPointValue,
+                          {
+                            color: point.color,
+                            ...getPointValuePosition(
+                              point,
+                              index,
+                              points,
+                              chartContentWidth,
+                              paddingTop,
+                              paddingLeft
+                            ),
+                          },
+                        ]}
+                      >
+                        {point.value}
+                      </Text>
+                    </View>
+                  ))
+                : null}
+
+              {chartWidth > 0 ? (
+                <View style={[styles.trendXLabels, { left: paddingLeft, width: plotWidth }]}>
+                  {points.map((point, index) => (
+                    <Text
+                      key={`label-${point.id}`}
+                      style={[
+                        styles.trendXLabel,
+                        {
+                          left: Math.min(
+                            Math.max(point.x - paddingLeft - 22, 0),
+                            Math.max(plotWidth - 44, 0)
+                          ),
+                        },
+                      ]}
+                      numberOfLines={1}
+                    >
+                      {point.label}
+                    </Text>
+                  ))}
                 </View>
-              ))
-            : null}
-
-          {chartWidth > 0 ? (
-            <View style={[styles.trendXLabels, { left: paddingLeft, width: plotWidth }]}>
-              {points.map((point) => (
-                <Text
-                  key={`label-${point.id}`}
+              ) : null}
+            </View>
+          </ScrollView>
+          {canScroll ? (
+            <View style={styles.trendScrollBarWrap}>
+              <View style={[styles.trendScrollBarTrack, { width: scrollBarMetrics.trackWidth }]}>
+                <Pressable
+                  style={styles.trendScrollBarTrackPress}
+                  onPress={handleScrollTrackPress}
+                />
+                <View
                   style={[
-                    styles.trendXLabel,
-                    { left: Math.min(Math.max(point.x - paddingLeft - 18, 0), plotWidth - 36) },
+                    styles.trendScrollBarThumbHit,
+                    {
+                      width: scrollBarMetrics.thumbWidth,
+                      left: scrollBarMetrics.thumbLeft,
+                    },
+                    Platform.OS === 'web' && styles.trendScrollBarThumbHitWeb,
+                    Platform.OS === 'web' && isThumbDragging && styles.trendScrollBarThumbHitDragging,
                   ]}
-                  numberOfLines={1}
+                  onMouseDown={handleThumbMouseDown}
+                  {...thumbPanResponder.panHandlers}
                 >
-                  {point.label}
-                </Text>
-              ))}
+                  <View style={styles.trendScrollBarThumb} />
+                </View>
+              </View>
             </View>
           ) : null}
-
-          <Text style={styles.trendAxisUnit}>mg/dL</Text>
         </View>
       )}
     </SectionCard>
@@ -445,6 +756,8 @@ export function TrendChartCard({ title, subtitle, data }) {
 
 export const nutriDesktopStyles = StyleSheet.create({
   pageGap: {
+    width: '100%',
+    alignSelf: 'stretch',
     gap: patientTheme.spacing.lg,
   },
   desktopColumns: {
@@ -476,6 +789,8 @@ export const nutriDesktopStyles = StyleSheet.create({
 
 const styles = StyleSheet.create({
   card: {
+    width: '100%',
+    alignSelf: 'stretch',
     backgroundColor: patientTheme.colors.surface,
     borderRadius: patientTheme.radius.card,
     borderWidth: 1,
@@ -723,6 +1038,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   chartCard: {
+    width: '100%',
+    alignSelf: 'stretch',
     minHeight: 320,
   },
   chartTitle: {
@@ -803,14 +1120,62 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     color: patientTheme.colors.textMuted,
   },
-  trendPlot: {
+  trendPlotViewport: {
     marginTop: 12,
-    position: 'relative',
-    overflow: 'hidden',
+    width: '100%',
+    alignSelf: 'stretch',
     borderRadius: patientTheme.radius.lg,
     backgroundColor: patientTheme.colors.backgroundSoft,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
+    overflow: 'hidden',
+  },
+  trendPlotScrollContent: {
+    flexGrow: 1,
+  },
+  trendPlot: {
+    position: 'relative',
+    overflow: 'hidden',
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  trendScrollBarWrap: {
+    alignItems: 'center',
+    paddingTop: 8,
+    paddingBottom: 10,
+    paddingHorizontal: 12,
+  },
+  trendScrollBarTrack: {
+    position: 'relative',
+    height: 14,
+    justifyContent: 'center',
+    borderRadius: 999,
+    backgroundColor: '#D9E2EC',
+    overflow: 'hidden',
+  },
+  trendScrollBarTrackPress: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
+    zIndex: 1,
+  },
+  trendScrollBarThumbHit: {
+    position: 'absolute',
+    top: 0,
+    height: 14,
+    justifyContent: 'center',
+    zIndex: 2,
+  },
+  trendScrollBarThumbHitWeb: {
+    cursor: 'grab',
+    userSelect: 'none',
+  },
+  trendScrollBarThumbHitDragging: {
+    cursor: 'grabbing',
+  },
+  trendScrollBarThumb: {
+    height: 6,
+    width: '100%',
+    borderRadius: 999,
+    backgroundColor: patientTheme.colors.textMuted,
   },
   trendTargetBand: {
     position: 'absolute',
@@ -827,12 +1192,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   trendYLabel: {
-    width: 38,
-    fontSize: 10,
+    width: 46,
+    fontSize: 11,
     fontWeight: '700',
     color: patientTheme.colors.textMuted,
     textAlign: 'right',
-    paddingRight: 6,
+    paddingRight: 8,
   },
   trendGridRule: {
     height: 1,
@@ -860,23 +1225,31 @@ const styles = StyleSheet.create({
   },
   trendXLabels: {
     position: 'absolute',
-    bottom: 8,
-    height: 16,
+    bottom: 6,
+    height: 24,
   },
   trendXLabel: {
     position: 'absolute',
-    width: 36,
-    fontSize: 10,
+    width: 44,
+    fontSize: 11,
     fontWeight: '700',
-    color: patientTheme.colors.textMuted,
+    color: patientTheme.colors.text,
     textAlign: 'center',
   },
-  trendAxisUnit: {
-    position: 'absolute',
-    top: 8,
-    left: 6,
-    fontSize: 10,
-    fontWeight: '800',
+  trendLoading: {
+    marginTop: 16,
+    minHeight: 180,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 10,
+    borderRadius: patientTheme.radius.lg,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    borderWidth: 1,
+    borderColor: patientTheme.colors.border,
+  },
+  trendLoadingText: {
+    fontSize: 13,
+    fontWeight: '600',
     color: patientTheme.colors.textMuted,
   },
   trendEmpty: {

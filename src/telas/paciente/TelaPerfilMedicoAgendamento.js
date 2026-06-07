@@ -171,6 +171,7 @@ export default function PacientePerfilMedicoScreen({
 
   const normalizedSlots = useMemo(() => uniqueSlotsByScheduledAt(slots), [slots]);
   const calendarDays = useMemo(() => groupSlotsByDay(normalizedSlots), [normalizedSlots]);
+  const canConfirmAgendamento = Boolean(selectedDayKey && selectedSlot?.scheduledAt);
   const availableDays = useMemo(
     () =>
       calendarDays.filter((day) =>
@@ -449,7 +450,8 @@ export default function PacientePerfilMedicoScreen({
               label="Confirmar agendamento"
               onPress={handleConfirmarAgendamento}
               loading={confirmando}
-              style={styles.primaryBtn}
+              disabled={!canConfirmAgendamento}
+              style={[styles.primaryBtn, !canConfirmAgendamento ? styles.disabledConfirmButton : null]}
             />
           </>
         ) : null}
@@ -546,5 +548,9 @@ const styles = StyleSheet.create({
   },
   feedback: { fontSize: 12, lineHeight: 18, color: patientTheme.colors.primaryDark, marginBottom: 8 },
   primaryBtn: { marginTop: 4 },
+  disabledConfirmButton: {
+    backgroundColor: '#C9D1D9',
+    borderColor: '#C9D1D9',
+  },
   secondaryBtn: { marginTop: 0 },
 });

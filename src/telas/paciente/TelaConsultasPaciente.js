@@ -47,6 +47,7 @@ import {
   abrirLinkGoogleMeet,
   createConsulta,
   formatConsultaDateTime,
+  formatConsultaDateTimeLong,
   listConsultasByNutricionista,
   listConsultasByPaciente,
   updateConsultaStatus,
@@ -56,7 +57,6 @@ import {
   resolveAssignedNutritionistIdFromRecords,
 } from '../../servicos/servicoVinculosNutricionista';
 import { resolveAssignedDoctorIdFromRecords } from '../../servicos/servicoVinculosMedico';
-import { resolveNutricionistaIdForPatient } from '../../servicos/servicoMensagensChat';
 import { formatValorConsulta, resolveMeetLink } from '../../servicos/servicoGoogleMeet';
 import {
   listarNotificacoesConsulta,
@@ -298,18 +298,13 @@ export default function PacienteAgendamentosScreen({
             }).catch(() => null)
           : Promise.resolve(null),
       ]);
-      let linkedId = resolveAssignedNutritionistIdFromRecords({
+      const linkedId = resolveAssignedNutritionistIdFromRecords({
         patient: pacienteAtual,
-        consultas: cons,
       });
       const linkedMedId = resolveAssignedDoctorIdFromRecords({
         patient: pacienteAtual,
         consultas: cons,
       });
-
-      if (!linkedId && patientId) {
-        linkedId = await resolveNutricionistaIdForPatient(patientId, null);
-      }
 
       setNutricionistas(nutris || []);
       setMedicos(meds || []);
@@ -434,6 +429,22 @@ export default function PacienteAgendamentosScreen({
         const latest = items?.[0];
         if (latest && !latest._shown) {
           latest._shown = true;
+          const refreshEvents = new Set([
+            'agendada',
+            'confirmada',
+            'meet_disponivel',
+            'cancelada',
+            'reagendada',
+          ]);
+          if (refreshEvents.has(latest.evento)) {
+            loadBase();
+            if (
+              latest.evento === 'meet_disponivel' &&
+              String(latest.mensagem || '').includes('foi atualizado')
+            ) {
+              setConsultasSection('anteriores');
+            }
+          }
           exibirMensagemAgendamentos(
             {
               tipo: latest.evento === 'cancelada' ? 'aviso' : 'sucesso',
@@ -444,7 +455,7 @@ export default function PacienteAgendamentosScreen({
         }
       },
     });
-  }, [patientId]);
+  }, [loadBase, patientId]);
 
   async function abrirPainelNotificacoes() {
     if (!patientId) return;
@@ -698,7 +709,7 @@ export default function PacienteAgendamentosScreen({
         const tipoText = normalizeSearchText(item?.tipo_consulta);
         const dataText = normalizeSearchText(formatConsultaDateTime(item?.scheduled_at));
         const searchable = normalizeSearchText(
-          [profissionalText, tipoText, item?.convenio, item?.status, dataText].join(' ')
+          [profissionalText, tipoText, item?.motivo, item?.convenio, item?.status, dataText].join(' ')
         );
 
         if (consultasSearchNormalized && !searchable.includes(consultasSearchNormalized)) return false;
@@ -828,8 +839,13 @@ export default function PacienteAgendamentosScreen({
     }
   }
 
-  async function handleAbrirMeet(consulta, nutri) {
-    const link = resolveMeetLink({ consulta, nutricionista: nutri });
+  async function handleAbrirMeet(consulta, profissional) {
+    const link = resolveMeetLink({
+      consulta,
+      nutricionista: profissional?.id_nutricionista_uuid ? profissional : null,
+      medico: profissional?.id_medico_uuid ? profissional : null,
+      profissional,
+    });
     try {
       await abrirLinkGoogleMeet(link);
     } catch (error) {
@@ -1667,7 +1683,7 @@ export default function PacienteAgendamentosScreen({
                 <View>
                   <Text style={styles.sectionTitle}>Minhas consultas agendadas</Text>
                   <Text style={styles.sectionSubtitle}>
-                    Consultas pendentes: só cancelamento. Meet após confirmação do profissional.
+                    Inclui consultas agendadas pelo profissional ou por você. Meet após confirmação.
                   </Text>
                 </View>
               </View>
@@ -1682,6 +1698,7 @@ export default function PacienteAgendamentosScreen({
                   const meetLink = resolveMeetLink({
                     consulta: item,
                     nutricionista: profissional.nutri,
+                    medico: profissional.medico,
                   });
                   const consultaStatus = String(item.status || 'scheduled').toLowerCase();
                   const consultaConfirmada = consultaStatus === 'confirmed';
@@ -1697,11 +1714,23 @@ export default function PacienteAgendamentosScreen({
                         <View style={styles.bookingBody}>
                           <Text style={styles.bookingName}>{profissional.nome}</Text>
                           <Text style={styles.bookingSpec}>{profissional.especialidade}</Text>
-                          <Text style={styles.bookingDate}>{formatConsultaDateTime(item.scheduled_at)}</Text>
+                          <Text style={styles.bookingDate}>
+                            {formatConsultaDateTimeLong(item.scheduled_at)}
+                          </Text>
                           <Text style={styles.bookingMeta}>
                             {item.tipo_consulta || 'Teleconsulta'} · {item.convenio || convenio}
                           </Text>
+                          {item.motivo ? (
+                            <Text style={styles.bookingMotivo} numberOfLines={2}>
+                              {item.motivo}
+                            </Text>
+                          ) : null}
                           <ConsultaStatusBadge status={item.status} style={styles.bookingStatusBadge} />
+                          {!consultaConfirmada ? (
+                            <Text style={styles.bookingHint}>
+                              Aguardando confirmação do profissional para liberar o Google Meet.
+                            </Text>
+                          ) : null}
                         </View>
                       </View>
 
@@ -1716,7 +1745,9 @@ export default function PacienteAgendamentosScreen({
                           <BotaoAgendamento
                             label="Entrar"
                             icon="videocam-outline"
-                            onPress={() => handleAbrirMeet(item, profissional.nutri)}
+                            onPress={() =>
+                              handleAbrirMeet(item, profissional.nutri || profissional.medico)
+                            }
                             style={styles.bookingActionPrimary}
                           />
                         ) : null}
@@ -1751,6 +1782,13 @@ export default function PacienteAgendamentosScreen({
                     nutricionistas,
                     medicos
                   );
+                  const meetLink = resolveMeetLink({
+                    consulta: item,
+                    nutricionista: profissional.nutri,
+                    medico: profissional.medico,
+                  });
+                  const consultaConfirmada =
+                    String(item.status || 'scheduled').toLowerCase() === 'confirmed';
 
                   return (
                     <CartaoAgendamento key={`past-filtered-${item.id}`} style={styles.bookingCardPast}>
@@ -1769,6 +1807,18 @@ export default function PacienteAgendamentosScreen({
                           </Text>
                         </View>
                       </View>
+                      {consultaConfirmada && meetLink ? (
+                        <View style={styles.bookingActions}>
+                          <BotaoAgendamento
+                            label="Entrar no Meet"
+                            icon="videocam-outline"
+                            onPress={() =>
+                              handleAbrirMeet(item, profissional.nutri || profissional.medico)
+                            }
+                            style={styles.bookingActionPrimary}
+                          />
+                        </View>
+                      ) : null}
                     </CartaoAgendamento>
                   );
                 })
@@ -2225,6 +2275,20 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: '700',
     marginTop: 4,
+  },
+  bookingMotivo: {
+    color: patientTheme.colors.text,
+    fontSize: 12,
+    fontWeight: '600',
+    marginTop: 6,
+    lineHeight: 18,
+  },
+  bookingHint: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 6,
+    lineHeight: 16,
   },
   bookingStatusBadge: {
     marginTop: 8,

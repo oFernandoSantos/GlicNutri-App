@@ -61,6 +61,7 @@ export function BotaoAgendamento({
   const isPrimary = variant === 'primary';
   const isGhost = variant === 'ghost';
   const isDanger = variant === 'danger';
+  const isDangerGhost = variant === 'dangerGhost';
   const isUnlink = variant === 'unlink';
 
   return (
@@ -70,6 +71,7 @@ export function BotaoAgendamento({
         isPrimary && styles.buttonPrimary,
         isGhost && styles.buttonGhost,
         isDanger && styles.buttonDanger,
+        isDangerGhost && styles.buttonDangerGhost,
         isUnlink && styles.buttonUnlink,
         disabled && styles.buttonDisabled,
         style,
@@ -85,7 +87,7 @@ export function BotaoAgendamento({
           color={
             isPrimary || isDanger
               ? patientTheme.colors.onPrimary
-              : isUnlink
+              : isUnlink || isDangerGhost
                 ? patientTheme.colors.danger
                 : patientTheme.colors.primaryDark
           }
@@ -97,11 +99,13 @@ export function BotaoAgendamento({
               name={icon}
               size={18}
               color={
-                isPrimary || isDanger
-                  ? patientTheme.colors.onPrimary
-                  : isUnlink
-                    ? patientTheme.colors.danger
-                    : patientTheme.colors.primaryDark
+                disabled && isPrimary
+                  ? '#6B7280'
+                  : isPrimary || isDanger
+                    ? patientTheme.colors.onPrimary
+                    : isUnlink || isDangerGhost
+                      ? patientTheme.colors.danger
+                      : patientTheme.colors.primaryDark
               }
             />
           ) : null}
@@ -114,7 +118,9 @@ export function BotaoAgendamento({
               isPrimary && styles.buttonTextPrimary,
               isGhost && styles.buttonTextGhost,
               isDanger && styles.buttonTextDanger,
+              isDangerGhost && styles.buttonTextDangerGhost,
               isUnlink && styles.buttonTextUnlink,
+              disabled && isPrimary && styles.buttonTextDisabled,
             ]}
           >
             {label}
@@ -138,18 +144,27 @@ export function BadgeStatusConsulta({ status }) {
   return <BadgeAgendamento label={meta.label} tone={meta.tone} />;
 }
 
-export function ChipFiltro({ label, active, onPress, icon, style, textStyle, inactiveStyle }) {
+export function ChipFiltro({ label, active, onPress, icon, style, textStyle, inactiveStyle, theme }) {
   const { width } = useWindowDimensions();
   const compact = width < 420;
+  const palette = theme?.colors || patientTheme.colors;
 
   return (
     <TouchableOpacity
       style={[
         styles.chip,
         compact && styles.chipCompact,
+        !active && {
+          borderColor: palette.primary,
+          backgroundColor: palette.surface || palette.background,
+        },
         !active && inactiveStyle,
         style,
         active && styles.chipActive,
+        active && {
+          backgroundColor: palette.primary,
+          borderColor: palette.primaryDark,
+        },
       ]}
       onPress={onPress}
       activeOpacity={0.85}
@@ -158,7 +173,7 @@ export function ChipFiltro({ label, active, onPress, icon, style, textStyle, ina
         <Ionicons
           name={icon}
           size={compact ? 12 : 14}
-          color={active ? patientTheme.colors.onPrimary : patientTheme.colors.primaryDark}
+          color={active ? palette.onPrimary : palette.primaryDark}
         />
       ) : null}
       <Text
@@ -167,6 +182,7 @@ export function ChipFiltro({ label, active, onPress, icon, style, textStyle, ina
         style={[
           styles.chipText,
           compact && styles.chipTextCompact,
+          !active && { color: palette.primaryDark },
           active && styles.chipTextActive,
           textStyle,
         ]}
@@ -298,6 +314,11 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderColor: patientTheme.colors.border,
   },
+  buttonDangerGhost: {
+    backgroundColor: patientTheme.colors.background,
+    borderWidth: 1.5,
+    borderColor: patientTheme.colors.danger,
+  },
   buttonUnlink: {
     backgroundColor: 'transparent',
     borderWidth: 0,
@@ -307,6 +328,9 @@ const styles = StyleSheet.create({
   },
   buttonDisabled: {
     opacity: 0.55,
+  },
+  buttonTextDisabled: {
+    color: '#6B7280',
   },
   buttonText: {
     fontWeight: '800',
@@ -319,6 +343,9 @@ const styles = StyleSheet.create({
   },
   buttonTextGhost: {
     color: patientTheme.colors.primaryDark,
+  },
+  buttonTextDangerGhost: {
+    color: patientTheme.colors.danger,
   },
   buttonTextUnlink: {
     color: patientTheme.colors.danger,

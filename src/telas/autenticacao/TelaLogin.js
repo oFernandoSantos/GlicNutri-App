@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { supabase } from '../../servicos/configSupabase';
+import { obterSessaoAuthSegura } from '../../servicos/servicoSessaoAuth';
 import {
   buildGooglePatientFallback,
   syncGooglePatientRecord,
@@ -726,7 +727,8 @@ export default function TelaLogin({ navigation, route, session }) {
         return;
       }
 
-      const finalSession = googleSession || (await supabase.auth.getSession()).data?.session;
+      const { session: fallbackSession } = await obterSessaoAuthSegura();
+      const finalSession = googleSession || fallbackSession;
 
       if (finalSession?.user) {
         googleSessionHandledRef.current = true;

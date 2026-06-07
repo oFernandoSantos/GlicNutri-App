@@ -208,6 +208,16 @@ function resolveNutriEmail(user) {
   ).trim();
 }
 
+function resolveMedicoEmail(user) {
+  return String(
+    user?.email_medico ||
+      user?.email_acesso ||
+      user?.email ||
+      user?.identificador ||
+      ''
+  ).trim();
+}
+
 function resolveActorFromProfile(user) {
   if (!user || typeof user !== 'object') {
     return { actorType: '', actorId: null, email: '' };
@@ -241,7 +251,7 @@ function resolveActorFromProfile(user) {
     return {
       actorType: 'medico',
       actorId: user.id_medico_uuid,
-      email: String(user.email_medico || user.email || '').trim(),
+      email: resolveMedicoEmail(user),
     };
   }
 
@@ -257,7 +267,7 @@ function resolveActorFromProfile(user) {
     return {
       actorType: 'medico',
       actorId: user.id_medico_uuid,
-      email: String(user.email_medico || user.email || '').trim(),
+      email: resolveMedicoEmail(user),
     };
   }
 
@@ -438,8 +448,11 @@ function shouldUsePatientOAuthFallback(user = null) {
 }
 
 function canRestaurarSessaoRpcPorPerfil(user = null) {
-  const { actorType } = resolveActorFromProfile(user);
-  return actorType === 'nutricionista' || actorType === 'medico';
+  const { actorType, actorId, email } = resolveActorFromProfile(user);
+  if (!actorType || !isValidRpcActorId(actorId) || !String(email || '').trim()) {
+    return false;
+  }
+  return actorType === 'nutricionista' || actorType === 'medico' || actorType === 'paciente';
 }
 
 async function resolverPacienteOAuthMeta(user = null) {
@@ -824,10 +837,11 @@ export function normalizeRpcActorProfile(user = null) {
   }
 
   if (isMedicoProfile(user) && user.id_medico_uuid) {
-    const email = String(user.email_medico || user.email || '').trim();
+    const email = resolveMedicoEmail(user);
     return {
       id_medico_uuid: user.id_medico_uuid,
       email_medico: email,
+      email_acesso: email,
       email,
       tipo_perfil: 'medico',
     };
@@ -843,8 +857,13 @@ export function normalizeRpcActorProfile(user = null) {
   }
 
   if (user.id_medico_uuid) {
-    const email = String(user.email_medico || user.email || '').trim();
-    return { id_medico_uuid: user.id_medico_uuid, email_medico: email, email };
+    const email = resolveMedicoEmail(user);
+    return {
+      id_medico_uuid: user.id_medico_uuid,
+      email_medico: email,
+      email_acesso: email,
+      email,
+    };
   }
 
   return user;

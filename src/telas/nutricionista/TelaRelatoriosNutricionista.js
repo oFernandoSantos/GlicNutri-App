@@ -3,6 +3,7 @@ import {
   ActivityIndicator,
   Alert,
   Platform,
+  Pressable,
   RefreshControl,
   StyleSheet,
   Text,
@@ -30,14 +31,23 @@ import {
   chartPercent,
   sumChartValues,
 } from '../../componentes/nutricionista/RelatoriosNutriCharts';
-import { DashboardKpiCard } from '../../componentes/nutricionista/NutriDesktopUI';
-import { SectionCard, nutriDesktopStyles } from '../../componentes/nutricionista/NutriDesktopUI';
+import {
+  AvatarBadge,
+  DashboardKpiCard,
+  formatPatientRiskLabel,
+  getPatientRiskPalette,
+  SectionCard,
+  nutriDesktopStyles,
+} from '../../componentes/nutricionista/NutriDesktopUI';
 import { ScreenLoading } from '../../componentes/comum/ui';
 import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
 import {
   buildNutritionistReportBundle,
   exportNutritionistReport,
+  getCachedNutritionistReportBundle,
 } from '../../servicos/servicoRelatoriosNutricionista';
+import { getNutritionistId } from '../../servicos/servicoVinculosNutricionista';
+import { normalizeRiskBucket, riskBucketLabel } from '../../utilitarios/adesaoNutricional';
 
 const METRIC_THEMES = {
   total: { accent: CHART_PALETTE.blue, icon: 'people-outline' },
@@ -46,13 +56,6 @@ const METRIC_THEMES = {
   critical: { accent: CHART_PALETTE.red, icon: 'warning-outline' },
   avgAdherence: { accent: CHART_PALETTE.greenDark, icon: 'trending-up-outline' },
   alerts: { accent: CHART_PALETTE.pink, icon: 'notifications-outline' },
-};
-
-const ALERT_SEVERITY = {
-  critical: { color: CHART_PALETTE.red, soft: '#FEE2E2', icon: 'warning-outline' },
-  highGlucose: { color: CHART_PALETTE.orange, soft: '#FFEDD5', icon: 'pulse-outline' },
-  lowAdherence: { color: CHART_PALETTE.yellow, soft: '#FEF3C7', icon: 'restaurant-outline' },
-  inactive: { color: CHART_PALETTE.gray, soft: CHART_PALETTE.graySoft, icon: 'time-outline' },
 };
 
 const TIR_COLORS = [
@@ -251,23 +254,117 @@ function CompactRankingList({
   );
 }
 
+function getAlertSchedule(item) {
+  const row = item.patientRow;
+  if (item.severity === 'highGlucose' || item.severity === 'critical') {
+    const value = row?.glucoseAverage ?? row?.latestGlucose;
+    return {
+      value: Number.isFinite(Number(value)) ? String(Math.round(Number(value))) : '--',
+      label: 'Glicose',
+    };
+  }
+  if (item.severity === 'lowAdherence') {
+    return {
+      value: Number.isFinite(Number(row?.adherence)) ? `${row.adherence}%` : '--',
+      label: 'Adesão',
+    };
+  }
+  return { value: '--', label: 'Alerta' };
+}
+
+function resolveAlertDisplayRisk(item) {
+  const row = item.patientRow || {};
+  const glucose = Number(row.glucoseAverage ?? row.latestGlucose);
+  let bucket = normalizeRiskBucket(row.riskBucket || row.risk || '', glucose);
+
+  if (row.controlBucket === 'critico' || item.severity === 'critical') {
+    bucket = 'alto';
+  } else if (row.controlBucket === 'atencao' && bucket === 'baixo') {
+    bucket = 'moderado';
+  } else if (item.severity === 'highGlucose' && Number.isFinite(glucose)) {
+    bucket = normalizeRiskBucket('', glucose);
+  } else if (item.severity === 'lowAdherence' && bucket === 'baixo') {
+    bucket = 'moderado';
+  }
+
+  return riskBucketLabel(bucket);
+}
+
+function toAlertPatientCard(item) {
+  const row = item.patientRow || {};
+  const glucose = row.glucoseAverage ?? row.latestGlucose ?? null;
+
+  return {
+    id: item.patientId,
+    name: item.name,
+    email: row.email || '',
+    age: row.age ?? '--',
+    adherence: row.adherence ?? '--',
+    alerts: Number(row.alerts || 0),
+    risk: resolveAlertDisplayRisk(item),
+    latestGlucose: glucose,
+    objective: row.objective,
+    specialtyTag: String(row.objective || 'Acompanhamento').slice(0, 80),
+    raw: {},
+  };
+}
+
 function AlertChip({ item, onPress }) {
-  const meta = ALERT_SEVERITY[item.severity] || ALERT_SEVERITY.inactive;
+  const patient = toAlertPatientCard(item);
+  const riskPalette = getPatientRiskPalette(patient);
+  const schedule = getAlertSchedule(item);
+
   return (
-    <View style={[styles.alertChip, { backgroundColor: meta.soft, borderColor: `${meta.color}55` }]}>
-      <View style={styles.alertChipTop}>
-        <View style={[styles.alertChipIcon, { backgroundColor: `${meta.color}22` }]}>
-          <Ionicons name={meta.icon} size={14} color={meta.color} />
+    <View style={styles.alertPatientRow}>
+      <Pressable
+        style={({ pressed }) => [
+          styles.alertPatientCard,
+          styles.alertPatientFlatCard,
+          { borderLeftColor: riskPalette.border, borderLeftWidth: 4 },
+          pressed && styles.alertPatientCardPressed,
+        ]}
+        onPress={onPress}
+      >
+        <View style={styles.alertPatientScheduleCol}>
+          <Text style={styles.alertPatientScheduleTime}>{schedule.value}</Text>
+          <Text style={styles.alertPatientScheduleDate}>{schedule.label}</Text>
         </View>
-        <View style={styles.alertChipCopy}>
-          <Text style={styles.alertChipName}>{item.name}</Text>
-          <Text style={[styles.alertChipReason, { color: meta.color }]}>{item.reason}</Text>
-          <Text style={styles.alertChipIndicator}>{item.indicator}</Text>
+
+        <View style={styles.alertPatientBody}>
+          <AvatarBadge name={patient.name} size={38} subtle />
+          <View style={styles.alertPatientCopy}>
+            <Text style={styles.alertPatientName} numberOfLines={1}>
+              {patient.name}
+            </Text>
+            <View style={styles.alertPatientMetaRow}>
+              <View
+                style={[
+                  styles.alertPatientStatusPill,
+                  {
+                    backgroundColor: riskPalette.bg,
+                    borderColor: riskPalette.border,
+                  },
+                ]}
+              >
+                <Text style={[styles.alertPatientStatusPillText, { color: riskPalette.text }]}>
+                  {formatPatientRiskLabel(patient)}
+                </Text>
+              </View>
+              <Text style={styles.alertPatientMeta} numberOfLines={1}>
+                {patient.specialtyTag} · {patient.age} anos
+              </Text>
+            </View>
+            {patient.email ? (
+              <Text style={styles.alertPatientEmail} numberOfLines={1}>
+                {patient.email}
+              </Text>
+            ) : null}
+            <Text style={styles.alertPatientDetailMeta} numberOfLines={2}>
+              {item.reason} · {item.indicator}
+            </Text>
+          </View>
         </View>
-      </View>
-      <TouchableOpacity style={[styles.alertActionButton, { borderColor: meta.color }]} onPress={onPress} activeOpacity={0.9}>
-        <Text style={[styles.alertActionText, { color: meta.color }]}>Ver paciente</Text>
-      </TouchableOpacity>
+      </Pressable>
     </View>
   );
 }
@@ -299,24 +396,43 @@ export default function TelaRelatoriosNutricionista({ navigation, route }) {
   });
 
   const dashboard = bundle?.dashboardAnalytics;
+  const nutricionistaId = useMemo(() => getNutritionistId(usuarioLogado), [usuarioLogado]);
 
   const loadReports = useCallback(
-    async ({ silent = false } = {}) => {
+    async ({ silent = false, skipIfFresh = false } = {}) => {
+      let cachedBundle = null;
       try {
-        if (!silent) setLoading(true);
+        cachedBundle = nutricionistaId
+          ? getCachedNutritionistReportBundle(nutricionistaId, reportPeriod)
+          : null;
+
+        if (skipIfFresh && cachedBundle) {
+          setBundle(cachedBundle);
+          setLoading(false);
+          setLoadError('');
+          return;
+        }
+
+        if (cachedBundle) {
+          setBundle(cachedBundle);
+          setLoading(false);
+          if (!silent) setRefreshing(true);
+        } else if (!silent) {
+          setLoading(true);
+        }
         setLoadError('');
         const nextBundle = await buildNutritionistReportBundle(usuarioLogado, { period: reportPeriod });
         setBundle(nextBundle);
       } catch (error) {
         console.log('Erro ao carregar relatorios do nutricionista:', error);
         setLoadError(error?.message || 'Nao foi possivel carregar os relatorios.');
-        setBundle(null);
+        if (!cachedBundle) setBundle(null);
       } finally {
         setLoading(false);
         setRefreshing(false);
       }
     },
-    [usuarioLogado, reportPeriod]
+    [usuarioLogado, reportPeriod, nutricionistaId]
   );
 
   useEffect(() => {
@@ -324,7 +440,9 @@ export default function TelaRelatoriosNutricionista({ navigation, route }) {
   }, [loadReports]);
 
   useEffect(() => {
-    const unsubscribe = navigation.addListener('focus', () => loadReports({ silent: true }));
+    const unsubscribe = navigation.addListener('focus', () =>
+      loadReports({ silent: true, skipIfFresh: true })
+    );
     return unsubscribe;
   }, [navigation, loadReports]);
 
@@ -438,6 +556,7 @@ export default function TelaRelatoriosNutricionista({ navigation, route }) {
         severity,
         reason: typeof reasonFn === 'function' ? reasonFn(row) : reasonFn,
         indicator: pickIndicator(row),
+        patientRow: row,
       }));
 
     const merged = [
@@ -544,25 +663,35 @@ export default function TelaRelatoriosNutricionista({ navigation, route }) {
           accent={CHART_PALETTE.greenDark}
         />
 
-        <View style={[styles.metricGrid, isCompact && styles.metricGridCompact]}>
-          {overviewCards.map((item) => {
-            const theme = METRIC_THEMES[item.id] || METRIC_THEMES.total;
-            return (
-              <View key={item.id} style={{ width: metricCardWidth, flexGrow: 1 }}>
-                <DashboardKpiCard
-                  icon={theme.icon}
-                  accent={theme.accent}
-                  label={item.label}
-                  value={item.value}
-                  trend={item.trend}
-                  invertTrend={item.invertTrend}
-                />
+        {loading && !bundle ? (
+          <ScreenLoading label="Consolidando dados da carteira..." persona="nutricionista" />
+        ) : (
+          <>
+            {refreshing ? (
+              <View style={styles.refreshBanner}>
+                <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+                <Text style={styles.refreshBannerText}>Atualizando relatórios...</Text>
               </View>
-            );
-          })}
-        </View>
-
-        {loading ? <ScreenLoading label="Consolidando dados da carteira..." persona="nutricionista" /> : null}
+            ) : null}
+            <View style={[styles.metricGrid, isCompact && styles.metricGridCompact]}>
+              {overviewCards.map((item) => {
+                const theme = METRIC_THEMES[item.id] || METRIC_THEMES.total;
+                return (
+                  <View key={item.id} style={{ width: metricCardWidth, flexGrow: 1 }}>
+                    <DashboardKpiCard
+                      icon={theme.icon}
+                      accent={theme.accent}
+                      label={item.label}
+                      value={item.value}
+                      trend={item.trend}
+                      invertTrend={item.invertTrend}
+                    />
+                  </View>
+                );
+              })}
+            </View>
+          </>
+        )}
 
         {!loading && loadError ? (
           <SectionCard style={styles.flatCard}>
@@ -656,7 +785,7 @@ export default function TelaRelatoriosNutricionista({ navigation, route }) {
 
             <SectionCard style={[styles.insightPanel, styles.flatCard]}>
               <View style={styles.insightHeader}>
-                <Ionicons name="bulb" size={20} color={CHART_PALETTE.greenDark} />
+                <Ionicons name="bulb" size={20} color={CHART_PALETTE.red} />
                 <Text style={styles.insightTitle}>Insights automáticos</Text>
               </View>
               <Text style={styles.insightText}>
@@ -898,7 +1027,7 @@ export default function TelaRelatoriosNutricionista({ navigation, route }) {
 
 const styles = StyleSheet.create({
   flatCard: {
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
@@ -915,6 +1044,18 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 12,
   },
+  refreshBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 10,
+    paddingHorizontal: 4,
+  },
+  refreshBannerText: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 12,
+    fontWeight: '700',
+  },
   metricGridCompact: {
     justifyContent: 'space-between',
   },
@@ -922,7 +1063,7 @@ const styles = StyleSheet.create({
     minWidth: 150,
     minHeight: 92,
     padding: 14,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     alignItems: 'center',
@@ -1037,7 +1178,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
   },
   miniKpiLabel: {
     color: patientTheme.colors.textMuted,
@@ -1209,62 +1350,121 @@ const styles = StyleSheet.create({
   alertPanel: {
     gap: 12,
     padding: 16,
-    backgroundColor: '#FFFBFB',
-    borderColor: '#FECACA',
+    backgroundColor: patientTheme.colors.surface,
+    borderColor: patientTheme.colors.border,
   },
   alertChipGrid: {
-    gap: 10,
+    gap: 8,
   },
-  alertChip: {
+  alertPatientRow: {
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+  },
+  alertPatientFlatCard: {
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
-    borderRadius: patientTheme.radius.lg,
-    padding: 12,
-    gap: 10,
+    borderColor: patientTheme.colors.border,
+    borderRadius: patientTheme.radius.xl,
+    shadowColor: 'transparent',
+    elevation: 0,
   },
-  alertChipTop: {
+  alertPatientCard: {
+    width: '100%',
+    minHeight: 64,
     flexDirection: 'row',
-    gap: 10,
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingRight: 10,
+    paddingLeft: 0,
+    gap: 8,
   },
-  alertChipIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 10,
+  alertPatientCardPressed: {
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  alertPatientScheduleCol: {
+    width: 68,
+    flexShrink: 0,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  alertChipCopy: {
-    flex: 1,
     gap: 2,
+    paddingHorizontal: 6,
+    borderRightWidth: 1,
+    borderRightColor: patientTheme.colors.border,
   },
-  alertChipName: {
-    color: patientTheme.colors.text,
+  alertPatientScheduleTime: {
+    color: '#111111',
     fontSize: 14,
     fontWeight: '800',
+    lineHeight: 16,
   },
-  alertChipReason: {
-    fontSize: 12,
-    fontWeight: '700',
+  alertPatientScheduleDate: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12,
   },
-  alertChipIndicator: {
+  alertPatientBody: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingRight: 8,
+  },
+  alertPatientCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  alertPatientName: {
+    color: '#111111',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 18,
+  },
+  alertPatientMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+    marginTop: 2,
+  },
+  alertPatientStatusPill: {
+    flexShrink: 0,
+    borderRadius: patientTheme.radius.pill,
+    borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+  },
+  alertPatientStatusPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 12,
+  },
+  alertPatientMeta: {
+    flex: 1,
+    minWidth: 0,
     color: patientTheme.colors.textMuted,
     fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
   },
-  alertActionButton: {
-    alignSelf: 'flex-start',
-    paddingHorizontal: 12,
-    paddingVertical: 7,
-    borderRadius: patientTheme.radius.pill,
-    borderWidth: 1.5,
-    backgroundColor: patientTheme.colors.background,
+  alertPatientEmail: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    lineHeight: 13,
   },
-  alertActionText: {
-    fontSize: 12,
-    fontWeight: '800',
+  alertPatientDetailMeta: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '600',
   },
   insightPanel: {
     gap: 10,
     padding: 16,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    backgroundColor: patientTheme.colors.surface,
     borderColor: patientTheme.colors.border,
   },
   insightHeader: {
@@ -1273,7 +1473,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   insightTitle: {
-    color: CHART_PALETTE.greenDark,
+    color: CHART_PALETTE.red,
     fontSize: 15,
     fontWeight: '800',
   },
@@ -1307,7 +1507,7 @@ const styles = StyleSheet.create({
   rankingRow: {
     minHeight: 54,
     borderRadius: patientTheme.radius.lg,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: patientTheme.colors.surface,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     paddingHorizontal: 12,

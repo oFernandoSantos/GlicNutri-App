@@ -1,10 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Platform, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Platform,
+  Pressable,
+  RefreshControl,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import LayoutMedico from '../../componentes/medico/LayoutMedico';
 import MedicoDrawer from '../../componentes/medico/MenuMedico';
 import {
   AvatarBadge,
+  formatPatientRiskLabel,
+  getPatientRiskPalette,
   SectionCard,
   nutriDesktopStyles,
   dashboardKpiStyles,
@@ -17,39 +28,23 @@ import {
   listConsultasMedicoComPaciente,
   listPatientsByDoctor,
 } from '../../servicos/servicoVinculosMedico';
-import {
-  listFollowUpRequestsByDoctor,
-  updateDoctorFollowUpRequestStatus,
-} from '../../servicos/servicoSolicitacoesAcompanhamento';
+import { getPriorityPatients } from '../../utilitarios/adesaoNutricional';
 import { criarGuardiaoCarregamentoInicial } from '../../utilitarios/carregamentoTela';
 import {
   MEDICO_MAIN_TAB_ROUTES,
   navigateMedicoTab,
 } from '../../utilitarios/navegacaoAbas';
 import { medicoTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { nutriClinicalStatus } from '../../temas/designSystemNutricionista';
 
-function getRiskMeta(patient) {
-  const risk = String(patient?.risk || '').toLowerCase();
-  if (risk.includes('alto')) {
-    return {
-      label: 'Alto Risco',
-      badgeStyle: styles.riskBadgeHigh,
-      badgeTextStyle: styles.riskBadgeTextHigh,
-    };
-  }
-  if (risk.includes('moderado') || risk.includes('medio')) {
-    return {
-      label: 'Médio Risco',
-      badgeStyle: styles.riskBadgeMedium,
-      badgeTextStyle: styles.riskBadgeTextMedium,
-    };
-  }
-  return {
-    label: 'Baixo Risco',
-    badgeStyle: styles.riskBadgeLow,
-    badgeTextStyle: styles.riskBadgeTextLow,
-  };
-}
+const PRIORITY_RED = '#FF3B30';
+
+const PRIORITY_BOARD_ACCENT = {
+  bg: nutriClinicalStatus.critical.bg,
+  border: PRIORITY_RED,
+  text: PRIORITY_RED,
+  scheduleBorder: '#FECACA',
+};
 
 function isConsultaToday(scheduledAt) {
   if (!scheduledAt) return false;
@@ -64,20 +59,20 @@ function isConsultaToday(scheduledAt) {
 }
 
 function getActionAppearance(route) {
+  const isMessages = route === 'MedicoMensagens';
   return {
     borderColor: patientTheme.colors.border,
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: '#FFFFFF',
     iconColor: patientTheme.colors.primaryDark,
-    badgeColor: patientTheme.colors.primaryDark,
+    badgeColor: isMessages ? patientTheme.colors.danger : patientTheme.colors.primaryDark,
   };
 }
 
 export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) {
   const { usuarioLogado } = route.params || {};
   const [patients, setPatients] = useState([]);
-  const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [respondingRequestId, setRespondingRequestId] = useState('');
+  const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState('');
   const [menuVisible, setMenuVisible] = useState(false);
   const [todayConsultasCount, setTodayConsultasCount] = useState(0);
@@ -93,18 +88,17 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
     });
   }, [navigation]);
 
-  const loadPatients = useCallback(async () => {
+  const loadPatients = useCallback(async ({ silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) setLoading(true);
       setLoadError('');
       const startOfDay = new Date();
       startOfDay.setHours(0, 0, 0, 0);
       const endOfDay = new Date();
       endOfDay.setHours(23, 59, 59, 999);
 
-      const [items, pendingRequests, consultas, chatSummary] = await Promise.all([
+      const [items, consultas] = await Promise.all([
         listPatientsByDoctor(medicoId, { limit: 80 }),
-        listFollowUpRequestsByDoctor(medicoId, { status: 'pending' }),
         listConsultasMedicoComPaciente(medicoId, {
           from: startOfDay.toISOString(),
           to: endOfDay.toISOString(),
@@ -119,7 +113,6 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
       );
 
       setPatients(items || []);
-      setRequests(pendingRequests || []);
       setTodayConsultasCount(
         (consultas || []).filter(
           (consulta) =>
@@ -131,9 +124,18 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
       console.log('Erro ao carregar pacientes vinculados na home:', error);
       setLoadError('Nao foi possivel carregar sua carteira de pacientes.');
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [medicoId]);
+
+  const handleRefresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await loadPatients({ silent: true });
+    } finally {
+      setRefreshing(false);
+    }
+  }, [loadPatients]);
 
   useEffect(() => {
     if (!medicoId) {
@@ -155,24 +157,6 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
     });
     return unsubscribe;
   }, [navigation, loadPatients]);
-
-  async function handleResponderSolicitacao(request, status) {
-    try {
-      setRespondingRequestId(request.id);
-      await updateDoctorFollowUpRequestStatus({
-        requestId: request.id,
-        medicoId,
-        status,
-        actor: usuarioLogado,
-      });
-      await loadPatients();
-    } catch (error) {
-      console.log('Erro ao responder solicitacao de acompanhamento:', error);
-      setLoadError(error?.message || 'Nao foi possivel responder a solicitacao.');
-    } finally {
-      setRespondingRequestId('');
-    }
-  }
 
   const clinicalAlerts = useMemo(
     () =>
@@ -224,21 +208,12 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
         icon: 'trending-up-outline',
         label: 'Adesão Média',
         value: `${avgAdherence}%`,
-        accent: KPI_ACCENTS.green,
+        accent: patientTheme.colors.primary,
       },
     ];
   }, [clinicalAlerts.length, patients]);
 
-  const priorityPatients = useMemo(() => {
-    return [...patients]
-      .sort((a, b) => {
-        if (b.alerts !== a.alerts) return b.alerts - a.alerts;
-        return a.adherence - b.adherence;
-      })
-      .slice(0, 4);
-  }, [patients]);
-
-  const highlightedPatient = priorityPatients[0] || null;
+  const priorityPatients = useMemo(() => getPriorityPatients(patients), [patients]);
 
   const quickActionCards = useMemo(() => {
     return medicoQuickActions.slice(0, 3).map((item) => {
@@ -280,9 +255,70 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
         adherence: patient.adherence,
         alerts: Number(patient.alerts || 0),
         updatedTime: patient.appointmentTime || patient.updatedAt || '--',
-        riskMeta: getRiskMeta(patient),
       }));
   }, [patients]);
+
+  function renderPatientListCard(patient, { cardKey, scheduleValue, onPress, accentPalette }) {
+    const alerts = Number(patient?.alerts || 0);
+    const riskPalette = getPatientRiskPalette(patient);
+
+    return (
+      <View key={cardKey} style={styles.patientRow}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.patientFlatCard,
+            styles.patientCard,
+            accentPalette && styles.patientCardPriority,
+            { borderLeftColor: riskPalette.border, borderLeftWidth: 4 },
+            pressed && styles.patientCardPressed,
+            accentPalette && pressed && styles.patientCardPriorityPressed,
+          ]}
+          onPress={onPress}
+        >
+          <View style={styles.patientScheduleCol}>
+            <Text style={styles.patientScheduleTime}>{scheduleValue || '--'}</Text>
+            <Text style={styles.patientScheduleDate}>Atualizado</Text>
+          </View>
+
+          <View style={styles.patientBody}>
+            <AvatarBadge name={patient.name} size={38} subtle theme={patientTheme} />
+            <View style={styles.patientCopy}>
+              <Text style={styles.patientName} numberOfLines={1}>
+                {patient.name}
+              </Text>
+              <View style={styles.patientMetaRow}>
+                <View
+                  style={[
+                    styles.patientStatusPill,
+                    {
+                      backgroundColor: riskPalette.bg,
+                      borderColor: riskPalette.border,
+                    },
+                  ]}
+                >
+                  <Text style={[styles.patientStatusPillText, { color: riskPalette.text }]}>
+                    {formatPatientRiskLabel(patient)}
+                  </Text>
+                </View>
+                <Text style={styles.patientMeta} numberOfLines={1}>
+                  {patient.specialtyTag} · {patient.age} anos
+                </Text>
+              </View>
+              {patient.email ? (
+                <Text style={styles.patientEmail} numberOfLines={1}>
+                  {patient.email}
+                </Text>
+              ) : null}
+              <Text style={styles.patientDetailMeta}>
+                Adesão: {patient.adherence}%
+                {alerts ? ` · ${alerts} ${alerts === 1 ? 'alerta' : 'alertas'}` : ''}
+              </Text>
+            </View>
+          </View>
+        </Pressable>
+      </View>
+    );
+  }
 
   return (
     <LayoutMedico
@@ -292,6 +328,13 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
       title=""
       subtitle=""
       showTabBar={route?.name === 'HomeMedico'}
+      refreshControl={
+        <RefreshControl
+          refreshing={refreshing}
+          onRefresh={handleRefresh}
+          colors={[patientTheme.colors.primaryDark]}
+        />
+      }
     >
       {menuVisible ? (
         <MedicoDrawer
@@ -374,8 +417,8 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
         <SectionCard style={styles.prioritySection}>
           <View style={styles.priorityBanner}>
             <View style={styles.priorityBannerLeft}>
-              <Ionicons name="alert-circle-outline" size={16} color="#ff3b30" />
-              <Text style={styles.priorityBannerTitle}>Pacientes Prioritários</Text>
+              <Ionicons name="alert-circle-outline" size={16} color={PRIORITY_RED} />
+              <Text style={styles.recentTitle}>Pacientes Prioritários</Text>
             </View>
             <View style={styles.priorityBannerCount}>
               <Text style={styles.priorityBannerCountText}>{priorityPatients.length}</Text>
@@ -399,47 +442,26 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
               </View>
             ) : null}
 
-            {!loading && !loadError && highlightedPatient ? (
-              <TouchableOpacity
-                style={styles.priorityPatientCard}
-                activeOpacity={0.9}
-                onPress={() =>
-                  navigation.navigate('MedicoProntuarioPaciente', {
-                    usuarioLogado,
-                    pacienteId: highlightedPatient.id,
-                    paciente: highlightedPatient,
+            {!loading && !loadError && priorityPatients.length ? (
+              <View style={styles.patientList}>
+                {priorityPatients.map((patient) =>
+                  renderPatientListCard(patient, {
+                    cardKey: patient.id,
+                    accentPalette: PRIORITY_BOARD_ACCENT,
+                    scheduleValue: patient.updatedAt || patient.appointmentTime || '--',
+                    onPress: () =>
+                      navigation.navigate('MedicoProntuarioPaciente', {
+                        usuarioLogado,
+                        pacienteId: patient.id,
+                        paciente: patient,
+                      }),
                   })
-                }
-              >
-                <View style={styles.priorityPatientLeft}>
-                  <AvatarBadge name={highlightedPatient.name} size={48} subtle />
-                  <View style={styles.priorityPatientCopy}>
-                    <View style={styles.priorityPatientTitleRow}>
-                      <Text style={styles.priorityPatientName}>{highlightedPatient.name}</Text>
-                      <View style={[styles.riskBadgePill, getRiskMeta(highlightedPatient).badgeStyle]}>
-                        <Text
-                          style={[
-                            styles.riskBadgePillText,
-                            getRiskMeta(highlightedPatient).badgeTextStyle,
-                          ]}
-                        >
-                          {getRiskMeta(highlightedPatient).label}
-                        </Text>
-                      </View>
-                    </View>
-                    <Text style={styles.priorityPatientMeta}>
-                      {highlightedPatient.alerts} alertas ativos · Adesão: {highlightedPatient.adherence}%
-                    </Text>
-                  </View>
-                </View>
-
-                <View style={styles.priorityPatientRight}>
-                  <Text style={styles.priorityPatientUpdateLabel}>Última atualização</Text>
-                  <Text style={styles.priorityPatientUpdateTime}>
-                    {highlightedPatient.appointmentTime || highlightedPatient.updatedAt || '--'}
-                  </Text>
-                </View>
-              </TouchableOpacity>
+                )}
+              </View>
+            ) : !loading && !loadError ? (
+              <View style={styles.inlineLoading}>
+                <Text style={styles.emptyText}>Nenhum paciente prioritário no momento.</Text>
+              </View>
             ) : null}
           </View>
         </SectionCard>
@@ -458,47 +480,29 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
 
           <View style={styles.recentList}>
             {recentUpdates.length ? (
-              recentUpdates.map((item) => (
-                <TouchableOpacity
-                  key={item.id}
-                  style={styles.recentItemCard}
-                  activeOpacity={0.9}
-                  onPress={() =>
-                    navigation.navigate('MedicoProntuarioPaciente', {
-                      usuarioLogado,
-                      pacienteId: item.id,
-                      paciente: item.patient,
-                    })
-                  }
-                >
-                  <View style={styles.recentItemLeft}>
-                    <AvatarBadge name={item.name} size={44} subtle />
-                    <View style={styles.recentItemCopy}>
-                      <View style={styles.recentItemTop}>
-                        <Text style={styles.recentItemName}>{item.name}</Text>
-                        <View style={[styles.riskBadgePill, item.riskMeta.badgeStyle]}>
-                          <Text style={[styles.riskBadgePillText, item.riskMeta.badgeTextStyle]}>
-                            {item.riskMeta.label}
-                          </Text>
-                        </View>
-                        {item.alerts ? (
-                          <View style={styles.alertsPill}>
-                            <Text style={styles.alertsPillText}>{item.alerts} alertas</Text>
-                          </View>
-                        ) : null}
-                      </View>
-                      <Text style={styles.recentItemMeta}>
-                        {item.age} anos · Adesão: {item.adherence}%
-                      </Text>
-                    </View>
-                  </View>
-
-                  <View style={styles.recentItemRight}>
-                    <Text style={styles.recentItemUpdateLabel}>Atualizado</Text>
-                    <Text style={styles.recentItemUpdateTime}>{item.updatedTime}</Text>
-                  </View>
-                </TouchableOpacity>
-              ))
+              <View style={styles.patientList}>
+                {recentUpdates.map((item) =>
+                  renderPatientListCard(
+                    {
+                      ...item.patient,
+                      name: item.name,
+                      age: item.age,
+                      adherence: item.adherence,
+                      alerts: item.alerts,
+                    },
+                    {
+                      cardKey: item.id,
+                      scheduleValue: item.patient?.updatedAt || item.updatedTime || '--',
+                      onPress: () =>
+                        navigation.navigate('MedicoProntuarioPaciente', {
+                          usuarioLogado,
+                          pacienteId: item.id,
+                          paciente: item.patient,
+                        }),
+                    }
+                  )
+                )}
+              </View>
             ) : (
               <View style={styles.inlineLoading}>
                 <Text style={styles.emptyTitle}>Sem atualizações recentes</Text>
@@ -507,55 +511,6 @@ export default function TelaInicioMedico({ route, navigation, onMedicoLogout }) 
             )}
           </View>
         </SectionCard>
-
-        {!!requests.length ? (
-          <SectionCard style={styles.pendingRequestsSection}>
-            <Text style={styles.pendingRequestsTitle}>Solicitacoes Pendentes</Text>
-            <View style={styles.pendingRequestsList}>
-              {requests.map((request) => {
-                const paciente = request.paciente || {};
-                const pacienteNome =
-                  paciente.nome_completo || paciente.nome_pac || paciente.email_pac || 'Paciente';
-                const responding = respondingRequestId === request.id;
-
-                return (
-                  <View key={request.id} style={styles.pendingRequestCard}>
-                    <View style={styles.pendingRequestIdentity}>
-                      <AvatarBadge name={pacienteNome} size={42} subtle />
-                      <View style={styles.pendingRequestCopy}>
-                        <Text style={styles.pendingRequestName}>{pacienteNome}</Text>
-                        <Text style={styles.pendingRequestMeta}>
-                          {request.mensagem || paciente.email_pac || 'Solicitacao de acompanhamento medico'}
-                        </Text>
-                      </View>
-                    </View>
-
-                    <View style={styles.pendingRequestActions}>
-                      <TouchableOpacity
-                        style={[styles.pendingRequestButton, styles.pendingRequestButtonPrimary]}
-                        activeOpacity={0.9}
-                        disabled={responding}
-                        onPress={() => handleResponderSolicitacao(request, 'approved')}
-                      >
-                        <Text style={styles.pendingRequestButtonPrimaryText}>
-                          {responding ? 'Salvando...' : 'Acompanhar'}
-                        </Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        style={styles.pendingRequestButton}
-                        activeOpacity={0.9}
-                        disabled={responding}
-                        onPress={() => handleResponderSolicitacao(request, 'rejected')}
-                      >
-                        <Text style={styles.pendingRequestButtonText}>Recusar</Text>
-                      </TouchableOpacity>
-                    </View>
-                  </View>
-                );
-              })}
-            </View>
-          </SectionCard>
-        ) : null}
       </View>
     </LayoutMedico>
   );
@@ -639,7 +594,7 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     padding: 16,
     justifyContent: 'space-between',
-    backgroundColor: patientTheme.colors.background,
+    backgroundColor: '#FFFFFF',
   },
   actionTopRow: {
     flexDirection: 'row',
@@ -677,12 +632,12 @@ const styles = StyleSheet.create({
     borderColor: patientTheme.colors.border,
     shadowColor: 'transparent',
     elevation: 0,
-    backgroundColor: patientTheme.colors.surface,
+    backgroundColor: '#FFFFFF',
   },
   priorityBanner: {
     minHeight: 44,
     paddingHorizontal: 16,
-    backgroundColor: patientTheme.colors.surfaceMuted,
+    backgroundColor: '#FFFFFF',
     borderBottomWidth: 1,
     borderBottomColor: patientTheme.colors.border,
     flexDirection: 'row',
@@ -694,16 +649,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  priorityBannerTitle: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
   priorityBannerCount: {
     minWidth: 18,
     height: 18,
     borderRadius: 9,
-    backgroundColor: '#ff0000',
+    backgroundColor: PRIORITY_RED,
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: 4,
@@ -715,88 +665,128 @@ const styles = StyleSheet.create({
   },
   priorityBody: {
     padding: 12,
+    gap: 8,
+    backgroundColor: '#FFFFFF',
   },
-  priorityPatientCard: {
-    minHeight: 72,
+  patientCardPriority: {
+    backgroundColor: '#FFFFFF',
+  },
+  patientCardPriorityPressed: {
+    backgroundColor: '#FEE2E2',
+  },
+  patientList: {
+    width: '100%',
+    minWidth: 0,
+    gap: 8,
+  },
+  patientRow: {
+    width: '100%',
+    minWidth: 0,
+    alignSelf: 'stretch',
+  },
+  patientFlatCard: {
+    backgroundColor: patientTheme.colors.background,
     borderWidth: 1,
     borderColor: patientTheme.colors.border,
     borderRadius: patientTheme.radius.xl,
+    shadowColor: 'transparent',
+    elevation: 0,
+  },
+  patientCard: {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: 0,
+    minHeight: 64,
     backgroundColor: patientTheme.colors.surface,
-    padding: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 12,
-  },
-  priorityPatientLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    flex: 1,
+    paddingVertical: 10,
+    paddingRight: 10,
+    paddingLeft: 0,
+    gap: 8,
+    alignSelf: 'stretch',
   },
-  priorityPatientCopy: {
+  patientCardPressed: {
+    backgroundColor: patientTheme.colors.backgroundSoft,
+  },
+  patientScheduleCol: {
+    width: 68,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+    paddingHorizontal: 6,
+    borderRightWidth: 1,
+    borderRightColor: patientTheme.colors.border,
+  },
+  patientScheduleTime: {
+    color: '#111111',
+    fontSize: 14,
+    fontWeight: '800',
+    lineHeight: 16,
+  },
+  patientScheduleDate: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    fontWeight: '600',
+    lineHeight: 12,
+  },
+  patientBody: {
     flex: 1,
     minWidth: 0,
-  },
-  priorityPatientTitleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    flexWrap: 'wrap',
+    gap: 10,
+    paddingRight: 8,
   },
-  priorityPatientName: {
-    color: patientTheme.colors.text,
+  patientCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  patientName: {
+    color: '#111111',
     fontSize: 14,
-    fontWeight: '700',
+    fontWeight: '800',
+    lineHeight: 18,
   },
-  priorityPatientMeta: {
-    marginTop: 4,
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
+  patientMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    minWidth: 0,
+    marginTop: 2,
   },
-  priorityPatientRight: {
-    alignItems: 'flex-end',
-  },
-  priorityPatientUpdateLabel: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 10,
-  },
-  priorityPatientUpdateTime: {
-    marginTop: 4,
-    color: patientTheme.colors.text,
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  riskBadgePill: {
+  patientStatusPill: {
+    flexShrink: 0,
     borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
     borderWidth: 1,
+    paddingHorizontal: 7,
+    paddingVertical: 2,
   },
-  riskBadgePillText: {
+  patientStatusPillText: {
+    fontSize: 9,
+    fontWeight: '800',
+    lineHeight: 12,
+  },
+  patientMeta: {
+    flex: 1,
+    minWidth: 0,
+    color: patientTheme.colors.textMuted,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '600',
+  },
+  patientEmail: {
+    color: patientTheme.colors.textMuted,
     fontSize: 10,
-    fontWeight: '700',
+    lineHeight: 13,
   },
-  riskBadgeHigh: {
-    backgroundColor: patientTheme.colors.dangerSoft,
-    borderColor: patientTheme.colors.danger,
-  },
-  riskBadgeTextHigh: {
-    color: patientTheme.colors.text,
-  },
-  riskBadgeMedium: {
-    backgroundColor: patientTheme.colors.warningSoft,
-    borderColor: patientTheme.colors.warning,
-  },
-  riskBadgeTextMedium: {
-    color: patientTheme.colors.text,
-  },
-  riskBadgeLow: {
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderColor: patientTheme.colors.primary,
-  },
-  riskBadgeTextLow: {
-    color: patientTheme.colors.primaryDark,
+  patientDetailMeta: {
+    color: patientTheme.colors.textMuted,
+    fontSize: 10,
+    lineHeight: 13,
+    fontWeight: '600',
   },
   recentSection: {
     borderWidth: 1,
@@ -830,140 +820,7 @@ const styles = StyleSheet.create({
   },
   recentList: {
     marginTop: 14,
-    gap: 12,
-  },
-  recentItemCard: {
-    minHeight: 64,
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.surface,
-    padding: 10,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    alignItems: 'center',
-  },
-  recentItemLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    flex: 1,
-  },
-  recentItemCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  recentItemTop: {
-    flexDirection: 'row',
-    gap: 6,
-    flexWrap: 'wrap',
-    alignItems: 'center',
-  },
-  recentItemName: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  alertsPill: {
-    borderRadius: patientTheme.radius.pill,
-    backgroundColor: patientTheme.colors.warningSoft,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-  },
-  alertsPillText: {
-    color: patientTheme.colors.text,
-    fontSize: 10,
-    fontWeight: '700',
-  },
-  recentItemMeta: {
-    marginTop: 4,
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-  },
-  recentItemRight: {
-    alignItems: 'flex-end',
-  },
-  recentItemUpdateLabel: {
-    color: patientTheme.colors.textMuted,
-    fontSize: 10,
-  },
-  recentItemUpdateTime: {
-    marginTop: 4,
-    color: patientTheme.colors.text,
-    fontWeight: '700',
-    fontSize: 12,
-  },
-  pendingRequestsSection: {
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    shadowColor: 'transparent',
-    elevation: 0,
-    backgroundColor: patientTheme.colors.background,
-  },
-  pendingRequestsTitle: {
-    color: patientTheme.colors.text,
-    fontSize: 18,
-    fontWeight: '700',
-  },
-  pendingRequestsList: {
-    marginTop: 14,
-    gap: 12,
-  },
-  pendingRequestCard: {
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.xl,
-    backgroundColor: patientTheme.colors.background,
-    padding: 12,
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    gap: 12,
-    alignItems: 'center',
-  },
-  pendingRequestIdentity: {
-    flexDirection: 'row',
-    gap: 12,
-    alignItems: 'center',
-    flex: 1,
-  },
-  pendingRequestCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  pendingRequestName: {
-    color: patientTheme.colors.text,
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  pendingRequestMeta: {
-    marginTop: 4,
-    color: patientTheme.colors.textMuted,
-    fontSize: 12,
-  },
-  pendingRequestActions: {
-    flexDirection: 'row',
     gap: 8,
-  },
-  pendingRequestButton: {
-    borderWidth: 1,
-    borderColor: patientTheme.colors.border,
-    borderRadius: patientTheme.radius.pill,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: patientTheme.colors.background,
-  },
-  pendingRequestButtonPrimary: {
-    backgroundColor: patientTheme.colors.surface,
-    borderColor: patientTheme.colors.surfaceBorder,
-  },
-  pendingRequestButtonText: {
-    color: patientTheme.colors.textMuted,
-    fontWeight: '700',
-  },
-  pendingRequestButtonPrimaryText: {
-    color: patientTheme.colors.text,
-    fontWeight: '700',
   },
   inlineLoading: {
     alignItems: 'flex-start',

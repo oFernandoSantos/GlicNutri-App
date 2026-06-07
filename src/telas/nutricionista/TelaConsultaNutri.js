@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +17,7 @@ import { supabase } from '../../servicos/configSupabase';
 import TelaProntuarioPacienteNutri from './TelaProntuarioPacienteNutri';
 import {
   abrirLinkGoogleMeet,
+  deleteConsulta,
   updateConsultaStatus,
   formatConsultaDateTime,
 } from '../../servicos/servicoConsultas';
@@ -158,12 +160,59 @@ export default function TelaConsultaNutri({ navigation, route }) {
     }
   }
 
-  async function handleAbrirMeet() {
-    try {
-      await abrirLinkGoogleMeet(meetLink);
-    } catch (error) {
-      setMensagemAcao(error?.message || 'Nao foi possivel abrir o Google Meet.');
+  function confirmMarkStatus(nextStatus) {
+    if (nextStatus === 'cancelled') {
+      Alert.alert('Cancelar consulta', 'Deseja cancelar esta consulta?', [
+        { text: 'Não', style: 'cancel' },
+        { text: 'Cancelar consulta', style: 'destructive', onPress: () => markStatus('cancelled') },
+      ]);
+      return;
     }
+    if (nextStatus === 'done') {
+      Alert.alert('Finalizar consulta', 'Marcar esta consulta como finalizada?', [
+        { text: 'Não', style: 'cancel' },
+        { text: 'Finalizar', onPress: () => markStatus('done') },
+      ]);
+      return;
+    }
+    if (nextStatus === 'confirmed') {
+      Alert.alert('Confirmar consulta', 'Marcar esta consulta como confirmada?', [
+        { text: 'Não', style: 'cancel' },
+        { text: 'Confirmar', onPress: () => markStatus('confirmed') },
+      ]);
+      return;
+    }
+    markStatus(nextStatus);
+  }
+
+  function confirmDeleteConsulta() {
+    if (!consultaId) return;
+    Alert.alert(
+      'Excluir consulta',
+      'Esta ação remove o agendamento permanentemente. Continuar?',
+      [
+        { text: 'Não', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              setSavingAction(true);
+              await deleteConsulta({
+                consultaId,
+                actor: usuarioLogado,
+                origin: 'consulta_nutricionista',
+              });
+              navigation.goBack();
+            } catch (error) {
+              setMensagemAcao(error?.message || 'Não foi possível excluir a consulta.');
+            } finally {
+              setSavingAction(false);
+            }
+          },
+        },
+      ]
+    );
   }
 
   return (
@@ -202,7 +251,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
             <SectionCard style={styles.meetCard}>
               <View style={styles.meetHeader}>
                 <View style={styles.meetIcon}>
-                  <Ionicons name="videocam" size={22} color={patientTheme.colors.onPrimary} />
+                  <Ionicons name="videocam" size={22} color={patientTheme.colors.primaryDark} />
                 </View>
                 <View style={styles.meetCopy}>
                   <Text style={styles.meetTitle}>Sala Google Meet</Text>
@@ -210,14 +259,24 @@ export default function TelaConsultaNutri({ navigation, route }) {
                 </View>
               </View>
               <TouchableOpacity
-                style={[styles.primaryButton, styles.meetButton]}
+                style={[styles.primaryButton, styles.meetButtonFilled]}
                 onPress={handleAbrirMeet}
               >
                 <Ionicons name="videocam-outline" size={16} color={patientTheme.colors.onPrimary} />
-                <Text style={styles.primaryButtonText}>Entrar no Meet</Text>
+                <Text style={styles.meetButtonText}>Entrar no Meet</Text>
               </TouchableOpacity>
             </SectionCard>
-          ) : null}
+          ) : (
+            <SectionCard style={styles.meetEmptyCard}>
+              <View style={styles.meetEmptyIcon}>
+                <Ionicons name="videocam-off-outline" size={24} color={patientTheme.colors.textMuted} />
+              </View>
+              <Text style={styles.meetEmptyTitle}>Link do Meet indisponível</Text>
+              <Text style={styles.meetEmptyText}>
+                O link será exibido aqui quando estiver configurado para esta consulta.
+              </Text>
+            </SectionCard>
+          )}
 
           {/* Status e ações rápidas */}
           <SectionCard style={styles.statusCard}>
@@ -245,7 +304,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
                 {status !== 'confirmed' ? (
                   <TouchableOpacity
                     style={[styles.actionBtn, styles.actionBtnPrimary]}
-                    onPress={() => markStatus('confirmed')}
+                    onPress={() => confirmMarkStatus('confirmed')}
                     disabled={savingAction}
                   >
                     <Ionicons name="checkmark-circle-outline" size={16} color={patientTheme.colors.onPrimary} />
@@ -254,7 +313,7 @@ export default function TelaConsultaNutri({ navigation, route }) {
                 ) : null}
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.actionBtnSuccess]}
-                  onPress={() => markStatus('done')}
+                  onPress={() => confirmMarkStatus('done')}
                   disabled={savingAction}
                 >
                   <Ionicons name="checkmark-done-outline" size={16} color={patientTheme.colors.primary} />
@@ -262,11 +321,19 @@ export default function TelaConsultaNutri({ navigation, route }) {
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[styles.actionBtn, styles.actionBtnDanger]}
-                  onPress={() => markStatus('cancelled')}
+                  onPress={() => confirmMarkStatus('cancelled')}
                   disabled={savingAction}
                 >
                   <Ionicons name="close-circle-outline" size={16} color={patientTheme.colors.danger} />
                   <Text style={styles.actionBtnDangerText}>Cancelar</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.actionBtn, styles.actionBtnDangerOutline]}
+                  onPress={confirmDeleteConsulta}
+                  disabled={savingAction}
+                  accessibilityLabel="Excluir consulta"
+                >
+                  <Ionicons name="trash-outline" size={16} color={patientTheme.colors.danger} />
                 </TouchableOpacity>
               </View>
             ) : null}
@@ -423,7 +490,24 @@ const styles = StyleSheet.create({
   meetCopy: { flex: 1, minWidth: 0 },
   meetTitle: { color: patientTheme.colors.primaryDark, fontSize: 15, fontWeight: '900' },
   meetLink: { marginTop: 4, color: patientTheme.colors.text, fontSize: 12, fontWeight: '800' },
-  meetButton: { alignSelf: 'flex-start' },
+  meetButtonFilled: {
+    alignSelf: 'flex-start',
+    marginTop: 0,
+    backgroundColor: patientTheme.colors.primary,
+    borderColor: patientTheme.colors.primary,
+  },
+  meetButtonText: { color: patientTheme.colors.onPrimary, fontWeight: '900' },
+  meetEmptyCard: { marginTop: 16, alignItems: 'center', gap: 8, paddingVertical: 20 },
+  meetEmptyIcon: {
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    backgroundColor: patientTheme.colors.backgroundSoft,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  meetEmptyTitle: { fontSize: 15, fontWeight: '900', color: patientTheme.colors.text },
+  meetEmptyText: { textAlign: 'center', color: patientTheme.colors.textMuted, lineHeight: 20, fontSize: 13 },
   statusCard: { marginTop: 16 },
   statusHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 },
   statusTitle: { fontSize: 16, fontWeight: '900', color: patientTheme.colors.text },
@@ -437,6 +521,14 @@ const styles = StyleSheet.create({
   actionBtnSuccessText: { color: patientTheme.colors.primaryDark, fontWeight: '900' },
   actionBtnDanger: { backgroundColor: '#fff4f4', borderWidth: 1, borderColor: '#f0d2d2' },
   actionBtnDangerText: { color: patientTheme.colors.danger, fontWeight: '900' },
+  actionBtnDangerOutline: {
+    backgroundColor: '#fff4f4',
+    borderWidth: 1,
+    borderColor: '#f0d2d2',
+    minWidth: 44,
+    paddingHorizontal: 12,
+    justifyContent: 'center',
+  },
   actionBtnSecondary: { backgroundColor: patientTheme.colors.backgroundSoft },
   actionBtnSecondaryText: { color: patientTheme.colors.text, fontWeight: '900' },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },

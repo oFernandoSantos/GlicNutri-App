@@ -40,7 +40,30 @@ function normalizeTimeHHMM(value) {
   return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`;
 }
 
-export function buildSlotLabel({ weekday, startTime, endTime, slotMinutes }) {
+function formatDateKeyToBr(dateKey) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey))) return '';
+  const [year, month, day] = String(dateKey).split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function weekdayFromDateKey(dateKey) {
+  if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey))) return 0;
+  const [year, month, day] = String(dateKey).split('-').map(Number);
+  return new Date(year, month - 1, day).getDay();
+}
+
+function formatDateKeyFromDate(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+export function buildSlotLabel({ weekday, startTime, endTime, slotMinutes, availabilityDate }) {
+  const dateLabel = availabilityDate ? formatDateKeyToBr(availabilityDate) : '';
+  if (dateLabel) {
+    return `${dateLabel} ${startTime}–${endTime} (${slotMinutes} min)`;
+  }
   const days = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'];
   return `${days[normalizeWeekday(weekday)]} ${startTime}–${endTime} (${slotMinutes} min)`;
 }
@@ -52,6 +75,7 @@ export async function listNutriAvailability(nutricionistaId) {
     .from('nutri_disponibilidade')
     .select('*')
     .eq('nutricionista_id', nutricionistaId)
+    .order('availability_date', { ascending: true, nullsFirst: false })
     .order('weekday', { ascending: true })
     .order('start_time', { ascending: true });
 
@@ -63,6 +87,7 @@ export async function upsertNutriAvailability({
   id,
   nutricionistaId,
   weekday,
+  availabilityDate,
   startTime,
   endTime,
   slotMinutes,
@@ -72,10 +97,16 @@ export async function upsertNutriAvailability({
 }) {
   if (!nutricionistaId) throw new Error('Nutricionista sem identificador.');
 
+  const normalizedDate =
+    availabilityDate && /^\d{4}-\d{2}-\d{2}$/.test(String(availabilityDate))
+      ? String(availabilityDate)
+      : null;
+
   const payload = {
     ...(id ? { id } : null),
     nutricionista_id: nutricionistaId,
-    weekday: normalizeWeekday(weekday),
+    availability_date: normalizedDate,
+    weekday: normalizedDate ? weekdayFromDateKey(normalizedDate) : normalizeWeekday(weekday),
     start_time: normalizeTimeHHMM(startTime),
     end_time: normalizeTimeHHMM(endTime),
     slot_minutes: Number(slotMinutes) || 30,
@@ -105,6 +136,7 @@ export async function upsertNutriAvailability({
       details: {
         nutricionistaId,
         weekday: data.weekday,
+        availabilityDate: data.availability_date || null,
         startTime: data.start_time,
         endTime: data.end_time,
         slotMinutes: data.slot_minutes,
@@ -173,7 +205,14 @@ export function generateSlotsForNextDays(availabilityRows, { days = 14 } = {}) {
 
   for (let dayCursor = new Date(start); dayCursor < end; dayCursor = addMinutes(dayCursor, 24 * 60)) {
     const weekday = dayCursor.getDay(); // 0-6
-    const dayAvail = avail.filter((row) => row.active !== false && normalizeWeekday(row.weekday) === weekday);
+    const dayKey = formatDateKeyFromDate(dayCursor);
+    const dayAvail = avail.filter((row) => {
+      if (row.active === false) return false;
+      if (row.availability_date) {
+        return String(row.availability_date).slice(0, 10) === dayKey;
+      }
+      return normalizeWeekday(row.weekday) === weekday;
+    });
 
     dayAvail.forEach((row) => {
       const slotMinutes = Number(row.slot_minutes) || 30;

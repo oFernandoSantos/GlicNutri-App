@@ -25,6 +25,9 @@ function shouldMirrorConsoleToRemoteLog(message = '') {
   if (normalized.includes('erro ao gravar log do sistema')) {
     return false;
   }
+  if (normalized.includes('invalid refresh token') || normalized.includes('authapierror')) {
+    return false;
+  }
   return true;
 }
 

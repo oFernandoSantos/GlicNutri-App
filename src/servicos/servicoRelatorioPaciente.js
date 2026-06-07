@@ -3,7 +3,12 @@ import { buildClinicalReportAnalytics, filterReportEntriesByBounds } from '../ut
 import { buildPatientClinicalReportPdf } from '../utilitarios/relatorioPacientePdf';
 import { mergeCachedGlucoseReadings } from './centralGlicose';
 import { supabase } from './configSupabase';
-import { fetchMealEntries, fetchPatientExperience, getPatientId } from './servicoDadosPaciente';
+import {
+  fetchMealEntries,
+  fetchPatientExperience,
+  getPatientId,
+} from './servicoDadosPaciente';
+import { isPatientExperienceCacheFresh } from './cacheExperienciaPaciente';
 import { getMedicoById } from './servicoMedicos';
 import { getNutritionistById } from './servicoNutricionistas';
 
@@ -567,9 +572,13 @@ function mergeReportMealPair(existing = {}, incoming = {}) {
 }
 
 async function loadReportMealEntries(patientId, payload = {}, experience = {}, periodBounds = {}) {
-  const databaseMeals = patientId
-    ? await fetchMealEntries(patientId, 500, payload.patient).catch(() => [])
+  const experienceMeals = Array.isArray(experience?.appState?.mealEntries)
+    ? experience.appState.mealEntries
     : [];
+  const databaseMeals =
+    patientId && !experienceMeals.length
+      ? await fetchMealEntries(patientId, 500, payload.patient).catch(() => [])
+      : experienceMeals;
 
   const mergedMeals = mergeReportMealSources(
     databaseMeals,
@@ -747,14 +756,20 @@ export async function enrichReportPayloadFromDatabase(payload = {}) {
   }
 
   try {
-    const experience = await fetchPatientExperience(patientId, {
-      patientContext: payload.patient,
-      forceRefresh: true,
+    const reportFetchLimits = {
       skipChat: true,
       skipAlertSync: true,
       glucoseLimit: 500,
       medicationLimit: 500,
       mealLimit: 500,
+      historicoPreset: true,
+      experienceCachePreset: 'relatorio',
+    };
+    const cacheFresco = isPatientExperienceCacheFresh(patientId, reportFetchLimits);
+    const experience = await fetchPatientExperience(patientId, {
+      patientContext: payload.patient,
+      forceRefresh: !cacheFresco,
+      ...reportFetchLimits,
     });
 
     const mealEntries = await loadReportMealEntries(patientId, payload, experience, periodBounds);

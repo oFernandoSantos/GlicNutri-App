@@ -15,7 +15,7 @@ import {
   SearchInput,
   SectionCard,
 } from './NutriDesktopUI';
-import { nutriTheme as patientTheme } from '../../temas/temaVisualNutricionista';
+import { nutriTheme as defaultTheme } from '../../temas/temaVisualNutricionista';
 import {
   getMealEntryPhotoRef,
   resolveMealPhotoDisplayUri,
@@ -52,25 +52,31 @@ function RegistroDateTime({ entry }) {
   );
 }
 
-function RegistroChatButton({ onPress, disabled, loading }) {
+function RegistroChatButton({ onPress, disabled, loading, theme = defaultTheme }) {
+  const palette = theme?.colors || defaultTheme.colors;
   return (
     <TouchableOpacity
-      style={styles.chatButton}
+      style={[styles.chatButton, { borderColor: palette.primary }]}
       onPress={onPress}
       disabled={disabled || loading}
       accessibilityLabel="Abrir chat sobre este registro"
+      accessibilityRole="button"
       hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
     >
       {loading ? (
-        <ActivityIndicator size="small" color={patientTheme.colors.primary} />
+        <ActivityIndicator size="small" color={palette.primary} />
       ) : (
-        <Ionicons name="chatbubble-ellipses-outline" size={20} color={patientTheme.colors.primary} />
+        <>
+          <Ionicons name="chatbubble-ellipses-outline" size={18} color={palette.primary} />
+          <Text style={[styles.chatButtonLabel, { color: palette.primary }]}>Chat</Text>
+        </>
       )}
     </TouchableOpacity>
   );
 }
 
-function MealPhotoThumb({ entry, onOpen }) {
+function MealPhotoThumb({ entry, onOpen, theme = defaultTheme }) {
+  const palette = theme?.colors || defaultTheme.colors;
   const photoRef = getMealEntryPhotoRef(entry);
   const [thumbUri, setThumbUri] = useState(null);
   const [loadingThumb, setLoadingThumb] = useState(false);
@@ -104,7 +110,7 @@ function MealPhotoThumb({ entry, onOpen }) {
   if (loadingThumb) {
     return (
       <View style={styles.mealThumbPlaceholder}>
-        <ActivityIndicator size="small" color={patientTheme.colors.primaryDark} />
+        <ActivityIndicator size="small" color={palette.primaryDark} />
       </View>
     );
   }
@@ -132,7 +138,9 @@ export default function RegistrosPacienteNutriSection({
   patientName = 'Paciente',
   usuarioLogado = null,
   onReloadRegistros = null,
+  theme = defaultTheme,
 }) {
+  const palette = theme?.colors || defaultTheme.colors;
   const [registrosTab, setRegistrosTab] = useState('glicemia');
   const [searchQuery, setSearchQuery] = useState('');
   const [openingChatKey, setOpeningChatKey] = useState(null);
@@ -259,12 +267,15 @@ export default function RegistrosPacienteNutriSection({
   return (
     <View style={styles.pageGap}>
       <FilterTabs
+        scrollable
+        fill={false}
         items={registrosTabs}
         active={registrosTab}
         onChange={(tab) => {
           setRegistrosTab(tab);
         }}
         compact
+        theme={theme}
       />
 
       <SearchInput
@@ -286,7 +297,7 @@ export default function RegistrosPacienteNutriSection({
 
       {loadingRegistros ? (
         <View style={styles.inlineStatus}>
-          <ActivityIndicator color={patientTheme.colors.primaryDark} />
+          <ActivityIndicator color={palette.primaryDark} />
           <Text style={styles.inlineStatusText}>Carregando registros...</Text>
         </View>
       ) : null}
@@ -295,7 +306,10 @@ export default function RegistrosPacienteNutriSection({
         <View style={styles.loadErrorWrap}>
           <Text style={styles.loadErrorText}>{loadError}</Text>
           {typeof onReloadRegistros === 'function' ? (
-            <TouchableOpacity style={styles.reloadButton} onPress={onReloadRegistros}>
+            <TouchableOpacity
+              style={[styles.reloadButton, { backgroundColor: palette.primary }]}
+              onPress={onReloadRegistros}
+            >
               <Text style={styles.reloadButtonText}>Recarregar registros</Text>
             </TouchableOpacity>
           ) : null}
@@ -313,7 +327,10 @@ export default function RegistrosPacienteNutriSection({
           <View style={styles.emptyWrap}>
             <Text style={styles.emptyText}>{emptyMessages[registrosTab]}</Text>
             {typeof onReloadRegistros === 'function' ? (
-              <TouchableOpacity style={styles.reloadButton} onPress={onReloadRegistros}>
+              <TouchableOpacity
+                style={[styles.reloadButton, { backgroundColor: palette.primary }]}
+                onPress={onReloadRegistros}
+              >
                 <Text style={styles.reloadButtonText}>Recarregar registros</Text>
               </TouchableOpacity>
             ) : null}
@@ -336,12 +353,13 @@ export default function RegistrosPacienteNutriSection({
                     </View>
                     {contexto ? <Text style={styles.registroMeta}>{contexto}</Text> : null}
                     {obs && obs !== contexto ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {obs}
                       </Text>
                     ) : null}
                   </View>
                   <RegistroChatButton
+                    theme={theme}
                     loading={openingChatKey === rowKey}
                     onPress={() => handleOpenRegistroChat('glicemia', g, rowKey)}
                   />
@@ -365,12 +383,13 @@ export default function RegistrosPacienteNutriSection({
                     </Text>
                     {dose ? <Text style={styles.registroMeta}>{dose}</Text> : null}
                     {m.observation ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {m.observation}
                       </Text>
                     ) : null}
                   </View>
                   <RegistroChatButton
+                    theme={theme}
                     loading={openingChatKey === rowKey}
                     onPress={() => handleOpenRegistroChat('medicacao', m, rowKey)}
                   />
@@ -400,6 +419,7 @@ export default function RegistrosPacienteNutriSection({
                     ) : null}
                   </View>
                   <RegistroChatButton
+                    theme={theme}
                     loading={openingChatKey === rowKey}
                     onPress={() => handleOpenRegistroChat('insulina', m, rowKey)}
                   />
@@ -421,20 +441,21 @@ export default function RegistrosPacienteNutriSection({
                     </Text>
                     {kcal ? <Text style={styles.registroMeta}>{kcal} kcal</Text> : null}
                     {r.description ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {r.description}
                       </Text>
                     ) : null}
                     {r.resumo_ia ? (
-                      <Text style={styles.registroMeta} numberOfLines={2}>
+                      <Text style={styles.registroMeta} numberOfLines={4}>
                         {r.resumo_ia}
                       </Text>
                     ) : null}
                     <View style={styles.mealPhotoSlot}>
-                      <MealPhotoThumb entry={r} onOpen={openMealPhoto} />
+                      <MealPhotoThumb entry={r} onOpen={openMealPhoto} theme={theme} />
                     </View>
                   </View>
                   <RegistroChatButton
+                    theme={theme}
                     loading={openingChatKey === rowKey}
                     onPress={() => handleOpenRegistroChat('refeicoes', r, rowKey)}
                   />
@@ -455,16 +476,16 @@ export default function RegistrosPacienteNutriSection({
             <TouchableWithoutFeedback onPress={() => {}}>
               <View style={styles.photoModalCard}>
                 <View style={styles.photoModalHeader}>
-                  <Text style={styles.photoModalTitle} numberOfLines={2}>
+                  <Text style={styles.photoModalTitle} numberOfLines={4}>
                     {mealPhotoViewer?.title || 'Foto da refeição'}
                   </Text>
                   <TouchableOpacity onPress={() => setMealPhotoViewer(null)}>
-                    <Ionicons name="close" size={22} color={patientTheme.colors.text} />
+                    <Ionicons name="close" size={22} color={palette.text} />
                   </TouchableOpacity>
                 </View>
                 <View style={styles.photoModalImageWrap}>
                   {mealPhotoViewer?.loading ? (
-                    <ActivityIndicator size="large" color={patientTheme.colors.primaryDark} />
+                    <ActivityIndicator size="large" color={palette.primaryDark} />
                   ) : mealPhotoViewer?.uri ? (
                     <Image
                       source={{ uri: mealPhotoViewer.uri }}
@@ -488,19 +509,19 @@ export default function RegistrosPacienteNutriSection({
 
 const styles = StyleSheet.create({
   pageGap: { gap: 14 },
-  sectionTitle: { fontSize: 18, fontWeight: '900', color: patientTheme.colors.text, marginBottom: 8 },
-  emptyText: { color: patientTheme.colors.textMuted, lineHeight: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: '900', color: defaultTheme.colors.text, marginBottom: 8 },
+  emptyText: { color: defaultTheme.colors.textMuted, lineHeight: 20 },
   inlineStatus: { alignItems: 'center', flexDirection: 'row', gap: 8, marginVertical: 4 },
-  inlineStatusText: { color: patientTheme.colors.textMuted, fontWeight: '700' },
+  inlineStatusText: { color: defaultTheme.colors.textMuted, fontWeight: '700' },
   chatFeedback: { fontSize: 12, fontWeight: '700', marginTop: -4 },
-  chatFeedbackSuccess: { color: patientTheme.colors.primaryDark },
-  chatFeedbackError: { color: patientTheme.colors.danger },
+  chatFeedbackSuccess: { color: defaultTheme.colors.primaryDark },
+  chatFeedbackError: { color: defaultTheme.colors.danger },
   loadErrorWrap: {
     gap: 8,
     marginBottom: 8,
   },
   loadErrorText: {
-    color: patientTheme.colors.danger,
+    color: defaultTheme.colors.danger,
     fontSize: 13,
     lineHeight: 18,
   },
@@ -510,13 +531,13 @@ const styles = StyleSheet.create({
   },
   reloadButton: {
     alignSelf: 'flex-start',
-    backgroundColor: patientTheme.colors.primary,
+    backgroundColor: defaultTheme.colors.primary,
     borderRadius: 999,
     paddingHorizontal: 14,
     paddingVertical: 8,
   },
   reloadButtonText: {
-    color: patientTheme.colors.onPrimary,
+    color: defaultTheme.colors.onPrimary,
     fontSize: 12,
     fontWeight: '700',
   },
@@ -525,21 +546,27 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
     borderBottomWidth: 1,
-    borderBottomColor: patientTheme.colors.border,
+    borderBottomColor: defaultTheme.colors.border,
     alignItems: 'flex-start',
   },
   registroDataCol: { minWidth: 88 },
-  registroData: { fontSize: 12, color: patientTheme.colors.textMuted },
-  registroHora: { fontSize: 11, color: patientTheme.colors.textMuted, marginTop: 2 },
+  registroData: { fontSize: 12, color: defaultTheme.colors.textMuted },
+  registroHora: { fontSize: 11, color: defaultTheme.colors.textMuted, marginTop: 2 },
   registroBody: { flex: 1, minWidth: 0, gap: 4 },
-  registroNome: { fontWeight: '700', color: patientTheme.colors.text },
-  registroMeta: { fontSize: 12, color: patientTheme.colors.textMuted },
+  registroNome: { fontWeight: '700', color: defaultTheme.colors.text },
+  registroMeta: { fontSize: 12, color: defaultTheme.colors.textMuted },
   chatButton: {
-    width: 36,
-    height: 36,
+    minWidth: 44,
+    minHeight: 44,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 2,
+    gap: 2,
+  },
+  chatButtonLabel: {
+    fontSize: 10,
+    fontWeight: '800',
+    color: defaultTheme.colors.primary,
   },
   glucoseBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 999, alignSelf: 'flex-start' },
   glucoseBadgeText: { fontWeight: '900', fontSize: 13 },
@@ -548,25 +575,25 @@ const styles = StyleSheet.create({
   glucoseHigh: { backgroundColor: '#FEE2E2' },
   glucoseLow: { backgroundColor: '#E0F2FE' },
   mealPhotoSlot: { marginTop: 4 },
-  mealThumb: { width: 56, height: 56, borderRadius: 8, backgroundColor: patientTheme.colors.backgroundSoft },
+  mealThumb: { width: 72, height: 72, borderRadius: 10, backgroundColor: defaultTheme.colors.backgroundSoft },
   mealThumbPlaceholder: {
-    width: 56,
-    height: 56,
-    borderRadius: 8,
-    backgroundColor: patientTheme.colors.backgroundSoft,
+    width: 72,
+    height: 72,
+    borderRadius: 10,
+    backgroundColor: defaultTheme.colors.backgroundSoft,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  semFotoText: { fontSize: 11, color: patientTheme.colors.textMuted, fontStyle: 'italic' },
+  semFotoText: { fontSize: 11, color: defaultTheme.colors.textMuted, fontStyle: 'italic' },
   photoModalBackdrop: {
     flex: 1,
-    backgroundColor: patientTheme.colors.overlay,
+    backgroundColor: defaultTheme.colors.overlay,
     justifyContent: 'center',
     padding: 20,
   },
   photoModalCard: {
-    backgroundColor: patientTheme.colors.surface,
-    borderRadius: patientTheme.radius.lg,
+    backgroundColor: defaultTheme.colors.surface,
+    borderRadius: defaultTheme.radius.lg,
     overflow: 'hidden',
     maxHeight: '85%',
   },
@@ -577,9 +604,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
     borderBottomWidth: 1,
-    borderBottomColor: patientTheme.colors.border,
+    borderBottomColor: defaultTheme.colors.border,
   },
-  photoModalTitle: { flex: 1, fontWeight: '800', color: patientTheme.colors.text, marginRight: 8 },
+  photoModalTitle: { flex: 1, fontWeight: '800', color: defaultTheme.colors.text, marginRight: 8 },
   photoModalImageWrap: {
     minHeight: 280,
     alignItems: 'center',
@@ -587,5 +614,5 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   photoModalImage: { width: '100%', height: 360 },
-  photoModalFallback: { color: patientTheme.colors.textMuted, textAlign: 'center' },
+  photoModalFallback: { color: defaultTheme.colors.textMuted, textAlign: 'center' },
 });

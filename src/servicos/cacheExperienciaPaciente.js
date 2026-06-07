@@ -9,6 +9,9 @@ const HOME_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
 const CHAT_CACHE_TTL_MS = 20 * 1000;
 export const PROFILE_CACHE_TTL_MS = 5 * 60 * 1000;
 const HISTORICO_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
+const PLANO_EXPERIENCE_TTL_MS = 5 * 60 * 1000;
+const PROGRESSO_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
+const RELATORIO_EXPERIENCE_TTL_MS = 3 * 60 * 1000;
 
 const experienceCache = new Map();
 const experienceInFlight = new Map();
@@ -69,6 +72,15 @@ function resolveExperienceTtlMs(options = {}) {
   }
   if (options.experienceCachePreset === 'prontuario') {
     return options.cacheTtlMs ?? HISTORICO_EXPERIENCE_TTL_MS;
+  }
+  if (options.experienceCachePreset === 'plano') {
+    return options.cacheTtlMs ?? PLANO_EXPERIENCE_TTL_MS;
+  }
+  if (options.experienceCachePreset === 'progresso') {
+    return options.cacheTtlMs ?? PROGRESSO_EXPERIENCE_TTL_MS;
+  }
+  if (options.experienceCachePreset === 'relatorio') {
+    return options.cacheTtlMs ?? RELATORIO_EXPERIENCE_TTL_MS;
   }
   return options.cacheTtlMs ?? DEFAULT_TTL_MS;
 }

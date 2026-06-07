@@ -43,13 +43,13 @@ export const nutriClinicalStatus = {
   },
   attention: {
     bg: '#FEF3C7',
-    border: '#FCD34D',
+    border: brand.warning,
     text: '#B45309',
     icon: nutriColors.warning,
   },
   critical: {
     bg: '#FEE2E2',
-    border: '#FECACA',
+    border: brand.danger,
     text: '#B91C1C',
     icon: nutriColors.danger,
   },

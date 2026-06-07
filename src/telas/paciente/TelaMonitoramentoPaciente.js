@@ -3189,55 +3189,61 @@ export default function PacienteMonitoramentoScreen({
                 <Text style={styles.primaryButtonText}>Salvar glicemia</Text>
               )}
             </TouchableOpacity>
-
-          {glucoseConfirmVisible ? (
-            <View style={styles.inlinePopupOverlay}>
-              <View style={styles.confirmCard}>
-                <CabecalhoModalPaciente
-                  title="Confirmar glicemia?"
-                  onClose={() => setGlucoseConfirmVisible(false)}
-                  titleCentered
-                />
-                <View style={styles.confirmIconWrap}>
-                  <Ionicons
-                    name="water-outline"
-                    size={24}
-                    color={patientTheme.colors.primaryDark}
-                  />
-                </View>
-
-                <Text style={styles.confirmText}>
-                  Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
-                  {isPreviousGlucoseEntry
-                    ? ` em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}?`
-                    : ' agora?'} {manualGlucoseType ? `Tipo: ${manualGlucoseType}. ` : ''}Essa leitura vai atualizar a tela de glicose e o Início.
-                </Text>
-
-                <View style={styles.confirmActions}>
-                  <TouchableOpacity
-                    style={styles.confirmCancelButton}
-                    onPress={() => setGlucoseConfirmVisible(false)}
-                    disabled={savingGlucose}
-                  >
-                    <Text style={styles.confirmCancelText}>Cancelar</Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.confirmSaveButton}
-                    onPress={handleAddGlucose}
-                    disabled={savingGlucose}
-                  >
-                    {savingGlucose ? (
-                      <ActivityIndicator color={patientTheme.colors.onPrimary} />
-                    ) : (
-                      <Text style={styles.confirmSaveText}>Confirmar registro</Text>
-                    )}
-                  </TouchableOpacity>
-                </View>
-              </View>
-            </View>
-          ) : null}
             </ScrollModalPacienteTeclado>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal
+        visible={glucoseConfirmVisible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setGlucoseConfirmVisible(false)}
+      >
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmCard}>
+            <CabecalhoModalPaciente
+              title="Confirmar glicemia?"
+              onClose={() => setGlucoseConfirmVisible(false)}
+            />
+            <View style={styles.confirmIconWrap}>
+              <Ionicons
+                name="water-outline"
+                size={26}
+                color={patientTheme.colors.primaryDark}
+              />
+            </View>
+
+            <Text style={styles.confirmText}>
+              Deseja registrar {hasValidNewGlucose ? Math.round(parsedNewGlucose) : '--'} mg/dL
+              {isPreviousGlucoseEntry
+                ? ` em ${formatDateForDisplay(manualMeasurementDate)} as ${String(manualMeasurementTime || '').slice(0, 5)}?`
+                : ' agora?'} {manualGlucoseType ? `Tipo: ${manualGlucoseType}. ` : ''}Essa leitura vai atualizar a tela de glicose e o Início.
+            </Text>
+
+            <View style={styles.confirmActions}>
+              <TouchableOpacity
+                style={styles.confirmCancelButton}
+                onPress={() => setGlucoseConfirmVisible(false)}
+                disabled={savingGlucose}
+              >
+                <Text style={styles.confirmCancelText}>Cancelar</Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.confirmSaveButton}
+                onPress={handleAddGlucose}
+                disabled={savingGlucose}
+              >
+                {savingGlucose ? (
+                  <ActivityIndicator color={patientTheme.colors.onPrimary} />
+                ) : (
+                  <Text style={styles.confirmSaveText} numberOfLines={1}>
+                    Confirmar registro
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
           </View>
         </View>
       </Modal>
@@ -5711,65 +5717,69 @@ const styles = StyleSheet.create({
     minHeight: 48,
     width: '100%',
   },
-  confirmCard: {
+  confirmOverlay: {
+    flex: 1,
     alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: patientTheme.radius.xl,
-    maxWidth: 420,
-    padding: 20,
+    justifyContent: 'center',
+    backgroundColor: 'rgba(15, 23, 42, 0.24)',
+    paddingHorizontal: 24,
+  },
+  confirmCard: {
     width: '100%',
+    maxWidth: 360,
+    backgroundColor: patientTheme.colors.surface,
+    borderRadius: 28,
+    paddingHorizontal: 22,
+    paddingVertical: 24,
     ...patientShadow,
   },
   confirmIconWrap: {
+    width: 54,
+    height: 54,
+    borderRadius: 27,
     alignItems: 'center',
-    backgroundColor: patientTheme.colors.primarySoft,
-    borderRadius: 24,
-    height: 48,
     justifyContent: 'center',
-    width: 48,
-  },
-  confirmTitle: {
-    color: patientTheme.colors.text,
-    fontSize: 19,
-    fontWeight: '800',
-    marginTop: 14,
-    textAlign: 'center',
+    alignSelf: 'center',
+    backgroundColor: patientTheme.colors.primarySoft,
+    marginBottom: 14,
   },
   confirmText: {
     color: patientTheme.colors.textMuted,
     fontSize: 14,
-    lineHeight: 20,
-    marginTop: 8,
+    lineHeight: 21,
     textAlign: 'center',
+    marginTop: 10,
   },
   confirmActions: {
     flexDirection: 'row',
     gap: 10,
-    marginTop: 18,
-    width: '100%',
+    marginTop: 20,
   },
   confirmCancelButton: {
-    alignItems: 'center',
-    backgroundColor: patientTheme.colors.surfaceMuted,
-    borderRadius: 18,
     flex: 1,
-    justifyContent: 'center',
     minHeight: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.surfaceMuted,
   },
   confirmCancelText: {
     color: patientTheme.colors.textMuted,
-    fontWeight: '800',
+    fontSize: 15,
+    fontWeight: '700',
   },
   confirmSaveButton: {
-    alignItems: 'center',
-    backgroundColor: patientTheme.colors.primaryDark,
-    borderRadius: 18,
-    flex: 1.35,
-    justifyContent: 'center',
+    flex: 1,
     minHeight: 48,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: patientTheme.colors.primaryDark,
+    paddingHorizontal: 12,
   },
   confirmSaveText: {
     color: patientTheme.colors.onPrimary,
+    fontSize: 15,
     fontWeight: '800',
   },
 });
