@@ -31,16 +31,7 @@
       }
     },
     "web": {
-      "favicon": "./assets/favicon.png",
-      "name": "GlicNutri",
-      "shortName": "GlicNutri",
-      "display": "standalone",
-      "startUrl": "/",
-      "scope": "/",
-      "themeColor": "#4FD6A0",
-      "backgroundColor": "#FFFFFF",
-      "orientation": "portrait",
-      "lang": "pt-BR"
+      "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "expo-web-browser",
