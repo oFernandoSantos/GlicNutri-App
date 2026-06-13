@@ -1,4 +1,4 @@
-import { storageSessaoPerfil } from './storageSessaoPerfil';
+import { storageSessaoPerfil, syncClearAbaPerfilSeAtivo } from './storageSessaoPerfil';
 import { isPatientUser } from '../utilitarios/perfisApp';
 import { limparRpcSessionToken } from './servicoSessaoRpc';
 
@@ -37,6 +37,7 @@ export async function limparSessaoPaciente() {
   try {
     await limparRpcSessionToken();
     await storageSessaoPerfil.removeItem(PATIENT_SESSION_STORAGE_KEY);
+    await syncClearAbaPerfilSeAtivo('paciente');
   } catch (_error) {
     return null;
   }

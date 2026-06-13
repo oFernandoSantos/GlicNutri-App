@@ -1,4 +1,4 @@
-import { storageSessaoPerfil } from './storageSessaoPerfil';
+import { storageSessaoPerfil, syncClearAbaPerfilSeAtivo } from './storageSessaoPerfil';
 import { limparRpcSessionToken } from './servicoSessaoRpc';
 
 export const NUTRI_SESSION_STORAGE_KEY = '@glicnutri:nutriSession';
@@ -50,6 +50,7 @@ export async function limparSessaoNutricionista() {
   try {
     await limparRpcSessionToken();
     await storageSessaoPerfil.removeItem(NUTRI_SESSION_STORAGE_KEY);
+    await syncClearAbaPerfilSeAtivo('nutricionista');
   } catch (_error) {
     return null;
   }

@@ -1,4 +1,4 @@
-import { storageSessaoPerfil } from './storageSessaoPerfil';
+import { storageSessaoPerfil, syncClearAbaPerfilSeAtivo } from './storageSessaoPerfil';
 
 const ADMIN_SESSION_STORAGE_KEY = '@glicnutri:adminSession';
 
@@ -39,6 +39,7 @@ export async function carregarSessaoAdmin() {
 export async function limparSessaoAdmin() {
   try {
     await storageSessaoPerfil.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    await syncClearAbaPerfilSeAtivo('admin');
   } catch (_error) {
     return null;
   }

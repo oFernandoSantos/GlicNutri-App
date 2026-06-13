@@ -1,4 +1,4 @@
-import { storageSessaoPerfil } from './storageSessaoPerfil';
+import { storageSessaoPerfil, syncClearAbaPerfilSeAtivo } from './storageSessaoPerfil';
 import { limparRpcSessionToken } from './servicoSessaoRpc';
 
 export const MEDICO_SESSION_STORAGE_KEY = '@glicnutri:medicoSession';
@@ -46,6 +46,7 @@ export async function limparSessaoMedico() {
   try {
     await limparRpcSessionToken();
     await storageSessaoPerfil.removeItem(MEDICO_SESSION_STORAGE_KEY);
+    await syncClearAbaPerfilSeAtivo('medico');
   } catch {
     return null;
   }

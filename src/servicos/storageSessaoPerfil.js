@@ -1,63 +1,270 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Platform } from 'react-native';
 
-const STAFF_SESSION_KEYS = [
-  '@glicnutri:adminSession',
-  '@glicnutri:nutriSession',
-  '@glicnutri:medicoSession',
-];
+export const ABA_PERFIL_ATIVO_KEY = '@glicnutri:abaPerfilAtivo';
 
-/**
- * Sessoes de perfil (admin/nutri/medico/paciente/RPC) ficam isoladas por aba no web.
- * Supabase Auth continua em AsyncStorage (localStorage) — compartilhado entre abas.
- */
-function createWebSessionStorage() {
-  const hasSessionStorage =
-    typeof globalThis !== 'undefined' &&
-    typeof globalThis.sessionStorage !== 'undefined';
+export const RPC_SESSION_STORAGE_KEY = '@glicnutri:rpcSessionToken';
+export const RPC_SESSION_META_STORAGE_KEY = '@glicnutri:rpcSessionMeta';
 
+const LEGACY_PROFILE_KEYS = {
+  '@glicnutri:adminSession': 'admin',
+  '@glicnutri:nutriSession': 'nutricionista',
+  '@glicnutri:medicoSession': 'medico',
+  '@glicnutri:patientSession': 'paciente',
+};
+
+const STAFF_TIPOS = new Set(['admin', 'nutricionista', 'medico']);
+
+function perfilStorageKey(tipo) {
+  return `@glicnutri:perfil:${tipo}`;
+}
+
+function rpcTokenKey(tipo) {
+  return `@glicnutri:rpc:token:${tipo}`;
+}
+
+function rpcMetaKey(tipo) {
+  return `@glicnutri:rpc:meta:${tipo}`;
+}
+
+function tipoFromLegacyKey(key) {
+  return LEGACY_PROFILE_KEYS[key] || null;
+}
+
+function readSessionStorage(key) {
+  if (typeof globalThis.sessionStorage === 'undefined') return null;
+  try {
+    return globalThis.sessionStorage.getItem(key);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeSessionStorage(key, value) {
+  if (typeof globalThis.sessionStorage === 'undefined') return;
+  try {
+    if (value == null) {
+      globalThis.sessionStorage.removeItem(key);
+    } else {
+      globalThis.sessionStorage.setItem(key, value);
+    }
+  } catch (_error) {
+    /* noop */
+  }
+}
+
+function readLocalStorage(key) {
+  if (typeof globalThis.localStorage === 'undefined') return null;
+  try {
+    return globalThis.localStorage.getItem(key);
+  } catch (_error) {
+    return null;
+  }
+}
+
+function writeLocalStorage(key, value) {
+  if (typeof globalThis.localStorage === 'undefined') return;
+  try {
+    if (value == null) {
+      globalThis.localStorage.removeItem(key);
+    } else {
+      globalThis.localStorage.setItem(key, value);
+    }
+  } catch (_error) {
+    /* noop */
+  }
+}
+
+function removeLocalStorageKeys(keys = []) {
+  keys.forEach((key) => writeLocalStorage(key, null));
+}
+
+export function getAbaPerfilAtivoSync() {
+  if (Platform.OS !== 'web') return null;
+  return readSessionStorage(ABA_PERFIL_ATIVO_KEY);
+}
+
+export async function getAbaPerfilAtivo() {
+  return getAbaPerfilAtivoSync();
+}
+
+export async function setAbaPerfilAtivo(tipo) {
+  if (Platform.OS !== 'web') return;
+  writeSessionStorage(ABA_PERFIL_ATIVO_KEY, String(tipo || '').trim() || null);
+}
+
+export async function clearAbaPerfilAtivo() {
+  if (Platform.OS !== 'web') return;
+  writeSessionStorage(ABA_PERFIL_ATIVO_KEY, null);
+}
+
+function resolveRpcTipo(meta = null) {
+  const fromMeta = String(meta?.actorType || '').trim();
+  if (fromMeta) return fromMeta;
+  return getAbaPerfilAtivoSync();
+}
+
+export async function limparDadosPerfilWeb(tipo, { revogarRpc = false, tokenRpc = null } = {}) {
+  if (Platform.OS !== 'web' || !tipo) return;
+
+  removeLocalStorageKeys([
+    perfilStorageKey(tipo),
+    rpcTokenKey(tipo),
+    rpcMetaKey(tipo),
+  ]);
+
+  if (revogarRpc && tokenRpc) {
+    try {
+      const { supabase } = await import('./configSupabase');
+      await supabase.rpc('revogar_sessao_rpc', { p_token_sessao: tokenRpc });
+    } catch (_error) {
+      /* noop */
+    }
+  }
+}
+
+export async function prepararLoginPerfilWeb(tipo) {
+  if (Platform.OS !== 'web' || !tipo) return;
+
+  const tokenAtual = readLocalStorage(rpcTokenKey(tipo));
+  await limparDadosPerfilWeb(tipo, { revogarRpc: true, tokenRpc: tokenAtual });
+  await setAbaPerfilAtivo(tipo);
+}
+
+function createWebProfileStorage() {
   return {
     async getItem(key) {
-      if (!hasSessionStorage) return null;
-      try {
-        return globalThis.sessionStorage.getItem(key);
-      } catch (_error) {
-        return null;
+      const perfilKey = tipoFromLegacyKey(key);
+      if (perfilKey) {
+        const abaAtiva = getAbaPerfilAtivoSync();
+        if (!abaAtiva || abaAtiva !== perfilKey) {
+          return null;
+        }
+        return readLocalStorage(perfilStorageKey(perfilKey));
       }
+
+      if (key === RPC_SESSION_STORAGE_KEY) {
+        const abaAtiva = getAbaPerfilAtivoSync();
+        if (!abaAtiva) return null;
+        return readLocalStorage(rpcTokenKey(abaAtiva));
+      }
+
+      if (key === RPC_SESSION_META_STORAGE_KEY) {
+        const abaAtiva = getAbaPerfilAtivoSync();
+        if (!abaAtiva) return null;
+        return readLocalStorage(rpcMetaKey(abaAtiva));
+      }
+
+      return readSessionStorage(key);
     },
+
     async setItem(key, value) {
-      if (!hasSessionStorage) return;
-      try {
-        globalThis.sessionStorage.setItem(key, value);
-      } catch (_error) {
-        /* noop */
+      const perfilKey = tipoFromLegacyKey(key);
+      if (perfilKey) {
+        writeLocalStorage(perfilStorageKey(perfilKey), value);
+        await setAbaPerfilAtivo(perfilKey);
+        return;
       }
+
+      if (key === RPC_SESSION_STORAGE_KEY) {
+        const abaAtiva = getAbaPerfilAtivoSync();
+        if (!abaAtiva) return;
+        writeLocalStorage(rpcTokenKey(abaAtiva), value);
+        return;
+      }
+
+      if (key === RPC_SESSION_META_STORAGE_KEY) {
+        const tipo = resolveRpcTipo(safeParseMeta(value));
+        if (tipo) {
+          writeLocalStorage(rpcMetaKey(tipo), value);
+        }
+        return;
+      }
+
+      writeSessionStorage(key, value);
     },
+
     async removeItem(key) {
-      if (!hasSessionStorage) return;
-      try {
-        globalThis.sessionStorage.removeItem(key);
-      } catch (_error) {
-        /* noop */
+      const perfilKey = tipoFromLegacyKey(key);
+      if (perfilKey) {
+        removeLocalStorageKeys([perfilStorageKey(perfilKey)]);
+        return;
       }
+
+      if (key === RPC_SESSION_STORAGE_KEY) {
+        const abaAtiva = getAbaPerfilAtivoSync();
+        if (!abaAtiva) return;
+        const token = readLocalStorage(rpcTokenKey(abaAtiva));
+        removeLocalStorageKeys([rpcTokenKey(abaAtiva), rpcMetaKey(abaAtiva)]);
+        if (token) {
+          try {
+            const { supabase } = await import('./configSupabase');
+            await supabase.rpc('revogar_sessao_rpc', { p_token_sessao: token });
+          } catch (_error) {
+            /* noop */
+          }
+        }
+        return;
+      }
+
+      if (key === RPC_SESSION_META_STORAGE_KEY) {
+        const abaAtiva = getAbaPerfilAtivoSync();
+        if (!abaAtiva) return;
+        writeLocalStorage(rpcMetaKey(abaAtiva), null);
+        return;
+      }
+
+      writeSessionStorage(key, null);
     },
+
     async multiRemove(keys = []) {
-      if (!hasSessionStorage) return;
-      try {
-        keys.forEach((key) => globalThis.sessionStorage.removeItem(key));
-      } catch (_error) {
-        /* noop */
+      const keySet = new Set(keys);
+      if (keySet.has(RPC_SESSION_STORAGE_KEY)) {
+        await this.removeItem(RPC_SESSION_STORAGE_KEY);
+        return;
+      }
+      for (const entry of keys) {
+        await this.removeItem(entry);
       }
     },
   };
 }
 
+function safeParseMeta(raw) {
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw);
+  } catch (_error) {
+    return null;
+  }
+}
+
 export const storageSessaoPerfil =
-  Platform.OS === 'web' ? createWebSessionStorage() : AsyncStorage;
+  Platform.OS === 'web' ? createWebProfileStorage() : AsyncStorage;
 
 export async function hasSessaoStaffLocal() {
-  const values = await Promise.all(
-    STAFF_SESSION_KEYS.map((key) => storageSessaoPerfil.getItem(key))
-  );
-  return values.some(Boolean);
+  if (Platform.OS !== 'web') {
+    const values = await Promise.all(
+      Object.keys(LEGACY_PROFILE_KEYS)
+        .filter((key) => STAFF_TIPOS.has(LEGACY_PROFILE_KEYS[key]))
+        .map((key) => AsyncStorage.getItem(key))
+    );
+    return values.some(Boolean);
+  }
+
+  const abaAtiva = getAbaPerfilAtivoSync();
+  return Boolean(abaAtiva && STAFF_TIPOS.has(abaAtiva));
+}
+
+export async function syncClearAbaPerfilSeAtivo(tipo) {
+  if (Platform.OS !== 'web') return;
+  if ((await getAbaPerfilAtivo()) === tipo) {
+    await clearAbaPerfilAtivo();
+  }
+}
+
+export async function isAbaPerfilPaciente() {
+  if (Platform.OS !== 'web') return true;
+  const abaAtiva = getAbaPerfilAtivoSync();
+  return !abaAtiva || abaAtiva === 'paciente';
 }

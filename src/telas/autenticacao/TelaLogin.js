@@ -33,18 +33,18 @@ import {
 import { bootstrapLibreSyncOnLogin } from '../../servicos/servicoLibreViewAutoSync';
 import { hasPatientOnboardingSeen } from '../../servicos/servicoOnboardingPaciente';
 import {
-  limparSessaoAdmin,
   salvarSessaoAdmin,
   sanitizeAdminUser,
+  limparSessaoAdmin,
 } from '../../servicos/servicoAdmin';
 import {
-  limparSessaoNutricionista,
   salvarSessaoNutricionista,
+  limparSessaoNutricionista,
 } from '../../servicos/servicoSessaoNutricionista';
 import {
-  limparSessaoMedico,
   salvarSessaoMedico,
   sanitizeMedicoUser,
+  limparSessaoMedico,
 } from '../../servicos/servicoSessaoMedico';
 import { salvarSessaoPaciente } from '../../servicos/servicoSessaoPaciente';
 import {
@@ -52,6 +52,7 @@ import {
   emitirSessaoRpcPosCredencial,
   limparRpcSessionToken,
 } from '../../servicos/servicoSessaoRpc';
+import { prepararLoginPerfilWeb } from '../../servicos/storageSessaoPerfil';
 import { patientAppAlreadyActive } from '../../utilitarios/navegacaoPaciente';
 import { registrarLogAuditoria } from '../../servicos/servicoAuditoria';
 import { executarComTimeout } from '../../utilitarios/executarComTimeout';
@@ -435,12 +436,25 @@ export default function TelaLogin({ navigation, route, session }) {
         return;
       }
 
-      await Promise.all([
-        limparSessaoAdmin(),
-        limparSessaoNutricionista(),
-        limparSessaoMedico(),
-        limparRpcSessionToken(),
-      ]);
+      const perfilDestino =
+        usuario.tipo_perfil === 'admin'
+          ? 'admin'
+          : usuario.tipo_perfil === 'medico'
+            ? 'medico'
+            : usuario.tipo_perfil === 'nutricionista'
+              ? 'nutricionista'
+              : 'paciente';
+
+      if (Platform.OS === 'web') {
+        await prepararLoginPerfilWeb(perfilDestino);
+      } else {
+        await Promise.all([
+          limparSessaoAdmin(),
+          limparSessaoNutricionista(),
+          limparSessaoMedico(),
+          limparRpcSessionToken(),
+        ]);
+      }
 
       if (usuario.tipo_perfil === 'admin') {
         const adminUser = await salvarSessaoAdmin(usuario);
@@ -667,6 +681,10 @@ export default function TelaLogin({ navigation, route, session }) {
   async function finalizarLoginGoogleComUsuario(user, auditOptions = {}) {
     if (patientAppAlreadyActive(navigation)) {
       return;
+    }
+
+    if (Platform.OS === 'web') {
+      await prepararLoginPerfilWeb('paciente');
     }
 
     const pacienteGoogle = await sincronizarPacienteGoogle(user);
