@@ -15,8 +15,8 @@ const LEGACY_PROFILE_KEYS = {
 
 const STAFF_TIPOS = new Set(['admin', 'nutricionista', 'medico']);
 
-function perfilStorageKey(tipo) {
-  return `@glicnutri:perfil:${tipo}`;
+function tipoFromLegacyKey(key) {
+  return LEGACY_PROFILE_KEYS[key] || null;
 }
 
 function rpcTokenKey(tipo) {
@@ -25,10 +25,6 @@ function rpcTokenKey(tipo) {
 
 function rpcMetaKey(tipo) {
   return `@glicnutri:rpc:meta:${tipo}`;
-}
-
-function tipoFromLegacyKey(key) {
-  return LEGACY_PROFILE_KEYS[key] || null;
 }
 
 function readSessionStorage(key) {
@@ -75,10 +71,6 @@ function writeLocalStorage(key, value) {
   }
 }
 
-function removeLocalStorageKeys(keys = []) {
-  keys.forEach((key) => writeLocalStorage(key, null));
-}
-
 export function getAbaPerfilAtivoSync() {
   if (Platform.OS !== 'web') return null;
   return readSessionStorage(ABA_PERFIL_ATIVO_KEY);
@@ -104,31 +96,30 @@ function resolveRpcTipo(meta = null) {
   return getAbaPerfilAtivoSync();
 }
 
-export async function limparDadosPerfilWeb(tipo, { revogarRpc = false, tokenRpc = null } = {}) {
-  if (Platform.OS !== 'web' || !tipo) return;
-
-  removeLocalStorageKeys([
-    perfilStorageKey(tipo),
-    rpcTokenKey(tipo),
-    rpcMetaKey(tipo),
-  ]);
-
-  if (revogarRpc && tokenRpc) {
-    try {
-      const { supabase } = await import('./configSupabase');
-      await supabase.rpc('revogar_sessao_rpc', { p_token_sessao: tokenRpc });
-    } catch (_error) {
-      /* noop */
-    }
+function clearProfileSessionStorage(tipo) {
+  const legacyKey = Object.entries(LEGACY_PROFILE_KEYS).find(([, value]) => value === tipo)?.[0];
+  if (legacyKey) {
+    writeSessionStorage(legacyKey, null);
   }
+}
+
+function clearProfileRpcStorage(tipo) {
+  if (!tipo) return;
+  writeLocalStorage(rpcTokenKey(tipo), null);
+  writeLocalStorage(rpcMetaKey(tipo), null);
 }
 
 export async function prepararLoginPerfilWeb(tipo) {
   if (Platform.OS !== 'web' || !tipo) return;
 
-  const tokenAtual = readLocalStorage(rpcTokenKey(tipo));
-  await limparDadosPerfilWeb(tipo, { revogarRpc: true, tokenRpc: tokenAtual });
   await setAbaPerfilAtivo(tipo);
+  clearProfileSessionStorage(tipo);
+  clearProfileRpcStorage(tipo);
+}
+
+export function shouldIgnoreSupabaseAuthEventsOnWeb() {
+  if (Platform.OS !== 'web') return false;
+  return Boolean(getAbaPerfilAtivoSync());
 }
 
 function createWebProfileStorage() {
@@ -140,7 +131,7 @@ function createWebProfileStorage() {
         if (!abaAtiva || abaAtiva !== perfilKey) {
           return null;
         }
-        return readLocalStorage(perfilStorageKey(perfilKey));
+        return readSessionStorage(key);
       }
 
       if (key === RPC_SESSION_STORAGE_KEY) {
@@ -161,7 +152,7 @@ function createWebProfileStorage() {
     async setItem(key, value) {
       const perfilKey = tipoFromLegacyKey(key);
       if (perfilKey) {
-        writeLocalStorage(perfilStorageKey(perfilKey), value);
+        writeSessionStorage(key, value);
         await setAbaPerfilAtivo(perfilKey);
         return;
       }
@@ -187,7 +178,7 @@ function createWebProfileStorage() {
     async removeItem(key) {
       const perfilKey = tipoFromLegacyKey(key);
       if (perfilKey) {
-        removeLocalStorageKeys([perfilStorageKey(perfilKey)]);
+        writeSessionStorage(key, null);
         return;
       }
 
@@ -195,7 +186,7 @@ function createWebProfileStorage() {
         const abaAtiva = getAbaPerfilAtivoSync();
         if (!abaAtiva) return;
         const token = readLocalStorage(rpcTokenKey(abaAtiva));
-        removeLocalStorageKeys([rpcTokenKey(abaAtiva), rpcMetaKey(abaAtiva)]);
+        clearProfileRpcStorage(abaAtiva);
         if (token) {
           try {
             const { supabase } = await import('./configSupabase');

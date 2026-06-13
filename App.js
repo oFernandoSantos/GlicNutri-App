@@ -63,7 +63,7 @@ import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
 import SwipeBackContainer from './src/componentes/comum/SwipeBackContainer';
 import { supabase, isSupabaseConfigured } from './src/servicos/configSupabase';
 import { obterSessaoAuthSegura } from './src/servicos/servicoSessaoAuth';
-import { hasSessaoStaffLocal, isAbaPerfilPaciente } from './src/servicos/storageSessaoPerfil';
+import { hasSessaoStaffLocal, isAbaPerfilPaciente, shouldIgnoreSupabaseAuthEventsOnWeb } from './src/servicos/storageSessaoPerfil';
 import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
 import { configurarCapturaGlobalLogs } from './src/servicos/servicoLogSistema';
 import { initObservabilidade } from './src/servicos/servicoObservabilidade';
@@ -422,6 +422,12 @@ export default function App() {
     }
 
     async function carregarSessao() {
+      if (shouldIgnoreSupabaseAuthEventsOnWeb()) {
+        setSession(null);
+        setAuthReady(true);
+        return;
+      }
+
       setAuthReady(false);
       let data = null;
       let error = null;
@@ -459,6 +465,10 @@ export default function App() {
     } = supabase.auth.onAuthStateChange((event, nextSession) => {
       (async () => {
         if (!isMounted) return;
+
+        if (shouldIgnoreSupabaseAuthEventsOnWeb()) {
+          return;
+        }
 
         const isSilentEvent =
           event === 'TOKEN_REFRESHED' || event === 'USER_UPDATED';
