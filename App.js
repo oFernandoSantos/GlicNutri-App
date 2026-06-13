@@ -63,6 +63,7 @@ import ReaderTopo from './src/componentes/comum/CabecalhoLeitor';
 import SwipeBackContainer from './src/componentes/comum/SwipeBackContainer';
 import { supabase, isSupabaseConfigured } from './src/servicos/configSupabase';
 import { obterSessaoAuthSegura } from './src/servicos/servicoSessaoAuth';
+import { hasSessaoStaffLocal } from './src/servicos/storageSessaoPerfil';
 import { syncGooglePatientRecord } from './src/servicos/sincronizarPacienteGoogle';
 import { configurarCapturaGlobalLogs } from './src/servicos/servicoLogSistema';
 import { initObservabilidade } from './src/servicos/servicoObservabilidade';
@@ -374,27 +375,6 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (session?.user && adminSession) {
-      limparSessaoAdmin();
-      setAdminSession(null);
-    }
-  }, [session, adminSession]);
-
-  useEffect(() => {
-    if (session?.user && nutriSession) {
-      limparSessaoNutricionista();
-      setNutriSession(null);
-    }
-  }, [session, nutriSession]);
-
-  useEffect(() => {
-    if (session?.user && medicoSession) {
-      limparSessaoMedico();
-      setMedicoSession(null);
-    }
-  }, [session, medicoSession]);
-
-  useEffect(() => {
     if (!isSupabaseConfigured) {
       setSession(null);
       setAuthReady(true);
@@ -405,6 +385,10 @@ export default function App() {
 
     async function prepararSessao(nextSession) {
       if (!nextSession?.user) {
+        return null;
+      }
+
+      if (await hasSessaoStaffLocal()) {
         return null;
       }
 
@@ -485,9 +469,12 @@ export default function App() {
 
         if (!nextSession?.user) {
           if (event === 'SIGNED_OUT') {
-            await limparSessaoPaciente();
-            if (isMounted) {
-              setPatientLocalSession(null);
+            const pacienteLocal = await carregarSessaoPaciente();
+            if (pacienteLocal) {
+              await limparSessaoPaciente();
+              if (isMounted) {
+                setPatientLocalSession(null);
+              }
             }
           }
           if (!isMounted) return;

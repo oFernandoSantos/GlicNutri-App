@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storageSessaoPerfil } from './storageSessaoPerfil';
 
 const ADMIN_SESSION_STORAGE_KEY = '@glicnutri:adminSession';
 
@@ -22,13 +22,13 @@ export function isAdminUser(user) {
 
 export async function salvarSessaoAdmin(user) {
   const sanitized = sanitizeAdminUser(user);
-  await AsyncStorage.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
+  await storageSessaoPerfil.setItem(ADMIN_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
   return sanitized;
 }
 
 export async function carregarSessaoAdmin() {
   try {
-    const raw = await AsyncStorage.getItem(ADMIN_SESSION_STORAGE_KEY);
+    const raw = await storageSessaoPerfil.getItem(ADMIN_SESSION_STORAGE_KEY);
     if (!raw) return null;
     return sanitizeAdminUser(JSON.parse(raw));
   } catch (_error) {
@@ -38,7 +38,7 @@ export async function carregarSessaoAdmin() {
 
 export async function limparSessaoAdmin() {
   try {
-    await AsyncStorage.removeItem(ADMIN_SESSION_STORAGE_KEY);
+    await storageSessaoPerfil.removeItem(ADMIN_SESSION_STORAGE_KEY);
   } catch (_error) {
     return null;
   }

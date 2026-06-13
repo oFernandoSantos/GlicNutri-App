@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storageSessaoPerfil } from './storageSessaoPerfil';
 import { supabase } from './configSupabase';
 import { isGoogleUser } from './sincronizarPacienteGoogle';
 
@@ -61,7 +61,7 @@ export function getRpcSessionTokenSync() {
 
 async function loadRpcSessionMeta() {
   try {
-    const raw = await AsyncStorage.getItem(RPC_SESSION_META_STORAGE_KEY);
+    const raw = await storageSessaoPerfil.getItem(RPC_SESSION_META_STORAGE_KEY);
     if (!raw) return null;
     return JSON.parse(raw);
   } catch (_error) {
@@ -84,7 +84,7 @@ function applyRpcSessionMeta(meta = null) {
 
 export async function loadRpcSessionToken() {
   try {
-    const token = await AsyncStorage.getItem(RPC_SESSION_STORAGE_KEY);
+    const token = await storageSessaoPerfil.getItem(RPC_SESSION_STORAGE_KEY);
     cachedRpcSessionToken = token || null;
     if (cachedRpcSessionToken) {
       applyRpcSessionMeta(await loadRpcSessionMeta());
@@ -724,8 +724,8 @@ export async function salvarRpcSessionToken(token, meta = {}) {
       ? `${meta.actorType}:${meta.actorId}:${String(meta.email).trim().toLowerCase()}`
       : '');
   sessaoRpcLastEnsuredAt = Date.now();
-  await AsyncStorage.setItem(RPC_SESSION_STORAGE_KEY, normalized);
-  await AsyncStorage.setItem(RPC_SESSION_META_STORAGE_KEY, JSON.stringify(meta || {}));
+  await storageSessaoPerfil.setItem(RPC_SESSION_STORAGE_KEY, normalized);
+  await storageSessaoPerfil.setItem(RPC_SESSION_META_STORAGE_KEY, JSON.stringify(meta || {}));
   return normalized;
 }
 
@@ -736,7 +736,7 @@ export async function limparRpcSessionToken() {
   sessaoRpcLastEnsuredAt = 0;
 
   try {
-    await AsyncStorage.multiRemove([RPC_SESSION_STORAGE_KEY, RPC_SESSION_META_STORAGE_KEY]);
+    await storageSessaoPerfil.multiRemove([RPC_SESSION_STORAGE_KEY, RPC_SESSION_META_STORAGE_KEY]);
   } catch (_error) {
     // noop
   }
