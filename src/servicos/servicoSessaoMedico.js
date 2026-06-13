@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storageSessaoPerfil } from './storageSessaoPerfil';
 import { limparRpcSessionToken } from './servicoSessaoRpc';
 
 export const MEDICO_SESSION_STORAGE_KEY = '@glicnutri:medicoSession';
@@ -27,13 +27,13 @@ export async function salvarSessaoMedico(user) {
     ...sanitizeMedicoUser(user),
     tipo_perfil: 'medico',
   };
-  await AsyncStorage.setItem(MEDICO_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
+  await storageSessaoPerfil.setItem(MEDICO_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
   return sanitized;
 }
 
 export async function carregarSessaoMedico() {
   try {
-    const raw = await AsyncStorage.getItem(MEDICO_SESSION_STORAGE_KEY);
+    const raw = await storageSessaoPerfil.getItem(MEDICO_SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = sanitizeMedicoUser(JSON.parse(raw));
     return isMedicoUser(parsed) ? parsed : null;
@@ -45,7 +45,7 @@ export async function carregarSessaoMedico() {
 export async function limparSessaoMedico() {
   try {
     await limparRpcSessionToken();
-    await AsyncStorage.removeItem(MEDICO_SESSION_STORAGE_KEY);
+    await storageSessaoPerfil.removeItem(MEDICO_SESSION_STORAGE_KEY);
   } catch {
     return null;
   }

@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storageSessaoPerfil } from './storageSessaoPerfil';
 import { limparRpcSessionToken } from './servicoSessaoRpc';
 
 export const NUTRI_SESSION_STORAGE_KEY = '@glicnutri:nutriSession';
@@ -31,13 +31,13 @@ export function isNutriUser(user) {
 
 export async function salvarSessaoNutricionista(user) {
   const sanitized = sanitizeNutriUser(user);
-  await AsyncStorage.setItem(NUTRI_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
+  await storageSessaoPerfil.setItem(NUTRI_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
   return sanitized;
 }
 
 export async function carregarSessaoNutricionista() {
   try {
-    const raw = await AsyncStorage.getItem(NUTRI_SESSION_STORAGE_KEY);
+    const raw = await storageSessaoPerfil.getItem(NUTRI_SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = sanitizeNutriUser(JSON.parse(raw));
     return isNutriUser(parsed) ? parsed : null;
@@ -49,7 +49,7 @@ export async function carregarSessaoNutricionista() {
 export async function limparSessaoNutricionista() {
   try {
     await limparRpcSessionToken();
-    await AsyncStorage.removeItem(NUTRI_SESSION_STORAGE_KEY);
+    await storageSessaoPerfil.removeItem(NUTRI_SESSION_STORAGE_KEY);
   } catch (_error) {
     return null;
   }

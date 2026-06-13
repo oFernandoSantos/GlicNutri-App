@@ -1,4 +1,4 @@
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import { storageSessaoPerfil } from './storageSessaoPerfil';
 import { isPatientUser } from '../utilitarios/perfisApp';
 import { limparRpcSessionToken } from './servicoSessaoRpc';
 
@@ -18,13 +18,13 @@ export function sanitizePatientUser(user) {
 
 export async function salvarSessaoPaciente(user) {
   const sanitized = sanitizePatientUser(user);
-  await AsyncStorage.setItem(PATIENT_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
+  await storageSessaoPerfil.setItem(PATIENT_SESSION_STORAGE_KEY, JSON.stringify(sanitized));
   return sanitized;
 }
 
 export async function carregarSessaoPaciente() {
   try {
-    const raw = await AsyncStorage.getItem(PATIENT_SESSION_STORAGE_KEY);
+    const raw = await storageSessaoPerfil.getItem(PATIENT_SESSION_STORAGE_KEY);
     if (!raw) return null;
     const parsed = sanitizePatientUser(JSON.parse(raw));
     return isPatientUser(parsed) ? parsed : null;
@@ -36,7 +36,7 @@ export async function carregarSessaoPaciente() {
 export async function limparSessaoPaciente() {
   try {
     await limparRpcSessionToken();
-    await AsyncStorage.removeItem(PATIENT_SESSION_STORAGE_KEY);
+    await storageSessaoPerfil.removeItem(PATIENT_SESSION_STORAGE_KEY);
   } catch (_error) {
     return null;
   }
